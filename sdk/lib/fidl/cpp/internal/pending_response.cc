@@ -59,12 +59,11 @@ PendingResponse& PendingResponse::operator=(PendingResponse&& other) {
 zx_status_t PendingResponse::Send(const fidl_type_t* type, Message message) {
   if (!weak_controller_)
     return ZX_ERR_BAD_STATE;
-  StubController* controller = weak_controller_->controller();
+  StubControllerBase* controller = weak_controller_->controller();
   if (!controller)
     return ZX_ERR_BAD_STATE;
   message.set_txid(txid_);
-  return fidl::internal::SendMessage(controller->reader().channel(), type,
-                                     std::move(message));
+  return controller->Send(type, std::move(message));
 }
 
 }  // namespace internal
