@@ -13,8 +13,8 @@
   "pkg/fidl_cpp/include/lib/fidl/cpp/internal/proxy.h": "12a79be8ee86efcf3600c2d39b38c454",
   "pkg/fidl_cpp/include/lib/fidl/cpp/internal/proxy_controller.h": "e7587733d8fbae165690a8221e449014",
   "pkg/fidl_cpp/include/lib/fidl/cpp/internal/stub.h": "297936b52beff803de36a5d9fe7d888f",
-  "pkg/fidl_cpp/include/lib/fidl/cpp/internal/stub_controller.h": "a6eaf131a7986a315993260df972b089",
-  "pkg/fidl_cpp/include/lib/fidl/cpp/internal/weak_stub_controller.h": "33863cfc502846b33e1887bb16abb76e",
+  "pkg/fidl_cpp/include/lib/fidl/cpp/internal/stub_controller.h": "90edea4b09b820d85fdb5ca8dc60efda",
+  "pkg/fidl_cpp/include/lib/fidl/cpp/internal/weak_stub_controller.h": "1d5b953edbcad35a65ba4a68b0cabdae",
   "pkg/fidl_cpp/include/lib/fidl/cpp/optional.h": "6749907c07e72a7826342b5cc341bff8",
   "pkg/fidl_cpp/include/lib/fidl/cpp/thread_safe_binding_set.h": "9a88d3c35b3eb543c0698a80e2293465",
   "pkg/fidl_cpp/include/lib/fidl/cpp/type_converter.h": "81ea87e9526f104ff4bbebd502c6a7ec"

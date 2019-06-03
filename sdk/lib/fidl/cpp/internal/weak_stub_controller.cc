@@ -7,7 +7,7 @@
 namespace fidl {
 namespace internal {
 
-WeakStubController::WeakStubController(StubControllerBase* controller)
+WeakStubController::WeakStubController(StubController* controller)
     : ref_count_(1u), controller_(controller) {}
 
 WeakStubController::~WeakStubController() = default;

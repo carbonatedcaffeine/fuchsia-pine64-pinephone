@@ -11,18 +11,16 @@
 namespace fidl {
 namespace internal {
 
-StubControllerBase::StubControllerBase() : weak_(nullptr) {}
+StubController::StubController() : weak_(nullptr), reader_(this) {}
 
-StubControllerBase::~StubControllerBase() { InvalidateWeakIfNeeded(); }
-
-StubController::StubController() : reader_(this) {}
+StubController::~StubController() { InvalidateWeakIfNeeded(); }
 
 zx_status_t StubController::Send(const fidl_type_t* type, Message message) {
   return fidl::internal::SendMessage(reader_.channel(), type,
                                      std::move(message));
 }
 
-zx_status_t StubControllerBase::OnMessage(Message message) {
+zx_status_t StubController::OnMessage(Message message) {
   if (!message.has_header())
     return ZX_ERR_INVALID_ARGS;
   zx_txid_t txid = message.txid();
@@ -35,9 +33,9 @@ zx_status_t StubControllerBase::OnMessage(Message message) {
   return stub_->Dispatch_(std::move(message), PendingResponse(txid, weak));
 }
 
-void StubControllerBase::OnChannelGone() { InvalidateWeakIfNeeded(); }
+void StubController::OnChannelGone() { InvalidateWeakIfNeeded(); }
 
-void StubControllerBase::InvalidateWeakIfNeeded() {
+void StubController::InvalidateWeakIfNeeded() {
   if (!weak_)
     return;
   weak_->Invalidate();

@@ -18,13 +18,23 @@ namespace fidl {
 namespace internal {
 class WeakStubController;
 
-class StubControllerBase : public MessageHandler, public MessageSender {
+// Controls the server endpoint of a FIDL channel.
+//
+// A |StubController| controls the protocol-specific "stub" object. Stub
+// objects are used on the server endpoint of a FIDL channel to decode messages
+// received over the channel and dispatch them to an implementation of the
+// protocol.
+class StubController final : public MessageHandler, public MessageSender {
  public:
-  StubControllerBase();
-  ~StubControllerBase() override;
+  StubController();
+  ~StubController() override;
 
-  StubControllerBase(const StubControllerBase&) = delete;
-  StubControllerBase& operator=(const StubControllerBase&) = delete;
+  StubController(const StubController&) = delete;
+  StubController& operator=(const StubController&) = delete;
+
+  // The |MessageReader| that is listening for messages sent by the client.
+  MessageReader& reader() { return reader_; }
+  const MessageReader& reader() const { return reader_; }
 
   // The protocol-specific object that decodes messages and dispatches them to
   // an implementation of the protocol.
@@ -34,6 +44,12 @@ class StubControllerBase : public MessageHandler, public MessageSender {
   // binding a channel to the |MessageReader|.
   Stub* stub() const { return stub_; }
   void set_stub(Stub* stub) { stub_ = stub; }
+
+  // Send a message over the channel.
+  //
+  // Returns an error if the message fails to encode properly or if the message
+  // cannot be written to the channel.
+  zx_status_t Send(const fidl_type_t* type, Message message) final;
 
  private:
   // Called by the |MessageReader| when a message arrives on the channel from
@@ -53,32 +69,9 @@ class StubControllerBase : public MessageHandler, public MessageSender {
   // |PendingResponse| objects from sending messages.
   void InvalidateWeakIfNeeded();
 
-  Stub* stub_;
   WeakStubController* weak_;
-};
-
-// Controls the server endpoint of a FIDL channel.
-//
-// A |StubController| controls the protocol-specific "stub" object. Stub
-// objects are used on the server endpoint of a FIDL channel to decode messages
-// received over the channel and dispatch them to an implementation of the
-// protocol.
-class StubController final : public StubControllerBase {
- public:
-  StubController();
-
-  // The |MessageReader| that is listening for messages sent by the client.
-  MessageReader& reader() { return reader_; }
-  const MessageReader& reader() const { return reader_; }
-
-  // Send a message over the channel.
-  //
-  // Returns an error if the message fails to encode properly or if the message
-  // cannot be written to the channel.
-  zx_status_t Send(const fidl_type_t* type, Message message) final;
-
- private:
   MessageReader reader_;
+  Stub* stub_;
 };
 
 }  // namespace internal

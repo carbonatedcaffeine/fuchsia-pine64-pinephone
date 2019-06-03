@@ -9,11 +9,11 @@
 
 namespace fidl {
 namespace internal {
-class StubControllerBase;
+class StubController;
 
-// A weak reference to a |StubControllerBase|.
+// A weak reference to a |StubController|.
 //
-// Used to link a |PendingResponse| object with a |StubControllerBase|. When the
+// Used to link a |PendingResponse| object with a |StubController|. When the
 // |StubController| is destroyed (or unbound from the underling channel), the
 // weak reference is invalidated, preventing outstanding |PendingResponse|
 // objects from referencing the |StubController|.
@@ -23,7 +23,7 @@ class WeakStubController final {
   //
   // The created |WeakStubController| has a reference count of one, which means
   // the creator is responsible for calling |Release| exactly once.
-  explicit WeakStubController(StubControllerBase* controller);
+  explicit WeakStubController(StubController* controller);
 
   // Increment the refernence count for this object.
   //
@@ -41,16 +41,16 @@ class WeakStubController final {
   // After calling this method, |controller()| will return nullptr.
   void Invalidate();
 
-  // The |StubControllerBase| to which this weak reference refers.
+  // The |StubController| to which this weak reference refers.
   //
   // After the weak reference has been invalidated, this method returns nullptr.
-  StubControllerBase* controller() const { return controller_; }
+  StubController* controller() const { return controller_; }
 
  private:
   ~WeakStubController();
 
   uint32_t ref_count_;  // starts at one
-  StubControllerBase* controller_;
+  StubController* controller_;
 };
 
 }  // namespace internal
