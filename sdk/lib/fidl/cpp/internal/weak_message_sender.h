@@ -9,21 +9,21 @@
 
 namespace fidl {
 namespace internal {
-class StubController;
+class MessageSender;
 
-// A weak reference to a |StubController|.
+// A weak reference to a |MessageSender|.
 //
-// Used to link a |PendingResponse| object with a |StubController|. When the
-// |StubController| is destroyed (or unbound from the underling channel), the
+// Used to link a |PendingResponse| object with a |MessageSender|. When the
+// |MessageSender| is destroyed (or unbound from the underling channel), the
 // weak reference is invalidated, preventing outstanding |PendingResponse|
-// objects from referencing the |StubController|.
-class WeakStubController final {
+// objects from referencing the |MessageSender|.
+class WeakMessageSender final {
  public:
-  // Creates a weak reference to a |StubController|.
+  // Creates a weak reference to a |MessageSender|.
   //
-  // The created |WeakStubController| has a reference count of one, which means
+  // The created |WeakMessageSender| has a reference count of one, which means
   // the creator is responsible for calling |Release| exactly once.
-  explicit WeakStubController(StubController* controller);
+  explicit WeakMessageSender(MessageSender* sender);
 
   // Increment the refernence count for this object.
   //
@@ -36,21 +36,21 @@ class WeakStubController final {
   // When the reference count reaches zero, the object is destroyed.
   void Release();
 
-  // Break the connection between this object and the |StubController|.
+  // Break the connection between this object and the |MessageSender|.
   //
-  // After calling this method, |controller()| will return nullptr.
+  // After calling this method, |sender()| will return nullptr.
   void Invalidate();
 
   // The |StubController| to which this weak reference refers.
   //
   // After the weak reference has been invalidated, this method returns nullptr.
-  StubController* controller() const { return controller_; }
+  MessageSender* sender() const { return sender_; }
 
  private:
-  ~WeakStubController();
+  ~WeakMessageSender();
 
   uint32_t ref_count_;  // starts at one
-  StubController* controller_;
+  MessageSender* sender_;
 };
 
 }  // namespace internal

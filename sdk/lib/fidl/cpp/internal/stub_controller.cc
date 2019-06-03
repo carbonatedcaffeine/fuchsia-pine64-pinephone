@@ -6,7 +6,7 @@
 
 #include "lib/fidl/cpp/internal/logging.h"
 #include "lib/fidl/cpp/internal/pending_response.h"
-#include "lib/fidl/cpp/internal/weak_stub_controller.h"
+#include "lib/fidl/cpp/internal/weak_message_sender.h"
 
 namespace fidl {
 namespace internal {
@@ -24,10 +24,10 @@ zx_status_t StubController::OnMessage(Message message) {
   if (!message.has_header())
     return ZX_ERR_INVALID_ARGS;
   zx_txid_t txid = message.txid();
-  WeakStubController* weak = nullptr;
+  WeakMessageSender* weak = nullptr;
   if (txid) {
     if (!weak_)
-      weak_ = new WeakStubController(this);
+      weak_ = new WeakMessageSender(this);
     weak = weak_;
   }
   return stub_->Dispatch_(std::move(message), PendingResponse(txid, weak));

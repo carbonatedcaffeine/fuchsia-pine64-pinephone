@@ -11,7 +11,7 @@
 
 namespace fidl {
 namespace internal {
-class WeakStubController;
+class WeakMessageSender;
 
 // A response to a FIDL message.
 //
@@ -35,7 +35,7 @@ class PendingResponse final : public MessageSender {
   //
   // The |PendingResponse| object will take a reference to |weak_controller|,
   // which it releases in its destructor.
-  PendingResponse(zx_txid_t txid, WeakStubController* weak_controller);
+  PendingResponse(zx_txid_t txid, WeakMessageSender* weak_sender);
 
   ~PendingResponse();
 
@@ -81,7 +81,7 @@ class PendingResponse final : public MessageSender {
   // fit::function to avoid allocating additional storage when processing
   // messages. Currently, fit::function has space for three pointers.
   zx_txid_t txid_;
-  WeakStubController* weak_controller_;
+  WeakMessageSender* weak_sender_;
 };
 
 }  // namespace internal

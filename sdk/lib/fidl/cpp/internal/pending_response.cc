@@ -6,65 +6,64 @@
 
 #include "lib/fidl/cpp/internal/logging.h"
 #include "lib/fidl/cpp/internal/stub_controller.h"
-#include "lib/fidl/cpp/internal/weak_stub_controller.h"
+#include "lib/fidl/cpp/internal/weak_message_sender.h"
 
 namespace fidl {
 namespace internal {
 
-PendingResponse::PendingResponse() : txid_(0), weak_controller_(nullptr) {}
+PendingResponse::PendingResponse() : txid_(0), weak_sender_(nullptr) {}
 
 PendingResponse::PendingResponse(zx_txid_t txid,
-                                 WeakStubController* weak_controller)
-    : txid_(txid), weak_controller_(weak_controller) {
-  if (weak_controller_)
-    weak_controller_->AddRef();
+                                 WeakMessageSender* weak_sender)
+    : txid_(txid), weak_sender_(weak_sender) {
+  if (weak_sender_)
+    weak_sender_->AddRef();
 }
 
 PendingResponse::~PendingResponse() {
-  if (weak_controller_)
-    weak_controller_->Release();
+  if (weak_sender_)
+    weak_sender_->Release();
 }
 
 PendingResponse::PendingResponse(const PendingResponse& other)
-    : PendingResponse(other.txid_, other.weak_controller_) {}
+    : PendingResponse(other.txid_, other.weak_sender_) {}
 
 PendingResponse& PendingResponse::operator=(const PendingResponse& other) {
   if (this == &other)
     return *this;
   txid_ = other.txid_;
-  if (weak_controller_)
-    weak_controller_->Release();
-  weak_controller_ = other.weak_controller_;
-  if (weak_controller_)
-    weak_controller_->AddRef();
+  if (weak_sender_)
+    weak_sender_->Release();
+  weak_sender_ = other.weak_sender_;
+  if (weak_sender_)
+    weak_sender_->AddRef();
   return *this;
 }
 
 PendingResponse::PendingResponse(PendingResponse&& other)
-    : txid_(other.txid_), weak_controller_(other.weak_controller_) {
-  other.weak_controller_ = nullptr;
+    : txid_(other.txid_), weak_sender_(other.weak_sender_) {
+  other.weak_sender_ = nullptr;
 }
 
 PendingResponse& PendingResponse::operator=(PendingResponse&& other) {
   if (this == &other)
     return *this;
   txid_ = other.txid_;
-  if (weak_controller_)
-    weak_controller_->Release();
-  weak_controller_ = other.weak_controller_;
-  other.weak_controller_ = nullptr;
+  if (weak_sender_)
+    weak_sender_->Release();
+  weak_sender_ = other.weak_sender_;
+  other.weak_sender_ = nullptr;
   return *this;
 }
 
 zx_status_t PendingResponse::Send(const fidl_type_t* type, Message message) {
-  if (!weak_controller_)
+  if (!weak_sender_)
     return ZX_ERR_BAD_STATE;
-  StubController* controller = weak_controller_->controller();
-  if (!controller)
+  MessageSender* sender = weak_sender_->sender();
+  if (!sender)
     return ZX_ERR_BAD_STATE;
   message.set_txid(txid_);
-  return fidl::internal::SendMessage(controller->reader().channel(), type,
-                                     std::move(message));
+  return sender->Send(type, std::move(message));
 }
 
 }  // namespace internal
