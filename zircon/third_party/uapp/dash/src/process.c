@@ -23,9 +23,9 @@
 #include "options.h"
 #include "var.h"
 
-static zx_status_t launch(const char* filename, const char* const* argv,
-                          const char* const* envp, zx_handle_t* process,
-                          zx_handle_t job, char err_msg[FDIO_SPAWN_ERR_MSG_MAX_LENGTH]) {
+static zx_status_t launch(const char* const* argv, const char* const* envp,
+                          zx_handle_t* process, zx_handle_t job,
+                          char err_msg[FDIO_SPAWN_ERR_MSG_MAX_LENGTH]) {
     // cancel any ^c generated before running the command
     if (isatty(STDIN_FILENO)) {
         uint32_t events = 0;
@@ -40,7 +40,7 @@ static zx_status_t launch(const char* filename, const char* const* argv,
     // We should find a library loader that's appropriate for this program
     // rather than cloning the library loader used by the shell.
     uint32_t flags = FDIO_SPAWN_CLONE_ALL & ~FDIO_SPAWN_CLONE_ENVIRON;
-    return fdio_spawn_etc(job, flags, filename, argv, envp, 0, NULL, process, err_msg);
+    return fdio_spawn_etc(job, flags, argv[0], argv, envp, 0, NULL, process, err_msg);
 }
 
 // Add all function definitions to our nodelist, so we can package them up for a
@@ -123,14 +123,23 @@ int process_launch(const char* const* argv, const char* path, int index,
     const char* const* envp = (const char* const*)environment();
 
     if (strchr(argv[0], '/') != NULL) {
-        status = launch(argv[0], argv, envp, process, job, err_msg);
+        status = launch(argv, envp, process, job, err_msg);
     } else {
         status = ZX_ERR_NOT_FOUND;
-        const char* filename = NULL;
-        while (status == ZX_ERR_NOT_FOUND && (filename = padvance(&path, argv[0])) != NULL) {
+
+        // Create a copy of argv so we can update argv[0]
+        // based on the actual path found to use.
+        size_t argc = 0;
+        while (argv[argc++] != NULL) {}
+        const char* tmpargv[argc];
+        for (size_t i = 0; i < argc; ++i) {
+            tmpargv[i] = argv[i];
+        }
+
+        while (status == ZX_ERR_NOT_FOUND && (tmpargv[0] = padvance(&path, argv[0])) != NULL) {
             if (--index < 0 && pathopt == NULL)
-                status = launch(filename, argv, envp, process, job, err_msg);
-            stunalloc(filename);
+                status = launch(tmpargv, envp, process, job, err_msg);
+            stunalloc(tmpargv[0]);
         }
     }
 
