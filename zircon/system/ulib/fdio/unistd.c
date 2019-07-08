@@ -1731,19 +1731,15 @@ int futimens(int fd, const struct timespec times[2]) {
     return STATUS(r);
 }
 
-__EXPORT
-int pipe2(int pipefd[2], int flags) {
-    const int allowed_flags = O_NONBLOCK | O_CLOEXEC;
-    if (flags & ~allowed_flags) {
-        return ERRNO(EINVAL);
-    }
+static
+int socketpair_create(int fd[2], uint32_t options) {
     fdio_t *a, *b;
-    int r = fdio_pipe_pair(&a, &b);
+    int r = fdio_pipe_pair(&a, &b, options);
     if (r < 0) {
         return ERROR(r);
     }
-    pipefd[0] = fdio_bind_to_fd(a, -1, 0);
-    if (pipefd[0] < 0) {
+    fd[0] = fdio_bind_to_fd(a, -1, 0);
+    if (fd[0] < 0) {
         int errno_ = errno;
         fdio_close(a);
         fdio_release(a);
@@ -1751,15 +1747,24 @@ int pipe2(int pipefd[2], int flags) {
         fdio_release(b);
         return ERRNO(errno_);
     }
-    pipefd[1] = fdio_bind_to_fd(b, -1, 0);
-    if (pipefd[1] < 0) {
+    fd[1] = fdio_bind_to_fd(b, -1, 0);
+    if (fd[1] < 0) {
         int errno_ = errno;
-        close(pipefd[0]);
+        close(fd[0]);
         fdio_close(b);
         fdio_release(b);
         return ERRNO(errno_);
     }
     return 0;
+}
+
+__EXPORT
+int pipe2(int pipefd[2], int flags) {
+    const int allowed_flags = O_NONBLOCK | O_CLOEXEC;
+    if (flags & ~allowed_flags) {
+        return ERRNO(EINVAL);
+    }
+    return socketpair_create(pipefd, 0);
 }
 
 __EXPORT
@@ -1769,7 +1774,7 @@ int pipe(int pipefd[2]) {
 
 __EXPORT
 int socketpair(int domain, int type, int protocol, int fd[2]) {
-    if (type != SOCK_STREAM) {  // TODO(jamesr): SOCK_DGRAM
+    if (type != SOCK_STREAM && type != SOCK_DGRAM) {
         errno = EPROTOTYPE;
         return -1;
     }
@@ -1782,7 +1787,14 @@ int socketpair(int domain, int type, int protocol, int fd[2]) {
         return -1;
     }
 
-    return pipe(fd);
+    uint32_t options;
+    if (type == SOCK_DGRAM) {
+        options = ZX_SOCKET_DATAGRAM;
+    } else {
+        options = ZX_SOCKET_STREAM;
+    }
+
+    return socketpair_create(fd, options);
 }
 
 __EXPORT

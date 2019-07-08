@@ -198,7 +198,7 @@ fdio_t* fdio_socket_create_stream(zx_handle_t s, int flags);
 fdio_t* fdio_socket_create_datagram(zx_handle_t s, int flags);
 
 // creates a message port and pair of simple io fdio_t's
-int fdio_pipe_pair(fdio_t** a, fdio_t** b);
+int fdio_pipe_pair(fdio_t** a, fdio_t** b, uint32_t options);
 
 fdio_t* fdio_ns_open_root(fdio_ns_t* ns);
 

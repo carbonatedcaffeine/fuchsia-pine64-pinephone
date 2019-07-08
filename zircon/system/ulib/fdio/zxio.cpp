@@ -718,11 +718,11 @@ fdio_t* fdio_socketpair_create(zx_handle_t h) {
     return fdio_pipe_create(h);
 }
 
-int fdio_pipe_pair(fdio_t** _a, fdio_t** _b) {
+int fdio_pipe_pair(fdio_t** _a, fdio_t** _b, uint32_t options) {
     zx_handle_t h0, h1;
     fdio_t *a, *b;
     zx_status_t r;
-    if ((r = zx_socket_create(0, &h0, &h1)) < 0) {
+    if ((r = zx_socket_create(options, &h0, &h1)) < 0) {
         return r;
     }
     if ((a = fdio_pipe_create(h0)) == NULL) {
