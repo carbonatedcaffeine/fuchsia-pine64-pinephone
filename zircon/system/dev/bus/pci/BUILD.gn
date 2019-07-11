@@ -7,10 +7,11 @@ import("$zx/kernel/params.gni")
 group("pci") {
   deps = [
     ":bus-pci",
+    ":bus-pci.proxy",
+    ":pci_fake",
+    ":pci_fake.proxy",
+    ":pci_protocol_test_driver",
   ]
-  if (!enable_user_pci) {
-    deps += [ ":bus-pci.proxy" ]
-  }
 }
 
 # The userspace PCI bus driver uses this set, as well as the
@@ -18,14 +19,14 @@ group("pci") {
 source_set("user_pci") {
   visibility = [ ":*" ]
   sources = [
-    "allocation.cpp",
-    "bridge.cpp",
-    "bus.cpp",
-    "capabilities.cpp",
-    "config.cpp",
-    "device.cpp",
-    "protocol.cpp",
-    "upstream_node.cpp",
+    "allocation.cc",
+    "bridge.cc",
+    "bus.cc",
+    "capabilities.cc",
+    "config.cc",
+    "device.cc",
+    "device_protocol.cc",
+    "upstream_node.cc",
   ]
   public_deps = [
     "$zx/system/banjo/ddk.protocol.pci",
@@ -33,9 +34,11 @@ source_set("user_pci") {
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",
     "$zx/system/ulib/fbl",
+    "$zx/system/ulib/hwreg",
     "$zx/system/ulib/pretty",
     "$zx/system/ulib/region-alloc",
     "$zx/system/ulib/zircon",
+    "$zx/system/ulib/zx",
 
     # TODO(ZX-4062): This shouldn't be here if the mmio code is actually
     # used in the test too.  Anything using that needs to be separately
@@ -44,16 +47,37 @@ source_set("user_pci") {
   ]
 }
 
-driver("bus-pci") {
-  if (enable_user_pci) {
+source_set("user_pci.proxy") {
+  sources = [
+    "device_proxy.cc",
+  ]
+  public_deps = [
+    "$zx/system/banjo/ddk.protocol.pci",
+    "$zx/system/ulib/ddk",
+    "$zx/system/ulib/ddktl",
+    "$zx/system/ulib/hwreg",
+    "$zx/system/ulib/pretty",
+  ]
+}
+
+if (enable_user_pci) {
+  driver("bus-pci") {
     sources = [
-      # The driver needs bind glue
-      "bind.cpp",
+      # The driver needs bind glue, unlike tests.
+      "bind.cc",
     ]
     deps = [
       ":user_pci",
     ]
-  } else {
+  }
+
+  driver("bus-pci.proxy") {
+    deps = [
+      ":user_pci.proxy",
+    ]
+  }
+} else {
+  driver("bus-pci") {
     sources = [
       "kpci/kpci.c",
     ]
@@ -66,33 +90,85 @@ driver("bus-pci") {
       "$zx/system/ulib/zircon",
     ]
   }
+
+  driver("bus-pci.proxy") {
+    sources = [
+      "kpci/proxy.c",
+    ]
+    deps = [
+      "$zx/system/banjo/ddk.protocol.pci",
+      "$zx/system/banjo/ddk.protocol.pciroot",
+      "$zx/system/banjo/ddk.protocol.platform.device",
+      "$zx/system/banjo/ddk.protocol.sysmem",
+      "$zx/system/ulib/ddk",
+      "$zx/system/ulib/zircon",
+    ]
+  }
 }
 
-driver("bus-pci.proxy") {
+# The output of the test code below is made up of several binaries
+# pci-unit-test: A binary to run the unit tests defiend in test/
+# pci-driver-test: A binary to run the driver tests
+# pci_fake.so: A fake bus driver loaded by pci-driver-test to provide a bind
+#              point for pci_test.so
+# pci_fake.proxy.so: The corresponding proxy driver that binds to pci_fake.so
+#                    and loads pci_test.so
+# pci_test.so: A zxtest driver to test the PCI protocol
+test("pci-unit") {
   sources = [
-    "kpci/proxy.c",
-  ]
-  deps = [
-    "$zx/system/banjo/ddk.protocol.pci",
-    "$zx/system/banjo/ddk.protocol.pciroot",
-    "$zx/system/banjo/ddk.protocol.platform.device",
-    "$zx/system/banjo/ddk.protocol.sysmem",
-    "$zx/system/ulib/ddk",
-    "$zx/system/ulib/zircon",
-  ]
-}
-
-test("pci_tests") {
-  sources = [
-    "test/allocation_tests.cpp",
-    "test/config_tests.cpp",
-    "test/device_tests.cpp",
-    "test/main.cpp",
+    "test/unit/allocation_tests.cc",
+    "test/unit/config_tests.cc",
+    "test/unit/device_tests.cc",
   ]
   deps = [
     ":user_pci",
     "$zx/system/dev/lib/fake_ddk",
-    "$zx/system/ulib/hwreg",
+    "$zx/system/ulib/zxtest",
+  ]
+}
+
+test("pci-driver") {
+  sources = [
+    "test/driver/driver_tests.cc",
+  ]
+  deps = [
+    "$zx/system/fidl/fuchsia-device-test:c",
+    "$zx/system/ulib/ddk",
+    "$zx/system/ulib/ddktl",
+    "$zx/system/ulib/devmgr-integration-test",
+    "$zx/system/ulib/driver-integration-test",
+    "$zx/system/ulib/fbl",
+    "$zx/system/ulib/fdio",
+    "$zx/system/ulib/zxtest",
+  ]
+}
+
+driver("pci_fake") {
+  sources = [
+    "test/driver/fake_bus_driver.cc",
+  ]
+  public_deps = [
+    ":user_pci",
+    "$zx/system/ulib/ddk",
+    "$zx/system/ulib/ddktl",
+    "$zx/system/ulib/pretty",
+    "$zx/system/ulib/zxtest",
+  ]
+}
+
+driver("pci_fake.proxy") {
+  deps = [
+    ":user_pci.proxy",
+  ]
+}
+
+driver("pci_protocol_test_driver") {
+  sources = [
+    "test/driver/protocol_test_driver.cc",
+  ]
+  deps = [
+    ":user_pci",
+    "$zx/system/fidl/fuchsia-device-test:c",
     "$zx/system/ulib/zxtest",
   ]
 }

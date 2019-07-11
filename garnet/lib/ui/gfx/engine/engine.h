@@ -6,12 +6,6 @@
 #define GARNET_LIB_UI_GFX_ENGINE_ENGINE_H_
 
 #include <fbl/ref_ptr.h>
-#include "src/ui/lib/escher/escher.h"
-#include "src/ui/lib/escher/flib/release_fence_signaller.h"
-#include "src/ui/lib/escher/renderer/batch_gpu_uploader.h"
-#include "src/ui/lib/escher/resources/resource_recycler.h"
-#include "src/ui/lib/escher/shape/rounded_rect_factory.h"
-#include "src/ui/lib/escher/vk/image_factory.h"
 #include <lib/fit/function.h>
 #include <lib/inspect/inspect.h>
 #include <lib/sys/cpp/component_context.h>
@@ -32,11 +26,20 @@
 #include "garnet/lib/ui/gfx/resources/nodes/scene.h"
 #include "garnet/lib/ui/gfx/util/event_timestamper.h"
 #include "garnet/lib/ui/scenic/event_reporter.h"
+#include "src/ui/lib/escher/escher.h"
+#include "src/ui/lib/escher/flib/release_fence_signaller.h"
+#include "src/ui/lib/escher/geometry/types.h"
+#include "src/ui/lib/escher/renderer/batch_gpu_uploader.h"
+#include "src/ui/lib/escher/resources/resource_recycler.h"
+#include "src/ui/lib/escher/shape/rounded_rect_factory.h"
+#include "src/ui/lib/escher/vk/image_factory.h"
 
 namespace scenic_impl {
 namespace gfx {
 
 class Compositor;
+class Engine;
+using EngineWeakPtr = fxl::WeakPtr<Engine>;
 class FrameTimings;
 using FrameTimingsPtr = fxl::RefPtr<FrameTimings>;
 class Session;
@@ -48,51 +51,27 @@ using ViewLinker = ObjectLinker<ViewHolder, View>;
 using PresentationInfo = fuchsia::images::PresentationInfo;
 using OnPresentedCallback = fit::function<void(PresentationInfo)>;
 
-// Graphical context for a set of session updates.
-// The CommandContext is only valid during RenderFrame() and should not be
-// accessed outside of that.
-class CommandContext {
- public:
-  CommandContext(std::unique_ptr<escher::BatchGpuUploader> uploader);
-
-  escher::BatchGpuUploader* batch_gpu_uploader() const {
-    return batch_gpu_uploader_.get();
-  }
-
-  // Flush any work accumulated during command processing.
-  void Flush();
-
- private:
-  std::unique_ptr<escher::BatchGpuUploader> batch_gpu_uploader_;
-};
-
-// Owns a group of sessions which can share resources with one another
-// using the same resource linker and which coexist within the same timing
-// domain using the same frame scheduler.  It is not possible for sessions
-// which belong to different engines to communicate with one another.
-class Engine : public SessionUpdater, public FrameRenderer {
+// Manages the interactions between the scene graph, renderers, and displays,
+// producing output when prompted through the FrameRenderer interface.
+class Engine : public FrameRenderer {
  public:
   Engine(sys::ComponentContext* component_context,
-         std::unique_ptr<FrameScheduler> frame_scheduler,
-         std::unique_ptr<SessionManager> session_manager,
-         DisplayManager* display_manager, escher::EscherWeakPtr escher,
-         inspect::Node inspect_node);
+         const std::shared_ptr<FrameScheduler>& frame_scheduler, DisplayManager* display_manager,
+         escher::EscherWeakPtr escher, inspect::Node inspect_node);
+
+  // Only used for testing.
+  Engine(sys::ComponentContext* component_context,
+         const std::shared_ptr<FrameScheduler>& frame_scheduler, DisplayManager* display_manager,
+         std::unique_ptr<escher::ReleaseFenceSignaller> release_fence_signaller,
+         escher::EscherWeakPtr escher);
 
   ~Engine() override = default;
 
   escher::Escher* escher() const { return escher_.get(); }
   escher::EscherWeakPtr GetEscherWeakPtr() const { return escher_; }
+  EngineWeakPtr GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
 
-  vk::Device vk_device() {
-    return escher_ ? escher_->vulkan_context().device : vk::Device();
-  }
-
-  bool has_vulkan() const { return has_vulkan_; }
-
-  ResourceLinker* resource_linker() { return &resource_linker_; }
-  ViewLinker* view_linker() { return &view_linker_; }
-
-  SessionManager* session_manager() { return session_manager_.get(); }
+  vk::Device vk_device() { return escher_ ? escher_->vulkan_context().device : vk::Device(); }
 
   EngineRenderer* renderer() { return engine_renderer_.get(); }
 
@@ -110,12 +89,11 @@ class Engine : public SessionUpdater, public FrameRenderer {
                           escher_rounded_rect_factory(),
                           release_fence_signaller(),
                           event_timestamper(),
-                          session_manager(),
-                          frame_scheduler(),
+                          frame_scheduler_.get(),
                           display_manager_,
                           scene_graph(),
-                          resource_linker(),
-                          view_linker()};
+                          &resource_linker_,
+                          &view_linker_};
   }
 
   // Invoke Escher::Cleanup().  If more work remains afterward, post a delayed
@@ -124,58 +102,22 @@ class Engine : public SessionUpdater, public FrameRenderer {
   void CleanupEscher();
 
   // Dumps the contents of all scene graphs.
-  std::string DumpScenes() const;
-
-  // |SessionUpdater|
-  //
-  // Applies scheduled updates to a session. If the update fails, the session is
-  // killed. Returns true if a new render is needed, false otherwise.
-  SessionUpdater::UpdateResults UpdateSessions(
-      std::unordered_set<SessionId> sessions_to_update,
-      zx_time_t presentation_time, uint64_t trace_id = 0) override;
-
-  // |SessionUpdater|
-  //
-  // Signals that all present calls prior to this point are included in the
-  // next frame. This must be called before RenderFrame() to be able to signal
-  // the present callbacks that contributed to that next frame.
-  void RatchetPresentCallbacks() override;
-
-  // |SessionUpdater|
-  //
-  // Triggers the corresponding callbacks for each session that had an update
-  // since the last ratchet point.
-  void SignalSuccessfulPresentCallbacks(PresentationInfo) override;
+  void DumpScenes(std::ostream& output,
+                  std::unordered_set<GlobalId, GlobalId::Hash>* visited_resources) const;
 
   // |FrameRenderer|
   //
   // Renders a new frame. Returns true if successful, false otherwise.
-  bool RenderFrame(const FrameTimingsPtr& frame,
-                   zx_time_t presentation_time) override;
-
- protected:
-  // Only used by subclasses used in testing.
-  Engine(sys::ComponentContext* component_context,
-         std::unique_ptr<FrameScheduler> frame_scheduler,
-         DisplayManager* display_manager,
-         std::unique_ptr<escher::ReleaseFenceSignaller> release_fence_signaller,
-         std::unique_ptr<SessionManager> session_manager,
-         escher::EscherWeakPtr escher);
+  bool RenderFrame(const FrameTimingsPtr& frame, zx_time_t presentation_time) override;
 
  private:
-  void InitializeFrameScheduler();
-
   // Initialize all inspect::Nodes, so that the Engine state can be observed.
   void InitializeInspectObjects();
-
-  // Creates a command context.
-  CommandContext CreateCommandContext(uint64_t trace_id);
 
   // Takes care of cleanup between frames.
   void EndCurrentFrame(uint64_t frame_number);
 
   EventTimestamper* event_timestamper() { return &event_timestamper_; }
-  FrameScheduler* frame_scheduler() { return frame_scheduler_.get(); }
 
   escher::ResourceRecycler* escher_resource_recycler() {
     return escher_ ? escher_->resource_recycler() : nullptr;
@@ -183,9 +125,7 @@ class Engine : public SessionUpdater, public FrameRenderer {
 
   escher::ImageFactory* escher_image_factory() { return image_factory_.get(); }
 
-  escher::RoundedRectFactory* escher_rounded_rect_factory() {
-    return rounded_rect_factory_.get();
-  }
+  escher::RoundedRectFactory* escher_rounded_rect_factory() { return rounded_rect_factory_.get(); }
 
   escher::ReleaseFenceSignaller* release_fence_signaller() {
     return release_fence_signaller_.get();
@@ -199,8 +139,7 @@ class Engine : public SessionUpdater, public FrameRenderer {
 
   // Update reported metrics for nodes which subscribe to metrics events.
   // If anything changed, append the node to |updated_nodes|.
-  void UpdateMetrics(Node* node,
-                     const ::fuchsia::ui::gfx::Metrics& parent_metrics,
+  void UpdateMetrics(Node* node, const ::fuchsia::ui::gfx::Metrics& parent_metrics,
                      std::vector<Node*>* updated_nodes);
 
   DisplayManager* const display_manager_;
@@ -215,24 +154,16 @@ class Engine : public SessionUpdater, public FrameRenderer {
   std::unique_ptr<escher::ImageFactoryAdapter> image_factory_;
   std::unique_ptr<escher::RoundedRectFactory> rounded_rect_factory_;
   std::unique_ptr<escher::ReleaseFenceSignaller> release_fence_signaller_;
-  std::unique_ptr<SessionManager> session_manager_;
-  std::unique_ptr<FrameScheduler> frame_scheduler_;
+
+  // TODO(SCN-1502): This is a temporary solution until we can remove frame_scheduler from
+  // ResourceContext. Do not add any additional dependencies on this object/pointer.
+  std::shared_ptr<FrameScheduler> frame_scheduler_;
+
   SceneGraph scene_graph_;
 
   bool escher_cleanup_scheduled_ = false;
 
-  // Tracks the number of sessions returning ApplyUpdateResult::needs_render and
-  // uses it for tracing.
-  uint64_t needs_render_count_ = 0;
-  uint64_t processed_needs_render_count_ = 0;
-
   bool render_continuously_ = false;
-  bool has_vulkan_ = false;
-
-  std::queue<OnPresentedCallback> callbacks_this_frame_;
-  std::queue<OnPresentedCallback> pending_callbacks_;
-
-  std::optional<CommandContext> command_context_;
 
   inspect::Node inspect_node_;
   inspect::LazyStringProperty inspect_scene_dump_;

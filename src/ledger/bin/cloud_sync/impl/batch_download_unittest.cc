@@ -23,9 +23,8 @@ namespace cloud_sync {
 namespace {
 
 // Creates a dummy continuation token.
-std::unique_ptr<cloud_provider::Token> MakeToken(
-    convert::ExtendedStringView token_id) {
-  auto token = std::make_unique<cloud_provider::Token>();
+std::unique_ptr<cloud_provider::PositionToken> MakeToken(convert::ExtendedStringView token_id) {
+  auto token = std::make_unique<cloud_provider::PositionToken>();
   token->opaque_id = convert::ToArray(token_id);
   return token;
 }
@@ -36,37 +35,33 @@ std::unique_ptr<cloud_provider::Token> MakeToken(
 // synced.
 class TestPageStorage : public storage::PageStorageEmptyImpl {
  public:
-  explicit TestPageStorage(async_dispatcher_t* dispatcher)
-      : dispatcher_(dispatcher) {}
+  explicit TestPageStorage(async_dispatcher_t* dispatcher) : dispatcher_(dispatcher) {}
 
   void AddCommitsFromSync(
       std::vector<storage::PageStorage::CommitIdAndBytes> ids_and_bytes,
       storage::ChangeSource source,
-      fit::function<void(storage::Status, std::vector<storage::CommitId>)>
-          callback) override {
+      fit::function<void(ledger::Status, std::vector<storage::CommitId>)> callback) override {
     ASSERT_EQ(storage::ChangeSource::CLOUD, source);
     if (should_fail_add_commit_from_sync) {
       async::PostTask(dispatcher_, [callback = std::move(callback)]() {
-        callback(storage::Status::IO_ERROR, {});
+        callback(ledger::Status::IO_ERROR, {});
       });
       return;
     }
-    async::PostTask(
-        dispatcher_, [this, ids_and_bytes = std::move(ids_and_bytes),
-                      callback = std::move(callback)]() mutable {
-          for (auto& commit : ids_and_bytes) {
-            received_commits[std::move(commit.id)] = std::move(commit.bytes);
-          }
-          callback(storage::Status::OK, {});
-        });
+    async::PostTask(dispatcher_, [this, ids_and_bytes = std::move(ids_and_bytes),
+                                  callback = std::move(callback)]() mutable {
+      for (auto& commit : ids_and_bytes) {
+        received_commits[std::move(commit.id)] = std::move(commit.bytes);
+      }
+      callback(ledger::Status::OK, {});
+    });
   }
 
   void SetSyncMetadata(fxl::StringView key, fxl::StringView value,
-                       fit::function<void(storage::Status)> callback) override {
+                       fit::function<void(ledger::Status)> callback) override {
     sync_metadata[key.ToString()] = value.ToString();
-    async::PostTask(dispatcher_, [callback = std::move(callback)]() {
-      callback(storage::Status::OK);
-    });
+    async::PostTask(dispatcher_,
+                    [callback = std::move(callback)]() { callback(ledger::Status::OK); });
   }
 
   bool should_fail_add_commit_from_sync = false;
@@ -79,8 +74,7 @@ class TestPageStorage : public storage::PageStorageEmptyImpl {
 
 class BatchDownloadTest : public gtest::TestLoopFixture {
  public:
-  BatchDownloadTest()
-      : storage_(dispatcher()), encryption_service_(dispatcher()) {}
+  BatchDownloadTest() : storage_(dispatcher()), encryption_service_(dispatcher()) {}
   ~BatchDownloadTest() override {}
 
  protected:

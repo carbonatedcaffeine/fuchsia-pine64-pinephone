@@ -11,13 +11,12 @@
 #include "src/developer/debug/shared/platform_message_loop.h"
 #include "src/developer/debug/zxdb/common/err.h"
 #include "src/developer/debug/zxdb/common/test_with_loop.h"
+#include "src/developer/debug/zxdb/expr/eval_context.h"
+#include "src/developer/debug/zxdb/expr/eval_context_impl.h"
 #include "src/developer/debug/zxdb/expr/eval_test_support.h"
-#include "src/developer/debug/zxdb/expr/expr_eval_context.h"
 #include "src/developer/debug/zxdb/expr/expr_value.h"
-#include "src/developer/debug/zxdb/expr/mock_expr_eval_context.h"
+#include "src/developer/debug/zxdb/expr/mock_eval_context.h"
 #include "src/developer/debug/zxdb/expr/mock_expr_node.h"
-#include "src/developer/debug/zxdb/expr/symbol_eval_context.h"
-#include "src/developer/debug/zxdb/expr/symbol_variable_resolver.h"
 #include "src/developer/debug/zxdb/symbols/base_type.h"
 #include "src/developer/debug/zxdb/symbols/code_block.h"
 #include "src/developer/debug/zxdb/symbols/collection.h"
@@ -35,7 +34,7 @@ class ExprNodeTest : public TestWithLoop {};
 }  // namespace
 
 TEST_F(ExprNodeTest, EvalIdentifier) {
-  auto context = fxl::MakeRefCounted<MockExprEvalContext>();
+  auto context = fxl::MakeRefCounted<MockEvalContext>();
   ExprValue foo_expected(12);
   context->AddVariable("foo", foo_expected);
 
@@ -44,8 +43,7 @@ TEST_F(ExprNodeTest, EvalIdentifier) {
   bool called = false;
   Err out_err;
   ExprValue out_value;
-  good_identifier->Eval(context, [&called, &out_err, &out_value](
-                                     const Err& err, ExprValue value) {
+  good_identifier->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
     called = true;
     out_err = err;
     out_value = value;
@@ -60,8 +58,7 @@ TEST_F(ExprNodeTest, EvalIdentifier) {
   auto bad_identifier = fxl::MakeRefCounted<IdentifierExprNode>("bar");
   called = false;
   out_value = ExprValue();
-  bad_identifier->Eval(context, [&called, &out_err, &out_value](
-                                    const Err& err, ExprValue value) {
+  bad_identifier->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
     called = true;
     out_err = err;
     out_value = ExprValue();  // value;
@@ -75,7 +72,7 @@ TEST_F(ExprNodeTest, EvalIdentifier) {
 
 template <typename T>
 void DoUnaryMinusTest(T in) {
-  auto context = fxl::MakeRefCounted<MockExprEvalContext>();
+  auto context = fxl::MakeRefCounted<MockEvalContext>();
   ExprValue foo_expected(in);
   context->AddVariable("foo", foo_expected);
 
@@ -86,8 +83,7 @@ void DoUnaryMinusTest(T in) {
   bool called = false;
   Err out_err;
   ExprValue out_value;
-  identifier->Eval(context, [&called, &out_err, &out_value](const Err& err,
-                                                            ExprValue value) {
+  identifier->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
     called = true;
     out_err = err;
     out_value = value;
@@ -100,14 +96,13 @@ void DoUnaryMinusTest(T in) {
   out_value = ExprValue();
 
   // Apply a unary '-' to that value.
-  auto unary = fxl::MakeRefCounted<UnaryOpExprNode>(
-      ExprToken(ExprTokenType::kMinus, "-", 0), std::move(identifier));
-  unary->Eval(context,
-              [&called, &out_err, &out_value](const Err& err, ExprValue value) {
-                called = true;
-                out_err = err;
-                out_value = value;
-              });
+  auto unary = fxl::MakeRefCounted<UnaryOpExprNode>(ExprToken(ExprTokenType::kMinus, "-", 0),
+                                                    std::move(identifier));
+  unary->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
+    called = true;
+    out_err = err;
+    out_value = value;
+  });
 
   // This checked that the type conversions have followed C rules. This is
   // the expected value (int/unsigned unchanged, everything smaller than an int
@@ -146,25 +141,23 @@ TEST_F(ExprNodeTest, UnaryMinus) {
 
   // Try an unsupported value (a 3-byte signed). This should throw an error and
   // compute an empty value.
-  auto context = fxl::MakeRefCounted<MockExprEvalContext>();
-  ExprValue expected(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 3, "uint24_t"),
-      {0, 0, 0});
+  auto context = fxl::MakeRefCounted<MockEvalContext>();
+  ExprValue expected(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 3, "uint24_t"),
+                     {0, 0, 0});
   context->AddVariable("foo", expected);
 
   auto identifier = fxl::MakeRefCounted<IdentifierExprNode>("foo");
-  auto unary = fxl::MakeRefCounted<UnaryOpExprNode>(
-      ExprToken(ExprTokenType::kMinus, "-", 0), std::move(identifier));
+  auto unary = fxl::MakeRefCounted<UnaryOpExprNode>(ExprToken(ExprTokenType::kMinus, "-", 0),
+                                                    std::move(identifier));
 
   bool called = false;
   Err out_err;
   ExprValue out_value;
-  unary->Eval(context,
-              [&called, &out_err, &out_value](const Err& err, ExprValue value) {
-                called = true;
-                out_err = err;
-                out_value = value;
-              });
+  unary->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
+    called = true;
+    out_err = err;
+    out_value = value;
+  });
   EXPECT_TRUE(called);
   EXPECT_TRUE(out_err.has_error());
   EXPECT_EQ("Negation for this value is not supported.", out_err.msg());
@@ -172,22 +165,21 @@ TEST_F(ExprNodeTest, UnaryMinus) {
 }
 
 // This test mocks at the SymbolDataProvider level because most of the
-// dereference logic is in the SymbolEvalContext.
+// dereference logic is in the EvalContextImpl.
 TEST_F(ExprNodeTest, DereferenceReferencePointer) {
   auto data_provider = fxl::MakeRefCounted<MockSymbolDataProvider>();
-  auto context = fxl::MakeRefCounted<SymbolEvalContext>(
-      fxl::WeakPtr<const ProcessSymbols>(),
-      SymbolContext::ForRelativeAddresses(), data_provider, nullptr);
+  auto context = fxl::MakeRefCounted<EvalContextImpl>(fxl::WeakPtr<const ProcessSymbols>(),
+                                                      SymbolContext::ForRelativeAddresses(),
+                                                      data_provider, nullptr);
 
   // Dereferencing should remove the const on the pointer but not the pointee.
-  auto base_type =
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 4, "uint32_t");
-  auto const_base_type = fxl::MakeRefCounted<ModifiedType>(
-      DwarfTag::kConstType, LazySymbol(base_type));
-  auto ptr_type = fxl::MakeRefCounted<ModifiedType>(
-      DwarfTag::kPointerType, LazySymbol(const_base_type));
-  auto const_ptr_type = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kConstType,
-                                                          LazySymbol(ptr_type));
+  auto base_type = fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 4, "uint32_t");
+  auto const_base_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kConstType, LazySymbol(base_type));
+  auto ptr_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol(const_base_type));
+  auto const_ptr_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kConstType, LazySymbol(ptr_type));
 
   // The value being pointed to.
   constexpr uint32_t kValue = 0x12345678;
@@ -195,17 +187,15 @@ TEST_F(ExprNodeTest, DereferenceReferencePointer) {
   data_provider->AddMemory(kAddress, {0x78, 0x56, 0x34, 0x12});
 
   // The pointer.
-  ExprValue ptr_value(const_ptr_type,
-                      {0x20, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
+  ExprValue ptr_value(const_ptr_type, {0x20, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
 
   // Execute the dereference.
-  auto deref_node = fxl::MakeRefCounted<DereferenceExprNode>(
-      fxl::MakeRefCounted<MockExprNode>(true, ptr_value));
+  auto deref_node =
+      fxl::MakeRefCounted<DereferenceExprNode>(fxl::MakeRefCounted<MockExprNode>(true, ptr_value));
   bool called = false;
   Err out_err;
   ExprValue out_value;
-  deref_node->Eval(context, [&called, &out_err, &out_value](const Err& err,
-                                                            ExprValue value) {
+  deref_node->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
     called = true;
     out_err = err;
     out_value = value;
@@ -225,14 +215,13 @@ TEST_F(ExprNodeTest, DereferenceReferencePointer) {
   EXPECT_EQ(kValue, out_value.GetAs<uint32_t>());
 
   // Now go backwards and get the address of the value.
-  auto addr_node = fxl::MakeRefCounted<AddressOfExprNode>(
-      fxl::MakeRefCounted<MockExprNode>(true, out_value));
+  auto addr_node =
+      fxl::MakeRefCounted<AddressOfExprNode>(fxl::MakeRefCounted<MockExprNode>(true, out_value));
 
   called = false;
   out_err = Err();
   out_value = ExprValue();
-  addr_node->Eval(context, [&called, &out_err, &out_value](const Err& err,
-                                                           ExprValue value) {
+  addr_node->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
     called = true;
     out_err = err;
     out_value = value;
@@ -252,8 +241,7 @@ TEST_F(ExprNodeTest, DereferenceReferencePointer) {
   const ModifiedType* out_mod_type = out_value.type()->AsModifiedType();
   ASSERT_TRUE(out_mod_type);
   EXPECT_EQ(DwarfTag::kPointerType, out_mod_type->tag());
-  EXPECT_EQ(const_base_type.get(),
-            out_mod_type->modified().Get()->AsModifiedType());
+  EXPECT_EQ(const_base_type.get(), out_mod_type->modified().Get()->AsModifiedType());
   EXPECT_EQ("const uint32_t*", out_mod_type->GetFullName());
 
   // Try to dereference an invalid address.
@@ -263,13 +251,32 @@ TEST_F(ExprNodeTest, DereferenceReferencePointer) {
   called = false;
   out_err = Err();
   out_value = ExprValue();
-  bad_deref_node->Eval(context, [&called, &out_err, &out_value](
-                                    const Err& err, ExprValue value) {
+  bad_deref_node->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
     called = true;
     out_err = err;
     out_value = value;
     debug_ipc::MessageLoop::Current()->QuitNow();
   });
+
+  // Should complete asynchronously.
+  EXPECT_FALSE(called);
+  loop().Run();
+  EXPECT_TRUE(called);
+  EXPECT_TRUE(out_err.has_error());
+  EXPECT_EQ("Invalid pointer 0x0", out_err.msg());
+
+  // Try to take the address of the invalid expression above. The error should be forwarded.
+  auto addr_bad_deref_node = fxl::MakeRefCounted<AddressOfExprNode>(std::move(bad_deref_node));
+  called = false;
+  out_err = Err();
+  out_value = ExprValue();
+  addr_bad_deref_node->Eval(context,
+                            [&called, &out_err, &out_value](const Err& err, ExprValue value) {
+                              called = true;
+                              out_err = err;
+                              out_value = value;
+                              debug_ipc::MessageLoop::Current()->QuitNow();
+                            });
 
   // Should complete asynchronously.
   EXPECT_FALSE(called);
@@ -283,33 +290,30 @@ TEST_F(ExprNodeTest, DereferenceReferencePointer) {
 // reference type.
 TEST_F(ExprNodeTest, ArrayAccess) {
   // The base address of the array (of type uint32_t*).
-  auto uint32_type =
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 4, "uint32_t");
-  auto uint32_ptr_type = fxl::MakeRefCounted<ModifiedType>(
-      DwarfTag::kPointerType, LazySymbol(uint32_type));
+  auto uint32_type = fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 4, "uint32_t");
+  auto uint32_ptr_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol(uint32_type));
   constexpr uint64_t kAddress = 0x12345678;
-  ExprValue pointer_value(uint32_ptr_type,
-                          {0x78, 0x56, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00});
+  ExprValue pointer_value(uint32_ptr_type, {0x78, 0x56, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00});
   auto pointer_node = fxl::MakeRefCounted<MockExprNode>(false, pointer_value);
 
   // The index value (= 5) lives in memory as a 32-bit little-endian value.
   constexpr uint64_t kRefAddress = 0x5000;
   constexpr uint8_t kIndex = 5;
-  auto context = fxl::MakeRefCounted<MockExprEvalContext>();
+  auto context = fxl::MakeRefCounted<MockEvalContext>();
   context->data_provider()->AddMemory(kRefAddress, {kIndex, 0, 0, 0});
 
   // The index expression is a reference to the index we saved above, and the
   // reference data is the address.
-  auto uint32_ref_type = fxl::MakeRefCounted<ModifiedType>(
-      DwarfTag::kReferenceType, LazySymbol(uint32_type));
+  auto uint32_ref_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kReferenceType, LazySymbol(uint32_type));
   auto index = fxl::MakeRefCounted<MockExprNode>(
       false, ExprValue(uint32_ref_type, {0, 0x50, 0, 0, 0, 0, 0, 0}));
 
   // The node to evaluate the access. Note the pointer are index nodes are
   // moved here so the source reference is gone. This allows us to test that
   // they stay in scope during an async call below.
-  auto access = fxl::MakeRefCounted<ArrayAccessExprNode>(
-      std::move(pointer_node), std::move(index));
+  auto access = fxl::MakeRefCounted<ArrayAccessExprNode>(std::move(pointer_node), std::move(index));
 
   // We expect it to read @ kAddress[kIndex]. Insert a value there.
   constexpr uint64_t kExpectedAddr = kAddress + 4 * kIndex;
@@ -320,8 +324,7 @@ TEST_F(ExprNodeTest, ArrayAccess) {
   bool called = false;
   Err out_err;
   ExprValue out_value;
-  access->Eval(context, [&called, &out_err, &out_value](const Err& err,
-                                                        ExprValue value) {
+  access->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
     called = true;
     out_err = err;
     out_value = value;
@@ -352,25 +355,24 @@ TEST_F(ExprNodeTest, ArrayAccess) {
 // This is more of an integration smoke test for "." and "->". The details are
 // tested in resolve_collection_unittest.cc.
 TEST_F(ExprNodeTest, MemberAccess) {
-  auto context = fxl::MakeRefCounted<MockExprEvalContext>();
+  auto context = fxl::MakeRefCounted<MockEvalContext>();
 
   // Define a class.
   auto int32_type = MakeInt32Type();
-  auto sc = MakeCollectionType(DwarfTag::kStructureType, "Foo",
-                               {{"a", int32_type}, {"b", int32_type}});
+  auto sc =
+      MakeCollectionType(DwarfTag::kStructureType, "Foo", {{"a", int32_type}, {"b", int32_type}});
 
   // Set up a call to do "." synchronously.
-  auto struct_node = fxl::MakeRefCounted<MockExprNode>(
-      true, ExprValue(sc, {0x78, 0x56, 0x34, 0x12}));
+  auto struct_node =
+      fxl::MakeRefCounted<MockExprNode>(true, ExprValue(sc, {0x78, 0x56, 0x34, 0x12}));
   auto access_node = fxl::MakeRefCounted<MemberAccessExprNode>(
-      struct_node, ExprToken(ExprTokenType::kDot, ".", 0), Identifier("a"));
+      struct_node, ExprToken(ExprTokenType::kDot, ".", 0), ParsedIdentifier("a"));
 
   // Do the call.
   bool called = false;
   Err out_err;
   ExprValue out_value;
-  access_node->Eval(context, [&called, &out_err, &out_value](const Err& err,
-                                                             ExprValue value) {
+  access_node->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
     called = true;
     out_err = err;
     out_value = value;
@@ -383,8 +385,7 @@ TEST_F(ExprNodeTest, MemberAccess) {
   EXPECT_EQ(0x12345678, out_value.GetAs<int32_t>());
 
   // Test indirection: "foo->a".
-  auto foo_ptr_type =
-      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol(sc));
+  auto foo_ptr_type = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol(sc));
   // Add memory in two chunks since the mock data provider can only respond
   // with the addresses it's given.
   constexpr uint64_t kAddress = 0x1000;
@@ -394,18 +395,15 @@ TEST_F(ExprNodeTest, MemberAccess) {
   // Make this one evaluate the left-hand-size asynchronously. This value
   // references kAddress (little-endian).
   auto struct_ptr_node = fxl::MakeRefCounted<MockExprNode>(
-      false, ExprValue(foo_ptr_type,
-                       {0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}));
+      false, ExprValue(foo_ptr_type, {0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}));
   auto access_ptr_node = fxl::MakeRefCounted<MemberAccessExprNode>(
-      struct_ptr_node, ExprToken(ExprTokenType::kArrow, "->", 0),
-      Identifier("b"));
+      struct_ptr_node, ExprToken(ExprTokenType::kArrow, "->", 0), ParsedIdentifier("b"));
 
   // Do the call.
   called = false;
   out_err = Err();
   out_value = ExprValue();
-  access_ptr_node->Eval(context, [&called, &out_err, &out_value](
-                                     const Err& err, ExprValue value) {
+  access_ptr_node->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
     called = true;
     out_err = err;
     out_value = value;
@@ -427,28 +425,25 @@ TEST_F(ExprNodeTest, MemberAccess) {
 // the reference value).
 TEST_F(ExprNodeTest, Cast) {
   DerivedClassTestSetup d;
-  auto context = fxl::MakeRefCounted<MockExprEvalContext>();
+  auto context = fxl::MakeRefCounted<MockEvalContext>();
 
   // Base2& base2_ref_value = base2_value;
   // static_cast<Derived&>(base2_ref_value);  // <- cast_ref_ref_node
-  auto base2_ref_node =
-      fxl::MakeRefCounted<MockExprNode>(true, d.base2_ref_value);
-  auto derived_ref_type_node =
-      fxl::MakeRefCounted<TypeExprNode>(d.derived_ref_type);
+  auto base2_ref_node = fxl::MakeRefCounted<MockExprNode>(true, d.base2_ref_value);
+  auto derived_ref_type_node = fxl::MakeRefCounted<TypeExprNode>(d.derived_ref_type);
   auto cast_ref_ref_node = fxl::MakeRefCounted<CastExprNode>(
-      CastType::kStatic, std::move(derived_ref_type_node),
-      std::move(base2_ref_node));
+      CastType::kStatic, std::move(derived_ref_type_node), std::move(base2_ref_node));
 
   // Do the call.
   bool called = false;
   Err out_err;
   ExprValue out_value;
-  cast_ref_ref_node->Eval(context, [&called, &out_err, &out_value](
-                                       const Err& err, ExprValue value) {
-    called = true;
-    out_err = err;
-    out_value = value;
-  });
+  cast_ref_ref_node->Eval(context,
+                          [&called, &out_err, &out_value](const Err& err, ExprValue value) {
+                            called = true;
+                            out_err = err;
+                            out_value = value;
+                          });
 
   // Should have run synchronously.
   EXPECT_TRUE(called);
@@ -458,12 +453,10 @@ TEST_F(ExprNodeTest, Cast) {
   // Now cast a ref to an object. This should dereference the object and
   // find the base class inside of it.
   // static_cast<Base2>(derived_ref_value)
-  auto derived_ref_node =
-      fxl::MakeRefCounted<MockExprNode>(true, d.derived_ref_value);
+  auto derived_ref_node = fxl::MakeRefCounted<MockExprNode>(true, d.derived_ref_value);
   auto base2_type_node = fxl::MakeRefCounted<TypeExprNode>(d.base2_type);
-  auto cast_node = fxl::MakeRefCounted<CastExprNode>(
-      CastType::kStatic, std::move(base2_type_node),
-      std::move(derived_ref_node));
+  auto cast_node = fxl::MakeRefCounted<CastExprNode>(CastType::kStatic, std::move(base2_type_node),
+                                                     std::move(derived_ref_node));
 
   // Provide the memory for the derived type for when we dereference the ref.
   context->data_provider()->AddMemory(d.kDerivedAddr, d.derived_value.data());
@@ -471,8 +464,7 @@ TEST_F(ExprNodeTest, Cast) {
   called = false;
   out_err = Err();
   out_value = ExprValue();
-  cast_node->Eval(context, [&called, &out_err, &out_value](const Err& err,
-                                                           ExprValue value) {
+  cast_node->Eval(context, [&called, &out_err, &out_value](const Err& err, ExprValue value) {
     called = true;
     out_err = err;
     out_value = value;
@@ -491,19 +483,17 @@ TEST_F(ExprNodeTest, Cast) {
 }
 
 TEST_F(ExprNodeTest, Sizeof) {
-  auto context = fxl::MakeRefCounted<MockExprEvalContext>();
+  auto context = fxl::MakeRefCounted<MockEvalContext>();
 
   // References on raw types should be stripped. Make a one-byte sized type and
   // an 8-byte reference to it.
-  auto char_type =
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSignedChar, 1, "char");
-  auto char_ref_type = fxl::MakeRefCounted<ModifiedType>(
-      DwarfTag::kReferenceType, LazySymbol(char_type));
+  auto char_type = fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSignedChar, 1, "char");
+  auto char_ref_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kReferenceType, LazySymbol(char_type));
   EXPECT_EQ(8u, char_ref_type->byte_size());
 
   auto char_ref_type_node = fxl::MakeRefCounted<TypeExprNode>(char_ref_type);
-  auto sizeof_char_ref_type =
-      fxl::MakeRefCounted<SizeofExprNode>(char_ref_type_node);
+  auto sizeof_char_ref_type = fxl::MakeRefCounted<SizeofExprNode>(char_ref_type_node);
 
   bool called = false;
   sizeof_char_ref_type->Eval(context, [&called](const Err& err, ExprValue v) {
@@ -519,8 +509,7 @@ TEST_F(ExprNodeTest, Sizeof) {
   EXPECT_TRUE(called);  // Make sure callback executed.
 
   // Test sizeof() for an asynchronously-executed boolean value.
-  auto char_value_node =
-      fxl::MakeRefCounted<MockExprNode>(false, ExprValue(true));
+  auto char_value_node = fxl::MakeRefCounted<MockExprNode>(false, ExprValue(true));
   auto sizeof_char = fxl::MakeRefCounted<SizeofExprNode>(char_value_node);
 
   called = false;

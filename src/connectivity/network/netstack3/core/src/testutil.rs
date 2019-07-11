@@ -5,9 +5,11 @@
 //! Testing-related utilities.
 
 use std::collections::{BinaryHeap, HashMap};
+use std::fmt::{self, Debug, Formatter};
 use std::hash::Hash;
+use std::ops;
 use std::sync::Once;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use byteorder::{ByteOrder, NativeEndian};
 use log::debug;
@@ -18,15 +20,16 @@ use rand_xorshift::XorShiftRng;
 use crate::device::ethernet::{EtherType, Mac};
 use crate::device::{DeviceId, DeviceLayerEventDispatcher};
 use crate::error::{IpParseResult, ParseError, ParseResult};
+use crate::ip::icmp::IcmpEventDispatcher;
 use crate::ip::{
-    AddrSubnet, Ip, IpAddr, IpAddress, IpExt, IpPacket, IpProto, Ipv4Addr, Ipv6Addr, Subnet,
-    SubnetEither, IPV6_MIN_MTU,
+    AddrSubnet, Ip, IpAddr, IpAddress, IpExtByteSlice, IpLayerEventDispatcher, IpPacket, IpProto,
+    Ipv4Addr, Ipv6Addr, Subnet, SubnetEither, IPV6_MIN_MTU,
 };
 use crate::transport::udp::UdpEventDispatcher;
 use crate::transport::TransportLayerEventDispatcher;
 use crate::wire::ethernet::EthernetFrame;
 use crate::wire::icmp::{IcmpMessage, IcmpPacket, IcmpParseArgs};
-use crate::{handle_timeout, Context, EventDispatcher, StackStateBuilder, TimerId};
+use crate::{handle_timeout, Context, EventDispatcher, Instant, StackStateBuilder, TimerId};
 
 use specialize_ip_macro::specialize_ip_address;
 
@@ -94,7 +97,7 @@ pub(crate) fn set_logger_for_test() {
     })
 }
 
-/// Skip current (fake) time forward to trigger the next timer event.
+/// Skip current time forward to trigger the next timer event.
 ///
 /// Returns true if a timer was triggered, false if there were no timers waiting
 /// to be triggered.
@@ -107,6 +110,29 @@ pub(crate) fn trigger_next_timer(ctx: &mut Context<DummyEventDispatcher>) -> boo
         }
         None => false,
     }
+}
+
+/// Skip current time forward by `duration`, triggering all timer events until then,
+/// inclusive.
+///
+/// Returns the number of timer events triggered.
+pub(crate) fn run_for(ctx: &mut Context<DummyEventDispatcher>, duration: Duration) -> usize {
+    let end_time = ctx.dispatcher.now() + duration;
+    let mut timers_fired = 0;
+
+    while let Some(tmr) = ctx.dispatcher.timer_events.peek() {
+        if tmr.0 > end_time {
+            break;
+        }
+
+        assert!(trigger_next_timer(ctx));
+        timers_fired += 1;
+    }
+
+    assert!(ctx.dispatcher.now() <= end_time);
+    ctx.dispatcher.current_time = end_time;
+
+    timers_fired
 }
 
 /// Trigger timer events until`f` callback returns true or passes the max
@@ -161,7 +187,7 @@ pub(crate) fn parse_ethernet_frame(
 pub(crate) fn parse_ip_packet<I: Ip>(
     mut buf: &[u8],
 ) -> IpParseResult<I, (&[u8], I::Addr, I::Addr, IpProto)> {
-    let packet = (&mut buf).parse::<<I as IpExt<_>>::Packet>()?;
+    let packet = (&mut buf).parse::<<I as IpExtByteSlice<_>>::Packet>()?;
     let src_ip = packet.src_ip();
     let dst_ip = packet.dst_ip();
     let proto = packet.proto();
@@ -254,10 +280,26 @@ where
     Ok((src_mac, dst_mac, src_ip, dst_ip, message, code))
 }
 
+/// Get a DummyEventDispatcherConfig depending on the `IpAddress`
+/// `get_dummy_config` is specialied with.
+#[specialize_ip_address]
+pub(crate) fn get_dummy_config<A: IpAddress>() -> DummyEventDispatcherConfig<A> {
+    #[ipv4addr]
+    {
+        DUMMY_CONFIG_V4
+    }
+
+    #[ipv6addr]
+    {
+        DUMMY_CONFIG_V6
+    }
+}
+
 /// A configuration for a simple network.
 ///
 /// `DummyEventDispatcherConfig` describes a simple network with two IP hosts
 /// - one remote and one local - both on the same Ethernet network.
+#[derive(Clone)]
 pub(crate) struct DummyEventDispatcherConfig<A: IpAddress> {
     /// The subnet of the local Ethernet network.
     pub(crate) subnet: Subnet<A>,
@@ -446,7 +488,7 @@ impl DummyEventDispatcherBuilder {
         }
         for (idx, ip, mac) in arp_table_entries {
             let device = *idx_to_device_id.get(&idx).unwrap();
-            crate::device::ethernet::insert_arp_table_entry(&mut ctx, device.id(), ip, mac);
+            crate::device::ethernet::insert_static_arp_table_entry(&mut ctx, device.id(), ip, mac);
         }
         for (idx, ip, mac) in ndp_table_entries {
             let device = *idx_to_device_id.get(&idx).unwrap();
@@ -475,14 +517,65 @@ impl DummyEventDispatcherBuilder {
     }
 }
 
-/// Represents arbitrary data of type `D` attached to an `Instant`.
+/// A dummy implementation of `Instant` for use in testing.
+#[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) struct DummyInstant {
+    // A DummyInstant is just an offset from some arbitrary epoch.
+    offset: Duration,
+}
+
+impl Instant for DummyInstant {
+    fn duration_since(&self, earlier: DummyInstant) -> Duration {
+        self.offset.checked_sub(earlier.offset).unwrap()
+    }
+
+    fn checked_add(&self, duration: Duration) -> Option<DummyInstant> {
+        self.offset.checked_add(duration).map(|offset| DummyInstant { offset })
+    }
+
+    fn checked_sub(&self, duration: Duration) -> Option<DummyInstant> {
+        self.offset.checked_sub(duration).map(|offset| DummyInstant { offset })
+    }
+}
+
+impl ops::Add<Duration> for DummyInstant {
+    type Output = DummyInstant;
+
+    fn add(self, other: Duration) -> DummyInstant {
+        DummyInstant { offset: self.offset + other }
+    }
+}
+
+impl ops::Sub<DummyInstant> for DummyInstant {
+    type Output = Duration;
+
+    fn sub(self, other: DummyInstant) -> Duration {
+        self.offset - other.offset
+    }
+}
+
+impl ops::Sub<Duration> for DummyInstant {
+    type Output = DummyInstant;
+
+    fn sub(self, other: Duration) -> DummyInstant {
+        DummyInstant { offset: self.offset - other }
+    }
+}
+
+impl Debug for DummyInstant {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{:?}", self.offset)
+    }
+}
+
+/// Represents arbitrary data of type `D` attached to a `DummyInstant`.
 ///
-/// `InstantAndData` implements `Ord` and `Eq` to be used in a `BinaryHeap`
-/// and ordered by `Instant`.
-struct InstantAndData<D>(Instant, D);
+/// `InstantAndData` implements `Ord` and `Eq` to be used in a `BinaryHeap` and
+/// ordered by `DummyInstant`.
+struct InstantAndData<D>(DummyInstant, D);
 
 impl<D> InstantAndData<D> {
-    fn new(time: Instant, data: D) -> Self {
+    fn new(time: DummyInstant, data: D) -> Self {
         Self(time, data)
     }
 }
@@ -514,10 +607,12 @@ type PendingTimer = InstantAndData<TimerId>;
 /// A `DummyEventDispatcher` implements the `EventDispatcher` interface for
 /// testing purposes. It provides facilities to inspect the history of what
 /// events have been emitted to the system.
+#[derive(Default)]
 pub(crate) struct DummyEventDispatcher {
     frames_sent: Vec<(DeviceId, Vec<u8>)>,
     timer_events: BinaryHeap<PendingTimer>,
-    current_time: Instant,
+    current_time: DummyInstant,
+    icmp_replies: HashMap<u64, Vec<(u16, Vec<u8>)>>,
 }
 
 impl DummyEventDispatcher {
@@ -526,13 +621,8 @@ impl DummyEventDispatcher {
     }
 
     /// Get an ordered list of all scheduled timer events
-    pub(crate) fn timer_events(&self) -> impl Iterator<Item = (&'_ Instant, &'_ TimerId)> {
+    pub(crate) fn timer_events(&self) -> impl Iterator<Item = (&'_ DummyInstant, &'_ TimerId)> {
         self.timer_events.iter().map(|t| (&t.0, &t.1))
-    }
-
-    /// Get the current (fake) time
-    pub(crate) fn current_time(self) -> Instant {
-        self.current_time
     }
 
     /// Forwards all the frames kept in the `self` to another context.
@@ -551,15 +641,10 @@ impl DummyEventDispatcher {
             crate::receive_frame(other, mapper(device_id), &mut data);
         }
     }
-}
 
-impl Default for DummyEventDispatcher {
-    fn default() -> DummyEventDispatcher {
-        DummyEventDispatcher {
-            frames_sent: vec![],
-            timer_events: BinaryHeap::new(),
-            current_time: Instant::now(),
-        }
+    /// Takes all the received icmp replies for a given `conn`.
+    pub(crate) fn take_icmp_replies(&mut self, conn: u64) -> Vec<(u16, Vec<u8>)> {
+        self.icmp_replies.remove(&conn).unwrap_or_else(Vec::default)
     }
 }
 
@@ -570,6 +655,17 @@ impl UdpEventDispatcher for DummyEventDispatcher {
 
 impl TransportLayerEventDispatcher for DummyEventDispatcher {}
 
+impl IcmpEventDispatcher for DummyEventDispatcher {
+    type IcmpConn = u64;
+
+    fn receive_icmp_echo_reply(&mut self, conn: &Self::IcmpConn, seq_num: u16, data: &[u8]) {
+        let replies = self.icmp_replies.entry(*conn).or_insert_with(Vec::default);
+        replies.push((seq_num, data.to_owned()))
+    }
+}
+
+impl IpLayerEventDispatcher for DummyEventDispatcher {}
+
 impl DeviceLayerEventDispatcher for DummyEventDispatcher {
     fn send_frame(&mut self, device: DeviceId, frame: &[u8]) {
         self.frames_sent.push((device, frame.to_vec()));
@@ -577,18 +673,28 @@ impl DeviceLayerEventDispatcher for DummyEventDispatcher {
 }
 
 impl EventDispatcher for DummyEventDispatcher {
-    fn schedule_timeout(&mut self, duration: Duration, id: TimerId) -> Option<Instant> {
+    type Instant = DummyInstant;
+
+    fn now(&self) -> DummyInstant {
+        self.current_time
+    }
+
+    fn schedule_timeout(&mut self, duration: Duration, id: TimerId) -> Option<DummyInstant> {
         self.schedule_timeout_instant(self.current_time + duration, id)
     }
 
-    fn schedule_timeout_instant(&mut self, time: Instant, id: TimerId) -> Option<Instant> {
+    fn schedule_timeout_instant(
+        &mut self,
+        time: DummyInstant,
+        id: TimerId,
+    ) -> Option<DummyInstant> {
         let ret = self.cancel_timeout(id);
         self.timer_events.push(PendingTimer::new(time, id));
         ret
     }
 
-    fn cancel_timeout(&mut self, id: TimerId) -> Option<Instant> {
-        let mut r: Option<Instant> = None;
+    fn cancel_timeout(&mut self, id: TimerId) -> Option<DummyInstant> {
+        let mut r: Option<DummyInstant> = None;
         // NOTE(brunodalbo): cancelling timeouts can be made a faster than this
         //  if we kept two data structures and TimerId was Hashable.
         self.timer_events = self
@@ -630,7 +736,7 @@ pub(crate) struct DummyNetwork<
 > {
     contexts: HashMap<N, Context<DummyEventDispatcher>>,
     mapper: F,
-    current_time: Instant,
+    current_time: DummyInstant,
     pending_frames: BinaryHeap<PendingFrame<N>>,
 }
 
@@ -686,9 +792,9 @@ where
     /// Creates a new `DummyNetwork`.
     ///
     /// Creates a new `DummyNetwork` with the collection of `Context`s in
-    /// `contexts`. `Context`s are named by type parameter `N`. `mapper`
-    /// is used to route frames from one pair of (named `Context`, `DeviceId`)
-    /// to another.
+    /// `contexts`. `Context`s are named by type parameter `N`. `mapper` is used
+    /// to route frames from one pair of (named `Context`, `DeviceId`) to
+    /// another.
     ///
     /// # Panics
     ///
@@ -706,7 +812,7 @@ where
         let mut ret = Self {
             contexts: contexts.collect(),
             mapper,
-            current_time: Instant::now(),
+            current_time: DummyInstant::default(),
             pending_frames: BinaryHeap::new(),
         };
 
@@ -799,8 +905,8 @@ where
         // dispatch all pending timers.
         for (n, ctx) in self.contexts.iter_mut() {
             // We have to collect the timers before dispatching them, to avoid
-            // an infinite loop in case handle_timeout schedules another timer for
-            // the same or older Instant.
+            // an infinite loop in case handle_timeout schedules another timer
+            // for the same or older DummyInstant.
             let mut timers = Vec::<TimerId>::new();
             while let Some(InstantAndData(t, id)) = ctx.dispatcher.timer_events.peek() {
                 // TODO(brunodalbo): remove this break once let_chains is stable
@@ -851,12 +957,12 @@ where
         }
     }
 
-    /// Calculates the next `Instant` when events are available.
+    /// Calculates the next `DummyInstant` when events are available.
     ///
-    /// Returns the smallest `Instant` greater than or equal to `current_time`
-    /// for which an event is available. If no events are available, returns
-    /// `None`.
-    fn next_step(&self) -> Option<Instant> {
+    /// Returns the smallest `DummyInstant` greater than or equal to
+    /// `current_time` for which an event is available. If no events are
+    /// available, returns `None`.
+    fn next_step(&self) -> Option<DummyInstant> {
         // get earliest timer in all contexts:
         let next_timer = self
             .contexts
@@ -949,9 +1055,9 @@ where
     let contexts = vec![(a.clone(), alice), (b.clone(), bob)].into_iter();
     DummyNetwork::<N, _>::new(contexts, move |net, device_id| {
         if *net == a {
-            (b.clone(), DeviceId::new_ethernet(1), latency)
+            (b.clone(), DeviceId::new_ethernet(0), latency)
         } else {
-            (a.clone(), DeviceId::new_ethernet(1), latency)
+            (a.clone(), DeviceId::new_ethernet(0), latency)
         }
     })
 }
@@ -1173,9 +1279,9 @@ mod tests {
         // verify implementation of InstantAndData to be used as a complex type
         // in a BinaryHeap:
         let mut heap = BinaryHeap::<InstantAndData<usize>>::new();
-        let now = Instant::now();
+        let now = DummyInstant::default();
 
-        fn new_data(time: Instant, id: usize) -> InstantAndData<usize> {
+        fn new_data(time: DummyInstant, id: usize) -> InstantAndData<usize> {
             InstantAndData::new(time, id)
         }
 

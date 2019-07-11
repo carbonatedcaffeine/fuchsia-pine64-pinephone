@@ -9,6 +9,7 @@
 #include "src/developer/debug/shared/platform_message_loop.h"
 #include "src/developer/debug/zxdb/client/remote_api.h"
 #include "src/developer/debug/zxdb/client/session.h"
+#include "src/developer/debug/zxdb/client/setting_schema_definition.h"
 #include "src/developer/debug/zxdb/common/host_util.h"
 
 namespace zxdb {
@@ -24,10 +25,9 @@ class MinidumpTest : public testing::Test {
   Err TryOpen(const std::string& filename);
 
   template <typename RequestType, typename ReplyType>
-  void DoRequest(
-      RequestType request, ReplyType& reply, Err& err,
-      void (RemoteAPI::*handler)(const RequestType&,
-                                 std::function<void(const Err&, ReplyType)>));
+  void DoRequest(RequestType request, ReplyType& reply, Err& err,
+                 void (RemoteAPI::*handler)(const RequestType&,
+                                            std::function<void(const Err&, ReplyType)>));
 
  private:
   debug_ipc::PlatformMessageLoop loop_;
@@ -42,8 +42,7 @@ MinidumpTest::MinidumpTest() {
 MinidumpTest::~MinidumpTest() { loop_.Cleanup(); }
 
 Err MinidumpTest::TryOpen(const std::string& filename) {
-  static auto data_dir =
-      std::filesystem::path(GetSelfPath()).parent_path() / "test_data" / "zxdb";
+  static auto data_dir = std::filesystem::path(GetSelfPath()).parent_path() / "test_data" / "zxdb";
 
   Err err;
   auto path = (data_dir / filename).string();
@@ -61,14 +60,12 @@ Err MinidumpTest::TryOpen(const std::string& filename) {
 template <typename RequestType, typename ReplyType>
 void MinidumpTest::DoRequest(
     RequestType request, ReplyType& reply, Err& err,
-    void (RemoteAPI::*handler)(const RequestType&,
-                               std::function<void(const Err&, ReplyType)>)) {
-  (session().remote_api()->*handler)(
-      request, [&reply, &err](const Err& e, ReplyType r) {
-        err = e;
-        reply = r;
-        debug_ipc::MessageLoop::Current()->QuitNow();
-      });
+    void (RemoteAPI::*handler)(const RequestType&, std::function<void(const Err&, ReplyType)>)) {
+  (session().remote_api()->*handler)(request, [&reply, &err](const Err& e, ReplyType r) {
+    err = e;
+    reply = r;
+    debug_ipc::MessageLoop::Current()->QuitNow();
+  });
   loop().Run();
 }
 
@@ -103,6 +100,8 @@ constexpr uint32_t kTestExampleMinidumpWithAspaceKOID = 9462UL;
 
 TEST_F(MinidumpTest, Load) {
   EXPECT_ZXDB_SUCCESS(TryOpen("test_example_minidump.dmp"));
+
+  EXPECT_NE(nullptr, session().system().ProcessFromKoid(kTestExampleMinidumpKOID));
 }
 
 TEST_F(MinidumpTest, ProcessTreeRecord) {
@@ -110,8 +109,7 @@ TEST_F(MinidumpTest, ProcessTreeRecord) {
 
   Err err;
   debug_ipc::ProcessTreeReply reply;
-  DoRequest(debug_ipc::ProcessTreeRequest(), reply, err,
-            &RemoteAPI::ProcessTree);
+  DoRequest(debug_ipc::ProcessTreeRequest(), reply, err, &RemoteAPI::ProcessTree);
   ASSERT_ZXDB_SUCCESS(err);
 
   auto record = reply.root;
@@ -222,8 +220,7 @@ TEST_F(MinidumpTest, Registers) {
   }
 
   std::vector<uint8_t> zero_short = {0, 0};
-  std::vector<uint8_t> zero_128 = {0, 0, 0, 0, 0, 0, 0, 0,
-                                   0, 0, 0, 0, 0, 0, 0, 0};
+  std::vector<uint8_t> zero_128 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
   EXPECT_EQ(AsData(0x83UL), got[std::pair(C::kGeneral, R::kX64_rax)]);
   EXPECT_EQ(AsData(0x2FE150062100UL), got[std::pair(C::kGeneral, R::kX64_rbx)]);
@@ -499,13 +496,35 @@ TEST_F(MinidumpTest, SysInfo) {
   DoRequest(request, reply, err, &RemoteAPI::SysInfo);
   ASSERT_ZXDB_SUCCESS(err);
 
-  EXPECT_EQ(
-      "Zircon prerelease git-50fbb1100548dc716d72abd4024461a85f5c8eb8 x86_64",
-      reply.version);
+  EXPECT_EQ("Zircon prerelease git-50fbb1100548dc716d72abd4024461a85f5c8eb8 x86_64", reply.version);
   EXPECT_EQ(4u, reply.num_cpus);
   EXPECT_EQ(0u, reply.memory_mb);
   EXPECT_EQ(0u, reply.hw_breakpoint_count);
   EXPECT_EQ(0u, reply.hw_watchpoint_count);
+}
+
+TEST_F(MinidumpTest, Backtrace) {
+  const uint64_t kProcessKOID = 10363;
+  const uint64_t kThreadKOID = 65232;
+  auto core_dir = std::filesystem::path(GetSelfPath()).parent_path() / "test_data" / "zxdb" /
+                  "sample_core" / "core";
+  session().system().settings().SetList(ClientSettings::System::kSymbolPaths, {core_dir});
+
+  ASSERT_ZXDB_SUCCESS(TryOpen(core_dir / "core.dmp"));
+
+  Err err;
+  debug_ipc::ThreadStatusRequest request;
+  debug_ipc::ThreadStatusReply reply;
+
+  request.process_koid = kProcessKOID;
+  request.thread_koid = kThreadKOID;
+  DoRequest(request, reply, err, &RemoteAPI::ThreadStatus);
+  ASSERT_ZXDB_SUCCESS(err);
+
+  ASSERT_EQ(3u, reply.record.frames.size());
+  EXPECT_EQ(0x6df7cb8a10a3u, reply.record.frames[0].ip);
+  EXPECT_EQ(0x6df7cb8a1062u, reply.record.frames[1].ip);
+  EXPECT_EQ(0x575953094967u, reply.record.frames[2].ip);
 }
 
 }  // namespace zxdb

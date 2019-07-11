@@ -37,18 +37,18 @@ spn_device_cb_pool_create(struct spn_device * const device)
 
   device->cb_pool = cb_pool;
 
-  VkCommandPoolCreateInfo const cpci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-                                        .pNext = NULL,
-                                        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-                                        .queueFamilyIndex = device->vk->qfi};
+  VkCommandPoolCreateInfo const cpci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                                         .pNext = NULL,
+                                         .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+                                         .queueFamilyIndex = device->environment->qfi };
 
-  vk(CreateCommandPool(device->vk->d, &cpci, device->vk->ac, &cb_pool->cp));
+  vk(CreateCommandPool(device->environment->d, &cpci, device->environment->ac, &cb_pool->cp));
 }
 
 void
 spn_device_cb_pool_dispose(struct spn_device * const device)
 {
-  vkDestroyCommandPool(device->vk->d, device->cb_pool->cp, device->vk->ac);
+  vkDestroyCommandPool(device->environment->d, device->cb_pool->cp, device->environment->ac);
 
   spn_allocator_host_perm_free(&device->allocator.host.perm, device->cb_pool);
 }
@@ -60,15 +60,16 @@ spn_device_cb_pool_dispose(struct spn_device * const device)
 VkCommandBuffer
 spn_device_cb_pool_acquire(struct spn_device * const device)
 {
-  VkCommandBufferAllocateInfo const cbai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                                            .pNext = NULL,
-                                            .commandPool        = device->cb_pool->cp,
-                                            .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                                            .commandBufferCount = 1};
+  VkCommandBufferAllocateInfo const cbai = { .sType =
+                                               VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                                             .pNext              = NULL,
+                                             .commandPool        = device->cb_pool->cp,
+                                             .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                                             .commandBufferCount = 1 };
 
   VkCommandBuffer cb;
 
-  vk(AllocateCommandBuffers(device->vk->d, &cbai, &cb));
+  vk(AllocateCommandBuffers(device->environment->d, &cbai, &cb));
 
   return cb;
 }
@@ -76,7 +77,7 @@ spn_device_cb_pool_acquire(struct spn_device * const device)
 void
 spn_device_cb_pool_release(struct spn_device * const device, VkCommandBuffer const cb)
 {
-  vkFreeCommandBuffers(device->vk->d, device->cb_pool->cp, 1, &cb);
+  vkFreeCommandBuffers(device->environment->d, device->cb_pool->cp, 1, &cb);
 }
 
 //

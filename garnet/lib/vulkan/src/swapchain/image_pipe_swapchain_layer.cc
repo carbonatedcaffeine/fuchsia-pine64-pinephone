@@ -2,27 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#define FUCHSIA_LAYER 1
+
 #if USE_IMAGEPIPE_SURFACE_FB
 #include "image_pipe_surface_display.h"  // nogncheck
 #else
 #include "image_pipe_surface_async.h"  // nogncheck
 #endif
 
+#include <vk_dispatch_table_helper.h>
+#include <vk_layer_data.h>
+#include <vk_layer_extension_utils.h>
+#include <vulkan/vk_layer.h>
+
 #include <thread>
 #include <vector>
-#include "vk_dispatch_table_helper.h"
-#include "vk_layer_data.h"
-#include "vk_layer_extension_utils.h"
-#include "vk_loader_platform.h"
-#include "vulkan/vk_layer.h"
 
-#define VK_LAYER_API_VERSION VK_MAKE_VERSION(1, 0, VK_HEADER_VERSION)
+#define VK_LAYER_API_VERSION VK_MAKE_VERSION(1, 1, VK_HEADER_VERSION)
 
 namespace image_pipe_swapchain {
 
 // Useful for testing app performance without external restriction
 // (due to composition, vsync, etc.)
+#if SKIP_PRESENT
+constexpr bool kSkipPresent = true;
+#else
 constexpr bool kSkipPresent = false;
+#endif
 
 struct LayerData {
   VkInstance instance;
@@ -50,8 +56,8 @@ static const VkExtensionProperties device_extensions[] = {{
 }};
 
 constexpr VkLayerProperties swapchain_layer = {
-#if USE_IMAGEPIPE_SURFACE_FB
-    "VK_LAYER_FUCHSIA_imagepipe_swapchain_fb",
+#ifdef USE_IMAGEPIPE_LAYER_NAME
+    USE_IMAGEPIPE_LAYER_NAME,
 #else
     "VK_LAYER_FUCHSIA_imagepipe_swapchain",
 #endif
@@ -73,7 +79,10 @@ struct PendingImageInfo {
 class ImagePipeSwapchain {
  public:
   ImagePipeSwapchain(ImagePipeSurface* surface)
-      : surface_(surface), image_pipe_closed_(false), device_(VK_NULL_HANDLE) {}
+      : surface_(surface),
+        image_pipe_closed_(false),
+        is_protected_(false),
+        device_(VK_NULL_HANDLE) {}
 
   VkResult Initialize(VkDevice device,
                       const VkSwapchainCreateInfoKHR* pCreateInfo,
@@ -97,6 +106,7 @@ class ImagePipeSwapchain {
   std::vector<uint32_t> acquired_ids_;
   std::vector<PendingImageInfo> pending_images_;
   bool image_pipe_closed_;
+  bool is_protected_;
   VkDevice device_;
 };
 
@@ -105,6 +115,7 @@ class ImagePipeSwapchain {
 VkResult ImagePipeSwapchain::Initialize(
     VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo,
     const VkAllocationCallbacks* pAllocator) {
+  is_protected_ = pCreateInfo->flags & VK_SWAPCHAIN_CREATE_PROTECTED_BIT_KHR;
   VkResult result;
   VkLayerDispatchTable* pDisp =
       GetLayerDataPtr(get_dispatch_key(device), layer_data_map)
@@ -129,14 +140,9 @@ VkResult ImagePipeSwapchain::Initialize(
   for (uint32_t i = 0; i < num_images; i++) {
     images_.push_back({image_infos[i].image, image_infos[i].image_id});
     memories_.push_back(image_infos[i].memory);
-    VkExportSemaphoreCreateInfoKHR export_create_info = {
-        .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO_KHR,
-        .pNext = nullptr,
-        .handleTypes =
-            VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TEMP_ZIRCON_EVENT_BIT_FUCHSIA};
     VkSemaphoreCreateInfo create_semaphore_info{
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-        .pNext = &export_create_info,
+        .pNext = nullptr,
         .flags = 0};
     VkSemaphore semaphore;
     result = pDisp->CreateSemaphore(device, &create_semaphore_info, pAllocator,
@@ -330,33 +336,58 @@ VkResult ImagePipeSwapchain::Present(VkQueue queue, uint32_t index,
       GetLayerDataPtr(get_dispatch_key(queue), layer_data_map)
           ->device_dispatch_table;
 
-  std::vector<VkPipelineStageFlags> flag_bits(
-      waitSemaphoreCount, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-  VkSubmitInfo submit_info = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                              .waitSemaphoreCount = waitSemaphoreCount,
-                              .pWaitSemaphores = pWaitSemaphores,
-                              .pWaitDstStageMask = flag_bits.data(),
-                              .signalSemaphoreCount = 1,
-                              .pSignalSemaphores = &semaphores_[index]};
-  VkResult result = pDisp->QueueSubmit(queue, 1, &submit_info, VK_NULL_HANDLE);
+  zx::event acquire_fence;
+  zx_status_t status = zx::event::create(0, &acquire_fence);
+  if (status != ZX_OK) {
+    fprintf(stderr, "zx::event::create failed: %d\n", status);
+    return VK_ERROR_DEVICE_LOST;
+  }
+
+  zx::event image_acquire_fence;
+  status = acquire_fence.duplicate(ZX_RIGHT_SAME_RIGHTS, &image_acquire_fence);
+  if (status != ZX_OK) {
+    fprintf(stderr,
+            "failed to duplicate acquire fence, "
+            "zx::event::duplicate() failed with status %d",
+            status);
+    return VK_ERROR_DEVICE_LOST;
+  }
+
+  VkImportSemaphoreZirconHandleInfoFUCHSIA import_info = {
+      .sType =
+          VK_STRUCTURE_TYPE_TEMP_IMPORT_SEMAPHORE_ZIRCON_HANDLE_INFO_FUCHSIA,
+      .pNext = nullptr,
+      .semaphore = semaphores_[index],
+      .flags = VK_SEMAPHORE_IMPORT_TEMPORARY_BIT_KHR,
+      .handleType =
+          VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TEMP_ZIRCON_EVENT_BIT_FUCHSIA,
+      .handle = image_acquire_fence.release()};
+
+  VkResult result =
+      pDisp->ImportSemaphoreZirconHandleFUCHSIA(device_, &import_info);
   if (result != VK_SUCCESS) {
-    fprintf(stderr, "vkQueueSubmit failed with result %d", result);
+    fprintf(stderr, "semaphore import failed: %d", result);
     return VK_ERROR_SURFACE_LOST_KHR;
   }
 
-  zx::event acquire_fence;
-
-  VkSemaphoreGetZirconHandleInfoFUCHSIA semaphore_info = {
-      .sType = VK_STRUCTURE_TYPE_TEMP_SEMAPHORE_GET_ZIRCON_HANDLE_INFO_FUCHSIA,
+  std::vector<VkPipelineStageFlags> flag_bits(
+      waitSemaphoreCount, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+  VkProtectedSubmitInfo protected_submit_info = {
+      .sType = VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO,
       .pNext = nullptr,
-      .semaphore = semaphores_[index],
-      .handleType =
-          VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TEMP_ZIRCON_EVENT_BIT_FUCHSIA};
-  result = pDisp->GetSemaphoreZirconHandleFUCHSIA(
-      device_, &semaphore_info, acquire_fence.reset_and_get_address());
+      .protectedSubmit = VK_TRUE,
+  };
+  VkSubmitInfo submit_info = {
+      .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+      .pNext = is_protected_ ? &protected_submit_info : nullptr,
+      .waitSemaphoreCount = waitSemaphoreCount,
+      .pWaitSemaphores = pWaitSemaphores,
+      .pWaitDstStageMask = flag_bits.data(),
+      .signalSemaphoreCount = 1,
+      .pSignalSemaphores = &semaphores_[index]};
+  result = pDisp->QueueSubmit(queue, 1, &submit_info, VK_NULL_HANDLE);
   if (result != VK_SUCCESS) {
-    fprintf(stderr, "GetSemaphoreZirconHandleFUCHSIA failed with result %d",
-            result);
+    fprintf(stderr, "vkQueueSubmit failed with result %d", result);
     return VK_ERROR_SURFACE_LOST_KHR;
   }
 

@@ -46,8 +46,8 @@ TEST_F(StepThreadControllerTest, SofwareException) {
   InjectException(exception);
 
   // Continue the thread with the controller stepping in range.
-  auto step_into = std::make_unique<StepThreadController>(
-      AddressRanges(AddressRange(kBeginAddr, kEndAddr)));
+  auto step_into =
+      std::make_unique<StepThreadController>(AddressRanges(AddressRange(kBeginAddr, kEndAddr)));
   bool continued = false;
   thread()->ContinueWith(std::move(step_into), [&continued](const Err& err) {
     if (!err.has_error())
@@ -109,12 +109,10 @@ TEST_F(StepThreadControllerTest, Line0) {
   mock_frames[0]->SetFileLine(line10);
   InjectExceptionWithStack(process()->GetKoid(), thread()->GetKoid(),
                            debug_ipc::NotifyException::Type::kSingleStep,
-                           MockFrameVectorToFrameVector(std::move(mock_frames)),
-                           true);
+                           MockFrameVectorToFrameVector(std::move(mock_frames)), true);
 
   // Continue the thread with the controller stepping in range.
-  auto step_into =
-      std::make_unique<StepThreadController>(StepMode::kSourceLine);
+  auto step_into = std::make_unique<StepThreadController>(StepMode::kSourceLine);
   bool continued = false;
   thread()->ContinueWith(std::move(step_into), [&continued](const Err& err) {
     if (!err.has_error())
@@ -130,8 +128,7 @@ TEST_F(StepThreadControllerTest, Line0) {
   mock_frames[0]->SetFileLine(line0);
   InjectExceptionWithStack(process()->GetKoid(), thread()->GetKoid(),
                            debug_ipc::NotifyException::Type::kSingleStep,
-                           MockFrameVectorToFrameVector(std::move(mock_frames)),
-                           true);
+                           MockFrameVectorToFrameVector(std::move(mock_frames)), true);
   EXPECT_EQ(1, mock_remote_api()->GetAndResetResumeCount());
 
   // Stop on 3rd instruction (line 10). Since this matches the original line,
@@ -140,8 +137,7 @@ TEST_F(StepThreadControllerTest, Line0) {
   mock_frames[0]->SetFileLine(line10);
   InjectExceptionWithStack(process()->GetKoid(), thread()->GetKoid(),
                            debug_ipc::NotifyException::Type::kSingleStep,
-                           MockFrameVectorToFrameVector(std::move(mock_frames)),
-                           true);
+                           MockFrameVectorToFrameVector(std::move(mock_frames)), true);
   EXPECT_EQ(1, mock_remote_api()->GetAndResetResumeCount());
 
   // Stop on 4th instruction. Since this is line 11, we should stay stopped.
@@ -149,8 +145,7 @@ TEST_F(StepThreadControllerTest, Line0) {
   mock_frames[0]->SetFileLine(line11);
   InjectExceptionWithStack(process()->GetKoid(), thread()->GetKoid(),
                            debug_ipc::NotifyException::Type::kSingleStep,
-                           MockFrameVectorToFrameVector(std::move(mock_frames)),
-                           true);
+                           MockFrameVectorToFrameVector(std::move(mock_frames)), true);
   EXPECT_EQ(0, mock_remote_api()->GetAndResetResumeCount());  // Stopped
   EXPECT_EQ(debug_ipc::ThreadRecord::State::kBlocked, thread()->GetState());
 }
@@ -168,13 +163,15 @@ void StepThreadControllerTest::DoSharedLibThunkTest(bool stop_on_no_symbols) {
   FileLine src_line("/path/src.cc", 1);
   FileLine dest_line("/path/dest.cc", 2);
 
-  const uint64_t kAddrSrc = kSymbolizedModuleAddress + 0x100;  // Line 1
-  const uint64_t kAddrThunk =
-      kSymbolizedModuleAddress + 0x10000;  // No symbols.
+  const uint64_t kAddrSrc = kSymbolizedModuleAddress + 0x100;      // Line 1
+  const uint64_t kAddrThunk = kSymbolizedModuleAddress + 0x10000;  // No symbols.
   // This is technically in the same module (normally it would be in a
   // different one) but it doesn't matter for this test and it simplifies
   // things.
   const uint64_t kAddrDest = kSymbolizedModuleAddress + 0x200;
+
+  const uint64_t kSrcSP = 0x5000;
+  const uint64_t kThunkSP = 0x4ff8;
 
   LineDetails src_details(src_line);
   src_details.entries().push_back({0, AddressRange(kAddrSrc, kAddrSrc + 1)});
@@ -190,12 +187,11 @@ void StepThreadControllerTest::DoSharedLibThunkTest(bool stop_on_no_symbols) {
   exception.thread.process_koid = process()->GetKoid();
   exception.thread.thread_koid = thread()->GetKoid();
   exception.thread.state = debug_ipc::ThreadRecord::State::kBlocked;
-  exception.thread.frames.emplace_back(kAddrSrc, 0x5000);
+  exception.thread.frames.emplace_back(kAddrSrc, kSrcSP, 0);
   InjectException(exception);
 
   // Continue the thread with the controller stepping in range.
-  auto step_into =
-      std::make_unique<StepThreadController>(StepMode::kSourceLine);
+  auto step_into = std::make_unique<StepThreadController>(StepMode::kSourceLine);
   step_into->set_stop_on_no_symbols(stop_on_no_symbols);
   bool continued = false;
   thread()->ContinueWith(std::move(step_into), [&continued](const Err& err) {
@@ -209,8 +205,7 @@ void StepThreadControllerTest::DoSharedLibThunkTest(bool stop_on_no_symbols) {
 
   // Stop on the thunk instruction with no line info. This is a separate
   // function so we push an entry on the stack.
-  exception.thread.frames.emplace(exception.thread.frames.begin(), kAddrThunk,
-                                  0x5000);
+  exception.thread.frames.emplace(exception.thread.frames.begin(), kAddrThunk, kThunkSP, kSrcSP);
   InjectException(exception);
   if (stop_on_no_symbols) {
     // For this variant of the test, the unsymbolized thunk should have stopped
@@ -231,16 +226,11 @@ void StepThreadControllerTest::DoSharedLibThunkTest(bool stop_on_no_symbols) {
   EXPECT_EQ(debug_ipc::ThreadRecord::State::kBlocked, thread()->GetState());
 }
 
-TEST_F(StepThreadControllerTest, SharedLibThunksStepOver) {
-  DoSharedLibThunkTest(false);
-}
+TEST_F(StepThreadControllerTest, SharedLibThunksStepOver) { DoSharedLibThunkTest(false); }
 
-TEST_F(StepThreadControllerTest, SharedLibThunksStepInto) {
-  DoSharedLibThunkTest(true);
-}
+TEST_F(StepThreadControllerTest, SharedLibThunksStepInto) { DoSharedLibThunkTest(true); }
 
-void StepThreadControllerTest::DoUnsymbolizedFunctionTest(
-    bool stop_on_no_symbols) {
+void StepThreadControllerTest::DoUnsymbolizedFunctionTest(bool stop_on_no_symbols) {
   FileLine src_line("/path/src.cc", 1);
 
   // Jump from src to dest and return, then to kOutOfRange.
@@ -248,6 +238,9 @@ void StepThreadControllerTest::DoUnsymbolizedFunctionTest(
   const uint64_t kAddrDest = kUnsymbolizedModuleAddress + 0x200;
   const uint64_t kAddrReturn = kAddrSrc + 4;
   const uint64_t kAddrOutOfRange = kAddrReturn + 4;
+
+  const uint64_t kSrcSP = 0x5000;
+  const uint64_t kDestSP = 0x4ff0;
 
   LineDetails src_details(src_line);
   src_details.entries().push_back({0, AddressRange(kAddrSrc, kAddrOutOfRange)});
@@ -259,13 +252,12 @@ void StepThreadControllerTest::DoUnsymbolizedFunctionTest(
   src_exception.thread.process_koid = process()->GetKoid();
   src_exception.thread.thread_koid = thread()->GetKoid();
   src_exception.thread.state = debug_ipc::ThreadRecord::State::kBlocked;
-  src_exception.thread.frames.emplace_back(kAddrSrc, 0x5000);
-  src_exception.thread.frames.emplace_back(0x10, 0x5008);
+  src_exception.thread.frames.emplace_back(kAddrSrc, kSrcSP, 0x5008);
+  src_exception.thread.frames.emplace_back(0x10, 0x5008, 0);
   InjectException(src_exception);
 
   // Continue the thread with the controller stepping in range.
-  auto step_into =
-      std::make_unique<StepThreadController>(StepMode::kSourceLine);
+  auto step_into = std::make_unique<StepThreadController>(StepMode::kSourceLine);
   step_into->set_stop_on_no_symbols(stop_on_no_symbols);
   bool continued = false;
   thread()->ContinueWith(std::move(step_into), [&continued](const Err& err) {
@@ -280,8 +272,8 @@ void StepThreadControllerTest::DoUnsymbolizedFunctionTest(
   // Stop on the destination unsymbolized address.
   debug_ipc::NotifyException dest_exception(src_exception);
   dest_exception.thread.frames.clear();
-  dest_exception.thread.frames.emplace_back(kAddrDest, 0x4ff0);
-  dest_exception.thread.frames.emplace_back(kAddrReturn, 0x5000);
+  dest_exception.thread.frames.emplace_back(kAddrDest, kDestSP, kSrcSP);
+  dest_exception.thread.frames.emplace_back(kAddrReturn, kSrcSP, 0);
   InjectException(dest_exception);
   if (stop_on_no_symbols) {
     // For this variant of the test, the unsymbolized thunk should have stopped
@@ -315,13 +307,9 @@ void StepThreadControllerTest::DoUnsymbolizedFunctionTest(
   EXPECT_EQ(debug_ipc::ThreadRecord::State::kBlocked, thread()->GetState());
 }
 
-TEST_F(StepThreadControllerTest, UnsymbolizedCallStepOver) {
-  DoUnsymbolizedFunctionTest(false);
-}
+TEST_F(StepThreadControllerTest, UnsymbolizedCallStepOver) { DoUnsymbolizedFunctionTest(false); }
 
-TEST_F(StepThreadControllerTest, UnsymbolizedCallStepInto) {
-  DoUnsymbolizedFunctionTest(true);
-}
+TEST_F(StepThreadControllerTest, UnsymbolizedCallStepInto) { DoUnsymbolizedFunctionTest(true); }
 
 TEST_F(StepThreadControllerTest, Inline) {
   // Recall the top frame from GetStack() is inline.
@@ -332,8 +320,7 @@ TEST_F(StepThreadControllerTest, Inline) {
 
   InjectExceptionWithStack(process()->GetKoid(), thread()->GetKoid(),
                            debug_ipc::NotifyException::Type::kSingleStep,
-                           MockFrameVectorToFrameVector(std::move(mock_frames)),
-                           true);
+                           MockFrameVectorToFrameVector(std::move(mock_frames)), true);
 
   // Hide the inline frame at the top so we're about to step into it.
   Stack& stack = thread()->GetStack();
@@ -346,18 +333,15 @@ TEST_F(StepThreadControllerTest, Inline) {
   // inlined function.
   module_symbols()->AddLineDetails(
       kTopInlineFunctionRange.begin(),
-      LineDetails(kTopInlineFileLine,
-                  {LineDetails::LineEntry(kTopInlineFunctionRange)}));
+      LineDetails(kTopInlineFileLine, {LineDetails::LineEntry(kTopInlineFunctionRange)}));
 
   // Do the "step into".
-  auto step_into_controller =
-      std::make_unique<StepThreadController>(StepMode::kSourceLine);
+  auto step_into_controller = std::make_unique<StepThreadController>(StepMode::kSourceLine);
   bool continued = false;
-  thread()->ContinueWith(std::move(step_into_controller),
-                         [&continued](const Err& err) {
-                           if (!err.has_error())
-                             continued = true;
-                         });
+  thread()->ContinueWith(std::move(step_into_controller), [&continued](const Err& err) {
+    if (!err.has_error())
+      continued = true;
+  });
   EXPECT_TRUE(continued);
 
   // That should have requested a synthetic exception which will be sent out
@@ -374,14 +358,12 @@ TEST_F(StepThreadControllerTest, Inline) {
 
   // Now that we're at the top of the inline stack, do a subsequent "step into"
   // which this time should resume the backend.
-  step_into_controller =
-      std::make_unique<StepThreadController>(StepMode::kSourceLine);
+  step_into_controller = std::make_unique<StepThreadController>(StepMode::kSourceLine);
   continued = false;
-  thread()->ContinueWith(std::move(step_into_controller),
-                         [&continued](const Err& err) {
-                           if (!err.has_error())
-                             continued = true;
-                         });
+  thread()->ContinueWith(std::move(step_into_controller), [&continued](const Err& err) {
+    if (!err.has_error())
+      continued = true;
+  });
   EXPECT_TRUE(continued);
   EXPECT_EQ(1, mock_remote_api()->GetAndResetResumeCount());
   EXPECT_EQ(0u, stack.hide_ambiguous_inline_frame_count());

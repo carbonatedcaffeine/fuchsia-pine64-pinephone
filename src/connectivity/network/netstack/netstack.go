@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"syslog"
 
@@ -134,8 +135,7 @@ func defaultRoutes(nicid tcpip.NICID, gateway tcpip.Address) []tcpip.Route {
 func subnetRoute(addr tcpip.Address, mask tcpip.AddressMask, nicid tcpip.NICID) tcpip.Route {
 	return tcpip.Route{
 		Destination: util.ApplyMask(addr, mask),
-		Mask:        tcpip.AddressMask(mask),
-		Gateway:     tcpip.Address(""),
+		Mask:        mask,
 		NIC:         nicid,
 	}
 }
@@ -164,6 +164,14 @@ func (ns *Netstack) AddRoutesLocked(rs []tcpip.Route, metric routes.Metric, dyna
 	}
 
 	for _, r := range rs {
+		switch len(r.Destination) {
+		case header.IPv4AddressSize, header.IPv6AddressSize:
+		default:
+			// TODO(NET-2244): update this to return an error; panicing here enables syzkaller to find
+			// the given state management bug more quickly.
+			panic(fmt.Sprintf("invalid destination for route: %+v\nroute table: %+v", r, ns.mu.routeTable.GetExtendedRouteTable()))
+		}
+
 		// If we don't have an interface set, find it using the gateway address.
 		if r.NIC == 0 {
 			nic, err := ns.mu.routeTable.FindNIC(r.Gateway)
@@ -247,7 +255,7 @@ func (ns *Netstack) removeInterfaceAddress(nic tcpip.NICID, protocol tcpip.Netwo
 		return fmt.Errorf("error parsing subnet format for NIC ID %d: %s", nic, err)
 	}
 	route := subnetRoute(addr, subnet.Mask(), nic)
-	syslog.Infof("removing static IP %v/%d from NIC %d, deleting subnet route %+v", addr, prefixLen, nic, route)
+	syslog.Infof("removing static IP %s/%d from NIC %d, deleting subnet route %+v", addr, prefixLen, nic, route)
 
 	ns.mu.Lock()
 	if err := func() error {
@@ -264,10 +272,10 @@ func (ns *Netstack) removeInterfaceAddress(nic tcpip.NICID, protocol tcpip.Netwo
 				if err := ns.mu.stack.RemoveSubnet(nic, subnet); err == tcpip.ErrUnknownNICID {
 					panic(fmt.Sprintf("stack.RemoveSubnet(_): NIC [%d] not found", nic))
 				} else if err != nil {
-					return fmt.Errorf("error removing subnet %+v from NIC ID %d: %s", subnet, nic, err)
+					return fmt.Errorf("error removing subnet %s/%d from NIC ID %d: %s", addr, prefixLen, nic, err)
 				}
 			} else {
-				return fmt.Errorf("no such subnet %+v for NIC ID %d", subnet, nic)
+				return fmt.Errorf("no such subnet %s/%d for NIC ID %d", addr, prefixLen, nic)
 			}
 		}
 
@@ -281,17 +289,6 @@ func (ns *Netstack) removeInterfaceAddress(nic tcpip.NICID, protocol tcpip.Netwo
 			}
 		}
 
-		newAddr := zeroIpAddr
-		newNetmask := zeroIpMask
-		// Check if the NIC still has other primary IPs and use that one.
-		if mainAddr, subnet, err := ns.mu.stack.GetMainNICAddress(nic, protocol); err == nil {
-			newAddr = mainAddr
-			newNetmask = subnet.Mask()
-			if newNetmask == "" {
-				addressSize := len(newAddr) * 8
-				newNetmask = util.CIDRMask(addressSize, addressSize)
-			}
-		}
 		return nil
 	}(); err != nil {
 		ns.mu.Unlock()
@@ -306,6 +303,9 @@ func (ns *Netstack) removeInterfaceAddress(nic tcpip.NICID, protocol tcpip.Netwo
 
 func toSubnet(address tcpip.Address, prefixLen uint8) (tcpip.Subnet, error) {
 	m := util.CIDRMask(int(prefixLen), int(len(address)*8))
+	if len(m) == 0 {
+		return tcpip.Subnet{}, fmt.Errorf("net.CIDRMask(%d, %d) = nil", prefixLen, len(address)*8)
+	}
 	return tcpip.NewSubnet(util.ApplyMask(address, m), m)
 }
 
@@ -358,20 +358,55 @@ func (ifs *ifState) updateMetric(metric routes.Metric) {
 	ifs.mu.Unlock()
 }
 
-func (ifs *ifState) dhcpAcquired(oldAddr, newAddr tcpip.Address, config dhcp.Config) {
-	if oldAddr != "" && oldAddr != newAddr {
-		syslog.Infof("NIC %s: DHCP IP %s expired", ifs.mu.name, oldAddr)
+func (ifs *ifState) dhcpAcquired(oldAddr, newAddr tcpip.Address, oldSubnet, newSubnet tcpip.Subnet, config dhcp.Config) {
+	ifs.mu.Lock()
+	name := ifs.mu.name
+	ifs.mu.Unlock()
+
+	ifs.ns.mu.Lock()
+	if oldAddr != newAddr {
+		if len(oldAddr) != 0 {
+			if err := ifs.ns.mu.stack.RemoveAddress(ifs.nicid, oldAddr); err != nil {
+				syslog.Infof("NIC %s: failed to remove expired DHCP address %s: %s", name, oldAddr, err)
+			} else {
+				syslog.Infof("NIC %s: removed expired DHCP address %s", name, oldAddr)
+			}
+		}
+		if len(newAddr) != 0 {
+			if err := ifs.ns.mu.stack.AddAddressWithOptions(ifs.nicid, ipv4.ProtocolNumber, newAddr, stack.FirstPrimaryEndpoint); err != nil {
+				syslog.Infof("NIC %s: failed to add DHCP acquired address %s: %s", name, newAddr, err)
+			} else {
+				syslog.Infof("NIC %s: DHCP acquired address %s for %s", name, newAddr, config.LeaseLength)
+			}
+		} else {
+			syslog.Errorf("NIC %s: DHCP could not acquire address", name)
+		}
 	}
-	if config.Error != nil {
-		syslog.Errorf("%v", config.Error)
+	if oldSubnet != newSubnet {
+		if oldSubnet != (tcpip.Subnet{}) {
+			if err := ifs.ns.mu.stack.RemoveSubnet(ifs.nicid, oldSubnet); err != nil {
+				syslog.Infof("NIC %s: failed to remove expired DHCP subnet %s/%d: %s", name, oldSubnet.ID(), oldSubnet.Prefix(), err)
+			} else {
+				syslog.Infof("NIC %s: removed expired DHCP subnet %s/%d", name, oldSubnet.ID(), oldSubnet.Prefix())
+			}
+		}
+		if newSubnet != (tcpip.Subnet{}) {
+			if err := ifs.ns.mu.stack.AddSubnet(ifs.nicid, ipv4.ProtocolNumber, newSubnet); err != nil {
+				syslog.Infof("NIC %s: failed to add DHCP acquired subnet %s/%d: %s", name, newSubnet.ID(), oldSubnet.Prefix(), err)
+			} else {
+				syslog.Infof("NIC %s: DHCP acquired subnet %s/%d for %s", name, newSubnet.ID(), newSubnet.Prefix(), config.LeaseLength)
+			}
+		} else {
+			syslog.Errorf("NIC %s: DHCP could not acquire subnet", name)
+		}
+	}
+	ifs.ns.mu.Unlock()
+
+	if len(newAddr) == 0 || newSubnet == (tcpip.Subnet{}) {
 		return
 	}
-	if newAddr == "" {
-		syslog.Errorf("NIC %s: DHCP could not acquire address", ifs.mu.name)
-		return
-	}
-	syslog.Infof("NIC %s: DHCP acquired IP %s for %s", ifs.mu.name, newAddr, config.LeaseLength)
-	syslog.Infof("NIC %s: Adding DNS servers: %v", ifs.mu.name, config.DNS)
+
+	syslog.Infof("NIC %s: Adding DNS servers: %v", name, config.DNS)
 
 	ifs.mu.Lock()
 	ifs.mu.hasDynamicAddr = true
@@ -385,7 +420,7 @@ func (ifs *ifState) dhcpAcquired(oldAddr, newAddr tcpip.Address, config dhcp.Con
 
 	ifs.ns.mu.Lock()
 	if err := ifs.ns.AddRoutesLocked(rs, metricNotSet, true /* dynamic */); err != nil {
-		syslog.Infof("error adding routes for DHCP address/gateway: %v", err)
+		syslog.Infof("error adding routes for DHCP address/gateway: %s", err)
 	}
 	interfaces := ifs.ns.getNetInterfaces2Locked()
 	ifs.ns.mu.Unlock()
@@ -428,10 +463,11 @@ func (ifs *ifState) stateChange(s link.State) {
 	ifs.mu.Lock()
 	switch s {
 	case link.StateClosed:
+		syslog.Infof("NIC %s: link.StateClosed", ifs.mu.name)
 		delete(ifs.ns.mu.ifStates, ifs.nicid)
 		fallthrough
 	case link.StateDown:
-		syslog.Infof("NIC %s: stopped", ifs.mu.name)
+		syslog.Infof("NIC %s: link.StateDown", ifs.mu.name)
 		ifs.mu.dhcp.cancel()
 
 		// TODO(crawshaw): more cleanup to be done here:
@@ -452,7 +488,7 @@ func (ifs *ifState) stateChange(s link.State) {
 		}
 
 	case link.StateStarted:
-		syslog.Infof("NIC %s: starting", ifs.mu.name)
+		syslog.Infof("NIC %s: link.StateStarted", ifs.mu.name)
 		// Re-enable static routes out this interface.
 		ifs.ns.UpdateRoutesByInterfaceLocked(ifs.nicid, routes.ActionEnableStatic)
 		if ifs.mu.dhcp.enabled {
@@ -515,12 +551,17 @@ func (ns *Netstack) getdnsServers() []tcpip.Address {
 	return out
 }
 
+var deviceSettingsErrorLogged uint32 = 0
+
 func (ns *Netstack) getNodeName() string {
 	nodename, status, err := ns.deviceSettings.GetString(deviceSettingsManagerNodenameKey)
 	if err != nil {
-		syslog.Warnf("getNodeName: error accessing device settings: %s", err)
+		if atomic.CompareAndSwapUint32(&deviceSettingsErrorLogged, 0, 1) {
+			syslog.Warnf("getNodeName: error accessing device settings: %s", err)
+		}
 		return defaultNodename
 	}
+
 	if status != devicesettings.StatusOk {
 		var reportStatus string
 		switch status {
@@ -537,9 +578,13 @@ func (ns *Netstack) getNodeName() string {
 		default:
 			reportStatus = fmt.Sprintf("unknown status code: %d", status)
 		}
-		syslog.Warnf("getNodeName: device settings error: %s", reportStatus)
+		if atomic.CompareAndSwapUint32(&deviceSettingsErrorLogged, 0, 1) {
+			syslog.Warnf("getNodeName: device settings error: %s", reportStatus)
+		}
 		return defaultNodename
 	}
+
+	atomic.StoreUint32(&deviceSettingsErrorLogged, 0)
 	return nodename
 }
 

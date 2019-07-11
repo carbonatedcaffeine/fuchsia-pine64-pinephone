@@ -19,13 +19,107 @@
 using magma::Status;
 
 namespace magma_sysmem {
+
+class ZirconPlatformBufferDescription : public PlatformBufferDescription {
+public:
+    ZirconPlatformBufferDescription(uint32_t buffer_count,
+                                    fuchsia::sysmem::SingleBufferSettings settings)
+        : buffer_count_(buffer_count), settings_(settings)
+    {
+    }
+    ~ZirconPlatformBufferDescription() override {}
+
+    bool IsValid()
+    {
+        switch (settings_.buffer_settings.coherency_domain) {
+            case fuchsia::sysmem::CoherencyDomain::RAM:
+            case fuchsia::sysmem::CoherencyDomain::CPU:
+                break;
+
+            default:
+                return DRETF(false, "Unsupported coherency domain: %d",
+                             settings_.buffer_settings.coherency_domain);
+        }
+        return true;
+    }
+
+    bool is_secure() const override { return settings_.buffer_settings.is_secure; }
+
+    uint32_t count() const override { return buffer_count_; }
+    bool has_format_modifier() const override
+    {
+        return settings_.image_format_constraints.pixel_format.has_format_modifier;
+    }
+    uint64_t format_modifier() const override
+    {
+        return settings_.image_format_constraints.pixel_format.format_modifier.value;
+    }
+    uint32_t coherency_domain() const override
+    {
+        switch (settings_.buffer_settings.coherency_domain) {
+            case fuchsia::sysmem::CoherencyDomain::RAM:
+                return MAGMA_COHERENCY_DOMAIN_RAM;
+
+            case fuchsia::sysmem::CoherencyDomain::CPU:
+                return MAGMA_COHERENCY_DOMAIN_CPU;
+
+            default:
+                // Checked by IsValid()
+                DASSERT(false);
+                return MAGMA_COHERENCY_DOMAIN_CPU;
+        }
+    }
+    bool GetPlanes(uint64_t width, uint64_t height, magma_image_plane_t* planes_out) const override
+    {
+        if (!settings_.has_image_format_constraints) {
+            return false;
+        }
+
+        for (uint32_t i = 0; i < MAGMA_MAX_IMAGE_PLANES; ++i) {
+          planes_out[i].byte_offset = 0;
+          planes_out[i].bytes_per_row = 0;
+        }
+
+        uint32_t bytes_per_pixel = 4;
+        if (settings_.image_format_constraints.pixel_format.type ==
+            fuchsia::sysmem::PixelFormatType::NV12) {
+            bytes_per_pixel = 1;
+        } else if (settings_.image_format_constraints.pixel_format.type !=
+                       fuchsia::sysmem::PixelFormatType::BGRA32 &&
+                   settings_.image_format_constraints.pixel_format.type !=
+                       fuchsia::sysmem::PixelFormatType::R8G8B8A8) {
+            // Sysmem should have given a format that was listed as supported.
+            DASSERT(false);
+        }
+        planes_out[0].bytes_per_row = magma::round_up(
+            std::max(static_cast<uint64_t>(settings_.image_format_constraints.min_bytes_per_row),
+                     bytes_per_pixel * width),
+            settings_.image_format_constraints.bytes_per_row_divisor);
+        planes_out[0].byte_offset = 0;
+        if (settings_.image_format_constraints.pixel_format.type ==
+            fuchsia::sysmem::PixelFormatType::NV12) {
+            // Planes are assumed to be tightly-packed for now.
+            planes_out[1].bytes_per_row = planes_out[0].bytes_per_row;
+            planes_out[1].byte_offset =
+                planes_out[0].bytes_per_row *
+                std::max(static_cast<uint64_t>(settings_.image_format_constraints.min_coded_height),
+                         height);
+        }
+        return true;
+    }
+
+private:
+    uint32_t buffer_count_;
+    fuchsia::sysmem::SingleBufferSettings settings_;
+};
+
 class ZirconPlatformBufferConstraints : public PlatformBufferConstraints {
 public:
     virtual ~ZirconPlatformBufferConstraints() {}
 
     ZirconPlatformBufferConstraints(const magma_buffer_format_constraints_t* constraints)
     {
-        constraints_.min_buffer_count_for_camping = constraints->count;
+        constraints_.min_buffer_count = constraints->count;
         // Ignore input usage
         fuchsia::sysmem::BufferUsage usage;
         usage.vulkan = fuchsia::sysmem::vulkanUsageTransientAttachment |
@@ -40,12 +134,12 @@ public:
         // No buffer constraints, except those passed directly through from the client. These two
         // are for whether this memory should be protected (e.g. usable for DRM content, the precise
         // definition depending on the system).
-        constraints_.buffer_memory_constraints.secure_required = constraints->secure_permitted;
-        constraints_.buffer_memory_constraints.secure_permitted = constraints->secure_required;
+        constraints_.buffer_memory_constraints.secure_required = constraints->secure_required;
         constraints_.buffer_memory_constraints.ram_domain_supported =
             constraints->ram_domain_supported;
         constraints_.buffer_memory_constraints.cpu_domain_supported =
             constraints->cpu_domain_supported;
+        constraints_.buffer_memory_constraints.min_size_bytes = constraints->min_size_bytes;
     }
 
     Status
@@ -64,11 +158,13 @@ public:
         // normally.
         constraints = fuchsia::sysmem::ImageFormatConstraints();
         constraints.color_spaces_count = 1;
-        constraints.min_coded_width = format_constraints->width;
-        constraints.max_coded_width = format_constraints->width;
-        constraints.min_coded_height = format_constraints->height;
-        constraints.max_coded_height = format_constraints->height;
+        constraints.min_coded_width = 0u;
+        constraints.max_coded_width = 16384;
+        constraints.min_coded_height = 0u;
+        constraints.max_coded_height = 16384;
         constraints.min_bytes_per_row = format_constraints->min_bytes_per_row;
+        constraints.required_max_coded_width = format_constraints->width;
+        constraints.required_max_coded_height = format_constraints->height;
         constraints.max_bytes_per_row =
             std::numeric_limits<decltype(constraints.max_bytes_per_row)>::max();
 
@@ -100,49 +196,6 @@ public:
 private:
     fuchsia::sysmem::BufferCollectionConstraints constraints_ = {};
 };
-
-static Status
-InitializeDescriptionFromSettings(const fuchsia::sysmem::SingleBufferSettings& settings,
-                                  PlatformBufferDescription* description_out)
-{
-    switch (settings.buffer_settings.coherency_domain) {
-        case fuchsia::sysmem::CoherencyDomain::Ram:
-            description_out->coherency_domain = MAGMA_COHERENCY_DOMAIN_RAM;
-            break;
-
-        case fuchsia::sysmem::CoherencyDomain::Cpu:
-            description_out->coherency_domain = MAGMA_COHERENCY_DOMAIN_CPU;
-            break;
-
-        default:
-            return DRET_MSG(MAGMA_STATUS_INVALID_ARGS, "Unsupported coherency domain: %d",
-                            settings.buffer_settings.coherency_domain);
-    }
-
-    description_out->is_secure = settings.buffer_settings.is_secure;
-    description_out->has_format_modifier =
-        settings.image_format_constraints.pixel_format.has_format_modifier;
-    description_out->format_modifier =
-        settings.image_format_constraints.pixel_format.format_modifier.value;
-    description_out->planes[0].bytes_per_row =
-        magma::round_up(settings.image_format_constraints.min_bytes_per_row,
-                        settings.image_format_constraints.bytes_per_row_divisor);
-    description_out->planes[0].byte_offset = 0;
-    if (settings.image_format_constraints.pixel_format.type ==
-        fuchsia::sysmem::PixelFormatType::NV12) {
-        // Planes are assumed to be tightly-packed for now.
-        description_out->planes[1].bytes_per_row = description_out->planes[0].bytes_per_row;
-        description_out->planes[1].byte_offset = description_out->planes[0].bytes_per_row *
-                                                 settings.image_format_constraints.min_coded_height;
-    } else if (settings.image_format_constraints.pixel_format.type !=
-                   fuchsia::sysmem::PixelFormatType::BGRA32 &&
-               settings.image_format_constraints.pixel_format.type !=
-                   fuchsia::sysmem::PixelFormatType::R8G8B8A8) {
-        // Sysmem should have given a format that was listed as supported.
-        DASSERT(false);
-    }
-    return MAGMA_STATUS_OK;
-}
 
 class ZirconPlatformBufferCollection : public PlatformBufferCollection {
 public:
@@ -184,15 +237,10 @@ public:
                             status, status2);
         }
 
-        if (!info.settings.has_image_format_constraints) {
+        auto description =
+            std::make_unique<ZirconPlatformBufferDescription>(info.buffer_count, info.settings);
+        if (!description->IsValid())
             return DRET(MAGMA_STATUS_INTERNAL_ERROR);
-        }
-        auto description = std::make_unique<PlatformBufferDescription>();
-        Status magma_status = InitializeDescriptionFromSettings(info.settings, description.get());
-        description->count = info.buffer_count;
-        if (!magma_status.ok()) {
-            return DRET(magma_status.get());
-        }
         *description_out = std::move(description);
         return MAGMA_STATUS_OK;
     }
@@ -253,7 +301,6 @@ public:
         constraints.buffer_memory_constraints.min_size_bytes = size;
         if (flags & MAGMA_SYSMEM_FLAG_PROTECTED) {
             constraints.buffer_memory_constraints.secure_required = true;
-            constraints.buffer_memory_constraints.secure_permitted = true;
         }
         constraints.image_format_constraints_count = 0;
 
@@ -381,12 +428,9 @@ magma_status_t PlatformSysmemConnection::DecodeBufferDescription(
         return DRET_MSG(MAGMA_STATUS_INVALID_ARGS, "Buffer is not image");
     }
 
-    auto description = std::make_unique<PlatformBufferDescription>();
-    description->count = 1u;
-    Status magma_status = InitializeDescriptionFromSettings(buffer_settings, description.get());
-    if (!magma_status.ok()) {
-        return DRET(magma_status.get());
-    }
+    auto description = std::make_unique<ZirconPlatformBufferDescription>(1u, buffer_settings);
+    if (!description->IsValid())
+        return DRET(MAGMA_STATUS_INTERNAL_ERROR);
 
     *buffer_description_out = std::move(description);
     return MAGMA_STATUS_OK;

@@ -7,11 +7,11 @@
 
 use {
     failure::{Error, ResultExt},
-    fidl_fuchsia_amber::ControlMarker as AmberMarker,
     fidl_fuchsia_pkg::PackageCacheMarker,
     fuchsia_async as fasync,
     fuchsia_component::client::connect_to_service,
     fuchsia_component::server::ServiceFs,
+    fuchsia_inspect as inspect,
     fuchsia_syslog::{self, fx_log_err, fx_log_info},
     futures::{StreamExt, TryFutureExt},
     parking_lot::RwLock,
@@ -19,6 +19,8 @@ use {
     std::sync::Arc,
 };
 
+mod amber;
+mod amber_connector;
 mod repository_manager;
 mod repository_service;
 mod resolver_service;
@@ -28,6 +30,7 @@ mod rewrite_service;
 #[cfg(test)]
 mod test_util;
 
+use crate::amber_connector::AmberConnector;
 use crate::repository_manager::{RepositoryManager, RepositoryManagerBuilder};
 use crate::repository_service::RepositoryService;
 use crate::rewrite_manager::{RewriteManager, RewriteManagerBuilder};
@@ -47,22 +50,27 @@ fn main() -> Result<(), Error> {
 
     let mut executor = fasync::Executor::new().context("error creating executor")?;
 
-    let amber = connect_to_service::<AmberMarker>().context("error connecting to amber")?;
     let cache =
         connect_to_service::<PackageCacheMarker>().context("error connecting to package cache")?;
 
-    let repo_manager = Arc::new(RwLock::new(load_repo_manager()));
-    let rewrite_manager = Arc::new(RwLock::new(load_rewrite_manager()));
+    let inspector = fuchsia_inspect::Inspector::new();
+    let rewrite_inspect_node = inspector.root().create_child("rewrite_manager");
+
+    let amber_connector = AmberConnector::new();
+
+    let repo_manager = Arc::new(RwLock::new(load_repo_manager(amber_connector.clone())));
+    let rewrite_manager = Arc::new(RwLock::new(load_rewrite_manager(rewrite_inspect_node)));
 
     let resolver_cb = {
-        // Capture a clone of rewrite_manager's Arc so the new client callback has a copy from
-        // which to make new clones.
+        // Capture a clone of repo and rewrite manager's Arc so the new client callback has a copy
+        // from which to make new clones.
+        let repo_manager = repo_manager.clone();
         let rewrite_manager = rewrite_manager.clone();
         move |stream| {
             fasync::spawn(
                 resolver_service::run_resolver_service(
                     rewrite_manager.clone(),
-                    amber.clone(),
+                    repo_manager.clone(),
                     cache.clone(),
                     stream,
                 )
@@ -84,7 +92,8 @@ fn main() -> Result<(), Error> {
     };
 
     let rewrite_cb = move |stream| {
-        let mut rewrite_service = RewriteService::new(rewrite_manager.clone());
+        let mut rewrite_service =
+            RewriteService::new(rewrite_manager.clone(), amber_connector.clone());
 
         fasync::spawn(
             async move { await!(rewrite_service.handle_client(stream)) }
@@ -93,10 +102,13 @@ fn main() -> Result<(), Error> {
     };
 
     let mut fs = ServiceFs::new();
-    fs.dir("public")
+    fs.dir("svc")
         .add_fidl_service(resolver_cb)
         .add_fidl_service(repo_cb)
         .add_fidl_service(rewrite_cb);
+
+    inspector.export(&mut fs);
+
     fs.take_and_serve_directory_handle()?;
 
     let () = executor.run(fs.collect(), SERVER_THREADS);
@@ -104,10 +116,10 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
-fn load_repo_manager() -> RepositoryManager {
+fn load_repo_manager(amber_connector: AmberConnector) -> RepositoryManager<AmberConnector> {
     // report any errors we saw, but don't error out because otherwise we won't be able
     // to update the system.
-    RepositoryManagerBuilder::new(DYNAMIC_REPO_PATH)
+    RepositoryManagerBuilder::new(DYNAMIC_REPO_PATH, amber_connector)
         .unwrap_or_else(|(builder, err)| {
             fx_log_err!("error loading dynamic repo config: {}", err);
             builder
@@ -122,7 +134,7 @@ fn load_repo_manager() -> RepositoryManager {
         .build()
 }
 
-fn load_rewrite_manager() -> RewriteManager {
+fn load_rewrite_manager(node: inspect::Node) -> RewriteManager {
     RewriteManagerBuilder::new(DYNAMIC_RULES_PATH)
         .unwrap_or_else(|(builder, err)| {
             if err.kind() != io::ErrorKind::NotFound {
@@ -133,6 +145,7 @@ fn load_rewrite_manager() -> RewriteManager {
             }
             builder
         })
+        .inspect_node(node)
         .static_rules_path(STATIC_RULES_PATH)
         .unwrap_or_else(|(builder, err)| {
             if err.kind() != io::ErrorKind::NotFound {

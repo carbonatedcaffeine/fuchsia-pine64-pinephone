@@ -21,8 +21,7 @@ namespace storage {
 // Common methods shared by all piece implementations.
 class BasePiece : public Piece {
  public:
-  Status AppendReferences(
-      ObjectReferencesAndPriority* references) const override;
+  Status AppendReferences(ObjectReferencesAndPriority* references) const override;
 };
 
 // Piece whose data is equal to its id.
@@ -56,8 +55,7 @@ class DataChunkPiece : public BasePiece {
 // Piece whose data is backed by a value in LevelDB.
 class LevelDBPiece : public BasePiece {
  public:
-  explicit LevelDBPiece(ObjectIdentifier identifier,
-                        std::unique_ptr<leveldb::Iterator> iterator);
+  explicit LevelDBPiece(ObjectIdentifier identifier, std::unique_ptr<leveldb::Iterator> iterator);
 
   // Piece:
   fxl::StringView GetData() const override;
@@ -71,8 +69,7 @@ class LevelDBPiece : public BasePiece {
 // Common methods shared by all object implementations.
 class BaseObject : public Object {
  public:
-  Status AppendReferences(
-      ObjectReferencesAndPriority* references) const override;
+  Status AppendReferences(ObjectReferencesAndPriority* references) const override;
 };
 
 // Object whose data is backed by a single chunk piece.
@@ -81,6 +78,10 @@ class ChunkObject : public BaseObject {
   // |piece| must be of type CHUNK; index pieces cannot be turned into objects
   // automatically.
   explicit ChunkObject(std::unique_ptr<const Piece> piece);
+
+  // Returns the |piece| backing this object. This object must not be used
+  // anymore once this function has returned.
+  std::unique_ptr<const Piece> ReleasePiece();
 
   // Object:
   ObjectIdentifier GetIdentifier() const override;

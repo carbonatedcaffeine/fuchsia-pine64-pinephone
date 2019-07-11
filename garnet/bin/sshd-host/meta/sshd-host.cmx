@@ -4,12 +4,14 @@
     },
     "sandbox": {
         "features": [
-            "shell",
-            "build-info"
+            "build-info",
+            "deprecated-shell"
         ],
         "services": [
-            "fuchsia.process.Launcher",
-            "fuchsia.net.SocketProvider"
+            "fuchsia.net.NameLookup",
+            "fuchsia.posix.socket.Provider",
+            "fuchsia.net.SocketProvider",
+            "fuchsia.process.Launcher"
         ]
     }
 }

@@ -7,6 +7,7 @@
 
 #include <fuchsia/ui/gfx/cpp/fidl.h>
 #include <fuchsia/ui/input/cpp/fidl.h>
+#include <fuchsia/ui/views/cpp/fidl.h>
 #include <lib/fit/function.h>
 #include <lib/zx/handle.h>
 
@@ -47,7 +48,8 @@ class View final : public Resource {
  public:
   static const ResourceTypeInfo kTypeInfo;
 
-  View(Session* session, ResourceId id, ViewLinker::ImportLink link);
+  View(Session* session, ResourceId id, ViewLinker::ImportLink link,
+       fuchsia::ui::views::ViewRefControl control_ref, fuchsia::ui::views::ViewRef view_ref);
   ~View() override;
 
   fxl::WeakPtr<View> GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
@@ -69,15 +71,16 @@ class View final : public Resource {
 
   // Called by |ViewHolder| to set the handle of the render event. It is
   // triggered on the next render pass this View is involved in.
-  void SetOnRenderEventHandle(zx_handle_t render_handle) {
-    render_handle_ = render_handle;
-  }
+  void SetOnRenderEventHandle(zx_handle_t render_handle) { render_handle_ = render_handle; }
   // Called by |ViewHolder| to invalidate the event handle when the event is
   // closed.
   void InvalidateRenderEventHandle() { render_handle_ = ZX_HANDLE_INVALID; }
   // Called by the scenic render pass when this view's children are rendered
   // as part of a render frame.
   void SignalRender();
+
+  // Accessor to this View's canonical ViewRef. Used to generate a FocusChain.
+  const fuchsia::ui::views::ViewRef& view_ref() const { return view_ref_; }
 
  private:
   // |ViewLinker::ExportCallbacks|
@@ -100,6 +103,12 @@ class View final : public Resource {
   // Handle signaled when any of this View's children are involved in a render
   // pass.
   zx_handle_t render_handle_;
+
+  // Control_ref_ and view_ref_ are handles to an entangled eventpair.
+  // Control_ref_ is the globally unique handle to one peer, and view_ref_ is
+  // the cloneable handle to the other peer.
+  fuchsia::ui::views::ViewRefControl control_ref_;
+  fuchsia::ui::views::ViewRef view_ref_;
 
   fxl::WeakPtrFactory<View> weak_factory_;  // must be last
 };

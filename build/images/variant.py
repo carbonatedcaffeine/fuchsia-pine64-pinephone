@@ -13,6 +13,8 @@ import os
 ZIRCON_NOTE_DRIVER = 0x31565244 # DRV1
 ZIRCON_DRIVER_IDENT = ('Zircon\0', ZIRCON_NOTE_DRIVER)
 
+LIBCXX_SONAMES = [ 'libc++.so.2', 'libc++abi.so.1', 'libunwind.so.1' ]
+
 
 def binary_info(filename):
     return elfinfo.get_elf_info(filename, [ZIRCON_DRIVER_IDENT])
@@ -27,14 +29,28 @@ class variant(
         'libprefix',        # Prefix on DT_SONAME string.
         'runtime',          # SONAME of runtime, does not use libprefix.
         'aux',              # List of (file, group) required if this is used.
+        'has_libcxx',       # True iff toolchain libraries have this variant.
     ])):
 
     def matches(self, info, assume=False):
         if self.libprefix and info.interp:
             return info.interp.startswith(self.libprefix)
+        if not self.has_libcxx and info.soname in LIBCXX_SONAMES:
+            # Variants without their own toolchain libraries wind up placing
+            # vanilla toolchain libraries in the variant target lib directory
+            # so they should be accepted even though they don't really match.
+            return True
         if self.runtime:
-            return self.runtime in info.needed
+            return self.runtime in info.needed or info.soname == self.runtime
         return assume
+
+    def soname_target(self, soname):
+        excluded = [self.runtime] + ([] if self.has_libcxx else LIBCXX_SONAMES)
+        target = 'lib/'
+        if soname not in excluded:
+            target += self.libprefix
+        target += soname
+        return target
 
 
 def make_variant(name, info):
@@ -42,6 +58,7 @@ def make_variant(name, info):
     runtime = None
     # All drivers need devhost; it must be in /boot (group 0).
     aux = [('bin/devhost', 0)] if is_driver(info) else []
+    has_libcxx = False
     if name is None:
         tc = '%s-shared' % info.cpu.gn
     else:
@@ -51,7 +68,14 @@ def make_variant(name, info):
             runtime = 'libclang_rt.asan.so'
             # ASan drivers need devhost.asan.
             aux = [(file + '.asan', group) for file, group in aux]
-    return variant(tc, libprefix, runtime, aux)
+            has_libcxx = True
+        elif name == 'profile' or name.startswith('fuzzer.'):
+            libprefix = name + '/'
+            if name.find('asan') != -1:
+                runtime = 'libclang_rt.asan.so'
+            elif name.find('ubsan') != -1:
+                runtime = 'libclang_rt.ubsan_standalone.so'
+    return variant(tc, libprefix, runtime, aux, has_libcxx)
 
 
 def deduce_aux_variant(info, install_path):
@@ -59,6 +83,10 @@ def deduce_aux_variant(info, install_path):
         deduce_from = 'lib/' + info.interp
     elif info.soname is not None:
         deduce_from = install_path
+    elif 'libclang_rt.asan.so' in info.needed:
+        return make_variant('asan', info)
+    elif 'libclang_rt.ubsan_standalone.so' in info.needed:
+        return make_variant('ubsan', info)
     else:
         return None
     pathelts = deduce_from.split('/')

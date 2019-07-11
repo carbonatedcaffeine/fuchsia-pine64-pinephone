@@ -167,6 +167,7 @@ type Struct struct {
 	Size         int
 	MaxHandles   int
 	MaxOutOfLine int
+	HasPadding   bool
 	Kind         structKind
 }
 
@@ -179,7 +180,7 @@ type StructMember struct {
 }
 
 func (s Struct) NeedsEncodeDecode() bool {
-	return s.MaxHandles > 0 || s.MaxOutOfLine > 0
+	return s.MaxHandles > 0 || s.MaxOutOfLine > 0 || s.HasPadding
 }
 
 type Interface struct {
@@ -201,9 +202,9 @@ type Interface struct {
 
 type Method struct {
 	types.Attributes
-	Ordinal              types.Ordinal
+	Ordinal              uint64
 	OrdinalName          string
-	GenOrdinal           types.Ordinal
+	GenOrdinal           uint64
 	GenOrdinalName       string
 	Name                 string
 	NameInLowerSnakeCase string
@@ -213,12 +214,14 @@ type Method struct {
 	RequestTypeName      string
 	RequestMaxHandles    int
 	RequestMaxOutOfLine  int
+	RequestPadding       bool
 	HasResponse          bool
 	Response             []Parameter
 	ResponseSize         int
 	ResponseTypeName     string
 	ResponseMaxHandles   int
 	ResponseMaxOutOfLine int
+	ResponsePadding      bool
 	CallbackType         string
 	ResponseHandlerType  string
 	ResponderType        string
@@ -421,6 +424,17 @@ func formatNamespace(library types.LibraryIdentifier, appendNamespace string) st
 	return ns
 }
 
+func formatLLNamespace(library types.LibraryIdentifier, appendNamespace string) string {
+	// Avoid user-defined llcpp library colliding with the llcpp namespace, by appending underscore.
+	if len(library) > 0 && library[0] == "llcpp" {
+		libraryRenamed := make([]types.Identifier, len(library))
+		copy(libraryRenamed, library)
+		libraryRenamed[0] = "llcpp_"
+		library = libraryRenamed
+	}
+	return "::llcpp" + formatNamespace(library, appendNamespace)
+}
+
 func formatLibraryPrefix(library types.LibraryIdentifier) string {
 	return formatLibrary(library, "_")
 }
@@ -435,11 +449,12 @@ func formatDestructor(eci types.EncodedCompoundIdentifier) string {
 }
 
 type compiler struct {
-	namespace    string
-	symbolPrefix string
-	decls        *types.DeclMap
-	library      types.LibraryIdentifier
-	handleTypes  map[types.HandleSubtype]bool
+	namespace          string
+	symbolPrefix       string
+	decls              *types.DeclMap
+	library            types.LibraryIdentifier
+	handleTypes        map[types.HandleSubtype]bool
+	namespaceFormatter func(types.LibraryIdentifier, string) string
 }
 
 func (c *compiler) isInExternalLibrary(ci types.CompoundIdentifier) bool {
@@ -458,7 +473,7 @@ func (c *compiler) compileCompoundIdentifier(eci types.EncodedCompoundIdentifier
 	val := types.ParseCompoundIdentifier(eci)
 	strs := []string{}
 	if c.isInExternalLibrary(val) {
-		strs = append(strs, formatNamespace(val.Library, appendNamespace))
+		strs = append(strs, c.namespaceFormatter(val.Library, appendNamespace))
 	}
 	strs = append(strs, changeIfReserved(val.Name, ext))
 	return strings.Join(strs, "::")
@@ -633,7 +648,7 @@ func (c *compiler) compileType(val types.Type) Type {
 				r.OvernetEmbeddedDtor = r.Dtor
 			}
 		case types.InterfaceDeclType:
-			r.Decl = fmt.Sprintf("::fidl::InterfaceHandle<%s>", t)
+			r.Decl = fmt.Sprintf("::fidl::InterfaceHandle<class %s>", t)
 			r.Dtor = fmt.Sprintf("~InterfaceHandle")
 			r.LLDecl = "::zx::channel"
 			r.LLDtor = "~channel"
@@ -673,7 +688,8 @@ func (c *compiler) compileConst(val types.Const, appendNamespace string) Const {
 			Extern:     true,
 			Decorator:  "const",
 			Type: Type{
-				Decl: "char",
+				Decl:   "char",
+				LLDecl: "char",
 			},
 			Name:  c.compileCompoundIdentifier(val.Name, "[]", appendNamespace),
 			Value: c.compileConstant(val.Value, nil, val.Type, appendNamespace),
@@ -761,8 +777,8 @@ func (m Method) NewLLProps(r Interface) LLProps {
 		LinearizeResponse:  len(m.Response) > 0 && m.ResponseMaxOutOfLine > 0,
 		StackAllocRequest:  len(m.Request) == 0 || (m.RequestSize+m.RequestMaxOutOfLine) < llcppMaxStackAllocSize,
 		StackAllocResponse: len(m.Response) == 0 || (m.ResponseSize+m.ResponseMaxOutOfLine) < llcppMaxStackAllocSize,
-		EncodeRequest:      m.RequestMaxOutOfLine > 0 || m.RequestMaxHandles > 0,
-		DecodeResponse:     m.ResponseMaxOutOfLine > 0 || m.ResponseMaxHandles > 0,
+		EncodeRequest:      m.RequestMaxOutOfLine > 0 || m.RequestMaxHandles > 0 || m.RequestPadding,
+		DecodeResponse:     m.ResponseMaxOutOfLine > 0 || m.ResponseMaxHandles > 0 || m.ResponsePadding,
 	}
 }
 
@@ -808,12 +824,14 @@ func (c *compiler) compileInterface(val types.Interface) Interface {
 			RequestTypeName:      fmt.Sprintf("%s_%s%sRequestTable", c.symbolPrefix, r.Name, v.Name),
 			RequestMaxHandles:    c.maxHandlesFromParameterArray(v.Request),
 			RequestMaxOutOfLine:  c.maxOutOfLineFromParameterArray(v.Request),
+			RequestPadding:       v.RequestPadding,
 			HasResponse:          v.HasResponse,
 			Response:             c.compileParameterArray(v.Response),
 			ResponseSize:         v.ResponseSize,
 			ResponseTypeName:     fmt.Sprintf("%s_%s%s%s", c.symbolPrefix, r.Name, v.Name, responseTypeNameSuffix),
 			ResponseMaxHandles:   c.maxHandlesFromParameterArray(v.Response),
 			ResponseMaxOutOfLine: c.maxOutOfLineFromParameterArray(v.Response),
+			ResponsePadding:      v.ResponsePadding,
 			CallbackType:         callbackType,
 			ResponseHandlerType:  fmt.Sprintf("%s_%s_ResponseHandler", r.Name, v.Name),
 			ResponderType:        fmt.Sprintf("%s_%s_Responder", r.Name, v.Name),
@@ -859,6 +877,7 @@ func (c *compiler) compileStruct(val types.Struct, appendNamespace string) Struc
 		Size:         val.Size,
 		MaxHandles:   val.MaxHandles,
 		MaxOutOfLine: val.MaxOutOfLine,
+		HasPadding:   val.HasPadding,
 	}
 
 	for _, v := range val.Members {
@@ -998,7 +1017,7 @@ func (c *compiler) compileXUnion(val types.XUnion) XUnion {
 	return r
 }
 
-func Compile(r types.Root) Root {
+func compile(r types.Root, namespaceFormatter func(types.LibraryIdentifier, string) string) Root {
 	root := Root{}
 	library := make(types.LibraryIdentifier, 0)
 	raw_library := make(types.LibraryIdentifier, 0)
@@ -1008,11 +1027,12 @@ func Compile(r types.Root) Root {
 		raw_library = append(raw_library, identifier)
 	}
 	c := compiler{
-		formatNamespace(library, ""),
+		namespaceFormatter(library, ""),
 		formatLibraryPrefix(raw_library),
 		&r.Decls,
 		types.ParseLibraryName(r.Name),
 		make(map[types.HandleSubtype]bool),
+		namespaceFormatter,
 	}
 
 	root.Library = library
@@ -1068,11 +1088,11 @@ func Compile(r types.Root) Root {
 	}
 
 	for _, v := range r.DeclOrder {
-		d := decls[v]
-		if d == nil {
-			log.Fatal("Unknown declaration: ", v)
+		// We process only a subset of declarations mentioned in the declaration
+		// order, ignore those we do not support.
+		if d, known := decls[v]; known {
+			root.Decls = append(root.Decls, d)
 		}
-		root.Decls = append(root.Decls, d)
 	}
 
 	for _, l := range r.Libraries {
@@ -1100,4 +1120,12 @@ func Compile(r types.Root) Root {
 	root.HandleTypes = handleTypes
 
 	return root
+}
+
+func Compile(r types.Root) Root {
+	return compile(r, formatNamespace)
+}
+
+func CompileLL(r types.Root) Root {
+	return compile(r, formatLLNamespace)
 }

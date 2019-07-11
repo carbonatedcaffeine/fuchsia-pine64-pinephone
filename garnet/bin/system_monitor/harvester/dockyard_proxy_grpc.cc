@@ -38,12 +38,12 @@ DockyardProxyStatus DockyardProxyGrpc::Init() {
 
   grpc::ClientContext context;
   grpc::Status status = stub_->Init(&context, request, &reply);
-  if (status.ok()) {
-    return DockyardProxyStatus::OK;
+  if (!status.ok()) {
+    FXL_LOG(ERROR) << status.error_code() << ": " << status.error_message();
+    FXL_LOG(ERROR) << "Unable to send to dockyard.";
+    return DockyardProxyStatus::ERROR;
   }
-  FXL_LOG(ERROR) << status.error_code() << ": " << status.error_message();
-  FXL_LOG(ERROR) << "Unable to send to dockyard.";
-  return DockyardProxyStatus::ERROR;
+  return DockyardProxyStatus::OK;
 }
 
 DockyardProxyStatus DockyardProxyGrpc::SendInspectJson(
@@ -109,7 +109,6 @@ DockyardProxyStatus DockyardProxyGrpc::SendStringSampleList(
                              now.time_since_epoch())
                              .count();
 
-  std::vector<dockyard::DockyardId> dockyard_ids;
   std::vector<const std::string*> dockyard_strings;
   for (const auto& element : list) {
     // Both the key (first) and value (second) are strings. Get IDs for each.
@@ -118,6 +117,7 @@ DockyardProxyStatus DockyardProxyGrpc::SendStringSampleList(
   }
   // Get an ID for each string (path or otherwise). The ID will then be used to
   // in place of the strings.
+  std::vector<dockyard::DockyardId> dockyard_ids;
   GetDockyardIdsForPaths(&dockyard_ids, dockyard_strings);
   SampleListById by_id;
   auto ids_iter = dockyard_ids.begin();
@@ -228,11 +228,13 @@ grpc::Status DockyardProxyGrpc::GetDockyardIdsForPaths(
   grpc::Status status =
       stub_->GetDockyardIdsForPaths(&context, need_ids, &reply);
   if (status.ok()) {
-    for (size_t index : indexes) {
-      dockyard::DockyardId dockyard_id = reply.id(index);
-      (*dockyard_ids)[index] = dockyard_id;
+    size_t reply_index = 0;
+    for (size_t id_index : indexes) {
+      dockyard::DockyardId dockyard_id = reply.id(reply_index);
+      ++reply_index;
+      (*dockyard_ids)[id_index] = dockyard_id;
       // Memoize it.
-      dockyard_path_to_id_.emplace(*dockyard_paths[index], dockyard_id);
+      dockyard_path_to_id_.emplace(*dockyard_paths[id_index], dockyard_id);
     }
   }
   return status;

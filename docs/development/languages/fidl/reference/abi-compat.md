@@ -31,7 +31,7 @@ Making a source-incompatible change requires changing
 all client source code at the same time (difficult if clients exist
 outside the repository) to avoid breaking builds.
 
-NOTE: Since Fuchsia sources (and related product code) exist in
+Note: Since Fuchsia sources (and related product code) exist in
 multiple repositories with integration rollers and SDK releases
 between them, it is not enough to ensure that the fuchsia.git
 repository compiles.
@@ -229,10 +229,12 @@ table T {          table T {
 
 **Transition Considerations**: **TODO**
 
-## xunions
+## unions
 
-> NOTE: unions (vs **x**unions) are deprecated.
-> However, they follow similar rules to structs.
+Note: unions (vs **x**unions) are deprecated.
+However, they follow similar rules to [structs](#structs).
+
+## xunions
 
 #### Reordering members
 
@@ -403,9 +405,9 @@ protocol P {       protocol P {
 
 ## protocol methods
 
-> NOTE: These rules apply only to the methods, their names & ordering.
-> Protocol method arguments and return values follow the same
-> rules as [structs](#structs).
+Note: These rules apply only to the methods, their names & ordering.
+Protocol method arguments and return values follow the same
+rules as [structs](#structs).
 
 #### Reordering members
 

@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DWARF_TAG_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DWARF_TAG_H_
 
 namespace zxdb {
 
@@ -68,6 +69,7 @@ enum class DwarfTag : int {
   // Indicates a C/C++ parameter of "...".
   kUnspecifiedParameters = 0x18,
 
+  // Member of a VariantPart, used by Rust for an enum value.
   kVariant = 0x19,
 
   // Common block and common inclusion are used by Fortran. Can ignore.
@@ -132,6 +134,8 @@ enum class DwarfTag : int {
   kTemplateValueParameter = 0x30,
   kThrownType = 0x31,
   kTryBlock = 0x32,
+
+  // Child of a structure that defines a Rust enum.
   kVariantPart = 0x33,
 
   // Local variable declaration. It will normally have a name, type,
@@ -195,3 +199,5 @@ bool DwarfTagIsEitherReference(DwarfTag tag);
 bool DwarfTagIsPointerOrReference(DwarfTag tag);
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DWARF_TAG_H_

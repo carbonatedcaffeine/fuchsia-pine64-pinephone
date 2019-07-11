@@ -2,23 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use bytes::Bytes;
 use fidl_fuchsia_wlan_mlme::{self as fidl_mlme, BssDescription, MlmeEvent};
+use fuchsia_inspect_contrib::{inspect_log, log::InspectBytes};
 use log::{error, warn};
 use wep_deprecated;
-use wlan_common::{
-    format::MacFmt,
-    ie::rsn::{
-        cipher,
-        suite_selector::{Factory, OUI},
-    },
-    RadioConfig,
-};
-use wlan_inspect::{inspect_log, log::InspectBytes};
+use wlan_common::{format::MacFmt, ie::rsn::cipher, RadioConfig};
 use wlan_rsn::key::exchange::Key;
 use wlan_rsn::rsna::{self, SecAssocStatus, SecAssocUpdate};
+use wlan_rsn::ProtectionInfo;
 
-use super::bss::convert_bss_description;
+use super::bss::ClientConfig;
 use super::rsn::Rsna;
 use super::{ConnectFailure, ConnectResult, InfoEvent, Status};
 
@@ -78,24 +71,30 @@ pub struct ConnectCommand {
 #[derive(Debug)]
 pub enum RsnaStatus {
     Established,
-    Failed(ConnectResult),
+    Failed,
     Unchanged,
     Progressed { new_resp_timeout: Option<EventId> },
 }
 
 #[derive(Debug)]
 pub enum State {
-    Idle,
+    Idle {
+        cfg: ClientConfig,
+    },
     Joining {
+        cfg: ClientConfig,
         cmd: ConnectCommand,
     },
     Authenticating {
+        cfg: ClientConfig,
         cmd: ConnectCommand,
     },
     Associating {
+        cfg: ClientConfig,
         cmd: ConnectCommand,
     },
     Associated {
+        cfg: ClientConfig,
         bss: Box<BssDescription>,
         last_rssi: Option<i8>,
         link_state: LinkState,
@@ -106,7 +105,7 @@ pub enum State {
 impl State {
     fn state_name(&self) -> &'static str {
         match self {
-            State::Idle => IDLE_STATE,
+            State::Idle { .. } => IDLE_STATE,
             State::Joining { .. } => JOINING_STATE,
             State::Authenticating { .. } => AUTHENTICATING_STATE,
             State::Associating { .. } => ASSOCIATING_STATE,
@@ -117,16 +116,26 @@ impl State {
         }
     }
 
+    fn cfg(&self) -> &ClientConfig {
+        match self {
+            State::Idle { cfg }
+            | State::Joining { cfg, .. }
+            | State::Authenticating { cfg, .. }
+            | State::Associating { cfg, .. }
+            | State::Associated { cfg, .. } => cfg,
+        }
+    }
+
     pub fn on_mlme_event(self, event: MlmeEvent, context: &mut Context) -> Self {
         let start_state = self.state_name();
         let mut state_change_msg: Option<String> = None;
 
         let new_state = match self {
-            State::Idle => {
+            State::Idle { .. } => {
                 warn!("Unexpected MLME message while Idle: {:?}", event);
-                State::Idle
+                self
             }
-            State::Joining { cmd } => match event {
+            State::Joining { cfg, cmd } => match event {
                 MlmeEvent::JoinConf { resp } => match resp.result_code {
                     fidl_mlme::JoinResultCodes::Success => {
                         if let Protection::Wep(ref key) = cmd.protection {
@@ -147,49 +156,47 @@ impl State {
                             ));
                         }
                         state_change_msg.replace("successful join".to_string());
-                        State::Authenticating { cmd }
+                        State::Authenticating { cfg, cmd }
                     }
                     other => {
                         error!("Join request failed with result code {:?}", other);
                         report_connect_finished(
                             cmd.responder,
                             &context,
-                            ConnectResult::Failed,
-                            Some(ConnectFailure::JoinFailure(other)),
+                            ConnectResult::Failed(ConnectFailure::JoinFailure(other)),
                         );
                         state_change_msg.replace(format!("failed join; result code: {:?}", other));
-                        State::Idle
+                        State::Idle { cfg }
                     }
                 },
-                _ => State::Joining { cmd },
+                _ => State::Joining { cfg, cmd },
             },
-            State::Authenticating { cmd } => match event {
+            State::Authenticating { cfg, cmd } => match event {
                 MlmeEvent::AuthenticateConf { resp } => match resp.result_code {
                     fidl_mlme::AuthenticateResultCodes::Success => {
                         state_change_msg.replace("successful auth".to_string());
-                        to_associating_state(cmd, &context.mlme_sink)
+                        to_associating_state(cfg, cmd, &context.mlme_sink)
                     }
                     other => {
                         error!("Authenticate request failed with result code {:?}", other);
                         report_connect_finished(
                             cmd.responder,
                             &context,
-                            ConnectResult::Failed,
-                            Some(ConnectFailure::AuthenticationFailure(other)),
+                            ConnectResult::Failed(ConnectFailure::AuthenticationFailure(other)),
                         );
                         state_change_msg.replace(format!("failed auth; result code: {:?}", other));
-                        State::Idle
+                        State::Idle { cfg }
                     }
                 },
-                _ => State::Authenticating { cmd },
+                _ => State::Authenticating { cfg, cmd },
             },
-            State::Associating { cmd } => match event {
+            State::Associating { cfg, cmd } => match event {
                 MlmeEvent::AssociateConf { resp } => {
-                    handle_mlme_assoc_conf(resp, cmd, context, &mut state_change_msg)
+                    handle_mlme_assoc_conf(cfg, resp, cmd, context, &mut state_change_msg)
                 }
-                _ => State::Associating { cmd },
+                _ => State::Associating { cfg, cmd },
             },
-            State::Associated { bss, last_rssi, link_state, radio_cfg } => match event {
+            State::Associated { cfg, bss, last_rssi, link_state, radio_cfg } => match event {
                 MlmeEvent::DisassociateInd { .. } => {
                     let (responder, mut protection) = match link_state {
                         LinkState::LinkUp { protection } => (None, protection),
@@ -205,30 +212,37 @@ impl State {
                     let cmd = ConnectCommand { bss, responder, protection, radio_cfg };
                     context.att_id += 1;
                     state_change_msg.replace("received DisassociateInd msg".to_string());
-                    to_associating_state(cmd, &context.mlme_sink)
+                    to_associating_state(cfg, cmd, &context.mlme_sink)
                 }
                 MlmeEvent::DeauthenticateInd { ind } => {
                     if let LinkState::EstablishingRsna { responder, .. } = link_state {
-                        let connect_result = deauth_code_to_connect_result(ind.reason_code);
-                        report_connect_finished(responder, &context, connect_result, None);
+                        let connect_result = ConnectResult::Failed(ConnectFailure::EstablishRsna);
+                        report_connect_finished(responder, &context, connect_result);
                     }
-                    state_change_msg.replace("received DeauthenticateInd msg".to_string());
-                    State::Idle
+                    state_change_msg.replace(format!(
+                        "received DeauthenticateInd msg; reason code {:?}",
+                        ind.reason_code
+                    ));
+                    State::Idle { cfg }
                 }
-                MlmeEvent::SignalReport { ind } => {
-                    State::Associated { bss, last_rssi: Some(ind.rssi_dbm), link_state, radio_cfg }
-                }
+                MlmeEvent::SignalReport { ind } => State::Associated {
+                    cfg,
+                    bss,
+                    last_rssi: Some(ind.rssi_dbm),
+                    link_state,
+                    radio_cfg,
+                },
                 MlmeEvent::EapolInd { ref ind } if bss.rsn.is_some() => {
                     // Reject EAPOL frames from other BSS.
                     if ind.src_addr != bss.bssid {
                         let eapol_pdu = &ind.data[..];
-                        inspect_log!(context.inspect.rsn_events, {
+                        inspect_log!(context.inspect.rsn_events.lock(), {
                             rx_eapol_frame: InspectBytes(&eapol_pdu),
                             foreign_bssid: ind.src_addr.to_mac_str(),
                             current_bssid: bss.bssid.to_mac_str(),
                             status: "rejected (foreign BSS)",
                         });
-                        return State::Associated { bss, last_rssi, link_state, radio_cfg };
+                        return State::Associated { cfg, bss, last_rssi, link_state, radio_cfg };
                     }
 
                     match link_state {
@@ -252,18 +266,18 @@ impl State {
                                     responder,
                                     &context,
                                     ConnectResult::Success,
-                                    None,
                                 );
                                 state_change_msg.replace("RSNA established".to_string());
                                 let link_state =
                                     LinkState::LinkUp { protection: Protection::Rsna(rsna) };
-                                State::Associated { bss, last_rssi, link_state, radio_cfg }
+                                State::Associated { cfg, bss, last_rssi, link_state, radio_cfg }
                             }
-                            RsnaStatus::Failed(result) => {
-                                report_connect_finished(responder, &context, result, None);
+                            RsnaStatus::Failed => {
+                                let result = ConnectResult::Failed(ConnectFailure::EstablishRsna);
+                                report_connect_finished(responder, &context, result);
                                 send_deauthenticate_request(bss, &context.mlme_sink);
                                 state_change_msg.replace("RSNA failed".to_string());
-                                State::Idle
+                                State::Idle { cfg }
                             }
                             RsnaStatus::Unchanged => {
                                 let link_state = LinkState::EstablishingRsna {
@@ -272,7 +286,7 @@ impl State {
                                     rsna_timeout,
                                     resp_timeout,
                                 };
-                                State::Associated { bss, last_rssi, link_state, radio_cfg }
+                                State::Associated { cfg, bss, last_rssi, link_state, radio_cfg }
                             }
                             RsnaStatus::Progressed { new_resp_timeout } => {
                                 cancel(&mut resp_timeout);
@@ -285,7 +299,7 @@ impl State {
                                     rsna_timeout,
                                     resp_timeout,
                                 };
-                                State::Associated { bss, last_rssi, link_state, radio_cfg }
+                                State::Associated { cfg, bss, last_rssi, link_state, radio_cfg }
                             }
                         },
                         LinkState::LinkUp { protection } => match protection {
@@ -302,25 +316,25 @@ impl State {
                                 };
                                 let link_state =
                                     LinkState::LinkUp { protection: Protection::Rsna(rsna) };
-                                State::Associated { bss, last_rssi, link_state, radio_cfg }
+                                State::Associated { cfg, bss, last_rssi, link_state, radio_cfg }
                             }
                             // Drop EAPOL frames if the BSS is not an RSN.
                             _ => {
                                 let link_state = LinkState::LinkUp { protection };
-                                State::Associated { bss, last_rssi, link_state, radio_cfg }
+                                State::Associated { cfg, bss, last_rssi, link_state, radio_cfg }
                             }
                         },
                     }
                 }
-                _ => State::Associated { bss, last_rssi, link_state, radio_cfg },
+                _ => State::Associated { cfg, bss, last_rssi, link_state, radio_cfg },
             },
         };
 
         if start_state != new_state.state_name() || state_change_msg.is_some() {
-            inspect_log!(context.inspect.states, {
+            inspect_log!(context.inspect.states.lock(), {
                 from: start_state,
                 to: new_state.state_name(),
-                ctx: state_change_msg,
+                ctx?: state_change_msg,
             });
         }
         new_state
@@ -331,7 +345,7 @@ impl State {
         let mut state_change_msg: Option<String> = None;
 
         let new_state = match self {
-            State::Associated { bss, last_rssi, link_state, radio_cfg } => match link_state {
+            State::Associated { cfg, bss, last_rssi, link_state, radio_cfg } => match link_state {
                 LinkState::EstablishingRsna {
                     responder,
                     rsna,
@@ -344,12 +358,11 @@ impl State {
                         report_connect_finished(
                             responder,
                             &context,
-                            ConnectResult::Failed,
-                            Some(ConnectFailure::RsnaTimeout),
+                            ConnectResult::Failed(ConnectFailure::RsnaTimeout),
                         );
                         send_deauthenticate_request(bss, &context.mlme_sink);
                         state_change_msg.replace("RSNA timeout".to_string());
-                        State::Idle
+                        State::Idle { cfg }
                     }
                     Event::KeyFrameExchangeTimeout { bssid, sta_addr, frame, attempt } => {
                         if !triggered(&resp_timeout, event_id) {
@@ -359,7 +372,13 @@ impl State {
                                 rsna_timeout,
                                 resp_timeout,
                             };
-                            return State::Associated { bss, last_rssi, link_state, radio_cfg };
+                            return State::Associated {
+                                cfg,
+                                bss,
+                                last_rssi,
+                                link_state,
+                                radio_cfg,
+                            };
                         }
 
                         if attempt < event::KEY_FRAME_EXCHANGE_MAX_ATTEMPTS {
@@ -375,19 +394,18 @@ impl State {
                                 rsna_timeout,
                                 resp_timeout,
                             };
-                            State::Associated { bss, last_rssi, link_state, radio_cfg }
+                            State::Associated { cfg, bss, last_rssi, link_state, radio_cfg }
                         } else {
                             error!("timeout waiting for key frame for last attempt; deauth");
                             cancel(&mut resp_timeout);
                             report_connect_finished(
                                 responder,
                                 &context,
-                                ConnectResult::Failed,
-                                Some(ConnectFailure::RsnaTimeout),
+                                ConnectResult::Failed(ConnectFailure::RsnaTimeout),
                             );
                             send_deauthenticate_request(bss, &context.mlme_sink);
                             state_change_msg.replace("key frame rx timeout".to_string());
-                            State::Idle
+                            State::Idle { cfg }
                         }
                     }
                     _ => {
@@ -397,19 +415,19 @@ impl State {
                             rsna_timeout,
                             resp_timeout,
                         };
-                        State::Associated { bss, last_rssi, link_state, radio_cfg }
+                        State::Associated { cfg, bss, last_rssi, link_state, radio_cfg }
                     }
                 },
-                _ => State::Associated { bss, last_rssi, link_state, radio_cfg },
+                _ => State::Associated { cfg, bss, last_rssi, link_state, radio_cfg },
             },
             _ => self,
         };
 
         if start_state != new_state.state_name() || state_change_msg.is_some() {
-            inspect_log!(context.inspect.states, {
+            inspect_log!(context.inspect.states.lock(), {
                 from: start_state,
                 to: new_state.state_name(),
-                ctx: state_change_msg,
+                ctx?: state_change_msg,
             });
         }
         new_state
@@ -417,6 +435,7 @@ impl State {
 
     pub fn connect(self, cmd: ConnectCommand, context: &mut Context) -> Self {
         let start_state = self.state_name();
+        let cfg = self.cfg().clone();
         self.disconnect_internal(context);
 
         let mut selected_bss = clone_bss_desc(&cmd.bss);
@@ -436,28 +455,29 @@ impl State {
         context.info_sink.send(InfoEvent::AssociationStarted { att_id: context.att_id });
 
         let msg = connect_cmd_inspect_summary(&cmd);
-        inspect_log!(context.inspect.states, from: start_state, to: JOINING_STATE, ctx: msg);
-        State::Joining { cmd }
+        inspect_log!(context.inspect.states.lock(), from: start_state, to: JOINING_STATE, ctx: msg);
+        State::Joining { cfg, cmd }
     }
 
     pub fn disconnect(self, context: &mut Context) -> Self {
-        inspect_log!(context.inspect.states, {
+        inspect_log!(context.inspect.states.lock(), {
             from: self.state_name(),
             to: IDLE_STATE,
             ctx: "disconnect command",
         });
+        let cfg = self.cfg().clone();
         self.disconnect_internal(context);
-        State::Idle
+        State::Idle { cfg }
     }
 
     fn disconnect_internal(self, context: &Context) {
         match self {
-            State::Idle => {}
-            State::Joining { cmd } | State::Authenticating { cmd } => {
-                report_connect_finished(cmd.responder, &context, ConnectResult::Canceled, None);
+            State::Idle { .. } => {}
+            State::Joining { cmd, .. } | State::Authenticating { cmd, .. } => {
+                report_connect_finished(cmd.responder, &context, ConnectResult::Canceled);
             }
             State::Associating { cmd, .. } => {
-                report_connect_finished(cmd.responder, &context, ConnectResult::Canceled, None);
+                report_connect_finished(cmd.responder, &context, ConnectResult::Canceled);
                 send_deauthenticate_request(cmd.bss, &context.mlme_sink);
             }
             State::Associated { bss, .. } => {
@@ -468,17 +488,17 @@ impl State {
 
     pub fn status(&self) -> Status {
         match self {
-            State::Idle => Status { connected_to: None, connecting_to: None },
-            State::Joining { cmd }
-            | State::Authenticating { cmd }
+            State::Idle { .. } => Status { connected_to: None, connecting_to: None },
+            State::Joining { cmd, .. }
+            | State::Authenticating { cmd, .. }
             | State::Associating { cmd, .. } => {
                 Status { connected_to: None, connecting_to: Some(cmd.bss.ssid.clone()) }
             }
             State::Associated { bss, link_state: LinkState::EstablishingRsna { .. }, .. } => {
                 Status { connected_to: None, connecting_to: Some(bss.ssid.clone()) }
             }
-            State::Associated { bss, link_state: LinkState::LinkUp { .. }, .. } => {
-                Status { connected_to: Some(convert_bss_description(bss)), connecting_to: None }
+            State::Associated { cfg, bss, link_state: LinkState::LinkUp { .. }, .. } => {
+                Status { connected_to: Some(cfg.convert_bss_description(bss)), connecting_to: None }
             }
         }
     }
@@ -490,8 +510,8 @@ fn install_wep_key(context: &mut Context, bssid: [u8; 6], key: &wep_deprecated::
         wep_deprecated::Key::Bits104(_) => cipher::WEP_104,
     };
     // unwrap() is safe, OUI is defined in RSN and always compatible with ciphers.
-    let cipher = cipher::Cipher::new(Bytes::from(&OUI[..]), cipher_suite).unwrap();
-    inspect_log!(context.inspect.rsn_events, {
+    let cipher = cipher::Cipher::new_dot11(cipher_suite);
+    inspect_log!(context.inspect.rsn_events.lock(), {
         derived_key: "WEP",
         cipher: format!("{:?}", cipher),
         key_index: 0,
@@ -502,6 +522,7 @@ fn install_wep_key(context: &mut Context, bssid: [u8; 6], key: &wep_deprecated::
 }
 
 fn handle_mlme_assoc_conf(
+    cfg: ClientConfig,
     resp: fidl_mlme::AssociateConfirm,
     cmd: ConnectCommand,
     context: &mut Context,
@@ -515,7 +536,7 @@ fn handle_mlme_assoc_conf(
                     Err(e) => {
                         handle_supplicant_start_failure(cmd.responder, cmd.bss, &context, e);
                         state_change_msg.replace("supplicant failed to start".to_string());
-                        State::Idle
+                        State::Idle { cfg }
                     }
                     Ok(_) => {
                         context.info_sink.send(InfoEvent::RsnaStarted { att_id: context.att_id });
@@ -524,6 +545,7 @@ fn handle_mlme_assoc_conf(
                             Some(context.timer.schedule(Event::EstablishingRsnaTimeout));
                         state_change_msg.replace("successful association".to_string());
                         State::Associated {
+                            cfg,
                             bss: cmd.bss,
                             last_rssi: None,
                             link_state: LinkState::EstablishingRsna {
@@ -537,9 +559,10 @@ fn handle_mlme_assoc_conf(
                     }
                 },
                 Protection::Open | Protection::Wep(_) => {
-                    report_connect_finished(cmd.responder, &context, ConnectResult::Success, None);
+                    report_connect_finished(cmd.responder, &context, ConnectResult::Success);
                     state_change_msg.replace("successful association".to_string());
                     State::Associated {
+                        cfg,
                         bss: cmd.bss,
                         last_rssi: None,
                         link_state: LinkState::LinkUp { protection: Protection::Open },
@@ -553,11 +576,10 @@ fn handle_mlme_assoc_conf(
             report_connect_finished(
                 cmd.responder,
                 &context,
-                ConnectResult::Failed,
-                Some(ConnectFailure::AssociationFailure(other)),
+                ConnectResult::Failed(ConnectFailure::AssociationFailure(other)),
             );
             state_change_msg.replace(format!("failed association; result code: {:?}", other));
-            State::Idle
+            State::Idle { cfg }
         }
     }
 }
@@ -602,26 +624,18 @@ fn cancel(event_id: &mut Option<EventId>) {
     let _ = event_id.take();
 }
 
-fn deauth_code_to_connect_result(reason_code: fidl_mlme::ReasonCode) -> ConnectResult {
-    match reason_code {
-        fidl_mlme::ReasonCode::InvalidAuthentication
-        | fidl_mlme::ReasonCode::Ieee8021XAuthFailed => ConnectResult::BadCredentials,
-        _ => ConnectResult::Failed,
-    }
-}
-
 fn process_eapol_ind(
     context: &mut Context,
     rsna: &mut Rsna,
     ind: &fidl_mlme::EapolIndication,
 ) -> RsnaStatus {
-    let mic_size = rsna.negotiated_rsne.mic_size;
+    let mic_size = rsna.negotiated_protection.mic_size;
     let eapol_pdu = &ind.data[..];
-    let eapol_frame = match eapol::key_frame_from_bytes(eapol_pdu, mic_size).to_full_result() {
+    let eapol_frame = match eapol::KeyFrameRx::parse(mic_size as usize, eapol_pdu) {
         Ok(key_frame) => eapol::Frame::Key(key_frame),
         Err(e) => {
             error!("received invalid EAPOL Key frame: {:?}", e);
-            inspect_log!(context.inspect.rsn_events, {
+            inspect_log!(context.inspect.rsn_events.lock(), {
                 rx_eapol_frame: InspectBytes(&eapol_pdu),
                 status: format!("rejected (parse error): {:?}", e)
             });
@@ -630,17 +644,17 @@ fn process_eapol_ind(
     };
 
     let mut update_sink = rsna::UpdateSink::default();
-    match rsna.supplicant.on_eapol_frame(&mut update_sink, &eapol_frame) {
+    match rsna.supplicant.on_eapol_frame(&mut update_sink, eapol_frame) {
         Err(e) => {
             error!("error processing EAPOL key frame: {}", e);
-            inspect_log!(context.inspect.rsn_events, {
+            inspect_log!(context.inspect.rsn_events.lock(), {
                 rx_eapol_frame: InspectBytes(&eapol_pdu),
                 status: format!("rejected (processing error): {}", e)
             });
             return RsnaStatus::Unchanged;
         }
         Ok(_) => {
-            inspect_log!(context.inspect.rsn_events, {
+            inspect_log!(context.inspect.rsn_events.lock(), {
                 rx_eapol_frame: InspectBytes(&eapol_pdu),
                 status: "processed"
             });
@@ -673,16 +687,14 @@ fn process_eapol_ind(
             // We should fix the API and make this more explicit.
             // Then we should rework this part.
             SecAssocUpdate::Status(status) => {
-                inspect_log!(context.inspect.rsn_events, rsna_status: format!("{:?}", status));
+                inspect_log!(
+                    context.inspect.rsn_events.lock(),
+                    rsna_status: format!("{:?}", status)
+                );
                 match status {
                     // ESS Security Association was successfully established. Link is now up.
                     SecAssocStatus::EssSaEstablished => return RsnaStatus::Established,
-                    // TODO(hahnr): The API should not expose whether or not the connection failed
-                    // because of bad credentials as it allows callers to reason about location
-                    // information since the network was apparently found.
-                    SecAssocStatus::WrongPassword => {
-                        return RsnaStatus::Failed(ConnectResult::BadCredentials);
-                    }
+                    SecAssocStatus::WrongPassword => return RsnaStatus::Failed,
                 }
             }
         }
@@ -695,12 +707,12 @@ fn inspect_log_key(context: &mut Context, key: &Key) {
     let (cipher, key_index) = match key {
         Key::Ptk(ptk) => (Some(&ptk.cipher), None),
         Key::Gtk(gtk) => (Some(&gtk.cipher), Some(gtk.key_id())),
-        _ => (None, None)
+        _ => (None, None),
     };
-    inspect_log!(context.inspect.rsn_events, {
+    inspect_log!(context.inspect.rsn_events.lock(), {
         derived_key: key.name(),
-        cipher: cipher.map(|c| format!("{:?}", c)),
-        key_index: key_index,
+        cipher?: cipher.map(|c| format!("{:?}", c)),
+        key_index?: key_index,
     });
 }
 
@@ -708,7 +720,7 @@ fn send_eapol_frame(
     context: &mut Context,
     bssid: [u8; 6],
     sta_addr: [u8; 6],
-    frame: eapol::KeyFrame,
+    frame: eapol::KeyFrameBuf,
     attempt: u32,
 ) -> EventId {
     let resp_timeout_id = context.timer.schedule(Event::KeyFrameExchangeTimeout {
@@ -718,13 +730,11 @@ fn send_eapol_frame(
         attempt,
     });
 
-    let mut buf = Vec::with_capacity(frame.len());
-    frame.as_bytes(false, &mut buf);
-    inspect_log!(context.inspect.rsn_events, tx_eapol_frame: InspectBytes(&buf));
+    inspect_log!(context.inspect.rsn_events.lock(), tx_eapol_frame: InspectBytes(&frame[..]));
     context.mlme_sink.send(MlmeRequest::Eapol(fidl_mlme::EapolRequest {
         src_addr: sta_addr,
         dst_addr: bssid,
-        data: buf,
+        data: frame.into(),
     }));
     resp_timeout_id
 }
@@ -753,7 +763,7 @@ fn send_keys(mlme_sink: &MlmeSink, bssid: [u8; 6], key: Key) {
                     address: [0xFFu8; 6],
                     cipher_suite_oui: eapol::to_array(&gtk.cipher.oui[..]),
                     cipher_suite_type: gtk.cipher.suite_type,
-                    rsc: 0,
+                    rsc: gtk.rsc,
                 }],
             }));
         }
@@ -768,13 +778,23 @@ fn send_deauthenticate_request(current_bss: Box<BssDescription>, mlme_sink: &Mlm
     }));
 }
 
-fn to_associating_state(cmd: ConnectCommand, mlme_sink: &MlmeSink) -> State {
+fn to_associating_state(cfg: ClientConfig, cmd: ConnectCommand, mlme_sink: &MlmeSink) -> State {
     let s_rsne_data = match &cmd.protection {
         Protection::Open | Protection::Wep(_) => None,
         Protection::Rsna(rsna) => {
-            let s_rsne = rsna.negotiated_rsne.to_full_rsne();
+            let s_protection = rsna.negotiated_protection.to_full_protection();
+            let s_rsne = match s_protection {
+                ProtectionInfo::Rsne(rsne) => rsne,
+                ProtectionInfo::LegacyWpa(_wpa) => {
+                    error!("Cannot associate with wpa!");
+                    return State::Idle { cfg };
+                }
+            };
             let mut buf = Vec::with_capacity(s_rsne.len());
-            s_rsne.as_bytes(&mut buf);
+            // Writing an RSNE into a Vector can never fail as a Vector can be grown when more
+            // space is required. If this panic ever triggers, something is clearly broken
+            // somewhere else.
+            let () = s_rsne.write_into(&mut buf).expect("writing RSNE into Vec can never fail");
             Some(buf)
         }
     };
@@ -782,8 +802,9 @@ fn to_associating_state(cmd: ConnectCommand, mlme_sink: &MlmeSink) -> State {
     mlme_sink.send(MlmeRequest::Associate(fidl_mlme::AssociateRequest {
         peer_sta_address: cmd.bss.bssid.clone(),
         rsn: s_rsne_data,
+        vendor_ies: None,
     }));
-    State::Associating { cmd }
+    State::Associating { cfg, cmd }
 }
 
 fn handle_supplicant_start_failure(
@@ -795,13 +816,10 @@ fn handle_supplicant_start_failure(
     error!("deauthenticating; could not start Supplicant: {}", e);
     send_deauthenticate_request(bss, &context.mlme_sink);
 
-    // TODO(hahnr): Report RSNA specific failure instead.
-    let reason = fidl_mlme::AssociateResultCodes::RefusedReasonUnspecified;
     report_connect_finished(
         responder,
         &context,
-        ConnectResult::Failed,
-        Some(ConnectFailure::AssociationFailure(reason)),
+        ConnectResult::Failed(ConnectFailure::EstablishRsna),
     );
 }
 
@@ -809,12 +827,12 @@ fn handle_supplicant_start_failure(
 mod tests {
     use super::*;
     use failure::format_err;
-    use fuchsia_inspect as finspect;
+    use fuchsia_inspect::Inspector;
     use futures::channel::{mpsc, oneshot};
     use std::error::Error;
     use std::sync::Arc;
     use wlan_common::{ie::rsn::rsne::RsnCapabilities, RadioConfig};
-    use wlan_rsn::{rsna::UpdateSink, NegotiatedRsne};
+    use wlan_rsn::{rsna::UpdateSink, NegotiatedProtection};
 
     use crate::client::test_utils::{
         expect_info_event, fake_protected_bss_description, fake_unprotected_bss_description,
@@ -861,7 +879,7 @@ mod tests {
         expect_info_event(&mut h.info_stream, InfoEvent::AssociationSuccess { att_id: 1 });
         expect_info_event(
             &mut h.info_stream,
-            InfoEvent::ConnectFinished { result: ConnectResult::Success, failure: None },
+            InfoEvent::ConnectFinished { result: ConnectResult::Success },
         );
     }
 
@@ -912,7 +930,7 @@ mod tests {
         expect_info_event(&mut h.info_stream, InfoEvent::AssociationSuccess { att_id: 1 });
         expect_info_event(
             &mut h.info_stream,
-            InfoEvent::ConnectFinished { result: ConnectResult::Success, failure: None },
+            InfoEvent::ConnectFinished { result: ConnectResult::Success },
         );
     }
 
@@ -976,7 +994,7 @@ mod tests {
         expect_info_event(&mut h.info_stream, InfoEvent::RsnaEstablished { att_id: 1 });
         expect_info_event(
             &mut h.info_stream,
-            InfoEvent::ConnectFinished { result: ConnectResult::Success, failure: None },
+            InfoEvent::ConnectFinished { result: ConnectResult::Success },
         );
     }
 
@@ -986,7 +1004,7 @@ mod tests {
 
         let (cmd, receiver) = connect_command_one();
         // Start in a "Joining" state
-        let state = State::Joining { cmd };
+        let state = State::Joining { cfg: ClientConfig::default(), cmd };
 
         // (mlme->sme) Send an unsuccessful JoinConf
         let join_conf = MlmeEvent::JoinConf {
@@ -997,18 +1015,13 @@ mod tests {
         let state = state.on_mlme_event(join_conf, &mut h.context);
         assert_idle(state);
 
+        let result = ConnectResult::Failed(ConnectFailure::JoinFailure(
+            fidl_mlme::JoinResultCodes::JoinFailureTimeout,
+        ));
         // User should be notified that connection attempt failed
-        expect_result(receiver, ConnectResult::Failed);
+        expect_result(receiver, result.clone());
 
-        expect_info_event(
-            &mut h.info_stream,
-            InfoEvent::ConnectFinished {
-                result: ConnectResult::Failed,
-                failure: Some(ConnectFailure::JoinFailure(
-                    fidl_mlme::JoinResultCodes::JoinFailureTimeout,
-                )),
-            },
-        );
+        expect_info_event(&mut h.info_stream, InfoEvent::ConnectFinished { result });
     }
 
     #[test]
@@ -1018,7 +1031,7 @@ mod tests {
         let (cmd, receiver) = connect_command_one();
 
         // Start in an "Authenticating" state
-        let state = State::Authenticating { cmd };
+        let state = State::Authenticating { cfg: ClientConfig::default(), cmd };
 
         // (mlme->sme) Send an unsuccessful AuthenticateConf
         let auth_conf = MlmeEvent::AuthenticateConf {
@@ -1031,18 +1044,13 @@ mod tests {
         let state = state.on_mlme_event(auth_conf, &mut h.context);
         assert_idle(state);
 
+        let result = ConnectResult::Failed(ConnectFailure::AuthenticationFailure(
+            fidl_mlme::AuthenticateResultCodes::Refused,
+        ));
         // User should be notified that connection attempt failed
-        expect_result(receiver, ConnectResult::Failed);
+        expect_result(receiver, result.clone());
 
-        expect_info_event(
-            &mut h.info_stream,
-            InfoEvent::ConnectFinished {
-                result: ConnectResult::Failed,
-                failure: Some(ConnectFailure::AuthenticationFailure(
-                    fidl_mlme::AuthenticateResultCodes::Refused,
-                )),
-            },
-        );
+        expect_info_event(&mut h.info_stream, InfoEvent::ConnectFinished { result });
     }
 
     #[test]
@@ -1052,7 +1060,7 @@ mod tests {
         let (cmd, receiver) = connect_command_one();
 
         // Start in an "Associating" state
-        let state = State::Associating { cmd };
+        let state = State::Associating { cfg: ClientConfig::default(), cmd };
 
         // (mlme->sme) Send an unsuccessful AssociateConf
         let assoc_conf =
@@ -1060,18 +1068,13 @@ mod tests {
         let state = state.on_mlme_event(assoc_conf, &mut h.context);
         assert_idle(state);
 
+        let result = ConnectResult::Failed(ConnectFailure::AssociationFailure(
+            fidl_mlme::AssociateResultCodes::RefusedReasonUnspecified,
+        ));
         // User should be notified that connection attempt failed
-        expect_result(receiver, ConnectResult::Failed);
+        expect_result(receiver, result.clone());
 
-        expect_info_event(
-            &mut h.info_stream,
-            InfoEvent::ConnectFinished {
-                result: ConnectResult::Failed,
-                failure: Some(ConnectFailure::AssociationFailure(
-                    fidl_mlme::AssociateResultCodes::RefusedReasonUnspecified,
-                )),
-            },
-        );
+        expect_info_event(&mut h.info_stream, InfoEvent::ConnectFinished { result });
     }
 
     #[test]
@@ -1126,17 +1129,10 @@ mod tests {
         let _state = state.on_mlme_event(assoc_conf, &mut h.context);
 
         expect_deauth_req(&mut h.mlme_stream, bssid, fidl_mlme::ReasonCode::StaLeaving);
-        expect_result(receiver, ConnectResult::Failed);
+        let result = ConnectResult::Failed(ConnectFailure::EstablishRsna);
+        expect_result(receiver, result.clone());
         expect_info_event(&mut h.info_stream, InfoEvent::AssociationSuccess { att_id: 0 });
-        expect_info_event(
-            &mut h.info_stream,
-            InfoEvent::ConnectFinished {
-                result: ConnectResult::Failed,
-                failure: Some(ConnectFailure::AssociationFailure(
-                    fidl_mlme::AssociateResultCodes::RefusedReasonUnspecified,
-                )),
-            },
-        );
+        expect_info_event(&mut h.info_stream, InfoEvent::ConnectFinished { result });
     }
 
     #[test]
@@ -1180,7 +1176,7 @@ mod tests {
         suppl_mock.set_on_eapol_frame_failure(format_err!("supplicant::on_eapol_frame fails"));
 
         // (mlme->sme) Send an EapolInd
-        let eapol_ind = create_eapol_ind(bssid.clone(), test_utils::eapol_key_frame_bytes());
+        let eapol_ind = create_eapol_ind(bssid.clone(), test_utils::eapol_key_frame().into());
         let state = state.on_mlme_event(eapol_ind, &mut h.context);
 
         assert_eq!(Ok(None), receiver.try_recv());
@@ -1207,7 +1203,7 @@ mod tests {
         });
 
         // Send an EapolInd from foreign BSS.
-        let eapol_ind = create_eapol_ind([1; 6], test_utils::eapol_key_frame_bytes());
+        let eapol_ind = create_eapol_ind([1; 6], test_utils::eapol_key_frame().into());
         let state = state.on_mlme_event(eapol_ind, &mut h.context);
 
         // Verify state did not change.
@@ -1233,11 +1229,9 @@ mod tests {
         let _state = on_eapol_ind(state, &mut h, bssid, &suppl_mock, vec![update]);
 
         expect_deauth_req(&mut h.mlme_stream, bssid, fidl_mlme::ReasonCode::StaLeaving);
-        expect_result(receiver, ConnectResult::BadCredentials);
-        expect_info_event(
-            &mut h.info_stream,
-            InfoEvent::ConnectFinished { result: ConnectResult::BadCredentials, failure: None },
-        );
+        let result = ConnectResult::Failed(ConnectFailure::EstablishRsna);
+        expect_result(receiver, result.clone());
+        expect_info_event(&mut h.info_stream, InfoEvent::ConnectFinished { result });
     }
 
     #[test]
@@ -1248,7 +1242,7 @@ mod tests {
         let bssid = command.bss.bssid.clone();
 
         // Start in an "Associating" state
-        let state = State::Associating { cmd: command };
+        let state = State::Associating { cfg: ClientConfig::default(), cmd: command };
         let assoc_conf = create_assoc_conf(fidl_mlme::AssociateResultCodes::Success);
         let state = state.on_mlme_event(assoc_conf, &mut h.context);
 
@@ -1263,7 +1257,7 @@ mod tests {
         let _state = state.handle_timeout(timed_event.id, timed_event.event, &mut h.context);
 
         expect_deauth_req(&mut h.mlme_stream, bssid, fidl_mlme::ReasonCode::StaLeaving);
-        expect_result(receiver, ConnectResult::Failed);
+        expect_result(receiver, ConnectResult::Failed(ConnectFailure::RsnaTimeout));
     }
 
     #[test]
@@ -1292,7 +1286,7 @@ mod tests {
         }
 
         expect_deauth_req(&mut h.mlme_stream, bssid, fidl_mlme::ReasonCode::StaLeaving);
-        expect_result(receiver, ConnectResult::Failed);
+        expect_result(receiver, ConnectResult::Failed(ConnectFailure::RsnaTimeout));
     }
 
     #[test]
@@ -1426,6 +1420,8 @@ mod tests {
         info_stream: InfoStream,
         time_stream: TimeStream,
         context: Context,
+        // Inspector is kept so that root node doesn't automatically get removed from VMO
+        _inspector: Inspector,
     }
 
     impl TestHelper {
@@ -1433,15 +1429,16 @@ mod tests {
             let (mlme_sink, mlme_stream) = mpsc::unbounded();
             let (info_sink, info_stream) = mpsc::unbounded();
             let (timer, time_stream) = timer::create_timer();
+            let inspector = Inspector::new();
             let context = Context {
                 device_info: Arc::new(fake_device_info()),
                 mlme_sink: MlmeSink::new(mlme_sink),
                 info_sink: InfoSink::new(info_sink),
                 timer,
                 att_id: 0,
-                inspect: inspect::SmeNode::new(finspect::ObjectTreeNode::new_root()),
+                inspect: Arc::new(inspect::SmeTree::new(inspector.root())),
             };
-            TestHelper { mlme_stream, info_stream, time_stream, context }
+            TestHelper { mlme_stream, info_stream, time_stream, context, _inspector: inspector }
         }
     }
 
@@ -1454,7 +1451,7 @@ mod tests {
     ) -> State {
         suppl_mock.set_on_eapol_frame_results(update_sink);
         // (mlme->sme) Send an EapolInd
-        let eapol_ind = create_eapol_ind(bssid.clone(), test_utils::eapol_key_frame_bytes());
+        let eapol_ind = create_eapol_ind(bssid.clone(), test_utils::eapol_key_frame().into());
         state.on_mlme_event(eapol_ind, &mut helper.context)
     }
 
@@ -1566,7 +1563,7 @@ mod tests {
             Some(MlmeRequest::Eapol(req)) => {
                 assert_eq!(req.src_addr, fake_device_info().addr);
                 assert_eq!(req.dst_addr, bssid);
-                assert_eq!(req.data, test_utils::eapol_key_frame_bytes());
+                assert_eq!(req.data, Vec::<u8>::from(test_utils::eapol_key_frame()));
             }
             other => panic!("expected an Eapol request, got {:?}", other),
         }
@@ -1680,7 +1677,8 @@ mod tests {
             bss: Box::new(bss),
             responder: Some(responder),
             protection: Protection::Rsna(Rsna {
-                negotiated_rsne: NegotiatedRsne::from_rsne(&rsne).expect("invalid NegotiatedRsne"),
+                negotiated_protection: NegotiatedProtection::from_rsne(&rsne)
+                    .expect("invalid NegotiatedProtection"),
                 supplicant: Box::new(supplicant),
             }),
             radio_cfg: RadioConfig::default(),
@@ -1689,23 +1687,24 @@ mod tests {
     }
 
     fn idle_state() -> State {
-        State::Idle
+        State::Idle { cfg: ClientConfig::default() }
     }
 
     fn assert_idle(state: State) {
-        match state {
-            State::Idle => {}
+        match &state {
+            State::Idle { cfg } => assert_eq!(state.cfg(), cfg),
             other => panic!("Expected an Idle state, got {:?}", other),
         }
     }
 
     fn joining_state(cmd: ConnectCommand) -> State {
-        State::Joining { cmd }
+        State::Joining { cfg: ClientConfig::default(), cmd }
     }
 
     fn assert_joining(state: State, bss: &BssDescription) {
-        match state {
-            State::Joining { cmd } => {
+        match &state {
+            State::Joining { cfg, cmd } => {
+                assert_eq!(cfg, state.cfg());
                 assert_eq!(cmd.bss.as_ref(), bss);
             }
             other => panic!("Expected a Joining state, got {:?}", other),
@@ -1713,16 +1712,17 @@ mod tests {
     }
 
     fn authenticating_state(cmd: ConnectCommand) -> State {
-        State::Authenticating { cmd }
+        State::Authenticating { cfg: ClientConfig::default(), cmd }
     }
 
     fn associating_state(cmd: ConnectCommand) -> State {
-        State::Associating { cmd }
+        State::Associating { cfg: ClientConfig::default(), cmd }
     }
 
     fn assert_associating(state: State, bss: &BssDescription) {
-        match state {
-            State::Associating { cmd } => {
+        match &state {
+            State::Associating { cfg, cmd } => {
+                assert_eq!(cfg, state.cfg());
                 assert_eq!(cmd.bss.as_ref(), bss);
             }
             other => panic!("Expected an Associating state, got {:?}", other),
@@ -1735,6 +1735,7 @@ mod tests {
             _ => panic!("expect rsna for establishing_rsna_state"),
         };
         State::Associated {
+            cfg: ClientConfig::default(),
             bss: cmd.bss,
             last_rssi: None,
             link_state: LinkState::EstablishingRsna {
@@ -1749,6 +1750,7 @@ mod tests {
 
     fn link_up_state(bss: Box<fidl_mlme::BssDescription>) -> State {
         State::Associated {
+            cfg: ClientConfig::default(),
             bss,
             last_rssi: None,
             link_state: LinkState::LinkUp { protection: Protection::Open },
@@ -1760,10 +1762,12 @@ mod tests {
         let bss = protected_bss(b"foo".to_vec(), bssid);
         let rsne = test_utils::wpa2_psk_ccmp_rsne_with_caps(RsnCapabilities(0));
         let rsna = Rsna {
-            negotiated_rsne: NegotiatedRsne::from_rsne(&rsne).expect("invalid NegotiatedRsne"),
+            negotiated_protection: NegotiatedProtection::from_rsne(&rsne)
+                .expect("invalid NegotiatedProtection"),
             supplicant: Box::new(supplicant),
         };
         State::Associated {
+            cfg: ClientConfig::default(),
             bss: Box::new(bss),
             last_rssi: None,
             link_state: LinkState::LinkUp { protection: Protection::Rsna(rsna) },

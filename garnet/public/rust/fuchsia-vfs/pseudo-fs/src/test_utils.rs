@@ -4,8 +4,6 @@
 
 //! Utilities used by tests in both file and directory modules.
 
-#![cfg(test)]
-
 #[doc(hidden)]
 pub mod reexport {
     pub use {
@@ -51,7 +49,7 @@ pub trait ClonableProxy {
 
 /// Calls .clone() on the proxy object, and returns a client side of the connection passed into the
 /// clone() method.
-pub fn clone_get_proxy<Proxy, M>(proxy: &Proxy, flags: u32) -> M::Proxy
+pub fn clone_get_proxy<M, Proxy>(proxy: &Proxy, flags: u32) -> M::Proxy
 where
     M: ServiceMarker,
     Proxy: ClonableProxy,
@@ -59,7 +57,7 @@ where
     let (new_proxy, new_server_end) =
         create_proxy::<M>().expect("Failed to create connection endpoints");
 
-    proxy.clone(flags, ServerEnd::<NodeMarker>::new(new_server_end.into_channel())).unwrap();
+    proxy.clone(flags, new_server_end.into_channel().into()).unwrap();
 
     new_proxy
 }
@@ -121,6 +119,38 @@ macro_rules! assert_read_fidl_err {
                 panic!("Read succeeded: status: {:?}, content: '{:?}'", status, content)
             }
         }
+    }};
+}
+
+// See comment at the top of the file for why this is a macro.
+#[macro_export]
+macro_rules! assert_get_buffer {
+    ($proxy:expr, $expected:expr) => {{
+        use $crate::test_utils::reexport::*;
+
+        let (status, buffer) =
+            await!($proxy.get_buffer(OPEN_RIGHT_READABLE)).expect("get buffer failed");
+
+        assert_eq!(Status::from_raw(status), Status::OK);
+        assert!(buffer.is_some());
+        let buffer = buffer.unwrap();
+
+        let mut buf = vec![0; buffer.size as usize];
+        buffer.vmo.read(&mut buf, 0).expect("VMO read failed");
+        assert_eq!(buf.as_slice(), $expected.as_bytes());
+    }};
+}
+
+// See comment at the top of the file for why this is a macro.
+#[macro_export]
+macro_rules! assert_get_buffer_err {
+    ($proxy:expr, $flags:expr, $expected_status: expr) => {{
+        use $crate::test_utils::reexport::*;
+
+        let (status, buffer) = await!($proxy.get_buffer($flags)).expect("get buffer failed");
+
+        assert_eq!(Status::from_raw(status), $expected_status);
+        assert!(buffer.is_none());
     }};
 }
 
@@ -456,7 +486,7 @@ macro_rules! open_as_directory_assert_err {
 macro_rules! clone_get_proxy_assert {
     ($proxy:expr, $flags:expr, $new_proxy_type:ty, $expected_pattern:pat,
      $expected_assertion:block) => {{
-        let new_proxy = $crate::test_utils::clone_get_proxy::<_, $new_proxy_type>($proxy, $flags);
+        let new_proxy = $crate::test_utils::clone_get_proxy::<$new_proxy_type, _>($proxy, $flags);
         assert_event!(new_proxy, $expected_pattern, $expected_assertion);
         new_proxy
     }};
@@ -501,7 +531,7 @@ macro_rules! clone_get_directory_proxy_assert_ok {
             DirectoryEvent::OnOpen_ { s, info },
             {
                 assert_eq!(Status::from_raw(s), Status::OK);
-                assert_eq!(info, Some(Box::new(NodeInfo::Directory(DirectoryObject))),);
+                assert_eq!(info, Some(Box::new(NodeInfo::Directory(DirectoryObject))));
             }
         )
     }};
@@ -522,7 +552,7 @@ macro_rules! clone_as_directory_assert_err {
                 assert_eq!(Status::from_raw(s), $expected_status);
                 assert_eq!(info, None);
             }
-        );
+        )
     }};
 }
 

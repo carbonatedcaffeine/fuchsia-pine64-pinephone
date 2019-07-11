@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/package.gni")
+import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
 import("//peridot/build/executable_package.gni")
 import("//peridot/build/tests_package.gni")
@@ -35,6 +36,7 @@ executable_package("basemgr") {
     "//garnet/public/lib/component/cpp",
     "//garnet/public/lib/fxl",
     "//garnet/public/lib/json",
+    "//peridot/bin/agents/clipboard:clipboard_sources",
     "//peridot/bin/basemgr/cobalt",
     "//peridot/lib/common:async_holder",
     "//peridot/lib/common:teardown",
@@ -43,7 +45,9 @@ executable_package("basemgr") {
     "//peridot/lib/fidl:clone",
     "//peridot/lib/fidl:environment",
     "//peridot/lib/ledger_client:constants",
+    "//peridot/lib/ledger_client:page_client",
     "//peridot/lib/modular_config:modular_config",
+    "//peridot/lib/rapidjson",
     "//peridot/public/lib/async/cpp:future",
     "//sdk/fidl/fuchsia.auth",
     "//sdk/fidl/fuchsia.auth.account",
@@ -58,28 +62,23 @@ executable_package("basemgr") {
     "//sdk/fidl/fuchsia.ui.policy",
     "//sdk/fidl/fuchsia.ui.views",
     "//sdk/fidl/fuchsia.wlan.service",
+    "//sdk/lib/sys/cpp",
     "//sdk/lib/ui/scenic/cpp",
     "//src/lib/fxl",
+    "//zircon/public/fidl/fuchsia-device-manager",
     "//zircon/public/lib/async-loop-cpp",
-    "//zircon/public/lib/trace-provider",
-  ]
-
-  public_deps = [
-    "//peridot/bin/basemgr/cobalt:basemgr_metrics_registry",
+    "//zircon/public/lib/trace-provider-with-fdio",
   ]
 
   resources = [
     {
-      path = rebase_path(
-              get_label_info(
-                  "//peridot/bin/basemgr/cobalt:basemgr_metrics_registry",
-                  "target_gen_dir") + "/basemgr_metrics_registry.pb")
-      dest = "basemgr_metrics_registry.pb"
+      path = rebase_path("//third_party/icu/common/icudtl.dat")
+      dest = "icudtl.dat"
     },
   ]
 }
 
-tests_package("basemgr_unittests") {
+hermetic_tests_package("basemgr_unittests") {
   deps = [
     ":session_context_impl_unittest",
   ]
@@ -100,6 +99,7 @@ source_set("wait_for_minfs") {
 
 source_set("lib") {
   sources = [
+    "noop_clipboard_impl.h",
     "presentation_container.cc",
     "presentation_container.h",
     "session_context_impl.cc",
@@ -111,7 +111,6 @@ source_set("lib") {
   ]
 
   deps = [
-    "//garnet/public/lib/component/cpp",
     "//garnet/public/lib/fsl",
     "//peridot/lib/common:async_holder",
     "//peridot/lib/common:teardown",
@@ -128,11 +127,14 @@ source_set("lib") {
     "//sdk/fidl/fuchsia.ui.input",
     "//sdk/fidl/fuchsia.ui.policy",
     "//sdk/fidl/fuchsia.ui.views",
+    "//sdk/lib/sys/cpp",
     "//src/lib/fxl",
+    "//zircon/public/fidl/fuchsia-device-manager",
     "//zircon/public/lib/trace",
   ]
 
   public_deps = [
+    "//peridot/bin/basemgr/intl_property_provider_impl",
     "//sdk/fidl/fuchsia.auth",
     "//sdk/fidl/fuchsia.auth.account",
     "//sdk/fidl/fuchsia.modular",
@@ -223,13 +225,11 @@ executable("auto_login_base_shell_test_bin") {
     "//sdk/fidl/fuchsia.sys",
     "//sdk/lib/sys/cpp",
     "//sdk/lib/sys/cpp/testing:integration",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 }
 
-package("auto_login_base_shell_test") {
-  testonly = true
-
+test_package("auto_login_base_shell_test") {
   deps = [
     ":auto_login_base_shell_bin",
     ":auto_login_base_shell_test_bin",
@@ -239,13 +239,6 @@ package("auto_login_base_shell_test") {
     {
       name = "auto_login_base_shell_test"
       environments = basic_envs
-    },
-  ]
-
-  meta = [
-    {
-      path = "meta/auto_login_base_shell_test.cmx"
-      dest = "auto_login_base_shell_test.cmx"
     },
   ]
 }
@@ -259,13 +252,14 @@ executable("session_context_impl_unittest") {
 
   deps = [
     ":lib",
-    "//garnet/public/lib/component/cpp",
-    "//garnet/public/lib/component/cpp/testing:fake_launcher",
     "//garnet/public/lib/fsl",
     "//garnet/public/lib/gtest",
     "//peridot/lib/fidl:clone",
+    "//peridot/lib/fidl:environment",
+    "//sdk/lib/sys/cpp",
+    "//sdk/lib/sys/cpp/testing:unit",
     "//src/lib/fxl",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 }
 

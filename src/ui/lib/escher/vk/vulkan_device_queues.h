@@ -10,6 +10,7 @@
 #include <vulkan/vulkan.hpp>
 
 #include "src/lib/fxl/memory/ref_counted.h"
+#include "src/ui/lib/escher/util/debug_print.h"
 #include "src/ui/lib/escher/vk/vulkan_context.h"
 #include "src/ui/lib/escher/vk/vulkan_instance.h"
 
@@ -20,12 +21,12 @@ using VulkanDeviceQueuesPtr = fxl::RefPtr<VulkanDeviceQueues>;
 
 // Convenient wrapper for creating and managing the lifecycle of a VkDevice
 // and a set of VkQueues that are suitable for use by Escher.
-class VulkanDeviceQueues
-    : public fxl::RefCountedThreadSafe<VulkanDeviceQueues> {
+class VulkanDeviceQueues : public fxl::RefCountedThreadSafe<VulkanDeviceQueues> {
  public:
   // Parameters used to construct a new Vulkan Device and Queues.
   struct Params {
-    std::set<std::string> extension_names;
+    std::set<std::string> required_extension_names;
+    std::set<std::string> desired_extension_names;
     vk::SurfaceKHR surface;
 
     enum FlagBits {
@@ -41,14 +42,21 @@ class VulkanDeviceQueues
   struct Caps {
     uint32_t max_image_width = 0;
     uint32_t max_image_height = 0;
-    Caps() {}
-    Caps(vk::PhysicalDeviceProperties props);
+    std::set<vk::Format> depth_stencil_formats;
+    std::set<std::string> extensions;
+
+    vk::PhysicalDeviceFeatures enabled_features;
+
+    // Return the first matching depth-stencil format.  CHECKs that there is
+    // a match.
+    vk::Format GetMatchingDepthStencilFormat(std::vector<vk::Format> formats) const;
+
+    Caps() = default;
+    Caps(vk::PhysicalDevice device);
   };
 
   // Contains dynamically-obtained addresses of device-specific functions.
   struct ProcAddrs {
-    ProcAddrs(vk::Device device, const std::set<std::string>& extension_names);
-
     PFN_vkCreateSwapchainKHR CreateSwapchainKHR = nullptr;
     PFN_vkDestroySwapchainKHR DestroySwapchainKHR = nullptr;
     PFN_vkGetSwapchainImagesKHR GetSwapchainImagesKHR = nullptr;
@@ -57,8 +65,7 @@ class VulkanDeviceQueues
   };
 
   // Constructor.
-  static fxl::RefPtr<VulkanDeviceQueues> New(VulkanInstancePtr instance,
-                                             Params params);
+  static fxl::RefPtr<VulkanDeviceQueues> New(VulkanInstancePtr instance, Params params);
 
   ~VulkanDeviceQueues();
 
@@ -66,10 +73,9 @@ class VulkanDeviceQueues
   // Return true if all required extensions are present, and false otherwise.
   // NOTE: if an extension isn't found at first, we look in all required layers
   // to see if it is implemented there.
-  static bool ValidateExtensions(
-      vk::PhysicalDevice device,
-      const std::set<std::string>& required_extension_names,
-      const std::set<std::string>& required_layer_names);
+  static bool ValidateExtensions(vk::PhysicalDevice device,
+                                 const std::set<std::string>& required_extension_names,
+                                 const std::set<std::string>& required_layer_names);
 
   vk::Device vk_device() const { return device_; }
   vk::PhysicalDevice vk_physical_device() const { return physical_device_; }
@@ -78,9 +84,7 @@ class VulkanDeviceQueues
   vk::Queue vk_transfer_queue() const { return transfer_queue_; }
   uint32_t vk_transfer_queue_family() const { return transfer_queue_family_; }
   vk::SurfaceKHR vk_surface() const { return params_.surface; }
-  const vk::DispatchLoaderDynamic& dispatch_loader() const {
-    return dispatch_loader_;
-  }
+  const vk::DispatchLoaderDynamic& dispatch_loader() const { return dispatch_loader_; }
 
   // Return the parameters that were used to create this device and queues.
   const Params& params() const { return params_; }
@@ -97,10 +101,10 @@ class VulkanDeviceQueues
   VulkanContext GetVulkanContext() const;
 
  private:
-  VulkanDeviceQueues(vk::Device device, vk::PhysicalDevice physical_device,
-                     vk::Queue main_queue, uint32_t main_queue_family,
-                     vk::Queue transfer_queue, uint32_t transfer_queue_family,
-                     VulkanInstancePtr instance, Params params);
+  VulkanDeviceQueues(vk::Device device, vk::PhysicalDevice physical_device, vk::Queue main_queue,
+                     uint32_t main_queue_family, vk::Queue transfer_queue,
+                     uint32_t transfer_queue_family, VulkanInstancePtr instance, Params params,
+                     Caps caps);
 
   vk::Device device_;
   vk::PhysicalDevice physical_device_;
@@ -115,6 +119,8 @@ class VulkanDeviceQueues
   Caps caps_;
   ProcAddrs proc_addrs_;
 };
+
+ESCHER_DEBUG_PRINTABLE(VulkanDeviceQueues::Caps);
 
 };  // namespace escher
 

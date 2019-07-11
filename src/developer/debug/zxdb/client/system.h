@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_BIN_ZXDB_CLIENT_SYSTEM_H_
-#define GARNET_BIN_ZXDB_CLIENT_SYSTEM_H_
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SYSTEM_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SYSTEM_H_
 
 #include <functional>
 #include <memory>
@@ -25,6 +25,7 @@ namespace zxdb {
 class Breakpoint;
 class Download;
 class Err;
+class Filter;
 class SystemObserver;
 class SystemSymbols;
 
@@ -33,8 +34,7 @@ class SystemSymbols;
 class System : public ClientObject {
  public:
   // Callback for requesting the process tree.
-  using ProcessTreeCallback =
-      std::function<void(const Err&, debug_ipc::ProcessTreeReply)>;
+  using ProcessTreeCallback = std::function<void(const Err&, debug_ipc::ProcessTreeReply)>;
 
   explicit System(Session* session);
   ~System() override;
@@ -61,6 +61,11 @@ class System : public ClientObject {
   // returned pointers are managed by the System object and should not be cached
   // once you return to the message loop.
   virtual std::vector<Breakpoint*> GetBreakpoints() const = 0;
+
+  // Returns all filters currently in this System instance. The returned
+  // pointers are managed by the System object and should not be cached once
+  // you return to the message loop.
+  virtual std::vector<Filter*> GetFilters() const = 0;
 
   // Returns all symbol servers registered with this symbol instance. The
   // returned pointers are managed by the System object and should not be
@@ -96,6 +101,12 @@ class System : public ClientObject {
   // this call. Used for both internal and external breakpoints.
   virtual void DeleteBreakpoint(Breakpoint* breakpoint) = 0;
 
+  // Creates a new filter. It will have no associated pattern.
+  virtual Filter* CreateNewFilter() = 0;
+
+  // Delete a filter. The passed-in pointer will be invalid after this call.
+  virtual void DeleteFilter(Filter* filter) = 0;
+
   // Pauses (suspends in Zircon terms) all threads of all attached processes.
   //
   // The backend will try to ensure the threads are actually paused before
@@ -111,8 +122,7 @@ class System : public ClientObject {
   virtual bool HasDownload(const std::string& build_id) { return false; }
 
   // Get a test download object.
-  virtual std::shared_ptr<Download> InjectDownloadForTesting(
-      const std::string& build_id) {
+  virtual std::shared_ptr<Download> InjectDownloadForTesting(const std::string& build_id) {
     return nullptr;
   }
 
@@ -136,4 +146,4 @@ class System : public ClientObject {
 
 }  // namespace zxdb
 
-#endif  // GARNET_BIN_ZXDB_CLIENT_SYSTEM_H_
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SYSTEM_H_

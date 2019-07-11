@@ -17,6 +17,8 @@
 
 namespace zxdb {
 
+using debug_ipc::RegisterID;
+
 class FrameImplTest : public RemoteAPITest {
  public:
   std::unique_ptr<RemoteAPI> GetRemoteAPIImpl() {
@@ -24,6 +26,8 @@ class FrameImplTest : public RemoteAPITest {
     mock_remote_api_ = remote_api.get();
     return remote_api;
   }
+
+  MockRemoteAPI* mock_remote_api() const { return mock_remote_api_; }
 
  private:
   MockRemoteAPI* mock_remote_api_ = nullptr;  // Owned by System.
@@ -48,24 +52,20 @@ class MockThread : public Thread, public Stack::Delegate {
     return debug_ipc::ThreadRecord::BlockedReason::kNotBlocked;
   }
   void Pause(std::function<void()> on_paused) override {
-    debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE,
-                                                [on_paused]() { on_paused(); });
+    debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE, [on_paused]() { on_paused(); });
   }
   void Continue() override {}
   void ContinueWith(std::unique_ptr<ThreadController> controller,
                     std::function<void(const Err&)> on_continue) override {}
-  void JumpTo(uint64_t new_address,
-              std::function<void(const Err&)> cb) override {}
+  void JumpTo(uint64_t new_address, std::function<void(const Err&)> cb) override {}
   void NotifyControllerDone(ThreadController* controller) override {}
   void StepInstruction() override {}
   const Stack& GetStack() const override { return stack_; }
   Stack& GetStack() override { return stack_; }
-  void ReadRegisters(
-      std::vector<debug_ipc::RegisterCategory::Type> cats_to_get,
-      std::function<void(const Err&, const RegisterSet&)> cb) override {
+  void ReadRegisters(std::vector<debug_ipc::RegisterCategory::Type> cats_to_get,
+                     std::function<void(const Err&, const RegisterSet&)> cb) override {
     debug_ipc::MessageLoop::Current()->PostTask(
-        FROM_HERE,
-        [registers = register_contents_, cb]() { cb(Err(), registers); });
+        FROM_HERE, [registers = register_contents_, cb]() { cb(Err(), registers); });
   }
 
  private:
@@ -78,8 +78,7 @@ class MockThread : public Thread, public Stack::Delegate {
     FXL_NOTREACHED();  // Should not get called since we provide stack frames.
     return std::unique_ptr<Frame>();
   }
-  Location GetSymbolizedLocationForStackFrame(
-      const debug_ipc::StackFrame& input) override {
+  Location GetSymbolizedLocationForStackFrame(const debug_ipc::StackFrame& input) override {
     return Location(Location::State::kSymbolized, input.ip);
   }
 
@@ -101,18 +100,30 @@ TEST_F(FrameImplTest, AsyncBasePointer) {
   constexpr uint64_t kProcessKoid = 1234;
   Process* process = InjectProcess(kProcessKoid);
 
-  const debug_ipc::StackFrame stack(0x12345678, 0x7890);
+  // Provide a value for rax (DWARF reg 0) which will be used below.
+  constexpr uint64_t kAddress = 0x86124309723;
+  std::vector<debug_ipc::Register> frame_regs;
+  frame_regs.emplace_back(RegisterID::kX64_rax, kAddress);
+
+  const debug_ipc::StackFrame stack(0x12345678, 0x7890, 0, frame_regs);
   SymbolContext symbol_context = SymbolContext::ForRelativeAddresses();
 
-  // This describes the frame base location for the function.
-  const uint8_t kSelectReg0[1] = {llvm::dwarf::DW_OP_reg0};
-  VariableLocation frame_base(kSelectReg0, 1);
+  // Set the memory pointed to by the register.
+  constexpr uint64_t kMemoryValue = 0x78362419047;
+  std::vector<uint8_t> mem_value;
+  mem_value.resize(sizeof(kMemoryValue));
+  memcpy(&mem_value[0], &kMemoryValue, sizeof(kMemoryValue));
+  mock_remote_api()->AddMemory(kAddress, mem_value);
+
+  // This describes the frame base location for the function. This encodes
+  // the memory pointed to by register 0.
+  const uint8_t kSelectRegRef[2] = {llvm::dwarf::DW_OP_reg0, llvm::dwarf::DW_OP_deref};
+  VariableLocation frame_base(kSelectRegRef, 2);
 
   auto function = fxl::MakeRefCounted<Function>(DwarfTag::kSubprogram);
   function->set_frame_base(frame_base);
 
-  Location location(stack.ip, FileLine("file.cc", 12), 0, symbol_context,
-                    LazySymbol(function));
+  Location location(stack.ip, FileLine("file.cc", 12), 0, symbol_context, LazySymbol(function));
 
   MockThread thread(process);
   thread.register_contents().set_arch(debug_ipc::Arch::kX64);
@@ -122,47 +133,21 @@ TEST_F(FrameImplTest, AsyncBasePointer) {
   Frame* frame = frames[0].get();
   thread.GetStack().SetFramesForTest(std::move(frames), true);
 
-  // This should not be able to complete synchronously because reg0 isn't
+  // This should not be able to complete synchronously because the memory isn't
   // available synchronously.
   auto optional_base = frame->GetBasePointer();
   EXPECT_FALSE(optional_base);
 
-  uint64_t sync_base = 0;
-  frame->GetBasePointerAsync([&sync_base](uint64_t value) {
-    sync_base = value;
-    debug_ipc::MessageLoop::Current()->QuitNow();
-  });
-
-  // We didn't provide a "register 0" in the register reply which means the
-  // DWARF expression evaluation will fail.
-  debug_ipc::MessageLoop::Current()->Run();
-  EXPECT_EQ(0u, sync_base);
-
-  // Now set the registers. Need a new frame because the old computed base
-  // pointer will be cached.
-  frames.clear();
-  frames.push_back(std::make_unique<FrameImpl>(&thread, stack, location));
-  Frame* frame2 = frames[0].get();
-  thread.GetStack().SetFramesForTest(std::move(frames), true);
-  auto& general_regs =
-      thread.register_contents()
-          .category_map()[debug_ipc::RegisterCategory::Type::kGeneral];
-
-  // Set a value for "rax" which is register 0 on x64.
-  uint64_t kReg0Value = 0x86124309723;
-  general_regs.emplace_back(
-      debug_ipc::Register(debug_ipc::RegisterID::kX64_rax, kReg0Value));
-
-  sync_base = 0;
-  frame2->GetBasePointerAsync([&sync_base](uint64_t value) {
-    sync_base = value;
+  uint64_t result_base = 0;
+  frame->GetBasePointerAsync([&result_base](uint64_t value) {
+    result_base = value;
     debug_ipc::MessageLoop::Current()->QuitNow();
   });
 
   // The base pointer should have picked up our register0 value for the base
   // pointer.
   debug_ipc::MessageLoop::Current()->Run();
-  EXPECT_EQ(kReg0Value, sync_base);
+  EXPECT_EQ(kMemoryValue, result_base);
 }
 
 }  // namespace zxdb

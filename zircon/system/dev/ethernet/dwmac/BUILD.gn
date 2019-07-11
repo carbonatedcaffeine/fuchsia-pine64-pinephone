@@ -4,9 +4,9 @@
 
 driver("dwmac") {
   sources = [
-    "dwmac-debug.cpp",
-    "dwmac.cpp",
-    "pinned-buffer.cpp",
+    "dwmac-debug.cc",
+    "dwmac.cc",
+    "pinned-buffer.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.clock",
@@ -18,12 +18,13 @@ driver("dwmac") {
     "$zx/system/banjo/ddk.protocol.i2c",
     "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/banjo/ddk.protocol.test",
+    "$zx/system/dev/lib/device-protocol-pdev",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",
     "$zx/system/ulib/fbl",
     "$zx/system/ulib/fzl",
-    "$zx/system/ulib/pretty",
     "$zx/system/ulib/sync",
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",

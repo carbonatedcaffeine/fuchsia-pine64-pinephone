@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_BREAKPOINT_IMPL_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_BREAKPOINT_IMPL_H_
 
 #include <map>
 
@@ -21,9 +22,7 @@ namespace zxdb {
 
 class BreakpointLocationImpl;
 
-class BreakpointImpl : public Breakpoint,
-                       public ProcessObserver,
-                       public SystemObserver {
+class BreakpointImpl : public Breakpoint, public ProcessObserver, public SystemObserver {
  public:
   // The controller can be null in which case it will perform the default
   // behavior. The controller must outlive the breakpoint.
@@ -60,18 +59,15 @@ class BreakpointImpl : public Breakpoint,
 
   // ProcessObserver.
   void WillDestroyThread(Process* process, Thread* thread) override;
-  void DidLoadModuleSymbols(Process* process,
-                            LoadedModuleSymbols* module) override;
-  void WillUnloadModuleSymbols(Process* process,
-                               LoadedModuleSymbols* module) override;
+  void DidLoadModuleSymbols(Process* process, LoadedModuleSymbols* module) override;
+  void WillUnloadModuleSymbols(Process* process, LoadedModuleSymbols* module) override;
 
   // SystemObserver.
   void WillDestroyTarget(Target* target) override;
   void GlobalDidCreateProcess(Process* process) override;
   void GlobalWillDestroyProcess(Process* process) override;
 
-  void SyncBackend(std::function<void(const Err&)> callback =
-                       std::function<void(const Err&)>());
+  void SyncBackend(std::function<void(const Err&)> callback = std::function<void(const Err&)>());
   void SendBackendAddOrChange(std::function<void(const Err&)> callback);
   void SendBackendRemove(std::function<void(const Err&)> callback);
 
@@ -113,3 +109,5 @@ class BreakpointImpl : public Breakpoint,
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_BREAKPOINT_IMPL_H_

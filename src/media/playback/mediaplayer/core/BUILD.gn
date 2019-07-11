@@ -30,8 +30,8 @@ source_set("core") {
   ]
 
   deps = [
-    "//garnet/public/lib/media/timeline",
     "//sdk/lib/fidl/cpp",
+    "//sdk/lib/media/cpp",
     "//src/lib/fxl",
     "//src/media/playback/mediaplayer/decode",
     "//src/media/playback/mediaplayer/demux",
@@ -64,10 +64,10 @@ test("tests") {
     "//garnet/public/lib/fsl",
     "//garnet/public/lib/gtest",
     "//src/lib/fxl",
+    "//src/lib/fxl/test:gtest_main",
     "//src/media/playback/mediaplayer/decode",
     "//src/media/playback/mediaplayer/demux",
     "//src/media/playback/mediaplayer/graph",
     "//src/media/playback/mediaplayer/render",
-    "//third_party/googletest:gtest_main",
   ]
 }

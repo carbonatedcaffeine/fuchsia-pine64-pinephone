@@ -222,7 +222,7 @@ static zx_status_t brcmf_p2p_set_discover_state(struct brcmf_if* ifp, uint8_t st
                                                 uint16_t chanspec, uint16_t listen_ms) {
     struct brcmf_p2p_disc_st_le discover_state;
     zx_status_t ret = ZX_OK;
-    brcmf_dbg(TRACE, "enter\n");
+    BRCMF_DBG(TRACE, "enter\n");
 
     discover_state.state = state;
     discover_state.chspec = chanspec;
@@ -242,30 +242,30 @@ static zx_status_t brcmf_p2p_enable_discovery(struct brcmf_p2p_info* p2p) {
     struct brcmf_cfg80211_vif* vif;
     zx_status_t ret = ZX_OK;
 
-    brcmf_dbg(TRACE, "enter\n");
+    BRCMF_DBG(TRACE, "enter\n");
     vif = p2p->bss_idx[P2PAPI_BSSCFG_DEVICE].vif;
     if (!vif) {
-        brcmf_err("P2P config device not available\n");
+        BRCMF_ERR("P2P config device not available\n");
         ret = ZX_ERR_UNAVAILABLE;
         goto exit;
     }
 
     if (brcmf_test_bit_in_array(BRCMF_P2P_STATUS_ENABLED, &p2p->status)) {
-        brcmf_dbg(INFO, "P2P config device already configured\n");
+        BRCMF_DBG(INFO, "P2P config device already configured\n");
         goto exit;
     }
 
     /* Re-initialize P2P Discovery in the firmware */
     vif = p2p->bss_idx[P2PAPI_BSSCFG_PRIMARY].vif;
-    ret = brcmf_fil_iovar_int_set(vif->ifp, "p2p_disc", 1);
+    ret = brcmf_fil_iovar_int_set(vif->ifp, "p2p_disc", 1, nullptr);
     if (ret != ZX_OK) {
-        brcmf_err("set p2p_disc error\n");
+        BRCMF_ERR("set p2p_disc error\n");
         goto exit;
     }
     vif = p2p->bss_idx[P2PAPI_BSSCFG_DEVICE].vif;
     ret = brcmf_p2p_set_discover_state(vif->ifp, WL_P2P_DISC_ST_SCAN, 0, 0);
     if (ret != ZX_OK) {
-        brcmf_err("unable to set WL_P2P_DISC_ST_SCAN\n");
+        BRCMF_ERR("unable to set WL_P2P_DISC_ST_SCAN\n");
         goto exit;
     }
 
@@ -277,7 +277,7 @@ static zx_status_t brcmf_p2p_enable_discovery(struct brcmf_p2p_info* p2p) {
      */
     ret = brcmf_fil_bsscfg_int_set(vif->ifp, "wsec", AES_ENABLED);
     if (ret != ZX_OK) {
-        brcmf_err("wsec error %d\n", ret);
+        BRCMF_ERR("wsec error %d\n", ret);
         goto exit;
     }
 
@@ -302,13 +302,13 @@ static zx_status_t brcmf_p2p_discover_listen(struct brcmf_p2p_info* p2p, uint16_
 
     vif = p2p->bss_idx[P2PAPI_BSSCFG_DEVICE].vif;
     if (!vif) {
-        brcmf_err("Discovery is not set, so we have nothing to do\n");
+        BRCMF_ERR("Discovery is not set, so we have nothing to do\n");
         err = ZX_ERR_UNAVAILABLE;
         goto exit;
     }
 
     if (brcmf_test_bit_in_array(BRCMF_P2P_STATUS_DISCOVER_LISTEN, &p2p->status)) {
-        brcmf_err("Previous LISTEN is not completed yet\n");
+        BRCMF_ERR("Previous LISTEN is not completed yet\n");
         /* WAR: prevent cookie mismatch in wpa_supplicant return OK */
         goto exit;
     }
@@ -343,7 +343,7 @@ zx_status_t brcmf_p2p_remain_on_channel(struct wiphy* wiphy, struct wireless_dev
     uint16_t channel_nr;
 
     channel_nr = ieee80211_frequency_to_channel(channel->center_freq);
-    brcmf_dbg(TRACE, "Enter, channel: %d, duration ms (%d)\n", channel_nr, duration);
+    BRCMF_DBG(TRACE, "Enter, channel: %d, duration ms (%d)\n", channel_nr, duration);
 
     err = brcmf_p2p_enable_discovery(p2p);
     if (err != ZX_OK) {
@@ -375,12 +375,12 @@ zx_status_t brcmf_p2p_notify_listen_complete(struct brcmf_if* ifp, const struct 
     struct brcmf_cfg80211_info* cfg = ifp->drvr->config;
     struct brcmf_p2p_info* p2p = &cfg->p2p;
 
-    brcmf_dbg(TRACE, "Enter\n");
+    BRCMF_DBG(TRACE, "Enter\n");
     if (brcmf_test_and_clear_bit_in_array(BRCMF_P2P_STATUS_DISCOVER_LISTEN, &p2p->status)) {
         if (brcmf_test_and_clear_bit_in_array(BRCMF_P2P_STATUS_WAITING_NEXT_AF_LISTEN,
                 &p2p->status)) {
             brcmf_clear_bit_in_array(BRCMF_P2P_STATUS_WAITING_NEXT_ACT_FRAME, &p2p->status);
-            brcmf_dbg(INFO, "Listen DONE, wake up wait_next_af\n");
+            BRCMF_DBG(INFO, "Listen DONE, wake up wait_next_af\n");
             sync_completion_signal(&p2p->wait_next_af);
         }
 
@@ -413,7 +413,7 @@ bool brcmf_p2p_scan_finding_common_channel(struct brcmf_cfg80211_info* cfg,
     }
 
     if (bi == NULL) {
-        brcmf_dbg(TRACE, "ACTION FRAME SCAN Done\n");
+        BRCMF_DBG(TRACE, "ACTION FRAME SCAN Done\n");
         if (afx_hdl->peer_chan == P2P_INVALID_CHANNEL) {
             sync_completion_signal(&afx_hdl->act_frm_scan);
         }
@@ -434,7 +434,7 @@ bool brcmf_p2p_scan_finding_common_channel(struct brcmf_cfg80211_info* cfg,
             bi->ctl_ch = ch.control_ch_num;
         }
         afx_hdl->peer_chan = bi->ctl_ch;
-        brcmf_dbg(TRACE, "ACTION FRAME SCAN : Peer %pM found, channel : %d\n", afx_hdl->tx_dst_addr,
+        BRCMF_DBG(TRACE, "ACTION FRAME SCAN : Peer %pM found, channel : %d\n", afx_hdl->tx_dst_addr,
                   afx_hdl->peer_chan);
         sync_completion_signal(&afx_hdl->act_frm_scan);
     }
@@ -456,11 +456,12 @@ static void brcmf_p2p_get_current_chanspec(struct brcmf_p2p_info* p2p, uint16_t*
 
     ifp = p2p->bss_idx[P2PAPI_BSSCFG_PRIMARY].vif->ifp;
 
-    if (brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_BSSID, mac_addr, ETH_ALEN) == ZX_OK) {
+    if (brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_BSSID, mac_addr, ETH_ALEN, nullptr) == ZX_OK) {
         buf = static_cast<decltype(buf)>(calloc(1, WL_BSS_INFO_MAX));
         if (buf != NULL) {
             *(uint32_t*)buf = WL_BSS_INFO_MAX;
-            if (brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_BSS_INFO, buf, WL_BSS_INFO_MAX) == ZX_OK) {
+            if (brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_BSS_INFO, buf, WL_BSS_INFO_MAX, nullptr)
+                == ZX_OK) {
                 bi = (struct brcmf_bss_info_le*)(buf + 4);
                 *chanspec = bi->chanspec;
                 free(buf);
@@ -490,17 +491,17 @@ zx_status_t brcmf_p2p_ifchange(struct brcmf_cfg80211_info* cfg,
     zx_status_t err;
     uint16_t chanspec;
 
-    brcmf_dbg(TRACE, "Enter\n");
+    BRCMF_DBG(TRACE, "Enter\n");
 
     vif = p2p->bss_idx[P2PAPI_BSSCFG_PRIMARY].vif;
     if (!vif) {
-        brcmf_err("vif for P2PAPI_BSSCFG_PRIMARY does not exist\n");
+        BRCMF_ERR("vif for P2PAPI_BSSCFG_PRIMARY does not exist\n");
         return ZX_ERR_UNAVAILABLE;
     }
     brcmf_notify_escan_complete(cfg, vif->ifp, true, true);
     vif = p2p->bss_idx[P2PAPI_BSSCFG_CONNECTION].vif;
     if (!vif) {
-        brcmf_err("vif for P2PAPI_BSSCFG_CONNECTION does not exist\n");
+        BRCMF_ERR("vif for P2PAPI_BSSCFG_CONNECTION does not exist\n");
         return ZX_ERR_UNAVAILABLE;
     }
     brcmf_set_mpc(vif->ifp, 0);
@@ -522,24 +523,25 @@ zx_status_t brcmf_p2p_ifchange(struct brcmf_cfg80211_info* cfg,
     // it properly.
     if (brcmf_cfg80211_vif_event_armed(cfg)) {
         // TODO(cphoenix): Deal with this better, or prevent it
-        brcmf_err(" * * Concurrent vif events should never happen.");
+        BRCMF_ERR(" * * Concurrent vif events should never happen.");
     }
 
     brcmf_cfg80211_arm_vif_event(cfg, vif, BRCMF_E_IF_CHANGE);
-    err = brcmf_fil_iovar_data_set(vif->ifp, "p2p_ifupd", &if_request, sizeof(if_request));
+    err = brcmf_fil_iovar_data_set(vif->ifp, "p2p_ifupd", &if_request, sizeof(if_request), nullptr);
     if (err != ZX_OK) {
-        brcmf_err("p2p_ifupd FAILED, err=%d\n", err);
+        BRCMF_ERR("p2p_ifupd FAILED, err=%d\n", err);
         brcmf_cfg80211_disarm_vif_event(cfg);
         return err;
     }
     err = brcmf_cfg80211_wait_vif_event(cfg, ZX_MSEC(BRCMF_VIF_EVENT_TIMEOUT_MSEC));
     brcmf_cfg80211_disarm_vif_event(cfg);
     if (err != ZX_OK) {
-        brcmf_err("No BRCMF_E_IF_CHANGE event received\n");
+        BRCMF_ERR("No BRCMF_E_IF_CHANGE event received\n");
         return ZX_ERR_IO;
     }
 
-    err = brcmf_fil_cmd_int_set(vif->ifp, BRCMF_C_SET_SCB_TIMEOUT, BRCMF_SCB_TIMEOUT_VALUE);
+    err = brcmf_fil_cmd_int_set(vif->ifp, BRCMF_C_SET_SCB_TIMEOUT, BRCMF_SCB_TIMEOUT_VALUE,
+                                nullptr);
 
     return err;
 }

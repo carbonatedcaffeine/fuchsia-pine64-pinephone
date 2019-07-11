@@ -21,6 +21,7 @@ use futures::future::FutureObj;
 
 mod auth_provider_connection;
 mod error;
+mod fake_auth_provider_supplier;
 mod token_manager;
 mod tokens;
 

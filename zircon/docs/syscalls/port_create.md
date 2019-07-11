@@ -10,7 +10,7 @@ Create an IO port.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_status_t zx_port_create(uint32_t options, zx_handle_t* out);
@@ -28,7 +28,8 @@ In the case where a port is bound to an interrupt, the interrupt packets are del
 dedicated queue on ports and are higher priority than other non-interrupt packets.
 
 The returned handle will have:
-  * `ZX_RIGHT_TRANSFER`: allowing them to be sent to another process via channel write.
+
+  * `ZX_RIGHT_TRANSFER`: allowing them to be sent to another process through [`zx_channel_write()`].
   * `ZX_RIGHT_WRITE`: allowing packets to be *queued*.
   * `ZX_RIGHT_READ`: allowing packets to be *read*.
   * `ZX_RIGHT_DUPLICATE`: allowing them to be *duplicated*.
@@ -64,6 +65,7 @@ In a future builds this error will no longer occur.
 
 <!-- References updated by update-docs-from-abigen, do not edit. -->
 
+[`zx_channel_write()`]: channel_write.md
 [`zx_handle_close()`]: handle_close.md
 [`zx_handle_duplicate()`]: handle_duplicate.md
 [`zx_handle_replace()`]: handle_replace.md

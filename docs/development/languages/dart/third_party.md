@@ -2,6 +2,7 @@
 
 
 There are two types of third-party dependencies in the Fuchsia tree:
+
 - extracted from [pub][pub];
 - sync'd from Git.
 
@@ -16,14 +17,17 @@ providing the necessary package coverage for the entire tree.
 
 Additionally, projects may request third-party dependencies to be imported
 through the following procedure:
+
 1. create a `dart_dependencies.yaml` file in the project
 2. add the desired dependencies in that file:
+
 ```
 name: my_project
 dependencies:
   foo: ^4.0.0
   bar: >=0.1.0
 ```
+
 3. add a reference to the file in `//scripts/dart/update_3p_packages.py`
 4. run that script
 5. merge your changes to `dart_dependencies.yaml` to master

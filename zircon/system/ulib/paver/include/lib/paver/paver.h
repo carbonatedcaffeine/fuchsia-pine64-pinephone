@@ -13,6 +13,18 @@
 
 namespace paver {
 
+// Options for locating an FVM within a partition.
+enum class BindOption {
+    // Bind to the FVM, if it exists already.
+    TryBind,
+    // Reformat the partition, regardless of if it already exists as an FVM.
+    Reformat,
+};
+
+// Public for testing.
+fbl::unique_fd FvmPartitionFormat(fbl::unique_fd partition_fd, size_t slice_size,
+                                  BindOption option);
+
 class Paver {
 public:
     // Writes a kernel or verified boot metadata payload to the appropriate
@@ -36,17 +48,11 @@ public:
         devfs_root_ = std::move(devfs_root);
     }
 
-    void set_sysinfo(zx::channel sysinfo) {
-        sysinfo_ = std::move(sysinfo);
-    }
-
 private:
     bool InitializePartitioner();
 
     // Used for test injection.
     fbl::unique_fd devfs_root_;
-    // Used for test injection.
-    zx::channel sysinfo_;
     // Lazily initialized to allow test to inject a fake devfs root after creating.
     std::unique_ptr<DevicePartitioner> partitioner_;
 };

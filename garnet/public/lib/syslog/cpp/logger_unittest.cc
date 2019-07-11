@@ -15,15 +15,15 @@ __BEGIN_CDECLS
 
 // This does not come from header file as this function should only be used in
 // tests and is not for general use.
-void fx_log_reset_global(void);
+void fx_log_reset_global_for_testing(void);
 __END_CDECLS
 
 namespace {
 
 class Cleanup {
  public:
-  Cleanup() { fx_log_reset_global(); }
-  ~Cleanup() { fx_log_reset_global(); }
+  Cleanup() { fx_log_reset_global_for_testing(); }
+  ~Cleanup() { fx_log_reset_global_for_testing(); }
 };
 
 bool ends_with(const char* str, const char* suffix) {
@@ -76,7 +76,7 @@ void output_compare_helper(zx::socket local, fx_log_severity_t severity,
 TEST(LogInit, Init) {
   Cleanup cleanup;
   ASSERT_EQ(ZX_OK, syslog::InitLogger());
-  fx_log_reset_global();
+  fx_log_reset_global_for_testing();
   ASSERT_EQ(ZX_OK, syslog::InitLogger({"tag1", "tag2"}));
 }
 
@@ -244,6 +244,27 @@ TEST(Logger, LogFirstN) {
   // Check that we can read 31 copies of |msg| from |local|.
   for (auto i = 0; i < 31; i++) {
     output_compare_helper_ptr(&local, FX_LOG_ERROR, msg, nullptr, 0);
+  }
+  // Check there are no more available bytes.
+  size_t outstanding_bytes = 10u;  // init to non zero value.
+  ASSERT_EQ(ZX_OK, GetAvailableBytes(local, &outstanding_bytes));
+  EXPECT_EQ(0u, outstanding_bytes);
+}
+
+TEST(Logger, LogFirstNWithTag) {
+  Cleanup cleanup;
+  zx::socket local, remote;
+  EXPECT_EQ(ZX_OK, zx::socket::create(ZX_SOCKET_DATAGRAM, &local, &remote));
+  ASSERT_EQ(ZX_OK, init_helper(remote.release(), nullptr, 0));
+  const char* msg = "test message";
+  const char* tags[] = {"tag"};
+  for (auto i = 0; i < 100; i++) {
+    FX_LOGST_FIRST_N(ERROR, 31, tags[0]) << msg;
+  }
+
+  // Check that we can read 31 copies of |msg| from |local|.
+  for (auto i = 0; i < 31; i++) {
+    output_compare_helper_ptr(&local, FX_LOG_ERROR, msg, tags, 1);
   }
   // Check there are no more available bytes.
   size_t outstanding_bytes = 10u;  // init to non zero value.

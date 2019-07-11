@@ -16,7 +16,7 @@
 //! local address and port and a single remote address and port. By virtue of
 //! being bound to a local address, it is also bound to a local interface. This
 //! means that, regardless of the entries in the forwarding table, all traffic
-//! on that connection will always egress over the same interface. [1] This also
+//! on that connection will always egress over the same interface. [^1] This also
 //! means that, if the interface's address changes, any connections bound to it
 //! are severed.
 //!
@@ -51,9 +51,9 @@
 //! happen to bind all of the addresses, rather than appearing like wildcard
 //! listeners.
 //!
-//! [1] It is an open design question as to whether incoming traffic on the
-//! connection will be accepted from a different interface. This is part of the
-//! "weak host model" vs "strong host model" discussion.
+//! [^1]: It is an open design question as to whether incoming traffic on the
+//!       connection will be accepted from a different interface. This is part
+//!       of the "weak host model" vs "strong host model" discussion.
 
 pub(crate) mod tcp;
 pub(crate) mod udp;
@@ -80,7 +80,7 @@ impl<D: EventDispatcher> Default for TransportLayerState<D> {
 }
 
 /// The identifier for timer events in the transport layer.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub(crate) enum TransportLayerTimerId {
     /// A timer event in the TCP layer
     Tcp(tcp::TcpTimerId),
@@ -150,28 +150,28 @@ impl<L: Eq + Hash, A: Eq + Hash> Default for ListenerAddrMap<L, A> {
 ///
 /// It differs from a `ListenerAddrMap` in that only a single address per
 /// connection is supported.
-struct ConnAddrMap<C, A> {
+pub(crate) struct ConnAddrMap<C, A> {
     conn_to_addr: HashMap<C, A>,
     addr_to_conn: HashMap<A, C>,
 }
 
 impl<C: Eq + Hash + Clone, A: Eq + Hash + Clone> ConnAddrMap<C, A> {
-    fn insert(&mut self, conn: C, addr: A) {
+    pub(crate) fn insert(&mut self, conn: C, addr: A) {
         self.addr_to_conn.insert(addr.clone(), conn.clone());
         self.conn_to_addr.insert(conn, addr);
     }
 }
 
 impl<C: Eq + Hash, A: Eq + Hash> ConnAddrMap<C, A> {
-    fn get_by_addr(&self, addr: &A) -> Option<&C> {
+    pub(crate) fn get_by_addr(&self, addr: &A) -> Option<&C> {
         self.addr_to_conn.get(addr)
     }
 
-    fn get_by_conn(&self, conn: &C) -> Option<&A> {
+    pub(crate) fn get_by_conn(&self, conn: &C) -> Option<&A> {
         self.conn_to_addr.get(conn)
     }
 
-    fn remove_by_conn(&mut self, conn: &C) -> Option<A> {
+    pub(crate) fn remove_by_conn(&mut self, conn: &C) -> Option<A> {
         let addr = self.conn_to_addr.remove(conn)?;
         self.addr_to_conn.remove(&addr).unwrap();
         Some(addr)

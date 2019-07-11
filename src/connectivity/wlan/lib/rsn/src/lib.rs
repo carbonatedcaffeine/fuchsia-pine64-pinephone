@@ -29,17 +29,26 @@ use crate::key::exchange::{
 use crate::rsna::esssa::EssSa;
 use crate::rsna::{Role, UpdateSink};
 use std::sync::{Arc, Mutex};
+use wlan_common::ie::{rsn::rsne::Rsne, wpa::WpaIe};
 
 pub use crate::auth::psk;
 pub use crate::crypto_utils::nonce;
 pub use crate::key::gtk;
 pub use crate::key::gtk::GtkProvider;
-pub use crate::rsna::NegotiatedRsne;
-use wlan_common::ie::rsn::rsne;
+pub use crate::rsna::NegotiatedProtection;
+
+use zerocopy::ByteSlice;
 
 #[derive(Debug, PartialEq)]
 pub struct Supplicant {
     esssa: EssSa,
+}
+
+/// Any information (i.e. info elements) used to negotiate protection on an RSN.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProtectionInfo {
+    Rsne(Rsne),
+    LegacyWpa(WpaIe),
 }
 
 impl Supplicant {
@@ -48,24 +57,24 @@ impl Supplicant {
         nonce_rdr: Arc<nonce::NonceReader>,
         psk: psk::Psk,
         s_addr: [u8; 6],
-        s_rsne: rsne::Rsne,
+        s_protection: ProtectionInfo,
         a_addr: [u8; 6],
-        a_rsne: rsne::Rsne,
+        a_protection: ProtectionInfo,
     ) -> Result<Supplicant, failure::Error> {
-        let negotiated_rsne = NegotiatedRsne::from_rsne(&s_rsne)?;
-        let akm = negotiated_rsne.akm.clone();
-        let group_data = negotiated_rsne.group_data.clone();
+        let negotiated_protection = NegotiatedProtection::from_protection(&s_protection)?;
+        let akm = negotiated_protection.akm.clone();
+        let group_data = negotiated_protection.group_data.clone();
 
         let esssa = EssSa::new(
             Role::Supplicant,
-            negotiated_rsne,
+            negotiated_protection,
             auth::Config::ComputedPsk(psk),
             exchange::Config::FourWayHandshake(fourway::Config::new(
                 Role::Supplicant,
                 s_addr,
-                s_rsne,
+                s_protection,
                 a_addr,
-                a_rsne,
+                a_protection,
                 nonce_rdr,
                 None,
             )?),
@@ -98,10 +107,10 @@ impl Supplicant {
     /// unsupported types; the Supplicant will filter and drop all unexpected frames.
     /// Outbound EAPOL frames, status and key updates will be pushed into the `update_sink`.
     /// The method will return an `Error` if the frame was invalid.
-    pub fn on_eapol_frame(
+    pub fn on_eapol_frame<B: ByteSlice>(
         &mut self,
         update_sink: &mut UpdateSink,
-        frame: &eapol::Frame,
+        frame: eapol::Frame<B>,
     ) -> Result<(), failure::Error> {
         self.esssa.on_eapol_frame(update_sink, frame)
     }
@@ -120,21 +129,21 @@ impl Authenticator {
         gtk_provider: Arc<Mutex<gtk::GtkProvider>>,
         psk: psk::Psk,
         s_addr: [u8; 6],
-        s_rsne: rsne::Rsne,
+        s_protection: ProtectionInfo,
         a_addr: [u8; 6],
-        a_rsne: rsne::Rsne,
+        a_protection: ProtectionInfo,
     ) -> Result<Authenticator, failure::Error> {
-        let negotiated_rsne = NegotiatedRsne::from_rsne(&s_rsne)?;
+        let negotiated_protection = NegotiatedProtection::from_protection(&s_protection)?;
         let esssa = EssSa::new(
             Role::Authenticator,
-            negotiated_rsne,
+            negotiated_protection,
             auth::Config::ComputedPsk(psk),
             exchange::Config::FourWayHandshake(fourway::Config::new(
                 Role::Authenticator,
                 s_addr,
-                s_rsne,
+                s_protection,
                 a_addr,
-                a_rsne,
+                a_protection,
                 nonce_rdr,
                 Some(gtk_provider),
             )?),
@@ -145,8 +154,8 @@ impl Authenticator {
         Ok(Authenticator { esssa })
     }
 
-    pub fn get_negotiated_rsne(&self) -> &NegotiatedRsne {
-        &self.esssa.negotiated_rsne
+    pub fn get_negotiated_protection(&self) -> &NegotiatedProtection {
+        &self.esssa.negotiated_protection
     }
 
     /// Resets all established Security Associations and invalidates all derived keys.
@@ -171,10 +180,10 @@ impl Authenticator {
     /// unsupported types; the Authenticator will filter and drop all unexpected frames.
     /// Outbound EAPOL frames, status and key updates will be pushed into the `update_sink`.
     /// The method will return an `Error` if the frame was invalid.
-    pub fn on_eapol_frame(
+    pub fn on_eapol_frame<B: ByteSlice>(
         &mut self,
         update_sink: &mut UpdateSink,
-        frame: &eapol::Frame,
+        frame: eapol::Frame<B>,
     ) -> Result<(), failure::Error> {
         self.esssa.on_eapol_frame(update_sink, frame)
     }
@@ -233,9 +242,9 @@ pub enum Error {
     #[fail(display = "cannot initiate Fourway Handshake as Supplicant")]
     UnexpectedInitiationRequest,
     #[fail(display = "unsupported Key Descriptor Type: {:?}", _0)]
-    UnsupportedKeyDescriptor(u8),
+    UnsupportedKeyDescriptor(eapol::KeyDescriptor),
     #[fail(display = "unexpected Key Descriptor Type {:?}; expected {:?}", _0, _1)]
-    InvalidKeyDescriptor(u8, eapol::KeyDescriptor),
+    InvalidKeyDescriptor(eapol::KeyDescriptor, eapol::KeyDescriptor),
     #[fail(display = "unsupported Key Descriptor Version: {:?}", _0)]
     UnsupportedKeyDescriptorVersion(u16),
     #[fail(display = "only PTK and GTK derivation is supported")]
@@ -268,12 +277,18 @@ pub enum Error {
     InvalidKeyAckBitSupplicant,
     #[fail(display = "invalid encrypted_key_data bit value")]
     InvalidEncryptedKeyDataBitValue(MessageNumber),
+    #[fail(display = "encrypted_key_data bit requires MIC bit to be set")]
+    InvalidMicBitForEncryptedKeyData,
     #[fail(display = "invalid key length {:?}; expected {:?}", _0, _1)]
     InvalidKeyLength(u16, u16),
     #[fail(display = "unsupported cipher suite")]
     UnsupportedCipherSuite,
     #[fail(display = "unsupported AKM suite")]
     UnsupportedAkmSuite,
+    #[fail(display = "cannot compute MIC for key frames which haven't set their MIC bit")]
+    ComputingMicForUnprotectedFrame,
+    #[fail(display = "the key frame's MIC size ({}) differes from the expected size: {}", _0, _1)]
+    MicSizesDiffer(usize, usize),
     #[fail(display = "invalid MIC size")]
     InvalidMicSize,
     #[fail(display = "invalid Nonce; expected to be non-zero")]
@@ -297,7 +312,7 @@ pub enum Error {
     #[fail(display = "invalid nonce; nonce must match nonce from 1st message")]
     ErrorNonceDoesntMatch,
     #[fail(display = "invalid IV; EAPOL protocol version: {:?}; message: {:?}", _0, _1)]
-    InvalidIv(u8, MessageNumber),
+    InvalidIv(eapol::ProtocolVersion, MessageNumber),
     #[fail(display = "PMKSA was not yet established")]
     PmksaNotEstablished,
     #[fail(display = "invalid nonce size; expected 32 bytes, found: {:?}", _0)]
@@ -308,8 +323,8 @@ pub enum Error {
     BufferTooSmall(usize, usize),
     #[fail(display = "error, SMK-Handshake is not supported")]
     SmkHandshakeNotSupported,
-    #[fail(display = "error, negotiated RSNE is invalid")]
-    InvalidNegotiatedRsne,
+    #[fail(display = "error, negotiated protection is invalid")]
+    InvalidNegotiatedProtection,
 }
 
 impl From<std::io::Error> for Error {

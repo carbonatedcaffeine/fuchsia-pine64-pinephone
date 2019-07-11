@@ -12,15 +12,15 @@ use crate::tests::*;
 use failure::{Error, ResultExt};
 use fidl_fuchsia_ui_text as txt;
 use fidl_fuchsia_ui_text_testing as txt_testing;
-use fuchsia_async as fasync;
+use fuchsia_async::{self as fasync, DurationExt};
 use fuchsia_component::server::ServiceFs;
-use fuchsia_zircon::{DurationNum, Time};
+use fuchsia_zircon::DurationNum;
 use futures::future::FutureObj;
 use futures::prelude::*;
 use lazy_static::lazy_static;
 
 lazy_static! {
-    pub static ref TEST_TIMEOUT: Time = 10.seconds().after_now();
+    pub static ref TEST_TIMEOUT: fasync::Time = 10.seconds().after_now();
 }
 
 macro_rules! text_field_tests {
@@ -46,43 +46,37 @@ fn main() -> Result<(), Error> {
     let mut executor = fuchsia_async::Executor::new()
         .context("Creating fuchsia_async executor for text tests failed")?;
     let mut fs = ServiceFs::new();
-    fs.dir("public").add_fidl_service(bind_text_tester);
+    fs.dir("svc").add_fidl_service(bind_text_tester);
     fs.take_and_serve_directory_handle()?;
     executor.run_singlethreaded(fs.collect::<()>());
     Ok(())
 }
 
 fn bind_text_tester(mut stream: txt_testing::TextFieldTestSuiteRequestStream) {
-    fasync::spawn(
-        async move {
-            while let Some(msg) = await!(stream.try_next())
-                .expect("error reading value from IME service request stream")
-            {
-                match msg {
-                    txt_testing::TextFieldTestSuiteRequest::RunTest {
-                        field,
-                        test_id,
-                        responder,
-                    } => {
-                        let res = await!(run_test(
-                            field.into_proxy().expect("failed to convert ClientEnd to proxy"),
-                            test_id
-                        ));
-                        let (ok, message) = match res {
-                            Ok(()) => (true, format!("passed")),
-                            Err(e) => (false, e),
-                        };
-                        responder.send(ok, &message).expect("failed to send response to RunTest");
-                    }
-                    txt_testing::TextFieldTestSuiteRequest::ListTests { responder } => {
-                        responder
-                            .send(&mut list_tests().iter_mut())
-                            .expect("failed to send response to ListTests");
-                    }
+    fasync::spawn(async move {
+        while let Some(msg) =
+            await!(stream.try_next()).expect("error reading value from IME service request stream")
+        {
+            match msg {
+                txt_testing::TextFieldTestSuiteRequest::RunTest { field, test_id, responder } => {
+                    let res = await!(run_test(
+                        field.into_proxy().expect("failed to convert ClientEnd to proxy"),
+                        test_id
+                    ));
+                    let (ok, message) = match res {
+                        Ok(()) => (true, format!("passed")),
+                        Err(e) => (false, e),
+                    };
+                    responder.send(ok, &message).expect("failed to send response to RunTest");
+                }
+                txt_testing::TextFieldTestSuiteRequest::ListTests { responder } => {
+                    responder
+                        .send(&mut list_tests().iter_mut())
+                        .expect("failed to send response to ListTests");
                 }
             }
-        },
-    );
+        }
+    });
 }
 
 async fn run_test(text_field: txt::TextFieldProxy, test_id: u64) -> Result<(), String> {

@@ -12,7 +12,6 @@
 #include <sys/uio.h>
 #include <threads.h>
 
-#include <lib/zircon-internal/default_stack_size.h>
 #include <runtime/thread.h>
 #include <runtime/tls.h>
 #include <zircon/assert.h>
@@ -113,7 +112,44 @@ static inline struct pthread* tp_to_pthread(void* tp) {
 
 #define SIGALL_SET ((sigset_t*)(const unsigned long long[2]){-1, -1})
 
-#define PTHREAD_MUTEX_MASK (PTHREAD_MUTEX_RECURSIVE | PTHREAD_MUTEX_ERRORCHECK)
+#define PTHREAD_MUTEX_TYPE_MASK (PTHREAD_MUTEX_RECURSIVE | PTHREAD_MUTEX_ERRORCHECK)
+#define PTHREAD_MUTEX_TYPE_SHIFT (0u)
+
+#define PTHREAD_MUTEX_ROBUST_MASK  (PTHREAD_MUTEX_ROBUST)
+#define PTHREAD_MUTEX_ROBUST_SHIFT (2u)
+
+#define PTHREAD_MUTEX_PROTOCOL_MASK  (PTHREAD_PRIO_INHERIT | PTHREAD_PRIO_PROTECT)
+#define PTHREAD_MUTEX_PROTOCOL_SHIFT (3u)
+
+#define PTHREAD_MUTEX_MAKE_ATTR(_type, _proto) \
+    (unsigned)(((_type & PTHREAD_MUTEX_TYPE_MASK) << PTHREAD_MUTEX_TYPE_SHIFT) | \
+    ((_proto & PTHREAD_MUTEX_PROTOCOL_MASK) << PTHREAD_MUTEX_PROTOCOL_SHIFT))
+
+static_assert(((PTHREAD_MUTEX_TYPE_MASK << PTHREAD_MUTEX_TYPE_SHIFT) &
+               (PTHREAD_MUTEX_ROBUST_MASK << PTHREAD_MUTEX_ROBUST_SHIFT)) == 0,
+        "pthread_mutex type attr overlaps with robust attr!");
+static_assert(((PTHREAD_MUTEX_TYPE_MASK << PTHREAD_MUTEX_TYPE_SHIFT) &
+               (PTHREAD_MUTEX_PROTOCOL_MASK << PTHREAD_MUTEX_PROTOCOL_SHIFT)) == 0,
+        "pthread_mutex type attr overlaps with protocol attr!");
+static_assert(((PTHREAD_MUTEX_ROBUST_MASK << PTHREAD_MUTEX_ROBUST_SHIFT) &
+               (PTHREAD_MUTEX_PROTOCOL_MASK << PTHREAD_MUTEX_PROTOCOL_SHIFT)) == 0,
+        "pthread_mutex robust attr overlaps with protocol attr!");
+
+static inline int pthread_mutex_get_type(pthread_mutex_t* m) {
+    return (m->_m_attr >> PTHREAD_MUTEX_TYPE_SHIFT) & PTHREAD_MUTEX_TYPE_MASK;
+}
+
+static inline int pthread_mutex_get_robust(pthread_mutex_t* m) {
+    return (m->_m_attr >> PTHREAD_MUTEX_ROBUST_SHIFT) & PTHREAD_MUTEX_ROBUST_MASK;
+}
+
+static inline int pthread_mutex_get_protocol(pthread_mutex_t* m) {
+    return (m->_m_attr >> PTHREAD_MUTEX_PROTOCOL_SHIFT) & PTHREAD_MUTEX_PROTOCOL_MASK;
+}
+
+static inline bool pthread_mutex_prio_inherit(pthread_mutex_t* m) {
+    return (m->_m_attr & (PTHREAD_PRIO_INHERIT << PTHREAD_MUTEX_PROTOCOL_MASK)) != 0;
+}
 
 // Contested state tracking bits.  Note; all users are required to use the
 // static inline functions for manipulating and checking state.  This
@@ -147,7 +183,7 @@ static inline int pthread_mutex_uncontested_to_contested_state(int state) {
 }
 
 static inline pid_t pthread_mutex_state_to_tid(int state) {
-    return ((pid_t)(state | _PTHREAD_MUTEX_CONTESTED_BIT));
+    return state ? ((pid_t)(state | _PTHREAD_MUTEX_CONTESTED_BIT)) : 0;
 }
 
 static inline bool pthread_mutex_is_state_contested(int state) {
@@ -189,6 +225,32 @@ static inline pid_t __thread_get_tid(void) {
     return zxr_thread_get_handle(&__pthread_self()->zxr_thread);
 }
 
+// This function maps a zx_handle_t for the thread into an int, similar to
+// __thread_get_tid(). This version is used by FILE::lock to indicate that this
+// thread owns the lock. In that lock structure, values < 0 (in particular -1)
+// are used to signal that the FILE structure does not require locking (this is
+// used for unshared structures, or rentrant calls where the FILE is already
+// locked).
+//
+// Because zx_handle_t uses the top bits of its uint32_t, simply returning the
+// uint32_t as an int32_t would erronously cause the tid to be < 0, causing the
+// FILE structure to go unguarded. See ZX-4278 for more detail.
+//
+// However, zx_handle_t reserves ZX_HANDLE_FIXED_BITS_MASK of its lower bits,
+// and they're always set to 1. Because we're only using this as an opaque
+// identifier (and no longer treating it as a handle value), we can simply shift
+// the valid bits of the handle down to avoid the sign bit being set.
+//
+// This function is (semi-)exposed for testing, but should only be used by
+// __thread_get_tid_for_filelock().
+static inline pid_t __thread_handle_to_filelock_tid(zx_handle_t handle) {
+    return (pid_t)(handle >> (ZX_HANDLE_FIXED_BITS_MASK - 1));
+}
+
+static inline pid_t __thread_get_tid_for_filelock(void) {
+    return __thread_handle_to_filelock_tid(zxr_thread_get_handle(&__pthread_self()->zxr_thread));
+}
+
 int __pthread_create(pthread_t* __restrict, const pthread_attr_t* __restrict,
                      void* (*)(void*), void* __restrict) ATTR_LIBC_VISIBILITY;
 int __pthread_detach(pthread_t t) ATTR_LIBC_VISIBILITY;
@@ -199,8 +261,14 @@ int __pthread_join(pthread_t t, void** result) ATTR_LIBC_VISIBILITY;
 void __private_cond_signal(void* condvar, int n) ATTR_LIBC_VISIBILITY;
 
 // This is guaranteed to only return 0, EINVAL, or ETIMEDOUT.
-int __timedwait(atomic_int*, int, clockid_t, const struct timespec*)
+int __timedwait_assign_owner(atomic_int*, int, clockid_t, const struct timespec*, zx_handle_t)
     ATTR_LIBC_VISIBILITY;
+static inline int __timedwait(atomic_int* futex,
+                              int val,
+                              clockid_t clk,
+                              const struct timespec* at) {
+    return __timedwait_assign_owner(futex, val, clk, at, ZX_HANDLE_INVALID);
+}
 
 // Loading a library can introduce more thread_local variables. Thread
 // allocation bases bookkeeping decisions based on the current state
@@ -214,7 +282,7 @@ void __thread_tsd_run_dtors(void) ATTR_LIBC_VISIBILITY;
 
 #define DEFAULT_PTHREAD_ATTR                                                  \
     ((pthread_attr_t){                                                        \
-        ._a_stacksize = ZIRCON_DEFAULT_STACK_SIZE,                           \
+        ._a_stacksize = libc.stack_size,                                      \
         ._a_guardsize = PAGE_SIZE,                                            \
     })
 

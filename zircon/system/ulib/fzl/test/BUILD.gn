@@ -6,19 +6,42 @@ group("test") {
   testonly = true
   deps = [
     ":fzl",
+    ":fzl-zxtest",
+  ]
+}
+
+test("fzl-zxtest") {
+  sources = [
+    "pinned-vmo-tests.cc",
+    "vmo-pool-tests.cc",
+  ]
+  deps = [
+    "$zx/system/dev/lib/fake-bti",
+    "$zx/system/fidl/fuchsia-io:c",
+    "$zx/system/ulib/async",
+    "$zx/system/ulib/async:async-cpp",
+    "$zx/system/ulib/async:async-default",
+    "$zx/system/ulib/async-loop",
+    "$zx/system/ulib/async-loop:async-loop-cpp",
+    "$zx/system/ulib/fbl",
+    "$zx/system/ulib/fdio",
+    "$zx/system/ulib/fzl",
+    "$zx/system/ulib/memfs",
+    "$zx/system/ulib/zircon",
+    "$zx/system/ulib/zx",
+    "$zx/system/ulib/zxtest",
   ]
 }
 
 test("fzl") {
   sources = [
-    "fdio.cpp",
-    "fzl-test.cpp",
-    "memory_probe_tests.cpp",
-    "owned-vmo-mapper-tests.cpp",
-    "resizeable-vmo-mapper-tests.cpp",
-    "vmo-pool-tests.cpp",
-    "vmo-probe.cpp",
-    "vmo-vmar-tests.cpp",
+    "fdio.cc",
+    "fzl-test.cc",
+    "memory_probe_tests.cc",
+    "owned-vmo-mapper-tests.cc",
+    "resizeable-vmo-mapper-tests.cc",
+    "vmo-probe.cc",
+    "vmo-vmar-tests.cc",
   ]
   deps = [
     "$zx/system/fidl/fuchsia-io:c",

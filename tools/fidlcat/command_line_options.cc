@@ -6,12 +6,16 @@
 
 #include <cmdline/args_parser.h>
 #include <stdio.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 #include <filesystem>
 #include <fstream>
 #include <set>
 #include <string>
 #include <vector>
+
+#include "tools/fidlcat/lib/display_options.h"
 
 namespace fidlcat {
 
@@ -25,14 +29,22 @@ Options:
 
 )";
 
-const char kRemoteHostHelp[] = R"(--connect
+const char kRemoteHostHelp[] = R"(  --connect
       The host and port of the target Fuchsia instance, of the form
       [<ipv6_addr>]:port.)";
 
-const char kRemotePidHelp[] = R"(--remote-pid
-      The koid of the remote process.)";
+const char kRemotePidHelp[] = R"(  --remote-pid
+      The koid of the remote process. Can be passed multiple times.)";
 
-const char kFidlIrPathHelp[] = R"(--fidl-ir-path=<path>|@argfile
+const char kRemoteNameHelp[] = R"(  --remote-name=<regexp>
+  -f <regexp>
+      Adds a filter to the default job that will cause fidlcat to attach
+      to processes whose name matches this regexp that are launched in the
+      job (e.g., "--remote-name echo_client.*.cmx", or even just "--remote-name
+      echo_client).  Multiple filters can be specified to match more than one
+      process.)";
+
+const char kFidlIrPathHelp[] = R"(  --fidl-ir-path=<path>|@argfile
       Adds the given path as a repository for FIDL IR, in the form of .fidl.json
       files.  Passing a file adds the given file.  Passing a directory adds all
       of the .fidl.json files in that directory and any directory transitively
@@ -41,10 +53,6 @@ const char kFidlIrPathHelp[] = R"(--fidl-ir-path=<path>|@argfile
       an argfile (starting with the '@' character) adds all files listed in that
       argfile.  This switch can be passed multiple times to add multiple
       locations.)";
-
-const char kHelpHelp[] = R"(  --help
-  -h
-      Prints all command-line switches.)";
 
 const char kSymbolPathHelp[] = R"(  --symbol-path=<path>
   -s <path>
@@ -57,30 +65,77 @@ const char kSymbolPathHelp[] = R"(  --symbol-path=<path>
       as a mapping database from build ID to file path. Otherwise, the path
       will be loaded as an ELF file (if possible).)";
 
-cmdline::Status ParseCommandLine(int argc, const char* argv[],
-                                 CommandLineOptions* options,
+const char kPrettyPrintHelp[] = R"(  --pretty-print
+      Use a formated print instead of JSON.)";
+
+const char kWithProcessInfoHelp[] = R"(  --with-process-info
+      Display the process name, process id and thread id on each line.)";
+
+const char kColorsHelp[] = R"(  --colors=[never|auto|always]
+      For pretty print, use colors:
+      - never
+      - auto: only if running in a terminal (default value)
+      - always)";
+
+const char kColumnsHelp[] = R"(  --columns=<size>
+      For pretty print, width of the display. By default, on a terminal, use
+      the terminal width.)";
+
+const char kHelpHelp[] = R"(  --help
+  -h
+      Prints all command-line switches.)";
+
+cmdline::Status ParseCommandLine(int argc, const char* argv[], CommandLineOptions* options,
+                                 DisplayOptions* display_options,
                                  std::vector<std::string>* params) {
   cmdline::ArgsParser<CommandLineOptions> parser;
 
-  parser.AddSwitch("connect", 'r', kRemoteHostHelp,
-                   &CommandLineOptions::connect);
-  parser.AddSwitch("remote-pid", 'p', kRemotePidHelp,
-                   &CommandLineOptions::remote_pid);
-  parser.AddSwitch("fidl-ir-path", 0, kFidlIrPathHelp,
-                   &CommandLineOptions::fidl_ir_paths);
-  parser.AddSwitch("symbol-path", 's', kSymbolPathHelp,
-                   &CommandLineOptions::symbol_paths);
+  parser.AddSwitch("connect", 'r', kRemoteHostHelp, &CommandLineOptions::connect);
+  parser.AddSwitch("remote-pid", 'p', kRemotePidHelp, &CommandLineOptions::remote_pid);
+  parser.AddSwitch("remote-name", 'f', kRemoteNameHelp, &CommandLineOptions::remote_name);
+  parser.AddSwitch("fidl-ir-path", 0, kFidlIrPathHelp, &CommandLineOptions::fidl_ir_paths);
+  parser.AddSwitch("symbol-path", 's', kSymbolPathHelp, &CommandLineOptions::symbol_paths);
+  parser.AddSwitch("pretty-print", 0, kPrettyPrintHelp, &CommandLineOptions::pretty_print);
+  parser.AddSwitch("with-process-info", 0, kWithProcessInfoHelp,
+                   &CommandLineOptions::with_process_info);
+  parser.AddSwitch("colors", 0, kColorsHelp, &CommandLineOptions::colors);
+  parser.AddSwitch("columns", 0, kColumnsHelp, &CommandLineOptions::columns);
   bool requested_help = false;
-  parser.AddGeneralSwitch("help", 'h', kHelpHelp,
-                          [&requested_help]() { requested_help = true; });
+  parser.AddGeneralSwitch("help", 'h', kHelpHelp, [&requested_help]() { requested_help = true; });
 
   cmdline::Status status = parser.Parse(argc, argv, options, params);
   if (status.has_error()) {
     return status;
   }
 
-  if (requested_help) {
+  if (requested_help || (options->remote_name.empty() && options->remote_pid.empty() &&
+                         std::find(params->begin(), params->end(), "run") == params->end())) {
     return cmdline::Status::Error(kHelpIntro + parser.GetHelp());
+  }
+
+  if (!options->remote_name.empty() && !options->remote_pid.empty()) {
+    return cmdline::Status::Error("Cannot specify both a remote pid and name.");
+  }
+
+  display_options->pretty_print = options->pretty_print;
+  display_options->with_process_info = options->with_process_info;
+
+  struct winsize term_size;
+  term_size.ws_col = 0;
+  int ioctl_result = ioctl(STDOUT_FILENO, TIOCGWINSZ, &term_size);
+  if (options->columns == 0) {
+    display_options->columns = term_size.ws_col;
+    display_options->columns = std::max(display_options->columns, 80);
+  } else {
+    display_options->columns = options->columns;
+  }
+
+  if (options->pretty_print) {
+    if ((options->colors == "always") || ((options->colors == "auto") && (ioctl_result != -1))) {
+      display_options->needs_colors = true;
+    } else {
+      display_options->needs_colors = false;
+    }
   }
 
   return cmdline::Status::Ok();
@@ -97,10 +152,9 @@ bool EndsWith(const std::string& value, const std::string& suffix) {
 
 }  // namespace
 
-void ExpandFidlPathsFromOptions(
-    std::vector<std::string> cli_ir_paths,
-    std::vector<std::unique_ptr<std::istream>>& paths,
-    std::vector<std::string>& bad_paths) {
+void ExpandFidlPathsFromOptions(std::vector<std::string> cli_ir_paths,
+                                std::vector<std::unique_ptr<std::istream>>& paths,
+                                std::vector<std::string>& bad_paths) {
   // Strip out argfiles before doing path processing.
   for (int i = cli_ir_paths.size() - 1; i >= 0; i--) {
     std::string& path = cli_ir_paths[i];
@@ -119,8 +173,8 @@ void ExpandFidlPathsFromOptions(
       std::string jsonfile;
       while (infile >> jsonfile) {
         if (std::filesystem::path(jsonfile).is_relative()) {
-          jsonfile = enclosing_directory.string() +
-                     std::filesystem::path::preferred_separator + jsonfile;
+          jsonfile =
+              enclosing_directory.string() + std::filesystem::path::preferred_separator + jsonfile;
         }
 
         paths.push_back(std::make_unique<std::ifstream>(jsonfile));

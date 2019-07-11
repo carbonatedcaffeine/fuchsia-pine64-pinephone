@@ -37,20 +37,18 @@ class MockStackDelegate : public Stack::Delegate {
   }
 
   void SyncFramesForStack(std::function<void(const Err&)> cb) override {
-    debug_ipc::MessageLoop::Current()->PostTask(
-        FROM_HERE, [cb = std::move(cb), this]() {
-          stack_->SetFramesForTest(std::move(async_frames_), true);
-          cb(Err());
-        });
+    debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE, [cb = std::move(cb), this]() {
+      stack_->SetFramesForTest(std::move(async_frames_), true);
+      cb(Err());
+    });
   }
 
   std::unique_ptr<Frame> MakeFrameForStack(const debug_ipc::StackFrame& input,
                                            Location location) override {
-    return std::make_unique<MockFrame>(nullptr, nullptr, input, location);
+    return std::make_unique<MockFrame>(nullptr, nullptr, location, input.sp);
   }
 
-  Location GetSymbolizedLocationForStackFrame(
-      const debug_ipc::StackFrame& input) override {
+  Location GetSymbolizedLocationForStackFrame(const debug_ipc::StackFrame& input) override {
     auto found = locations_.find(input.ip);
     if (found == locations_.end())
       return Location(Location::State::kSymbolized, input.ip);
@@ -77,36 +75,31 @@ constexpr uint64_t kBottomSP = 0x2040;
 //   [5] = physical frame at kBottomSP
 std::vector<std::unique_ptr<Frame>> MakeInlineStackFrames() {
   // Create three physical frames.
-  debug_ipc::StackFrame phys_top_record(0x1000, kTopSP);
-  Location top_location(Location::State::kSymbolized, phys_top_record.ip);
-  debug_ipc::StackFrame phys_middle_record(0x1010, kMiddleSP);
-  Location middle_location(Location::State::kSymbolized, phys_middle_record.ip);
-  debug_ipc::StackFrame phys_bottom_record(0x1020, kBottomSP);
-  Location bottom_location(Location::State::kSymbolized, phys_bottom_record.ip);
+  Location top_location(Location::State::kSymbolized, 0x1000);
+  Location middle_location(Location::State::kSymbolized, 0x1010);
+  Location bottom_location(Location::State::kSymbolized, 0x1020);
 
-  auto phys_top = std::make_unique<MockFrame>(nullptr, nullptr, phys_top_record,
-                                              top_location);
-  auto phys_middle = std::make_unique<MockFrame>(
-      nullptr, nullptr, phys_middle_record, middle_location);
-  auto phys_bottom = std::make_unique<MockFrame>(
-      nullptr, nullptr, phys_bottom_record, bottom_location);
+  auto phys_top = std::make_unique<MockFrame>(nullptr, nullptr, top_location, kTopSP, kMiddleSP);
+  auto phys_middle =
+      std::make_unique<MockFrame>(nullptr, nullptr, middle_location, kMiddleSP, kBottomSP);
+  auto phys_bottom = std::make_unique<MockFrame>(nullptr, nullptr, bottom_location, kBottomSP, 0);
 
   std::vector<std::unique_ptr<Frame>> frames;
 
   // Top frame has two inline functions expanded on top of it. This uses the
   // same Location object for simplicity, in real life these will be different.
-  frames.push_back(std::make_unique<MockFrame>(
-      nullptr, nullptr, phys_top_record, top_location, kTopSP, phys_top.get()));
-  frames.push_back(std::make_unique<MockFrame>(
-      nullptr, nullptr, phys_top_record, top_location, kTopSP, phys_top.get()));
+  frames.push_back(std::make_unique<MockFrame>(nullptr, nullptr, top_location, kTopSP, kMiddleSP,
+                                               std::vector<Register>(), kTopSP, phys_top.get()));
+  frames.push_back(std::make_unique<MockFrame>(nullptr, nullptr, top_location, kTopSP, kMiddleSP,
+                                               std::vector<Register>(), kTopSP, phys_top.get()));
 
   // Physical top frame below those.
   frames.push_back(std::move(phys_top));
 
   // Middle frame has one inline function expanded on top of it.
-  frames.push_back(std::make_unique<MockFrame>(
-      nullptr, nullptr, phys_middle_record, middle_location, kMiddleSP,
-      phys_middle.get()));
+  frames.push_back(std::make_unique<MockFrame>(nullptr, nullptr, middle_location, kMiddleSP,
+                                               kBottomSP, std::vector<Register>(), kMiddleSP,
+                                               phys_middle.get()));
   frames.push_back(std::move(phys_middle));
 
   // Bottom frame has no inline frame.
@@ -126,123 +119,22 @@ TEST_F(StackTest, InlineFingerprint) {
 
   // The top frames (physical and inline) have the middle frame's SP as their
   // fingerprint, along with the inline count.
-  EXPECT_EQ(FrameFingerprint(kMiddleSP, 2), *stack.GetFrameFingerprint(0));
+  EXPECT_EQ(FrameFingerprint(kMiddleSP, 2), stack.GetFrameFingerprint(0));
   EXPECT_EQ(2u, stack.InlineDepthForIndex(0));
-  EXPECT_EQ(FrameFingerprint(kMiddleSP, 1), *stack.GetFrameFingerprint(1));
+  EXPECT_EQ(FrameFingerprint(kMiddleSP, 1), stack.GetFrameFingerprint(1));
   EXPECT_EQ(1u, stack.InlineDepthForIndex(1));
-  EXPECT_EQ(FrameFingerprint(kMiddleSP, 0), *stack.GetFrameFingerprint(2));
+  EXPECT_EQ(FrameFingerprint(kMiddleSP, 0), stack.GetFrameFingerprint(2));
   EXPECT_EQ(0u, stack.InlineDepthForIndex(2));
 
   // Middle frames have the bottom frame's SP.
-  EXPECT_EQ(FrameFingerprint(kBottomSP, 1), *stack.GetFrameFingerprint(3));
+  EXPECT_EQ(FrameFingerprint(kBottomSP, 1), stack.GetFrameFingerprint(3));
   EXPECT_EQ(1u, stack.InlineDepthForIndex(3));
-  EXPECT_EQ(FrameFingerprint(kBottomSP, 0), *stack.GetFrameFingerprint(4));
+  EXPECT_EQ(FrameFingerprint(kBottomSP, 0), stack.GetFrameFingerprint(4));
   EXPECT_EQ(0u, stack.InlineDepthForIndex(4));
 
-  // Since there's nothing below the bottom frame, it gets its own SP.
-  EXPECT_EQ(FrameFingerprint(kBottomSP, 0), *stack.GetFrameFingerprint(5));
+  // Bottom frame reports the 0 CFA.
+  EXPECT_EQ(FrameFingerprint(0, 0), stack.GetFrameFingerprint(5));
   EXPECT_EQ(0u, stack.InlineDepthForIndex(5));
-}
-
-// Tests basic requesting of asynchronous frame fingerprints.
-TEST_F(StackTest, AsyncFingerprint) {
-  MockStackDelegate delegate;
-  Stack stack(&delegate);
-  delegate.set_stack(&stack);
-
-  // Only send the top two physical stack frames (with their inlined
-  // expansions) for the initial data, and mark stack as incomplete.
-  auto frames = MakeInlineStackFrames();
-  frames.pop_back();
-  stack.SetFramesForTest(std::move(frames), false);
-
-  // Fingerprint for top physical frames and its inlines should be OK.
-  auto found = stack.GetFrameFingerprint(2);
-  ASSERT_TRUE(found);
-  EXPECT_EQ(FrameFingerprint(kMiddleSP, 0), *found);
-
-  // Fingerprint for the middle frame and its inline should fail.
-  found = stack.GetFrameFingerprint(3);
-  EXPECT_FALSE(found);
-  found = stack.GetFrameFingerprint(4);
-  EXPECT_FALSE(found);
-
-  // Set the full stack as the reply.
-  delegate.SetAsyncFrames(MakeInlineStackFrames());
-
-  // Ask for the middle inline function fingerprint.
-  bool called = false;
-  stack.GetFrameFingerprint(
-      3, [&called](const Err& err, FrameFingerprint fingerprint) {
-        EXPECT_FALSE(err.has_error()) << err.msg();
-        called = true;
-
-        EXPECT_EQ(FrameFingerprint(kBottomSP, 1), fingerprint);
-
-        debug_ipc::MessageLoop::Current()->QuitNow();
-      });
-
-  // Should not be called synchronously.
-  EXPECT_FALSE(called);
-
-  // Running the message loop should run the lambda.
-  debug_ipc::MessageLoop::Current()->Run();
-  EXPECT_TRUE(called);
-
-  // Ask for the middle non-inline fingerprint. The stack should be fully
-  // synced so it should not try to re-sync (if it does, the new stack stored
-  // in the delegate will be empty and getting the frame fingerprint will
-  // fail.
-  called = false;
-  stack.GetFrameFingerprint(
-      4, [&called](const Err& err, FrameFingerprint fingerprint) {
-        EXPECT_FALSE(err.has_error()) << err.msg();
-        called = true;
-
-        EXPECT_EQ(FrameFingerprint(kBottomSP, 0), fingerprint);
-
-        debug_ipc::MessageLoop::Current()->QuitNow();
-      });
-  EXPECT_FALSE(called);
-  debug_ipc::MessageLoop::Current()->Run();
-  EXPECT_TRUE(called);
-}
-
-// Tests that the frame is found when the index changes across updates.
-TEST_F(StackTest, AsyncFingerprintMoved) {
-  MockStackDelegate delegate;
-  Stack stack(&delegate);
-  delegate.set_stack(&stack);
-
-  // Only send the top two physical stack frames (with their inline expansions)
-  // for the initial data, and mark stack as incomplete.
-  auto frames = MakeInlineStackFrames();
-  frames.pop_back();
-  stack.SetFramesForTest(std::move(frames), false);
-
-  // The async frames reply is the full stack but missing the top physical
-  // frame (which has two inline frames above it).
-  auto frame_reply = MakeInlineStackFrames();
-  frame_reply.erase(frame_reply.begin(), frame_reply.begin() + 3);
-  delegate.SetAsyncFrames(std::move(frame_reply));
-
-  // Ask for the middle inline function fingerprint.
-  bool called = false;
-  stack.GetFrameFingerprint(
-      3, [&called](const Err& err, FrameFingerprint fingerprint) {
-        EXPECT_TRUE(err.has_error());
-        EXPECT_EQ(FrameFingerprint(), fingerprint);
-        called = true;
-
-        debug_ipc::MessageLoop::Current()->QuitNow();
-      });
-
-  // Should not be called synchronously.
-  EXPECT_FALSE(called);
-
-  // Running the message loop should run the lambda.
-  debug_ipc::MessageLoop::Current()->Run();
-  EXPECT_TRUE(called);
 }
 
 // Tests that stack frames inside inline functions are expanded so that the
@@ -291,22 +183,19 @@ TEST_F(StackTest, InlineExpansion) {
   // Non-inline location for the top stack frame.
   auto top_func = fxl::MakeRefCounted<Function>(DwarfTag::kSubprogram);
   top_func->set_assigned_name("Top");
-  Location top_location(kTopAddr, top_line, 0, symbol_context,
-                        LazySymbol(top_func));
+  Location top_location(kTopAddr, top_line, 0, symbol_context, LazySymbol(top_func));
   delegate.AddLocation(top_location);
 
   // Bottom stack frame has a real function, an inline function, and an
   // ambiguous inline location (at the start of an inline range).
-  auto bottom_ambig_inline_func =
-      fxl::MakeRefCounted<Function>(DwarfTag::kInlinedSubroutine);
+  auto bottom_ambig_inline_func = fxl::MakeRefCounted<Function>(DwarfTag::kInlinedSubroutine);
   bottom_ambig_inline_func->set_assigned_name("Inline");
   // Must start exactly at kBottomAddr for the location to be ambiguous.
   bottom_ambig_inline_func->set_code_ranges(
       AddressRanges(AddressRange(kBottomAddr, kBottomAddr + 8)));
   bottom_ambig_inline_func->set_call_line(inline_ambig_call_line);
 
-  auto bottom_inline_func =
-      fxl::MakeRefCounted<Function>(DwarfTag::kInlinedSubroutine);
+  auto bottom_inline_func = fxl::MakeRefCounted<Function>(DwarfTag::kInlinedSubroutine);
   bottom_inline_func->set_assigned_name("Inline");
   // Must start before at kBottomAddr for the location to not be ambiguous.
   bottom_inline_func->set_code_ranges(
@@ -315,11 +204,9 @@ TEST_F(StackTest, InlineExpansion) {
 
   auto bottom_func = fxl::MakeRefCounted<Function>(DwarfTag::kSubprogram);
   bottom_func->set_assigned_name("Bottom");
-  bottom_func->set_code_ranges(
-      AddressRanges(AddressRange(kBottomAddr - 8, kBottomAddr + 16)));
+  bottom_func->set_code_ranges(AddressRanges(AddressRange(kBottomAddr - 8, kBottomAddr + 16)));
 
-  bottom_ambig_inline_func->set_containing_block(
-      LazySymbol(bottom_inline_func));
+  bottom_ambig_inline_func->set_containing_block(LazySymbol(bottom_inline_func));
   bottom_inline_func->set_containing_block(LazySymbol(bottom_func));
 
   // The location returned by the symbol function will have the file/line
@@ -332,9 +219,12 @@ TEST_F(StackTest, InlineExpansion) {
   delegate.set_stack(&stack);
 
   // Send IPs that will map to the bottom and top addresses.
+  constexpr uint64_t kTopSP = 0x100;
+  constexpr uint64_t kBottomSP = 0x200;
+
   stack.SetFrames(debug_ipc::ThreadRecord::StackAmount::kFull,
-                  {debug_ipc::StackFrame(kTopAddr, 0x100),
-                   debug_ipc::StackFrame(kBottomAddr, 0x200)});
+                  {debug_ipc::StackFrame(kTopAddr, kTopSP, kBottomSP),
+                   debug_ipc::StackFrame(kBottomAddr, kBottomSP, 0)});
 
   // This should expand to tree stack entries, the one in the middle should
   // be the inline function expanded from the "bottom".
@@ -380,25 +270,21 @@ TEST_F(StackTest, InlineHiding) {
   constexpr uint64_t kBottomSP = 0x2020;
 
   // Create two physical frames.
-  debug_ipc::StackFrame phys_top_record(0x1000, kTopSP);
-  Location top_location(Location::State::kSymbolized, phys_top_record.ip);
-  debug_ipc::StackFrame phys_bottom_record(0x1020, kBottomSP);
-  Location bottom_location(Location::State::kSymbolized, phys_bottom_record.ip);
+  Location top_location(Location::State::kSymbolized, 0x1000);
+  Location bottom_location(Location::State::kSymbolized, 0x1020);
 
-  auto phys_top = std::make_unique<MockFrame>(nullptr, nullptr, phys_top_record,
-                                              top_location);
-  auto phys_bottom = std::make_unique<MockFrame>(
-      nullptr, nullptr, phys_bottom_record, bottom_location);
+  auto phys_top = std::make_unique<MockFrame>(nullptr, nullptr, top_location, kTopSP);
+  auto phys_bottom = std::make_unique<MockFrame>(nullptr, nullptr, bottom_location, kBottomSP);
 
   std::vector<std::unique_ptr<Frame>> frames;
 
   // Top frame has two inline functions expanded on top of it.
-  frames.push_back(std::make_unique<MockFrame>(nullptr, nullptr,
-                                               phys_top_record, top_location,
-                                               kTopSP, phys_top.get(), true));
-  frames.push_back(std::make_unique<MockFrame>(nullptr, nullptr,
-                                               phys_top_record, top_location,
-                                               kTopSP, phys_top.get(), true));
+  frames.push_back(std::make_unique<MockFrame>(nullptr, nullptr, top_location, kTopSP, 0,
+                                               std::vector<Register>(), kTopSP, phys_top.get(),
+                                               true));
+  frames.push_back(std::make_unique<MockFrame>(nullptr, nullptr, top_location, kTopSP, 0,
+                                               std::vector<Register>(), kTopSP, phys_top.get(),
+                                               true));
 
   // Physical top frame below those.
   frames.push_back(std::move(phys_top));
@@ -433,13 +319,12 @@ TEST_F(StackTest, UpdateExisting) {
   delegate.set_stack(&stack);
 
   // Make a stack with one physial frame and one inline frame above it.
-  debug_ipc::StackFrame phys_top_record(0x1000, kTopSP);
-  Location top_location(Location::State::kSymbolized, phys_top_record.ip);
-  auto phys_top = std::make_unique<MockFrame>(nullptr, nullptr, phys_top_record,
-                                              top_location, kTopSP);
+  Location top_location(Location::State::kSymbolized, 0x1000);
+  auto phys_top = std::make_unique<MockFrame>(nullptr, nullptr, top_location, kTopSP, 0,
+                                              std::vector<Register>(), kTopSP);
   auto inline_top =
-      std::make_unique<MockFrame>(nullptr, nullptr, phys_top_record,
-                                  top_location, kTopSP, phys_top.get(), true);
+      std::make_unique<MockFrame>(nullptr, nullptr, top_location, kTopSP, 0,
+                                  std::vector<Register>(), kTopSP, phys_top.get(), true);
   inline_top->set_is_ambiguous_inline(true);
 
   // Save for verification later.
@@ -461,6 +346,7 @@ TEST_F(StackTest, UpdateExisting) {
   // physical frame from above. This uses the non-test update flow which should
   // preserve the frame objects that haven't changed.
   std::vector<debug_ipc::StackFrame> raw_frames;
+  debug_ipc::StackFrame phys_top_record(0x1000, kTopSP, kBottomSP);
   raw_frames.push_back(phys_top_record);
   debug_ipc::StackFrame phys_bottom_record(0x1020, kBottomSP);
   raw_frames.push_back(phys_bottom_record);

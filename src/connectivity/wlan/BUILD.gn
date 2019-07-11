@@ -5,14 +5,30 @@
 group("wlan") {
   testonly = true
   deps = [
-    ":bin",
+    ":service",
     "drivers",
+  ]
+}
+
+group("service") {
+  testonly = true
+  deps = [
+    ":bin",
+    "config:default",
+  ]
+}
+
+group("service-wep") {
+  testonly = true
+  deps = [
+    ":bin",
+    "config:wep",
   ]
 }
 
 group("bin") {
   testonly = true
-  deps = [
+  public_deps = [
     "//src/connectivity/wlan/wlancfg",
     "//src/connectivity/wlan/wlanstack",
   ]
@@ -22,7 +38,9 @@ group("tests") {
   testonly = true
 
   public_deps = [
+    "//src/connectivity/wlan/drivers/testing/lib/sim-device/test:sim_device_test",
     "//src/connectivity/wlan/drivers/third_party/broadcom/brcmfmac/test:brcmfmac_test",
+    "//src/connectivity/wlan/drivers/third_party/intel/iwlwifi/test:iwlwifi_test",
     "//src/connectivity/wlan/drivers/wlan:wlan_drivers_tests",
     "//src/connectivity/wlan/drivers/wlanif/test:wlanif_unittest",
     "//src/connectivity/wlan/lib/bitfield/wlan-bitfield-tests",
@@ -43,7 +61,7 @@ group("tests") {
     "//src/connectivity/wlan/testing/wlantap-driver:wlantap",
     "//src/connectivity/wlan/tools/wlantool:wlan-tests",
     "//src/connectivity/wlan/wlancfg:wlancfg-tests",
-    "//src/connectivity/wlan/wlanstack:wlanstack2-tests",
+    "//src/connectivity/wlan/wlanstack:wlanstack-tests",
   ]
 }
 

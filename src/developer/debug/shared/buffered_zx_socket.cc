@@ -4,9 +4,9 @@
 
 #include "src/developer/debug/shared/buffered_zx_socket.h"
 
-#include "src/lib/fxl/logging.h"
 #include "src/developer/debug/shared/message_loop_target.h"
 #include "src/developer/debug/shared/zx_status.h"
+#include "src/lib/fxl/logging.h"
 
 namespace debug_ipc {
 
@@ -31,8 +31,7 @@ zx_status_t BufferedZxSocket::Start() {
   // Register for socket updates from the message loop.
   MessageLoopTarget* loop = MessageLoopTarget::Current();
   FXL_DCHECK(loop);
-  return loop->WatchSocket(MessageLoop::WatchMode::kReadWrite, socket_.get(),
-                           this, &watch_handle_);
+  return loop->WatchSocket(MessageLoop::WatchMode::kReadWrite, socket_.get(), this, &watch_handle_);
 }
 
 zx_status_t BufferedZxSocket::Stop() {

@@ -7,13 +7,16 @@
 #include <deque>
 #include <map>
 #include <queue>
+#include <variant>
 
 #include "src/connectivity/overnet/lib/environment/timer.h"
 #include "src/connectivity/overnet/lib/environment/trace.h"
 #include "src/connectivity/overnet/lib/labels/seq_num.h"
 #include "src/connectivity/overnet/lib/packet_protocol/bbr.h"
+#include "src/connectivity/overnet/lib/packet_protocol/bdp_estimator.h"
 #include "src/connectivity/overnet/lib/protocol/ack_frame.h"
 #include "src/connectivity/overnet/lib/protocol/varint.h"
+#include "src/connectivity/overnet/lib/stats/link.h"
 #include "src/connectivity/overnet/lib/vocabulary/callback.h"
 #include "src/connectivity/overnet/lib/vocabulary/lazy_slice.h"
 #include "src/connectivity/overnet/lib/vocabulary/once_fn.h"
@@ -39,6 +42,7 @@ class PacketProtocol {
   class PacketSender {
    public:
     virtual void SendPacket(SeqNum seq, LazySlice send) = 0;
+    virtual void NoConnectivity() = 0;
   };
 
   // Codec describes the transformation to apply to *payload* bytes that are
@@ -121,7 +125,11 @@ class PacketProtocol {
   // either explicitly dropped or destroyed.
   class ProtocolRef {
    public:
-    ProtocolRef(PacketProtocol* protocol) : protocol_(protocol) {
+    ProtocolRef(PacketProtocol* protocol, bool primary_ref = false)
+        : protocol_(protocol) {
+      if (!primary_ref) {
+        assert(protocol_->refs_ != 0);
+      }
       protocol_->refs_++;
     }
     ~ProtocolRef() {
@@ -190,126 +198,193 @@ class PacketProtocol {
 
   class PacketSend;
 
+  // A Transaction is created to describe a set of changes to a PacketProtocol.
+  // One is created in response to every Process() call, and in response to
+  // sends that are outside of incoming messages.
+  // Only one Transaction can be active at a time.
+  // A Transaction can process only one incoming message.
+  // A Transaction may process any number (including zero) sends.
+  class Transaction {
+   public:
+    Transaction(PacketProtocol* protocol);
+    ~Transaction();
+
+    void QuiesceOnCompletion(Callback<void> callback);
+    bool Closing() const { return quiesce_ || !protocol_->state_.has_value(); }
+
+    void StartSendingOnCompletion() { start_sending_ = true; }
+    void IncrementOutstandingTipOnCompletion() {
+      increment_outstanding_tip_ = true;
+    }
+
+    void QueueAck(BBR::SentPacket packet) {
+      bbr_ack_.Force()->acked_packets.push_back(packet);
+    }
+    void QueueNack(BBR::SentPacket packet) {
+      bbr_ack_.Force()->nacked_packets.push_back(packet);
+    }
+
+    void SetTip(uint64_t seq_idx, TimeStamp received) {
+      if (!set_tip_) {
+        OVERNET_TRACE(DEBUG) << "Transaction.SetTip: seq_idx=" << seq_idx
+                             << " received=" << received;
+        set_tip_.Reset(SetTipArgs{seq_idx, received});
+      } else {
+        OVERNET_TRACE(DEBUG)
+            << "Transaction.SetTip: seq_idx=" << seq_idx
+            << " received=" << received << " atop seq_idx=" << set_tip_->seq_idx
+            << " received=" << set_tip_->received;
+        set_tip_->seq_idx = std::max(set_tip_->seq_idx, seq_idx);
+        set_tip_->received = std::max(set_tip_->received, received);
+      }
+    }
+
+   private:
+    PacketProtocol* const protocol_;
+    bool quiesce_ = false;
+    bool start_sending_ = false;
+    bool increment_outstanding_tip_ = false;
+    struct SetTipArgs {
+      uint64_t seq_idx;
+      TimeStamp received;
+    };
+    Optional<SetTipArgs> set_tip_;
+    Optional<BBR::Ack> bbr_ack_;
+  };
+
   // OutstandingMessages tracks messages that are sent but not yet acknowledged.
   class OutstandingMessages {
    public:
     OutstandingMessages(PacketProtocol* protocol);
-    ~OutstandingMessages() { NackAll(); }
-    void Send(BBR::TransmitRequest bbr_request, SendRequestHdl request);
+    ~OutstandingMessages();
     Status ValidateAck(const AckFrame& ack) const;
-    void ProcessValidAck(AckFrame ack, TimeStamp received);
+    void ProcessValidAck(Transaction* transaction, AckFrame ack,
+                         TimeStamp received);
     void ReceivedPacket() { ScheduleRetransmit(); }
+    void Schedule(Transaction* transaction, SendRequestHdl message);
+    void StartSending();
+
+    void ScheduleAck();
+    void ForceSendAck(Transaction* t);
+
+    void IncrementTip();
 
    private:
     friend class PacketSend;
 
-    Slice GeneratePacket(BBR::TransmitRequest bbr_request, uint64_t seq_idx,
-                         LazySliceArgs args);
-    void CancelPacket(uint64_t seq_idx);
+    Slice GeneratePacket(Transaction* transaction,
+                         BBR::TransmitRequest bbr_request, LazySliceArgs args);
+    void SentMessage(Transaction* transaction);
+    void CancelledMessage(Transaction* transaction);
+
     void FinishedSending();
     void ScheduleRetransmit();
     Optional<TimeStamp> RetransmitDeadline();
-    void CheckRetransmit();
-    void NackAll();
+    void CheckRetransmit(Transaction* transaction);
+    void NackAll(Transaction* transaction);
+    void Send(BBR::TransmitRequest bbr_request, SendRequestHdl request);
 
-    enum class OutstandingPacketState : uint8_t {
-      PENDING,
-      SENT,
-      ACKED,
-      NACKED,
-    };
-
-    friend std::ostream& operator<<(std::ostream& out,
-                                    OutstandingPacketState state) {
-      switch (state) {
-        case OutstandingPacketState::PENDING:
-          return out << "PENDING";
-        case OutstandingPacketState::SENT:
-          return out << "SENT";
-        case OutstandingPacketState::ACKED:
-          return out << "ACKED";
-        case OutstandingPacketState::NACKED:
-          return out << "NACKED";
-      }
-    }
+    void Ack(Transaction* transaction, uint64_t seq, TimeDelta queue_delay,
+             TimeStamp received);
+    void Nack(Transaction* transaction, uint64_t seq, TimeDelta queue_delay,
+              const Status& status);
 
     struct OutstandingPacket {
-      OutstandingPacketState state;
-      uint64_t max_seen_sequence_at_send;
-      Optional<BBR::SentPacket> bbr_sent_packet;
-      SendRequestHdl request;
+      struct PendingTailProbe {};
+
+      struct Pending {
+        SendRequestHdl request;
+      };
+
+      struct Sent {
+        uint64_t first_unknown_sequence_at_send;  // or 0 if the packet did not
+                                                  // carry an ack
+        SendRequestHdl request;
+        BBR::SentPacket bbr_sent_packet;
+        BdpEstimator::PerPacketData bdp_packet;
+      };
+
+      struct Acked {};
+      struct Nacked {};
+
+      using State =
+          std::variant<PendingTailProbe, Pending, Sent, Acked, Nacked>;
+
+      State state;
+
+      bool has_request() const {
+        return std::holds_alternative<Pending>(state) ||
+               std::holds_alternative<Sent>(state);
+      }
+
+      bool is_finalized() const {
+        return std::holds_alternative<Acked>(state) ||
+               std::holds_alternative<Nacked>(state);
+      }
+
+      bool is_pending() const {
+        return std::holds_alternative<Pending>(state) ||
+               std::holds_alternative<PendingTailProbe>(state);
+      }
+
+      friend std::ostream& operator<<(std::ostream& out, const State& state) {
+        if (std::holds_alternative<PendingTailProbe>(state)) {
+          return out << "PENDING_TAIL_PROBE";
+        } else if (std::holds_alternative<Pending>(state)) {
+          return out << "PENDING";
+        } else if (const auto* p = std::get_if<Sent>(&state)) {
+          return out << "SENT{" << p->bbr_sent_packet.send_time
+                     << "; unk:" << p->first_unknown_sequence_at_send << "}";
+        } else if (std::holds_alternative<Acked>(state)) {
+          return out << "ACKED";
+        } else if (std::holds_alternative<Nacked>(state)) {
+          return out << "NACKED";
+        } else {
+          abort();
+        }
+      }
     };
 
-    // Assists processing a set of acks/nacks
-    class AckProcessor {
-     public:
-      AckProcessor(OutstandingMessages* outstanding, TimeDelta queue_delay)
-          : outstanding_(outstanding), queue_delay_(queue_delay) {}
-      ~AckProcessor();
-
-      void Ack(uint64_t seq);
-      void Nack(uint64_t seq, const Status& status);
-
-     private:
-      OutstandingMessages* const outstanding_;
-      const TimeDelta queue_delay_;
-      BBR::Ack bbr_ack_;
-    };
+    void Schedule(Transaction* transaction,
+                  OutstandingPacket::State outstanding_packet_state);
+    bool HasPendingPackets(Transaction* transaction) const;
 
     PacketProtocol* const protocol_;
     uint64_t send_tip_ = 1;
+    uint64_t unsent_tip_ = 1;
     uint64_t max_outstanding_size_ = 1;
     uint64_t last_sent_ack_ = 0;
+    bool last_send_was_tail_probe_ = false;
     std::deque<OutstandingPacket> outstanding_;
 
-    Optional<Timeout> rto_timer_;
-  };
+    std::string OutstandingString() const;
 
-  // SendQueue groups together pending sends in the protocol and manages writing
-  // them out.
-  class SendQueue {
-   public:
-    SendQueue(PacketProtocol* protocol) : protocol_(protocol) {}
-
-    // Schedule this queue to be sent. Should only be used as directed.
-    void Schedule();
-
-    // A message was just sent: possibly schedule the next one.
-    void SentMessage();
-
-    // Ensure a tail loss probe is scheduled: used to force acks to be sent on
-    // idle connections.
-    void ScheduleTailLossProbe();
-
-    // Force a packet to be sent with an ack.
-    void ForceSendAck();
-
-    // Returns true if send request addition triggers the need for
-    // Schedule to be called.
-    [[nodiscard]] bool Add(SendRequestHdl hdl);
-
-   private:
-    PacketProtocol* const protocol_;
-    bool scheduled_ = false;
-    bool last_send_was_tail_loss_probe_ = false;
-    Optional<BBR::TransmitRequest> transmit_request_;
-    std::queue<SendRequestHdl> requests_;
-    struct ScheduledTailLossProbe {
+    struct TailProbeTimeout {
       template <class F>
-      ScheduledTailLossProbe(Timer* timer, TimeStamp when, F f)
+      TailProbeTimeout(Timer* timer, TimeStamp when, F f)
           : when(when), timeout(timer, when, std::move(f)) {}
       TimeStamp when;
       Timeout timeout;
     };
-    Optional<ScheduledTailLossProbe> scheduled_tail_loss_probe_;
+
+    Optional<Timeout> retransmit_timeout_;
+    Optional<TailProbeTimeout> tail_probe_timeout_;
+    Optional<BBR::TransmitRequest> transmit_request_;
   };
 
-  enum class AckUrgency { NOT_REQUIRED, SEND_SOON, SEND_IMMEDIATELY };
+  enum class AckUrgency {
+    NOT_REQUIRED,
+    SEND_BUNDLED,
+    SEND_SOON,
+    SEND_IMMEDIATELY
+  };
 
   friend std::ostream& operator<<(std::ostream& out, AckUrgency urgency) {
     switch (urgency) {
       case AckUrgency::NOT_REQUIRED:
         return out << "NOT_REQUIRED";
+      case AckUrgency::SEND_BUNDLED:
+        return out << "SEND_BUNDLED";
       case AckUrgency::SEND_SOON:
         return out << "SEND_SOON";
       case AckUrgency::SEND_IMMEDIATELY:
@@ -321,19 +396,25 @@ class PacketProtocol {
    public:
     AckSender(PacketProtocol* protocol);
 
-    void NeedAck(AckUrgency urgency);
+    void NeedAck(Transaction* transaction, AckUrgency urgency);
     bool ShouldSendAck() const {
-      return !all_acks_acknowledged_ && sent_full_acks_.empty();
+      return !suppress_need_acks_ && !all_acks_acknowledged_ &&
+             sent_full_acks_.empty();
     }
-    void AckSent(uint64_t seq_idx, bool partial);
-    void OnNack(uint64_t seq_idx);
+    void AckSent(Transaction* transaction, uint64_t seq_idx, bool partial);
+    void OnNack(Transaction* transaction, uint64_t seq_idx, bool shutting_down);
     void OnAck(uint64_t seq_idx);
+
+    std::string Acksplanation() const;
 
    private:
     PacketProtocol* const protocol_;
     std::vector<uint64_t> sent_full_acks_;
     bool all_acks_acknowledged_ = true;
+    bool suppress_need_acks_ = false;
     AckUrgency urgency_ = AckUrgency::NOT_REQUIRED;
+    TimeStamp urgency_set_ = TimeStamp::Epoch();
+    Optional<Timeout> send_ack_timer_;
 
     std::string SentFullAcksString() const;
   };
@@ -342,16 +423,24 @@ class PacketProtocol {
   // need to acknowledge them.
   class ReceivedQueue {
    public:
+    explicit ReceivedQueue(LinkStats* stats) : stats_(stats) {}
+
     // Return true if an ack should be sent now.
     template <class F>
     [[nodiscard]] AckUrgency Received(SeqNum seq_num, TimeStamp received,
                                       F logic);
 
-    uint64_t max_seen_sequence() const;
-    bool CanBuildAck() const { return max_seen_sequence() > 0; }
-    AckFrame BuildAck(uint64_t seq_idx, TimeStamp now, uint32_t max_length,
-                      AckSender* ack_sender);
+    // Compute the largest sequence index that has ever been seen
+    uint64_t MaxSeenSequence() const;
+    // Compute the first sequence for which we don't know if it was received or
+    // not
+    uint64_t FirstUnknownSequence() const;
+    bool CanBuildAck() const { return MaxSeenSequence() > 0; }
+    AckFrame BuildAck(Transaction* transaction, uint64_t seq_idx, TimeStamp now,
+                      uint32_t max_length, AckSender* ack_sender);
     void SetTip(uint64_t seq_idx, TimeStamp received);
+
+    std::string ReceivedPacketSummary() const;
 
    private:
     [[nodiscard]] bool EnsureValidReceivedPacket(uint64_t seq_idx,
@@ -366,15 +455,16 @@ class PacketProtocol {
       }
       return true;
     }
-    std::string ReceivedPacketSummary() const;
 
-    uint64_t received_tip_ = 0;
+    uint64_t received_tip_ = 1;
     uint64_t optional_ack_run_length_ = 0;
 
     enum class ReceiveState {
       UNKNOWN,
       NOT_RECEIVED,
+      RECEIVED_PURE_ACK,
       RECEIVED,
+      RECEIVED_AND_ACKED_IMMEDIATELY,
     };
 
     friend std::ostream& operator<<(std::ostream& out, ReceiveState state) {
@@ -385,6 +475,10 @@ class PacketProtocol {
           return out << "NOT_RECEIVED";
         case ReceiveState::RECEIVED:
           return out << "RECEIVED";
+        case ReceiveState::RECEIVED_PURE_ACK:
+          return out << "RECEIVED_PURE_ACK";
+        case ReceiveState::RECEIVED_AND_ACKED_IMMEDIATELY:
+          return out << "RECEIVED_AND_ACKED_IMMEDIATELY";
       }
     }
 
@@ -394,37 +488,12 @@ class PacketProtocol {
       TimeStamp when;
     };
     std::deque<ReceivedPacket> received_packets_;
-  };
-
-  // A Transaction is created to describe a set of changes to a PacketProtocol.
-  // One is created in response to every Process() call, and in response to
-  // sends that are outside of incoming messages.
-  // Only one Transaction can be active at a time.
-  // A Transaction can process only one incoming message.
-  // A Transaction may process any number (including zero) sends.
-  class Transaction {
-   public:
-    Transaction(PacketProtocol* protocol);
-    ~Transaction();
-    void Send(SendRequestHdl hdl);
-    void ScheduleForcedAck() { schedule_send_queue_ = true; }
-
-    void QuiesceOnCompletion(Callback<void> callback);
-
-    bool Closing() const { return quiesce_ || !protocol_->state_.has_value(); }
-
-   private:
-    SendQueue* send_queue();
-
-    PacketProtocol* const protocol_;
-    bool schedule_send_queue_ = false;
-    bool quiesce_ = false;
+    LinkStats* const stats_;
   };
 
   class PacketSend final {
    public:
-    PacketSend(PacketProtocol* protocol, uint64_t seq_idx,
-               BBR::TransmitRequest bbr_request);
+    PacketSend(PacketProtocol* protocol, BBR::TransmitRequest bbr_request);
     ~PacketSend();
     PacketSend(const PacketSend&) = delete;
     PacketSend(PacketSend&&) = default;
@@ -433,8 +502,18 @@ class PacketProtocol {
 
    private:
     ProtocolRef protocol_;
-    uint64_t seq_idx_;
     BBR::TransmitRequest bbr_request_;
+  };
+
+  class ConnectivityDetection {
+   public:
+    ConnectivityDetection(PacketProtocol* protocol) : protocol_(protocol) {}
+    void FailedDelivery();
+    void MessageReceived() { no_route_timeout_.Reset(); }
+
+   private:
+    PacketProtocol* const protocol_;
+    Optional<Timeout> no_route_timeout_;
   };
 
   /////////////////////////////////////////////////////////////////////////////
@@ -444,7 +523,7 @@ class PacketProtocol {
   using RandFunc = BBR::RandFunc;
 
   PacketProtocol(Timer* timer, RandFunc rand, PacketSender* packet_sender,
-                 const Codec* codec, uint64_t mss);
+                 const Codec* codec, uint64_t mss, bool probe_tails);
 
   // Request that a single message be sent.
   void Send(SendRequestHdl send_request);
@@ -479,14 +558,19 @@ class PacketProtocol {
 
   uint32_t maximum_send_size() const { return maximum_send_size_; }
   TimeDelta round_trip_time() const {
-    return state_.has_value() ? state_->bbr_.rtt() : TimeDelta::PositiveInf();
+    return state_.has_value() ? state_->bbr.rtt() : TimeDelta::PositiveInf();
   }
   Bandwidth bottleneck_bandwidth() const {
-    return state_.has_value() ? state_->bbr_.bottleneck_bandwidth()
+    return state_.has_value() ? state_->bbr.bottleneck_bandwidth()
                               : Bandwidth::Zero();
   }
+  uint64_t bdp_estimate() const {
+    return state_.has_value() ? state_->bdp_estimator.estimate() : 0;
+  }
 
-  static Codec* NullCodec();
+  static Codec* PlaintextCodec();
+
+  const LinkStats* stats() const { return &stats_; }
 
   /////////////////////////////////////////////////////////////////////////////
   // Internal methods.
@@ -494,9 +578,10 @@ class PacketProtocol {
   TimeDelta CurrentRTT() const;
   TimeDelta RetransmitDelay() const;
   TimeDelta TailLossProbeDelay() const;
-  Slice FormatPacket(uint64_t seq_idx, SendRequest* request,
-                     LazySliceArgs args);
-  ProcessMessageResult ProcessMessage(uint64_t seq_idx, Slice slice,
+  Slice FormatPacket(Transaction* transaction, uint64_t seq_idx,
+                     SendRequest* request, LazySliceArgs args, bool* has_ack);
+  ProcessMessageResult ProcessMessage(Transaction* transaction,
+                                      uint64_t seq_idx, Slice slice,
                                       TimeStamp received,
                                       ProcessCallback handle_message);
   // Run closure f in a transaction (creating one if necessary)
@@ -520,22 +605,27 @@ class PacketProtocol {
   PacketSender* const packet_sender_;
   Transaction* active_transaction_ = nullptr;
   Callback<void> quiesce_;
+  const bool probe_tails_;
   const uint32_t maximum_send_size_;
   uint32_t refs_ = 0;
-  ProtocolRef master_ref_{this};
+  ProtocolRef primary_ref_{this, true};
   struct OpenState {
     OpenState(PacketProtocol* protocol, RandFunc rand)
         : ack_sender(protocol),
+          received_queue(&protocol->stats_),
           outstanding_messages(protocol),
-          bbr_(protocol->timer_, std::move(rand), protocol->maximum_send_size_,
-               Nothing) {}
+          bbr(protocol->timer_, std::move(rand), protocol->maximum_send_size_,
+              Nothing),
+          connectivity_detection(protocol) {}
     AckSender ack_sender;
-    Optional<SendQueue> send_queue;
     ReceivedQueue received_queue;
     OutstandingMessages outstanding_messages;
-    BBR bbr_;
+    BBR bbr;
+    BdpEstimator bdp_estimator;
+    ConnectivityDetection connectivity_detection;
   };
   Optional<OpenState> state_;
+  LinkStats stats_;
 };
 
 template <class GB, class A>

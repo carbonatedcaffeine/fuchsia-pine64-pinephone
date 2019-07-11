@@ -21,28 +21,23 @@ namespace encryption {
 
 class EncryptionServiceImpl : public EncryptionService {
  public:
-  EncryptionServiceImpl(ledger::Environment* environment,
-                        std::string namespace_id);
+  EncryptionServiceImpl(ledger::Environment* environment, std::string namespace_id);
   ~EncryptionServiceImpl() override;
 
   // EncryptionService:
-  storage::ObjectIdentifier MakeObjectIdentifier(
-      storage::ObjectDigest digest) override;
-  void EncryptCommit(
-      std::string commit_storage,
-      fit::function<void(Status, std::string)> callback) override;
-  void DecryptCommit(
-      convert::ExtendedStringView storage_bytes,
-      fit::function<void(Status, std::string)> callback) override;
-  void GetObjectName(
-      storage::ObjectIdentifier object_identifier,
-      fit::function<void(Status, std::string)> callback) override;
-  void EncryptObject(
-      storage::ObjectIdentifier object_identifier, fxl::StringView content,
-      fit::function<void(Status, std::string)> callback) override;
-  void DecryptObject(
-      storage::ObjectIdentifier object_identifier, std::string encrypted_data,
-      fit::function<void(Status, std::string)> callback) override;
+  storage::ObjectIdentifier MakeObjectIdentifier(storage::ObjectDigest digest) override;
+  void EncryptCommit(std::string commit_storage,
+                     fit::function<void(Status, std::string)> callback) override;
+  void DecryptCommit(convert::ExtendedStringView storage_bytes,
+                     fit::function<void(Status, std::string)> callback) override;
+  void GetObjectName(storage::ObjectIdentifier object_identifier,
+                     fit::function<void(Status, std::string)> callback) override;
+  void EncryptObject(storage::ObjectIdentifier object_identifier, fxl::StringView content,
+                     fit::function<void(Status, std::string)> callback) override;
+  void DecryptObject(storage::ObjectIdentifier object_identifier, std::string encrypted_data,
+                     fit::function<void(Status, std::string)> callback) override;
+  void GetChunkingPermutation(
+      fit::function<void(Status, fit::function<uint64_t(uint64_t)>)> callback) override;
 
  private:
   class KeyService;
@@ -57,10 +52,8 @@ class EncryptionServiceImpl : public EncryptionService {
   void Decrypt(size_t key_index, std::string encrypted_data,
                fit::function<void(Status, std::string)> callback);
 
-  void FetchMasterKey(size_t key_index,
-                      fit::function<void(Status, std::string)> callback);
-  void FetchNamespaceKey(size_t key_index,
-                         fit::function<void(Status, std::string)> callback);
+  void FetchMasterKey(size_t key_index, fit::function<void(Status, std::string)> callback);
+  void FetchNamespaceKey(size_t key_index, fit::function<void(Status, std::string)> callback);
   void FetchReferenceKey(DeletionScopeSeed deletion_scope_seed,
                          fit::function<void(Status, std::string)> callback);
 

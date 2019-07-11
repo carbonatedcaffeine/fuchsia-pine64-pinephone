@@ -19,7 +19,11 @@ A fatal failure is triggered by macros starting with ``ASSERT_*`` and non fatal 
 
 * Limited set of dependencies.
 * All assertions on main thread.
+* ``ASSERT/EXPECT_STATUS`` custom macro.
+* ``ASSERT/EXPECT_NOT_STATUS`` custom macro.
 * ``ASSERT/EXPECT_OK`` custom macro.
+* ``ASSERT/EXPECT_NOT_OK`` custom macro.
+* ``CURRENT_TEST_HAS_(FATAL_)FAILURES`` custom macro.
 * Custom messages on assertion rely on a printf-like approach instead of a stream ``ASSERT_TRUE(false, "My msg  %d", i);``
 * Library supports C.
 * `namespace` is `::zxtest` instead of `::testing`. (``zxtest::Test, zxtest::Environment, zxtest::Runner,...``)

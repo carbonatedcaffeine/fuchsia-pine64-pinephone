@@ -56,6 +56,18 @@ std::string LogPreamble(const DebuggedProcess* process) {
                            process->name().c_str());
 }
 
+void LogRegisterBreakpoint(DebuggedProcess* process, Breakpoint* bp, uint64_t address) {
+  if (!debug_ipc::IsDebugModeActive())
+    return;
+
+  std::stringstream ss;
+  ss << LogPreamble(process) << "Setting breakpoint on 0x" << std::hex << address;
+  if (bp->settings().one_shot)
+    ss << " (one shot)";
+
+  DEBUG_LOG(Process) << ss.str();
+}
+
 }  // namespace
 
 DebuggedProcessCreateInfo::DebuggedProcessCreateInfo() = default;
@@ -157,6 +169,7 @@ void DebuggedProcess::OnPause(const debug_ipc::PauseRequest& request,
     DebuggedThread* thread = GetThread(request.thread_koid);
     if (thread) {
       thread->Suspend(true);
+      thread->set_client_state(DebuggedThread::ClientState::kPaused);
 
       // The Suspend call could have failed though most failures should be
       // rare (perhaps we raced with the thread being destroyed). Either way,
@@ -169,8 +182,17 @@ void DebuggedProcess::OnPause(const debug_ipc::PauseRequest& request,
     // Could be not found if there is a race between the thread exiting and
     // the client sending the request.
   } else {
-    // 0 thread ID means resume all threads.
-    SuspendAll(true);
+    // 0 thread ID means pause all threads.
+    std::vector<zx_koid_t> suspended_koids;
+    SuspendAll(true, &suspended_koids);
+
+    // Change the state of those threads.
+    for (zx_koid_t thread_koid : suspended_koids) {
+      DebuggedThread* thread = GetThread(thread_koid);
+      FXL_DCHECK(thread);
+      thread->set_client_state(DebuggedThread::ClientState::kPaused);
+    }
+
     FillThreadRecords(&reply->threads);
   }
 }
@@ -178,13 +200,17 @@ void DebuggedProcess::OnPause(const debug_ipc::PauseRequest& request,
 void DebuggedProcess::OnResume(const debug_ipc::ResumeRequest& request) {
   if (request.thread_koids.empty()) {
     // Empty thread ID list means resume all threads.
-    for (const auto& pair : threads_)
-      pair.second->Resume(request);
+    for (auto& [thread_koid, thread] : threads_) {
+      thread->Resume(request);
+      thread->set_client_state(DebuggedThread::ClientState::kRunning);
+    }
   } else {
     for (uint64_t thread_koid : request.thread_koids) {
       DebuggedThread* thread = GetThread(thread_koid);
-      if (thread)
+      if (thread) {
         thread->Resume(request);
+        thread->set_client_state(DebuggedThread::ClientState::kRunning);
+      }
       // Could be not found if there is a race between the thread exiting and
       // the client sending the request.
     }
@@ -248,7 +274,7 @@ void DebuggedProcess::PopulateCurrentThreads() {
                             &handle) == ZX_OK) {
       auto added = threads_.emplace(
           koid, std::make_unique<DebuggedThread>(
-                    this, zx::thread(handle), koid,
+                    this, zx::thread(handle), koid, zx::exception(),
                     ThreadCreationOption::kRunningKeepRunning));
       added.first->second->SendThreadNotification();
     }
@@ -318,8 +344,8 @@ ProcessWatchpoint* DebuggedProcess::FindWatchpointByAddress(uint64_t address) {
 
 zx_status_t DebuggedProcess::RegisterBreakpoint(Breakpoint* bp,
                                                 uint64_t address) {
-  DEBUG_LOG(Process) << LogPreamble(this)
-                     << "Setting breakpoint on 0x: " << std::hex << address;
+  LogRegisterBreakpoint(this, bp, address);
+
   auto found = breakpoints_.find(address);
   if (found == breakpoints_.end()) {
     auto process_breakpoint =
@@ -394,24 +420,28 @@ void DebuggedProcess::OnProcessTerminated(zx_koid_t process_koid) {
   // "THIS" IS NOW DELETED.
 }
 
-void DebuggedProcess::OnThreadStarting(zx_koid_t process_koid,
-                                       zx_koid_t thread_koid) {
-  zx::thread thread = ThreadForKoid(process_.get(), thread_koid);
+void DebuggedProcess::OnThreadStarting(zx::exception exception,
+                                       zx_exception_info_t exception_info) {
+  FXL_DCHECK(exception_info.pid == koid());
+  FXL_DCHECK(threads_.find(exception_info.tid) == threads_.end());
+  zx::thread thread = GetThreadFromException(exception.get());
 
-  FXL_DCHECK(threads_.find(thread_koid) == threads_.end());
   auto added = threads_.emplace(
-      thread_koid, std::make_unique<DebuggedThread>(
-                       this, std::move(thread), thread_koid,
-                       ThreadCreationOption::kSuspendedKeepSuspended));
+      exception_info.tid,
+      std::make_unique<DebuggedThread>(
+          this, std::move(thread), exception_info.tid, std::move(exception),
+          ThreadCreationOption::kSuspendedKeepSuspended));
 
   // Notify the client.
   added.first->second->SendThreadNotification();
 }
 
-void DebuggedProcess::OnThreadExiting(zx_koid_t process_koid,
-                                      zx_koid_t thread_koid) {
+void DebuggedProcess::OnThreadExiting(zx::exception exception,
+                                      zx_exception_info_t exception_info) {
+  FXL_DCHECK(exception_info.pid == koid());
+
   // Clean up our DebuggedThread object.
-  auto found_thread = threads_.find(thread_koid);
+  auto found_thread = threads_.find(exception_info.tid);
   if (found_thread == threads_.end()) {
     FXL_NOTREACHED();
     return;
@@ -419,17 +449,15 @@ void DebuggedProcess::OnThreadExiting(zx_koid_t process_koid,
 
   // The thread will currently be in a "Dying" state. For it to complete its
   // lifecycle it must be resumed.
-  debug_ipc::MessageLoopTarget::Current()->ResumeFromException(
-      thread_koid, found_thread->second->thread(), 0);
+  exception.reset();
 
-  threads_.erase(thread_koid);
+  threads_.erase(exception_info.tid);
 
   // Notify the client. Can't call FillThreadRecord since the thread doesn't
   // exist any more.
   debug_ipc::NotifyThread notify;
-  notify.record.process_koid = process_koid;
-  notify.record.process_koid = process_koid;
-  notify.record.thread_koid = thread_koid;
+  notify.record.process_koid = exception_info.pid;
+  notify.record.thread_koid = exception_info.tid;
   notify.record.state = debug_ipc::ThreadRecord::State::kDead;
 
   debug_ipc::MessageWriter writer;
@@ -438,16 +466,18 @@ void DebuggedProcess::OnThreadExiting(zx_koid_t process_koid,
   debug_agent_->stream()->Write(writer.MessageComplete());
 }
 
-void DebuggedProcess::OnException(zx_koid_t process_koid, zx_koid_t thread_koid,
-                                  uint32_t type) {
-  DebuggedThread* thread = GetThread(thread_koid);
-  if (thread) {
-    thread->OnException(type);
-  } else {
-    fprintf(stderr,
-            "Exception for thread %" PRIu64 " which we don't know about.\n",
-            thread_koid);
+void DebuggedProcess::OnException(zx::exception exception_token,
+                                  zx_exception_info_t exception_info) {
+  FXL_DCHECK(exception_info.pid == koid());
+
+  DebuggedThread* thread = GetThread(exception_info.tid);
+  if (!thread) {
+    FXL_LOG(ERROR) << "Exception on thread " << exception_info.tid
+                   << " which we don't know about.";
+    return;
   }
+
+  thread->OnException(std::move(exception_token), exception_info);
 }
 
 void DebuggedProcess::OnAddressSpace(
@@ -496,7 +526,8 @@ void DebuggedProcess::SuspendAll(bool synchronous,
                                  std::vector<uint64_t>* suspended_koids) {
   // We issue the suspension order for all the threads.
   for (auto& [thread_koid, thread] : threads_) {
-    if (thread->Suspend() == DebuggedThread::SuspendResult::kWasRunning) {
+    bool was_suspended = thread->Suspend(synchronous);
+    if (was_suspended) {
       if (suspended_koids)
         suspended_koids->push_back(thread_koid);
     }

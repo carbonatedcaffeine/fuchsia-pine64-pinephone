@@ -3,9 +3,8 @@
 // found in the LICENSE file.
 
 use super::suite_selector;
-use super::Error;
-use bytes::Bytes;
-use failure::{self, ensure};
+use crate::ie::rsn::suite_selector::OUI;
+use crate::organization::Oui;
 use std::fmt;
 
 macro_rules! return_none_if_unknown_algo {
@@ -33,13 +32,19 @@ pub const EAP_SUITEB_SHA384: u8 = 12;
 pub const FT_EAP_SHA384: u8 = 13;
 // 14-255 - Reserved.
 
-#[derive(PartialOrd, PartialEq, Clone)]
+#[derive(PartialOrd, PartialEq, Eq, Clone)]
 pub struct Akm {
-    pub oui: Bytes,
+    pub oui: Oui,
     pub suite_type: u8,
 }
 
 impl Akm {
+    /// Creates a new AKM instance for 802.11 specified AKMs.
+    /// See IEEE Std 802.11-2016, 9.4.2.25.3, Table 9-133.
+    pub fn new_dot11(suite_type: u8) -> Self {
+        Akm { oui: OUI, suite_type }
+    }
+
     /// Only AKMs specified in IEEE 802.11-2016, 9.4.2.25.4, Table 9-133 have known algorithms.
     pub fn has_known_algorithm(&self) -> bool {
         if self.is_reserved() || self.is_vendor_specific() {
@@ -51,7 +56,7 @@ impl Akm {
 
     pub fn is_vendor_specific(&self) -> bool {
         // IEEE 802.11-2016, 9.4.2.25.4, Table 9-133
-        !&self.oui[..].eq(&suite_selector::OUI)
+        !self.oui.eq(&OUI)
     }
 
     pub fn is_reserved(&self) -> bool {
@@ -143,14 +148,26 @@ impl Akm {
 impl suite_selector::Factory for Akm {
     type Suite = Akm;
 
-    fn new(oui: Bytes, suite_type: u8) -> Result<Self::Suite, failure::Error> {
-        ensure!(oui.len() == 3, Error::InvalidOuiLength(oui.len()));
-        Ok(Akm { oui, suite_type })
+    fn new(oui: Oui, suite_type: u8) -> Self::Suite {
+        Akm { oui, suite_type }
     }
 }
 
 impl fmt::Debug for Akm {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:02X}-{:02X}-{:02X}:{}", self.oui[0], self.oui[1], self.oui[2], self.suite_type)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_dot11() {
+        let psk = Akm::new_dot11(PSK);
+        assert!(!psk.is_vendor_specific());
+        assert!(psk.has_known_algorithm());
+        assert!(!psk.is_reserved());
     }
 }

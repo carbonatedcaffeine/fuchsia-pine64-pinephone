@@ -18,6 +18,7 @@ static const char* kLogSinkServiceURL =
     "fuchsia-pkg://fuchsia.com/logger#meta/logger.cmx";
 static const char* kLogServiceURL =
     "fuchsia-pkg://fuchsia.com/logger#meta/logger.cmx";
+static const char* kLogServiceNoKLogOption = "--disable-klog";
 
 using sys::testing::EnclosingEnvironment;
 using sys::testing::EnvironmentServices;
@@ -56,8 +57,6 @@ void ManagedEnvironment::CreateChildEnvironment(
 void ManagedEnvironment::Create(const fuchsia::sys::EnvironmentPtr& parent,
                                 ManagedEnvironment::Options options,
                                 const ManagedEnvironment* managed_parent) {
-  auto services = EnvironmentServices::Create(parent);
-
   // Nested environments without a name are not allowed, if empty name is
   // provided, replace it with a default *randomized* value.
   // Randomness there is necessary due to appmgr rules for environments with
@@ -66,6 +65,12 @@ void ManagedEnvironment::Create(const fuchsia::sys::EnvironmentPtr& parent,
     std::random_device rnd;
     options.set_name(fxl::StringPrintf("netemul-env-%08x", rnd()));
   }
+
+  // Start LogListener for this environment
+  log_listener_ = LogListener::Create(
+      std::move(*options.mutable_logger_options()), options.name(), NULL);
+
+  auto services = EnvironmentServices::Create(parent);
 
   services->SetServiceTerminatedCallback(
       [this, name = options.name()](const std::string& service,
@@ -79,7 +84,13 @@ void ManagedEnvironment::Create(const fuchsia::sys::EnvironmentPtr& parent,
         }
       });
 
-  loggers_ = std::make_unique<ManagedLoggerCollection>(options.name());
+  if (log_listener_) {
+    loggers_ = std::make_unique<ManagedLoggerCollection>(
+        options.name(), log_listener_->GetLogListenerImpl());
+  } else {
+    loggers_ =
+        std::make_unique<ManagedLoggerCollection>(options.name(), nullptr);
+  }
 
   // add network context service:
   services->AddService(sandbox_env_->network_context().GetHandler());
@@ -90,12 +101,17 @@ void ManagedEnvironment::Create(const fuchsia::sys::EnvironmentPtr& parent,
   // add managed environment itself as a handler
   services->AddService(bindings_.GetHandler(this));
 
+  bool disable_klog = !LogListener::IsKlogsEnabled(options);
+
   // Inject LogSink service
   services->AddServiceWithLaunchInfo(
       kLogSinkServiceURL,
-      [this]() {
+      [this, disable_klog]() {
         fuchsia::sys::LaunchInfo linfo;
         linfo.url = kLogSinkServiceURL;
+        if (disable_klog) {
+          linfo.arguments.push_back(kLogServiceNoKLogOption);
+        }
         linfo.out = loggers_->CreateLogger(kLogSinkServiceURL, false);
         linfo.err = loggers_->CreateLogger(kLogSinkServiceURL, true);
         loggers_->IncrementCounter();
@@ -106,9 +122,12 @@ void ManagedEnvironment::Create(const fuchsia::sys::EnvironmentPtr& parent,
   // Inject Log service
   services->AddServiceWithLaunchInfo(
       kLogServiceURL,
-      [this]() {
+      [this, disable_klog]() {
         fuchsia::sys::LaunchInfo linfo;
         linfo.url = kLogServiceURL;
+        if (disable_klog) {
+          linfo.arguments.push_back(kLogServiceNoKLogOption);
+        }
         linfo.out = loggers_->CreateLogger(kLogServiceURL, false);
         linfo.err = loggers_->CreateLogger(kLogServiceURL, true);
         loggers_->IncrementCounter();
@@ -190,9 +209,14 @@ void ManagedEnvironment::Create(const fuchsia::sys::EnvironmentPtr& parent,
 
   launcher_ = std::make_unique<ManagedLauncher>(this);
 
-  // Start LogListener for this environment
-  log_listener_ =
-      LogListener::Create(this, options.logger_options(), options.name(), NULL);
+  // If we have one, bind our log listener to this environment.
+  // We do this after creation of log listener because
+  // we need to make sure the environment is created first,
+  // but managed logger needs our implementation of LogListenerImpl.
+  if (log_listener_) {
+    ZX_ASSERT(log_listener_->Bindable());
+    log_listener_->BindToLogService(this);
+  }
 }
 
 zx::channel ManagedEnvironment::OpenVdevDirectory() {

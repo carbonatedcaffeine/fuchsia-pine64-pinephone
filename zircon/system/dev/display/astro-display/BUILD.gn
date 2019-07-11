@@ -4,13 +4,13 @@
 
 driver("astro-display") {
   sources = [
-    "aml-dsi-host.cpp",
-    "aml-mipi-phy.cpp",
-    "astro-clock.cpp",
-    "astro-display.cpp",
-    "lcd.cpp",
-    "osd.cpp",
-    "vpu.cpp",
+    "aml-dsi-host.cc",
+    "aml-mipi-phy.cc",
+    "astro-clock.cc",
+    "astro-display.cc",
+    "lcd.cc",
+    "osd.cc",
+    "vpu.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.amlogiccanvas",
@@ -21,6 +21,7 @@ driver("astro-display") {
     "$zx/system/banjo/ddk.protocol.i2c",
     "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/banjo/ddk.protocol.sysmem",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/fidl/fuchsia-sysmem:c",
     "$zx/system/ulib/bitmap",

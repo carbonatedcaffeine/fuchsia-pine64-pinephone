@@ -22,8 +22,7 @@ void TrimAndLowerCase(std::vector<std::string>* strings) {
   }
 }
 
-bool IsSuperSet(const std::vector<std::string>& super_set,
-                const std::vector<std::string>& set) {
+bool IsSuperSet(const std::vector<std::string>& super_set, const std::vector<std::string>& set) {
   std::set<std::string> sset;
   sset.insert(super_set.begin(), super_set.end());
   for (auto& s : set) {
@@ -38,8 +37,7 @@ bool IsSuperSet(const std::vector<std::string>& super_set,
 
 }  // namespace
 
-void SettingSchema::AddBool(std::string name, std::string description,
-                            bool v) {
+void SettingSchema::AddBool(std::string name, std::string description, bool v) {
   SettingInfo info{name, std::move(description)};
   AddSetting(std::move(name), {std::move(info), SettingValue(v)});
 }
@@ -49,14 +47,12 @@ void SettingSchema::AddInt(std::string name, std::string description, int v) {
   AddSetting(std::move(name), {std::move(info), SettingValue(v)});
 }
 
-void SettingSchema::AddString(std::string name, std::string description,
-                              std::string v) {
+void SettingSchema::AddString(std::string name, std::string description, std::string v) {
   SettingInfo info{name, std::move(description)};
   AddSetting(std::move(name), {std::move(info), SettingValue(v)});
 }
 
-bool SettingSchema::AddList(std::string name, std::string description,
-                            std::vector<std::string> v,
+bool SettingSchema::AddList(std::string name, std::string description, std::vector<std::string> v,
                             std::vector<std::string> options) {
   // Transform everything to lower case.
   TrimAndLowerCase(&v);
@@ -65,8 +61,7 @@ bool SettingSchema::AddList(std::string name, std::string description,
     return false;
 
   SettingInfo info{name, std::move(description)};
-  AddSetting(std::move(name), {std::move(info), SettingValue(v)},
-             std::move(options));
+  AddSetting(std::move(name), {std::move(info), SettingValue(v)}, std::move(options));
 
   return true;
 }
@@ -82,18 +77,15 @@ bool SettingSchema::HasSetting(const std::string& key) {
   return settings_.find(key) != settings_.end();
 }
 
-Err SettingSchema::ValidateSetting(const std::string& key,
-                                   const SettingValue& value) const {
+Err SettingSchema::ValidateSetting(const std::string& key, const SettingValue& value) const {
   auto it = settings_.find(key);
   if (it == settings_.end())
     return Err("Setting \"%s\" not found in the given context.", key.data());
 
   auto& setting = it->second;
   if (setting.setting.value.type != value.type) {
-    return Err(
-        "Setting \"%s\" expects a different type (expected: %s, given: %s).",
-        key.data(), SettingTypeToString(value.type),
-        SettingTypeToString(setting.setting.value.type));
+    return Err("Setting \"%s\" expects a different type (expected: %s, given: %s).", key.data(),
+               SettingTypeToString(value.type), SettingTypeToString(setting.setting.value.type));
   }
 
   if (setting.setting.value.is_list() && !setting.options.empty()) {
@@ -113,8 +105,7 @@ Err SettingSchema::ValidateSetting(const std::string& key,
   return Err();
 }
 
-const SettingSchema::SchemaSetting& SettingSchema::GetSetting(
-    const std::string& name) const {
+const SettingSchema::SchemaSetting& SettingSchema::GetSetting(const std::string& name) const {
   static SchemaSetting null_setting;
 
   const auto& setting = settings_.find(name);

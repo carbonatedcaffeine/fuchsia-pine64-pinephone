@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_EXPR_FOUND_NAME_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_EXPR_FOUND_NAME_H_
 
 #include "src/developer/debug/zxdb/expr/found_member.h"
 #include "src/developer/debug/zxdb/symbols/function.h"
@@ -43,8 +44,7 @@ class FoundName {
   // Constructor for data member variables. The object_ptr may be null if this
   // represents a query on a type with no corresponding variable).
   FoundName(const Variable* object_ptr, FoundMember member);
-  FoundName(const Variable* object_ptr, const DataMember* data_member,
-            uint32_t data_member_offset);
+  FoundName(const Variable* object_ptr, const DataMember* data_member, uint32_t data_member_offset);
 
   // Constructor for types.
   explicit FoundName(fxl::RefPtr<Type> type);
@@ -69,6 +69,7 @@ class FoundName {
   // from this class rather than the offset in data_member() (see comment
   // below for more).
   const Variable* object_ptr() const { return object_ptr_.get(); }
+  fxl::RefPtr<Variable> object_ptr_ref() const { return object_ptr_; }
   const FoundMember& member() const { return member_; }
 
   // Valid when kind == kType.
@@ -108,3 +109,5 @@ class FoundName {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_EXPR_FOUND_NAME_H_

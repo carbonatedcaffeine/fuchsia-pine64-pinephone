@@ -4,13 +4,12 @@
 
 #include "garnet/bin/trace_manager/trace_manager.h"
 
+#include <fuchsia/sys/cpp/fidl.h>
+#include <lib/fidl/cpp/clone.h>
 #include <lib/zx/time.h>
 
 #include <algorithm>
 #include <iostream>
-
-#include "fuchsia/sys/cpp/fidl.h"
-#include "lib/fidl/cpp/clone.h"
 
 namespace tracing {
 namespace {
@@ -24,8 +23,8 @@ constexpr uint32_t kMaxBufferSizeMegabytes = 64;
 // These defaults are copied from fuchsia.tracing/trace_controller.fidl.
 constexpr uint32_t kDefaultBufferSizeMegabytesHint = 4;
 constexpr uint32_t kDefaultStartTimeoutMilliseconds = 5000;
-constexpr fuchsia::tracing::controller::BufferingMode kDefaultBufferingMode =
-    fuchsia::tracing::controller::BufferingMode::ONESHOT;
+constexpr controller::BufferingMode kDefaultBufferingMode =
+    controller::BufferingMode::ONESHOT;
 
 uint32_t ConstrainBufferSize(uint32_t buffer_size_megabytes) {
   return std::min(std::max(buffer_size_megabytes, kMinBufferSizeMegabytes),
@@ -46,7 +45,7 @@ TraceManager::TraceManager(sys::ComponentContext* context, const Config& config)
 TraceManager::~TraceManager() = default;
 
 void TraceManager::StartTracing(
-    fuchsia::tracing::controller::TraceOptions options, zx::socket output,
+    controller::TraceOptions options, zx::socket output,
     StartTracingCallback start_callback) {
   if (session_) {
     FXL_LOG(ERROR) << "Trace already in progress";
@@ -67,24 +66,23 @@ void TraceManager::StartTracing(
     }
   }
 
-  fuchsia::tracing::controller::BufferingMode tracing_buffering_mode =
-      kDefaultBufferingMode;
+  controller::BufferingMode tracing_buffering_mode = kDefaultBufferingMode;
   if (options.has_buffering_mode()) {
     tracing_buffering_mode = options.buffering_mode();
   }
-  fuchsia::tracelink::BufferingMode tracelink_buffering_mode;
+  provider::BufferingMode provider_buffering_mode;
   const char* mode_name;
   switch (tracing_buffering_mode) {
-    case fuchsia::tracing::controller::BufferingMode::ONESHOT:
-      tracelink_buffering_mode = fuchsia::tracelink::BufferingMode::ONESHOT;
+    case controller::BufferingMode::ONESHOT:
+      provider_buffering_mode = provider::BufferingMode::ONESHOT;
       mode_name = "oneshot";
       break;
-    case fuchsia::tracing::controller::BufferingMode::CIRCULAR:
-      tracelink_buffering_mode = fuchsia::tracelink::BufferingMode::CIRCULAR;
+    case controller::BufferingMode::CIRCULAR:
+      provider_buffering_mode = provider::BufferingMode::CIRCULAR;
       mode_name = "circular";
       break;
-    case fuchsia::tracing::controller::BufferingMode::STREAMING:
-      tracelink_buffering_mode = fuchsia::tracelink::BufferingMode::STREAMING;
+    case controller::BufferingMode::STREAMING:
+      provider_buffering_mode = provider::BufferingMode::STREAMING;
       mode_name = "streaming";
       break;
     default:
@@ -109,7 +107,7 @@ void TraceManager::StartTracing(
   }
   session_ = fxl::MakeRefCounted<TraceSession>(
       std::move(output), std::move(categories), default_buffer_size_megabytes,
-      tracelink_buffering_mode, std::move(provider_specs),
+      provider_buffering_mode, std::move(provider_specs),
       [this]() { session_ = nullptr; });
 
   session_->QueueTraceInfo();
@@ -142,22 +140,21 @@ void TraceManager::StopTracing() {
 }
 
 void TraceManager::GetKnownCategories(GetKnownCategoriesCallback callback) {
-  fidl::VectorPtr<fuchsia::tracing::controller::KnownCategory> known_categories;
+  fidl::VectorPtr<controller::KnownCategory> known_categories;
   for (const auto& it : config_.known_categories()) {
     known_categories.push_back(
-        fuchsia::tracing::controller::KnownCategory{it.first, it.second});
+        controller::KnownCategory{it.first, it.second});
   }
   callback(std::move(known_categories));
 }
 
-void TraceManager::RegisterTraceProviderWorker(
-    fidl::InterfaceHandle<fuchsia::tracelink::Provider> provider, uint64_t pid,
+void TraceManager::RegisterProviderWorker(
+    fidl::InterfaceHandle<provider::Provider> provider, uint64_t pid,
     fidl::StringPtr name) {
   FXL_VLOG(2) << "Registering provider {" << pid << ":" << name.get() << "}";
   auto it = providers_.emplace(
       providers_.end(),
-      TraceProviderBundle{provider.Bind(), next_provider_id_++, pid,
-                          name.get()});
+      provider.Bind(), next_provider_id_++, pid, name.get());
 
   it->provider.set_error_handler([this, it](zx_status_t status) {
     if (session_)
@@ -169,22 +166,16 @@ void TraceManager::RegisterTraceProviderWorker(
     session_->AddProvider(&(*it));
 }
 
-void TraceManager::RegisterTraceProviderDeprecated(
-    fidl::InterfaceHandle<fuchsia::tracelink::Provider> provider) {
-  RegisterTraceProviderWorker(std::move(provider), ZX_KOID_INVALID,
-                              fidl::StringPtr(""));
-}
-
-void TraceManager::RegisterTraceProvider(
-    fidl::InterfaceHandle<fuchsia::tracelink::Provider> provider, uint64_t pid,
+void TraceManager::RegisterProvider(
+    fidl::InterfaceHandle<provider::Provider> provider, uint64_t pid,
     std::string name) {
-  RegisterTraceProviderWorker(std::move(provider), pid, std::move(name));
+  RegisterProviderWorker(std::move(provider), pid, std::move(name));
 }
 
-void TraceManager::RegisterTraceProviderSynchronously(
-    fidl::InterfaceHandle<fuchsia::tracelink::Provider> provider, uint64_t pid,
-    std::string name, RegisterTraceProviderSynchronouslyCallback callback) {
-  RegisterTraceProviderWorker(std::move(provider), pid, std::move(name));
+void TraceManager::RegisterProviderSynchronously(
+    fidl::InterfaceHandle<provider::Provider> provider, uint64_t pid,
+    std::string name, RegisterProviderSynchronouslyCallback callback) {
+  RegisterProviderWorker(std::move(provider), pid, std::move(name));
   callback(ZX_OK, trace_running_);
 }
 

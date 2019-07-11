@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/host.gni")
 import("//build/package.gni")
 import("//build/rust/rustc_binary.gni")
 import("//build/test/test_package.gni")
@@ -9,23 +10,19 @@ import("//build/testing/environments.gni")
 
 rustc_binary("bin") {
   name = "odu"
+  version = "0.1.0"
   with_unit_tests = true
   edition = "2018"
 
   deps = [
-    "//garnet/public/lib/fidl/rust/fidl",
-    "//garnet/public/rust/fdio",
-    "//garnet/public/rust/fuchsia-app",
-    "//garnet/public/rust/fuchsia-async",
-    "//garnet/public/rust/fuchsia-zircon",
-    "//third_party/rust-crates/rustc_deps:failure",
-    "//third_party/rust-crates/rustc_deps:serde",
-    "//third_party/rust-crates/rustc_deps:serde_derive",
-    "//third_party/rust-crates/rustc_deps:serde_json",
     "//third_party/rust_crates:byteorder",
-    "//third_party/rust_crates:lazy_static",
+    "//third_party/rust_crates:clap",
+    "//third_party/rust_crates:failure",
     "//third_party/rust_crates:libc",
     "//third_party/rust_crates:log",
+    "//third_party/rust_crates:serde",
+    "//third_party/rust_crates:serde_derive",
+    "//third_party/rust_crates:serde_json",
   ]
 }
 
@@ -49,10 +46,9 @@ package("odu") {
   ]
 }
 
-package("odu_tests") {
-  testonly = true
+test_package("odu_tests") {
   deps = [
-    ":bin",
+    ":bin_test",
   ]
   tests = [
     {
@@ -60,5 +56,14 @@ package("odu_tests") {
       dest = "odu_bin_test"
       environments = basic_envs
     },
+  ]
+}
+
+install_host_tools("odu_host") {
+  deps = [
+    ":bin($host_toolchain)",
+  ]
+  outputs = [
+    "odu",
   ]
 }

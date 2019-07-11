@@ -109,9 +109,11 @@ impl AsyncResponse {
 pub enum FacadeType {
     AudioFacade,
     AuthFacade,
+    BaseManagerFacade,
     BleAdvertiseFacade,
     Bluetooth,
     BluetoothControlFacade,
+    FileFacade,
     GattClientFacade,
     GattServerFacade,
     LoggingFacade,
@@ -119,6 +121,7 @@ pub enum FacadeType {
     SetUiFacade,
     ScenicFacade,
     TraceutilFacade,
+    WebdriverFacade,
     Wlan,
     Undefined,
 }
@@ -128,9 +131,11 @@ impl FacadeType {
         match facade.as_ref() {
             "audio_facade" => FacadeType::AudioFacade,
             "auth_facade" => FacadeType::AuthFacade,
+            "basemgr_facade" => FacadeType::BaseManagerFacade,
             "ble_advertise_facade" => FacadeType::BleAdvertiseFacade,
             "bluetooth" => FacadeType::Bluetooth,
             "bt_control_facade" => FacadeType::BluetoothControlFacade,
+            "file_facade" => FacadeType::FileFacade,
             "gatt_client_facade" => FacadeType::GattClientFacade,
             "gatt_server_facade" => FacadeType::GattServerFacade,
             "logging" => FacadeType::LoggingFacade,
@@ -138,6 +143,7 @@ impl FacadeType {
             "scenic_facade" => FacadeType::ScenicFacade,
             "setui_facade" => FacadeType::SetUiFacade,
             "traceutil_facade" => FacadeType::TraceutilFacade,
+            "webdriver_facade" => FacadeType::WebdriverFacade,
             "wlan" => FacadeType::Wlan,
             _ => FacadeType::Undefined,
         }

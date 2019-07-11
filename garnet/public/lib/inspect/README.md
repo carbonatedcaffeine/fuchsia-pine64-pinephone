@@ -1,8 +1,4 @@
 
-# Inspect Library
+# DEPRECATED Inspect compatibility library.
 
-The inspect library is documented [here][inspect]
-(//fuchsia/garnet/docs/inspect/README.md).
-
-<!-- xrefs -->
-[inspect]: https://fuchsia.googlesource.com/fuchsia/+/master/garnet/docs/inspect/README.md
+We are in the process of moving these files to the SDK, do not depend on this library.

@@ -4,6 +4,7 @@
 
 library("async-loop") {
   sdk = "source"
+  sdk_publishable = true
   sdk_headers = [ "lib/async-loop/loop.h" ]
   sources = [
     "loop.c",
@@ -22,9 +23,10 @@ library("async-loop") {
 
 library("async-loop-cpp") {
   sdk = "source"
+  sdk_publishable = true
   sdk_headers = [ "lib/async-loop/cpp/loop.h" ]
   sources = [
-    "loop_wrapper.cpp",
+    "loop_wrapper.cc",
   ]
   configs += [ "$zx/public/gn/config:visibility_hidden" ]
   deps = [

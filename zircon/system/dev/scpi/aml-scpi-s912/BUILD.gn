@@ -11,7 +11,7 @@ group("aml-scpi-s912") {
 
 driver("aml-scpi-s912.mailbox") {
   sources = [
-    "aml-mailbox.cpp",
+    "aml-mailbox.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.clock",
@@ -19,7 +19,8 @@ driver("aml-scpi-s912.mailbox") {
     "$zx/system/banjo/ddk.protocol.i2c",
     "$zx/system/banjo/ddk.protocol.mailbox",
     "$zx/system/banjo/ddk.protocol.platform.bus",
-    "$zx/system/banjo/ddk.protocol.platform.device",
+    "$zx/system/dev/lib/device-protocol-pdev",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/fidl/fuchsia-hardware-thermal:c",
     "$zx/system/ulib/ddk",
@@ -32,11 +33,13 @@ driver("aml-scpi-s912.mailbox") {
 
 driver("scpi") {
   sources = [
-    "aml-scpi.cpp",
+    "aml-scpi.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.mailbox",
     "$zx/system/banjo/ddk.protocol.scpi",
+    "$zx/system/dev/lib/device-protocol-pdev",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/fidl/fuchsia-hardware-thermal:c",
     "$zx/system/ulib/ddk",

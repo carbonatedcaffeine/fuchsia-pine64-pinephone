@@ -48,10 +48,8 @@ fuchsia::ui::scenic::ScreenshotData EmptyScreenshot() {
 // move this to the root presenter, which runs on a separate process,
 // or when Scenic eventually becomes multi-threaded, we keep it here and
 // and run the rotation on a background thread.
-std::vector<uint8_t> rotate_img_vec(const std::vector<uint8_t>& imgvec,
-                                    uint32_t& width, uint32_t& height,
-                                    uint32_t bytes_per_pixel,
-                                    uint32_t rotation) {
+std::vector<uint8_t> rotate_img_vec(const std::vector<uint8_t>& imgvec, uint32_t& width,
+                                    uint32_t& height, uint32_t bytes_per_pixel, uint32_t rotation) {
   // Trace performance.
   TRACE_DURATION("gfx", "Screenshotter rotate_img_vec");
 
@@ -89,42 +87,27 @@ std::vector<uint8_t> rotate_img_vec(const std::vector<uint8_t>& imgvec,
   return result;
 }
 
+constexpr vk::Format kImageFormat = vk::Format::eB8G8R8A8Unorm;
+
+constexpr uint32_t kBytesPerPixel = 4u;
+
 };  // namespace
 
 // static
 void Screenshotter::OnCommandBufferDone(
-    const escher::ImagePtr& image, uint32_t width, uint32_t height,
-    uint32_t rotation, vk::Device device,
+    const escher::BufferPtr& buffer, uint32_t width, uint32_t height, uint32_t rotation,
     fuchsia::ui::scenic::Scenic::TakeScreenshotCallback done_callback) {
   TRACE_DURATION("gfx", "Screenshotter::OnCommandBufferDone");
-  // Map the final image so CPU can read it.
-  const vk::ImageSubresource sr(vk::ImageAspectFlagBits::eColor, 0, 0);
-  vk::SubresourceLayout sr_layout;
-  device.getImageSubresourceLayout(image->vk(), &sr, &sr_layout);
 
-  constexpr uint32_t kBytesPerPixel = 4u;
   std::vector<uint8_t> imgvec;
   const size_t kImgVecElementSize = sizeof(decltype(imgvec)::value_type);
   imgvec.resize(kBytesPerPixel * width * height);
 
-  const uint8_t* row = image->host_ptr();
+  const uint8_t* row = buffer->host_ptr();
   FXL_CHECK(row != nullptr);
-  row += sr_layout.offset;
-  if (width == sr_layout.rowPitch) {
-    uint32_t num_bytes = width * height * kBytesPerPixel;
-    FXL_DCHECK(num_bytes <= kImgVecElementSize * imgvec.size());
-    memcpy(imgvec.data(), row, num_bytes);
-  } else {
-    uint8_t* imgvec_ptr = imgvec.data();
-    for (uint32_t y = 0; y < height; y++) {
-      uint32_t num_bytes = width * kBytesPerPixel;
-      FXL_DCHECK(num_bytes <=
-                 kImgVecElementSize * (1 + &imgvec.back() - imgvec_ptr));
-      memcpy(imgvec_ptr, row, num_bytes);
-      row += sr_layout.rowPitch;
-      imgvec_ptr += num_bytes;
-    }
-  }
+  uint32_t num_bytes = width * height * kBytesPerPixel;
+  FXL_DCHECK(num_bytes <= kImgVecElementSize * imgvec.size());
+  memcpy(imgvec.data(), row, num_bytes);
 
   // Apply rotation of 90, 180 or 270 degrees counterclockwise.
   if (rotation > 0) {
@@ -145,15 +128,12 @@ void Screenshotter::OnCommandBufferDone(
 }
 
 void Screenshotter::TakeScreenshot(
-    Engine* engine,
-    fuchsia::ui::scenic::Scenic::TakeScreenshotCallback done_callback) {
+    Engine* engine, fuchsia::ui::scenic::Scenic::TakeScreenshotCallback done_callback) {
   auto* escher = engine->escher();
-  const CompositorWeakPtr& compositor =
-      engine->scene_graph()->first_compositor();
+  const CompositorWeakPtr& compositor = engine->scene_graph()->first_compositor();
 
   if (!compositor || compositor->GetNumDrawableLayers() == 0) {
-    FXL_LOG(WARNING)
-        << "TakeScreenshot: No drawable layers; returning empty screenshot.";
+    FXL_LOG(WARNING) << "TakeScreenshot: No drawable layers; returning empty screenshot.";
     done_callback(EmptyScreenshot(), false);
     return;
   }
@@ -163,21 +143,18 @@ void Screenshotter::TakeScreenshot(
 
   uint32_t rotation = compositor->layout_rotation();
   escher::ImageInfo image_info;
-  image_info.format = vk::Format::eB8G8R8A8Unorm;
+  image_info.format = kImageFormat;
   image_info.width = width;
   image_info.height = height;
-  image_info.usage = vk::ImageUsageFlagBits::eColorAttachment |
-                     vk::ImageUsageFlagBits::eSampled;
-  image_info.memory_flags = vk::MemoryPropertyFlagBits::eHostVisible;
-  image_info.tiling = vk::ImageTiling::eLinear;
+  image_info.usage =
+      vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc;
 
   // TODO(ES-7): cache is never trimmed.
   escher::ImagePtr image = escher->image_cache()->NewImage(image_info);
   escher::FramePtr frame = escher->NewFrame("Scenic Compositor", 0);
 
   std::vector<Layer*> drawable_layers = compositor->GetDrawableLayers();
-  engine->renderer()->RenderLayers(frame, dispatcher_clock_now(), image,
-                                   drawable_layers);
+  engine->renderer()->RenderLayers(frame, dispatcher_clock_now(), image, drawable_layers);
 
   // TODO(SCN-1096): Nobody signals this semaphore, so there's no point.  One
   // way that it could be used is export it as a zx::event and watch for that to
@@ -190,11 +167,27 @@ void Screenshotter::TakeScreenshot(
   vk::Queue queue = escher->command_buffer_pool()->queue();
   auto* command_buffer = escher->command_buffer_pool()->GetCommandBuffer();
 
+  escher::BufferPtr buffer = escher->buffer_cache()->NewHostBuffer(width * height * kBytesPerPixel);
+
+  vk::BufferImageCopy region;
+  region.bufferRowLength = width;
+  region.bufferImageHeight = height;
+  region.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+  region.imageSubresource.layerCount = 1;
+  region.imageExtent.width = width;
+  region.imageExtent.height = height;
+  region.imageExtent.depth = 1;
+  command_buffer->TransitionImageLayout(image, vk::ImageLayout::eColorAttachmentOptimal,
+                                        vk::ImageLayout::eTransferSrcOptimal);
+  command_buffer->vk().copyImageToBuffer(image->vk(), vk::ImageLayout::eTransferSrcOptimal,
+                                         buffer->vk(), 1, &region);
+  command_buffer->TransitionImageLayout(image, vk::ImageLayout::eUndefined,
+                                        vk::ImageLayout::eColorAttachmentOptimal);
+  command_buffer->KeepAlive(image);
+
   command_buffer->Submit(
-      queue, [image, width, height, rotation, device = escher->vk_device(),
-              done_callback = std::move(done_callback)]() mutable {
-        OnCommandBufferDone(image, width, height, rotation, device,
-                            std::move(done_callback));
+      queue, [buffer, width, height, rotation, done_callback = std::move(done_callback)]() mutable {
+        OnCommandBufferDone(buffer, width, height, rotation, std::move(done_callback));
       });
 
   // Force the command buffer to retire to guarantee that |done_callback| will

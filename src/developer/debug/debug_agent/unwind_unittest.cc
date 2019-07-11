@@ -34,11 +34,11 @@ struct ThreadData {
 
 void __attribute__((noinline)) ThreadFunc2(ThreadData* data) {
   // Tell the main thread we're ready for backtrace computation.
+  std::unique_lock<std::mutex> lock(data->mutex);
   data->thread_ready = true;
   data->thread_ready_cv.notify_one();
 
   // Block until the backtrace is done being completed.
-  std::unique_lock<std::mutex> lock(data->mutex);
   if (!data->backtrace_done) {
     data->backtrace_done_cv.wait(lock,
                                  [data]() { return data->backtrace_done; });
@@ -66,8 +66,8 @@ zx::suspend_token SyncSuspendThread(zx::thread& thread) {
 
   // Need long timeout when running on shared bots on QEMU.
   zx_signals_t observed = 0;
-  status = thread.wait_one(ZX_THREAD_SUSPENDED,
-                           zx::deadline_after(zx::sec(10)), &observed);
+  status = thread.wait_one(ZX_THREAD_SUSPENDED, zx::deadline_after(zx::sec(10)),
+                           &observed);
   EXPECT_TRUE(observed & ZX_THREAD_SUSPENDED);
   if (status != ZX_OK)
     return zx::suspend_token();
@@ -75,7 +75,7 @@ zx::suspend_token SyncSuspendThread(zx::thread& thread) {
   return token;
 }
 
-void DoUnwindTest() {
+void DoUnwindTest(bool expect_registers) {
   ThreadData data;
   std::thread background(ThreadFunc1, &data);
 
@@ -116,11 +116,17 @@ void DoUnwindTest() {
 
   // Validate the stack. It's really hard to say what these values will be
   // without symbols given the few guarantees C++ can provide. But we should
-  // have "several" entries and the first one should have "a bunch" of
-  // registers.
+  // have "several" entries, the first one should have "a bunch" of registers.
   ASSERT_TRUE(stack.size() >= 2) << "Only got " << stack.size();
   EXPECT_TRUE(stack[0].ip != 0);
   EXPECT_TRUE(stack[0].regs.size() >= 8);
+
+  // Non-topmost stack frames should always have at least two registers (IP/SP).
+  EXPECT_TRUE(stack[1].regs.size() >= 2);
+
+  if (expect_registers) {
+    EXPECT_TRUE(stack[1].regs.size() >= 8);
+  }
 
   // TODO: It might be nice to write the thread functions in assembly so we can
   // know what the addresses are supposed to be.
@@ -130,12 +136,12 @@ void DoUnwindTest() {
 
 TEST(Unwind, Android) {
   SetUnwinderType(UnwinderType::kAndroid);
-  DoUnwindTest();
+  DoUnwindTest(true);
 }
 
 TEST(Unwind, NG) {
   SetUnwinderType(UnwinderType::kNgUnwind);
-  DoUnwindTest();
+  DoUnwindTest(false);
 }
 
 }  // namespace debug_agent

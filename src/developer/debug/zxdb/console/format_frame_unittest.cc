@@ -9,7 +9,6 @@
 #include "src/developer/debug/zxdb/client/mock_frame.h"
 #include "src/developer/debug/zxdb/client/session.h"
 #include "src/developer/debug/zxdb/console/format_value.h"
-#include "src/developer/debug/zxdb/console/mock_format_value_process_context.h"
 #include "src/developer/debug/zxdb/console/output_buffer.h"
 #include "src/developer/debug/zxdb/symbols/function.h"
 #include "src/developer/debug/zxdb/symbols/location.h"
@@ -20,13 +19,11 @@ namespace zxdb {
 namespace {
 
 // Synchronous wrapper around asynchronous long formatting.
-std::string SyncFormatFrameLong(const Frame* frame,
-                                const FormatExprValueOptions& options) {
+std::string SyncFormatFrameLong(const Frame* frame, const FormatExprValueOptions& options) {
   debug_ipc::PlatformMessageLoop loop;
   loop.Init();
 
-  auto helper = fxl::MakeRefCounted<FormatValue>(
-      std::make_unique<MockFormatValueProcessContext>());
+  auto helper = fxl::MakeRefCounted<FormatValue>();
   FormatFrameLong(frame, false, helper.get(), FormatExprValueOptions());
 
   std::string out_string;
@@ -51,10 +48,8 @@ std::string SyncFormatFrameLong(const Frame* frame,
 }  // namespace
 
 TEST(FormatFrame, Unsymbolized) {
-  debug_ipc::StackFrame stack_frame(0x12345678, 0x567890);
-  MockFrame frame(nullptr, nullptr, stack_frame,
-                  Location(Location::State::kSymbolized, stack_frame.ip),
-                  0xdeadbeef);
+  MockFrame frame(nullptr, nullptr, Location(Location::State::kSymbolized, 0x12345678), 0x567890, 0,
+                  std::vector<Register>(), 0xdeadbeef);
 
   OutputBuffer out;
 
@@ -63,7 +58,7 @@ TEST(FormatFrame, Unsymbolized) {
   EXPECT_EQ("0x12345678", out.AsString());
 
   // Long version should do the same (not duplicate it).
-  EXPECT_EQ("\n      IP = 0x12345678, SP = 0x567890",
+  EXPECT_EQ("\n      IP = 0x12345678, SP = 0x567890, base = 0xdeadbeef",
             SyncFormatFrameLong(&frame, FormatExprValueOptions()));
 
   // With index.
@@ -73,27 +68,24 @@ TEST(FormatFrame, Unsymbolized) {
 }
 
 TEST(FormatFrame, Inline) {
-  debug_ipc::StackFrame stack_frame(0x12345678, 0x567890);
-
   // This is to have some place for the inline frame to refer to as the
   // underlying physical frame. The values are ignored.
-  MockFrame physical_frame(
-      nullptr, nullptr, stack_frame,
-      Location(Location::State::kSymbolized, stack_frame.ip));
+  MockFrame physical_frame(nullptr, nullptr, Location(Location::State::kSymbolized, 0x12345678),
+                           0x567890);
 
   SymbolContext symbol_context = SymbolContext::ForRelativeAddresses();
 
   auto function = fxl::MakeRefCounted<Function>(DwarfTag::kInlinedSubroutine);
   function->set_assigned_name("Function");
 
-  MockFrame inline_frame(nullptr, nullptr, stack_frame,
-                         Location(stack_frame.ip, FileLine("file.cc", 22), 0,
-                                  symbol_context, LazySymbol(function)),
-                         0xdeadbeef, &physical_frame);
+  MockFrame inline_frame(
+      nullptr, nullptr,
+      Location(0x12345678, FileLine("file.cc", 22), 0, symbol_context, LazySymbol(function)),
+      0x567890, 0, std::vector<Register>(), 0xdeadbeef, &physical_frame);
 
   EXPECT_EQ(
       "Function() • file.cc:22 (inline)\n"
-      "      IP = 0x12345678, SP = 0x567890",
+      "      IP = 0x12345678, SP = 0x567890, base = 0xdeadbeef",
       SyncFormatFrameLong(&inline_frame, FormatExprValueOptions()));
 }
 

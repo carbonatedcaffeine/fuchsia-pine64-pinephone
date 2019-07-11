@@ -118,9 +118,12 @@ void launchpad_destroy(launchpad_t* lp) {
     free(lp);
 }
 
-zx_status_t launchpad_create_with_process(zx_handle_t proc,
-                                          zx_handle_t vmar,
-                                          launchpad_t** result) {
+// Create a new launchpad for a given existing process handle and
+// its root VMAR handle.  On success, the launchpad takes ownership
+// of both handles.
+static zx_status_t launchpad_create_with_process(zx_handle_t proc,
+                                                 zx_handle_t vmar,
+                                                 launchpad_t** result) {
     launchpad_t* lp = calloc(1, sizeof(*lp));
     if (lp == NULL) {
         lp = &invalid_launchpad;
@@ -384,7 +387,7 @@ zx_status_t launchpad_elf_load_extra(launchpad_t* lp, zx_handle_t vmo,
 
 #define LOADER_SVC_MSG_MAX 1024
 
-static zx_status_t loader_svc_rpc(zx_handle_t loader_svc, uint32_t ordinal,
+static zx_status_t loader_svc_rpc(zx_handle_t loader_svc, uint64_t ordinal,
                                   const void* data, size_t len, zx_handle_t* out) {
     static _Atomic zx_txid_t next_txid;
 

@@ -94,6 +94,7 @@ In Zircon global locks are typically defined either at global/namespace scope or
 within another type as a static member.
 
 example.h:
+
 ```C++
 #include <kernel/mutex.h>
 
@@ -108,18 +109,20 @@ private:
 ```
 
 example.cpp:
+
 ```C++
 #include "example.h"
 
-fbl::Mutext a_global_lock;
+fbl::Mutex a_global_lock;
 
-fbl::Mutext MyType::all_objects_lock_;
+fbl::Mutex MyType::all_objects_lock_;
 ```
 
 The instrumentation simplifies declaring locks by declaring singleton types that
 may be used in either scope and handles ODR-use automatically.
 
 example.h:
+
 ```
 #include <kernel/mutex.h>
 

@@ -17,13 +17,13 @@
 #include "src/ui/lib/escher/util/bit_ops.h"
 #include "src/ui/lib/escher/vk/image.h"
 #include "src/ui/lib/escher/vk/shader_module.h"
+#include "src/ui/lib/escher/vk/vulkan_device_queues.h"
 
 namespace escher {
 
 std::ostream& operator<<(std::ostream& str, const Transform& transform) {
-  return str << "Transform[t: " << transform.translation
-             << " s: " << transform.scale << " r: " << transform.rotation
-             << " a: " << transform.anchor << "]";
+  return str << "Transform[t: " << transform.translation << " s: " << transform.scale
+             << " r: " << transform.rotation << " a: " << transform.anchor << "]";
 }
 
 std::ostream& operator<<(std::ostream& str, const mat2& m) {
@@ -57,8 +57,7 @@ std::ostream& operator<<(std::ostream& str, const vec3& v) {
 }
 
 std::ostream& operator<<(std::ostream& str, const vec4& v) {
-  return str << "(" << v[0] << ", " << v[1] << ", " << v[2] << ", " << v[3]
-             << ")";
+  return str << "(" << v[0] << ", " << v[1] << ", " << v[2] << ", " << v[3] << ")";
 }
 
 std::ostream& operator<<(std::ostream& str, const quat& q) {
@@ -104,9 +103,8 @@ std::ostream& operator<<(std::ostream& str, const MeshAttributes& attributes) {
   static_assert(uint32_t(MeshAttribute::kStride) == (1 << 6), "missing enum");
 
   constexpr std::array<MeshAttribute, 6> all_flags = {
-      {MeshAttribute::kPosition2D, MeshAttribute::kPosition3D,
-       MeshAttribute::kPositionOffset, MeshAttribute::kUV,
-       MeshAttribute::kPerimeterPos, MeshAttribute::kBlendWeight1}};
+      {MeshAttribute::kPosition2D, MeshAttribute::kPosition3D, MeshAttribute::kPositionOffset,
+       MeshAttribute::kUV, MeshAttribute::kPerimeterPos, MeshAttribute::kBlendWeight1}};
 
   bool has_flag = false;  // has a flag already been seen?
   for (auto flag : all_flags) {
@@ -141,9 +139,8 @@ std::ostream& operator<<(std::ostream& str, const MeshSpec& spec) {
   return str;
 }
 
-std::ostream& operator<<(
-    std::ostream& str,
-    const impl::ModelPipelineSpec::ClipperState& clipper_state) {
+std::ostream& operator<<(std::ostream& str,
+                         const impl::ModelPipelineSpec::ClipperState& clipper_state) {
   using ClipperState = impl::ModelPipelineSpec::ClipperState;
   switch (clipper_state) {
     case ClipperState::kBeginClipChildren:
@@ -159,13 +156,10 @@ std::ostream& operator<<(
   return str;
 }
 
-std::ostream& operator<<(std::ostream& str,
-                         const impl::ModelPipelineSpec& spec) {
+std::ostream& operator<<(std::ostream& str, const impl::ModelPipelineSpec& spec) {
   str << "ModelPipelineSpec[" << spec.mesh_spec << ", " << spec.shape_modifiers
-      << ", clipper_state: " << spec.clipper_state
-      << ", is_clippee: " << spec.is_clippee
-      << ", has_material: " << spec.has_material
-      << ", is_opaque: " << spec.is_opaque << "]";
+      << ", clipper_state: " << spec.clipper_state << ", is_clippee: " << spec.is_clippee
+      << ", has_material: " << spec.has_material << ", is_opaque: " << spec.is_opaque << "]";
   return str;
 }
 
@@ -201,8 +195,7 @@ std::ostream& operator<<(std::ostream& str, const ShapeModifiers& flags) {
 
 std::ostream& operator<<(std::ostream& str, const ImageInfo& info) {
   return str << "ImageInfo[" << info.width << "x" << info.height << " "
-             << vk::to_string(info.format) << "  samples: " << info.sample_count
-             << "]";
+             << vk::to_string(info.format) << "  samples: " << info.sample_count << "]";
 }
 
 std::ostream& operator<<(std::ostream& str, const ViewingVolume& volume) {
@@ -223,11 +216,9 @@ std::ostream& operator<<(std::ostream& str, const Camera& camera) {
              << "\nprojection: " << camera.projection() << "]";
 }
 
-std::ostream& operator<<(std::ostream& str,
-                         const impl::DescriptorSetLayout& layout) {
+std::ostream& operator<<(std::ostream& str, const impl::DescriptorSetLayout& layout) {
   return str << "DescriptorSetLayout[\n\tsampled_image_mask: " << std::hex
-             << layout.sampled_image_mask
-             << "\n\tstorage_image_mask: " << layout.storage_image_mask
+             << layout.sampled_image_mask << "\n\tstorage_image_mask: " << layout.storage_image_mask
              << "\n\tuniform_buffer_mask: " << layout.uniform_buffer_mask
              << "\n\tstorage_buffer_mask: " << layout.storage_buffer_mask
              << "\n\tsampled_buffer_mask: " << layout.sampled_buffer_mask
@@ -236,10 +227,8 @@ std::ostream& operator<<(std::ostream& str,
              << vk::to_string(layout.stages) << "]";
 }
 
-std::ostream& operator<<(std::ostream& str,
-                         const impl::ShaderModuleResourceLayout& layout) {
-  str << "ShaderModuleResourceLayout[\n\tattribute_mask: " << std::hex
-      << layout.attribute_mask
+std::ostream& operator<<(std::ostream& str, const impl::ShaderModuleResourceLayout& layout) {
+  str << "ShaderModuleResourceLayout[\n\tattribute_mask: " << std::hex << layout.attribute_mask
       << "\n\trender_target_mask: " << layout.render_target_mask
       << "\n\tpush_constant_offset: " << layout.push_constant_offset
       << "\n\tpush_constant_range: " << layout.push_constant_range << std::dec;
@@ -268,23 +257,19 @@ std::ostream& operator<<(std::ostream& str, const ShaderStage& stage) {
   }
 }
 
-std::ostream& operator<<(std::ostream& str,
-                         const impl::PipelineLayoutSpec& spec) {
+std::ostream& operator<<(std::ostream& str, const impl::PipelineLayoutSpec& spec) {
   str << "==============PipelineLayoutSpec[\n\tattribute_mask: " << std::hex
-      << spec.attribute_mask()
-      << "\n\trender_target_mask: " << spec.render_target_mask()
+      << spec.attribute_mask() << "\n\trender_target_mask: " << spec.render_target_mask()
       << "\n\tnum_push_constant_ranges: " << spec.num_push_constant_ranges()
       << "\n\tdescriptor_set_mask: " << spec.descriptor_set_mask();
   ForEachBitIndex(spec.descriptor_set_mask(), [&](uint32_t index) {
-    str << "\n=== index: " << index << " "
-        << spec.descriptor_set_layouts(index);
+    str << "\n=== index: " << index << " " << spec.descriptor_set_layouts(index);
   });
 
   return str << "\n]";
 }
 
-static const char* PaperRendererShadowTypeString(
-    const PaperRendererShadowType& shadow_type) {
+static const char* PaperRendererShadowTypeString(const PaperRendererShadowType& shadow_type) {
   switch (shadow_type) {
     case PaperRendererShadowType::kNone:
       return "kNone";
@@ -301,15 +286,88 @@ static const char* PaperRendererShadowTypeString(
   }
 }
 
-std::ostream& operator<<(std::ostream& str,
-                         const PaperRendererShadowType& shadow_type) {
-  return str << "PaperRendererShadowType::"
-             << PaperRendererShadowTypeString(shadow_type);
+std::ostream& operator<<(std::ostream& str, const PaperRendererShadowType& shadow_type) {
+  return str << "PaperRendererShadowType::" << PaperRendererShadowTypeString(shadow_type);
 }
 
 std::ostream& operator<<(std::ostream& str, const PaperRendererConfig& config) {
   return str << "PaperRendererConfig[shadow_type:"
              << PaperRendererShadowTypeString(config.shadow_type) << "]";
+}
+
+std::ostream& operator<<(std::ostream& str, const VulkanDeviceQueues::Caps& caps) {
+  str << "Caps[\n  max_image_width: " << caps.max_image_width
+      << "  max_image_height: " << caps.max_image_height << "\n  depth_stencil_formats:";
+  for (auto& fmt : caps.depth_stencil_formats) {
+    str << "\n    " << vk::to_string(fmt);
+  }
+  str << "\n  extensions:";
+  for (auto& name : caps.extensions) {
+    str << "\n    " << name;
+  }
+  str << "\n  enabled_features:";
+#define PRINT_FEATURE(X)         \
+  if (caps.enabled_features.X) { \
+    str << "\n    " << #X;       \
+  }
+  PRINT_FEATURE(robustBufferAccess);
+  PRINT_FEATURE(fullDrawIndexUint32);
+  PRINT_FEATURE(imageCubeArray);
+  PRINT_FEATURE(independentBlend);
+  PRINT_FEATURE(geometryShader);
+  PRINT_FEATURE(tessellationShader);
+  PRINT_FEATURE(sampleRateShading);
+  PRINT_FEATURE(dualSrcBlend);
+  PRINT_FEATURE(logicOp);
+  PRINT_FEATURE(multiDrawIndirect);
+  PRINT_FEATURE(drawIndirectFirstInstance);
+  PRINT_FEATURE(depthClamp);
+  PRINT_FEATURE(depthBiasClamp);
+  PRINT_FEATURE(fillModeNonSolid);
+  PRINT_FEATURE(depthBounds);
+  PRINT_FEATURE(wideLines);
+  PRINT_FEATURE(largePoints);
+  PRINT_FEATURE(alphaToOne);
+  PRINT_FEATURE(multiViewport);
+  PRINT_FEATURE(samplerAnisotropy);
+  PRINT_FEATURE(textureCompressionETC2);
+  PRINT_FEATURE(textureCompressionASTC_LDR);
+  PRINT_FEATURE(textureCompressionBC);
+  PRINT_FEATURE(occlusionQueryPrecise);
+  PRINT_FEATURE(pipelineStatisticsQuery);
+  PRINT_FEATURE(vertexPipelineStoresAndAtomics);
+  PRINT_FEATURE(fragmentStoresAndAtomics);
+  PRINT_FEATURE(shaderTessellationAndGeometryPointSize);
+  PRINT_FEATURE(shaderImageGatherExtended);
+  PRINT_FEATURE(shaderStorageImageExtendedFormats);
+  PRINT_FEATURE(shaderStorageImageMultisample);
+  PRINT_FEATURE(shaderStorageImageReadWithoutFormat);
+  PRINT_FEATURE(shaderStorageImageWriteWithoutFormat);
+  PRINT_FEATURE(shaderUniformBufferArrayDynamicIndexing);
+  PRINT_FEATURE(shaderSampledImageArrayDynamicIndexing);
+  PRINT_FEATURE(shaderStorageBufferArrayDynamicIndexing);
+  PRINT_FEATURE(shaderStorageImageArrayDynamicIndexing);
+  PRINT_FEATURE(shaderClipDistance);
+  PRINT_FEATURE(shaderCullDistance);
+  PRINT_FEATURE(shaderFloat64);
+  PRINT_FEATURE(shaderInt64);
+  PRINT_FEATURE(shaderInt16);
+  PRINT_FEATURE(shaderResourceResidency);
+  PRINT_FEATURE(shaderResourceMinLod);
+  PRINT_FEATURE(sparseBinding);
+  PRINT_FEATURE(sparseResidencyBuffer);
+  PRINT_FEATURE(sparseResidencyImage2D);
+  PRINT_FEATURE(sparseResidencyImage3D);
+  PRINT_FEATURE(sparseResidency2Samples);
+  PRINT_FEATURE(sparseResidency4Samples);
+  PRINT_FEATURE(sparseResidency8Samples);
+  PRINT_FEATURE(sparseResidency16Samples);
+  PRINT_FEATURE(sparseResidencyAliased);
+  PRINT_FEATURE(variableMultisampleRate);
+  PRINT_FEATURE(inheritedQueries);
+#undef PRINT_FEATURE
+
+  return str << "\n]";
 }
 
 }  // namespace escher

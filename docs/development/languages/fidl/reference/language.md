@@ -73,7 +73,7 @@ struct struct { };
 
 > Note that while using keywords as identifiers is supported, it can lead to confusion,
 > and should the be considered on a case-by-case basis. See the `Names` section of the
-> [Readability Rubric](../../../api/fidl.md#Names)
+> [Style Rubric](/docs/development/languages/fidl/style.md#Names)
 
 ### Qualified Identifiers
 
@@ -120,17 +120,17 @@ integers, floating point values, strings, and enumerations.
 The syntax is similar to C:
 
 ```fidl
-const bool enabled_flag = true;
-const int8 offset = -33;
-const uint16 answer = 42;
-const uint16 answer_in_binary = 0b101010;
-const uint32 population_2018 = 7700000000;
-const uint64 diamond = 0x183c7effff7e3c18;
-const uint64 fuchsia = 4054509061583223046;
-const string username = "squeenze";
-const float32 min_temp = -273.15;
-const float64 conversion_factor = 1.41421358;
-const Beverage my_drink = WATER;
+const bool ENABLED_FLAG = true;
+const int8 OFFSET = -33;
+const uint16 ANSWER = 42;
+const uint16 ANSWER_IN_BINARY = 0b101010;
+const uint32 POPULATION_USA_2018 = 330000000;
+const uint64 DIAMOND = 0x183c7effff7e3c18;
+const uint64 FUCHSIA = 4054509061583223046;
+const string USERNAME = "squeenze";
+const float32 MIN_TEMP = -273.15;
+const float64 CONVERSION_FACTOR = 1.41421358;
+const Beverage MY_DRINK = WATER;
 ```
 
 These declarations introduce a name within their scope.
@@ -374,9 +374,9 @@ struct Record {
 
 > Strings should not be used to pass arbitrary binary data since bindings enforce
 > valid UTF-8. Instead, consider `bytes` for small data or
-> [`fuchsia.mem.Buffer`](../../../api/fidl.md#consider-using-fuchsia_mem_buffer)
+> [`fuchsia.mem.Buffer`](/docs/development/api/fidl.md#consider-using-fuchsia_mem_buffer)
 > for blobs. See
-> [Should I use string or vector?](../../../api/fidl.md#should-i-use-string-or-vector)
+> [Should I use string or vector?](/docs/development/api/fidl.md#should-i-use-string-or-vector)
 > for details.
 
 ### Vectors
@@ -443,9 +443,8 @@ Handles are denoted:
 *   **`handle<H>?`** : nullable Zircon handle of
     type _H_
 
-_H_ can be one of: `channel, event, eventpair, fifo, job,
-process, port, resource, socket, thread, vmo`. New types will
-be added to the FIDL language as they are added to Zircon.
+_H_ can be any [object][zircon_objects] supported by Zircon, e.g. `channel`, `thread`, `vmo`.
+Please refer to the [grammar][grammar] for a full list.
 
 ```fidl
 // A record which contains some handles.
@@ -501,7 +500,8 @@ struct Circle {
 
 *   Record type consisting of a sequence of typed fields with ordinals.
 *   Declaration is intended for forward and backward compatibility in the face of schema changes.
-*   Reference may be nullable.
+*   Tables cannot be nullable. The semantics of "missing value" is expressed by an empty table
+    i.e. where all members are absent, to avoid dealing with double nullability.
 *   Tables contain zero or more members.
 
 #### Declaration
@@ -516,10 +516,9 @@ table Profile {
 
 #### Use
 
-Tables are denoted by their declared name (eg. **Profile**) and nullability:
+Tables are denoted by their declared name (eg. **Profile**):
 
 *   **`Profile`** : non-nullable Profile
-*   **`Profile?`** : nullable Profile
 
 Here, we show how `Profile` evolves to also carry temperature units.
 A client aware of the previous definition of `Profile` (without temperature units)
@@ -549,6 +548,8 @@ table Profile {
 *   Unions contain one or more members. A union with no members would have
     no inhabitants and thus would make little sense in a wire format.
 
+> Unions are deprecated. New code should use [xunions](#Xunions).
+
 #### Declaration
 
 ```fidl
@@ -575,8 +576,9 @@ Unions are denoted by their declared name (eg. **Pattern**) and nullability:
 
 *   Record type consisting of an ordinal and an envelope.
 *   Ordinal indicates member selection, envelope holds contents.
-*   Declaration is not intended to be modified once deployed; use protocol
-    extension instead.
+*   Declaration can be modified after deployment, while maintaining ABI
+    compatibility. See the [Compatibility Guide](abi-compat.md#xunions) for
+    source-compatibility considerations.
 *   Reference may be nullable.
 *   Xunions contain one or more members. An xunion with no members would have
     no inhabitants and thus would make little sense in a wire format.
@@ -639,21 +641,6 @@ protocol Calculator {
     Clear();
     -> OnClear();
 };
-
-protocol RealCalculator : Calculator {
-    AddFloats(float32 a, float32 b) -> (float32 sum);
-};
-
-protocol Science {
-    Hypothesize();
-    Investigate();
-    Explode();
-    Reproduce();
-};
-
-protocol ScientificCalculator : RealCalculator, Science {
-    Sin(float32 x) -> (float32 result);
-};
 ```
 
 #### Use
@@ -682,12 +669,14 @@ struct Record {
     RealCalculator? r;
 };
 ```
+
 ### Protocol Composition
 
 A protocol can include methods from other protocols.
 This is called composition: you compose one protocol from other protocols.
 
 Composition is used in the following cases:
+
 1. you have multiple protocols that all share some common behavior(s)
 2. you have varying levels of functionality you want to expose to different audiences
 

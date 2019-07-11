@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 use super::*;
-use crate::protocol::response::Response;
+use crate::{protocol::response::Response, request_builder::RequestParams};
 use failure::Fail;
-use futures::future::FutureObj;
+use futures::future::BoxFuture;
 use futures::prelude::*;
 
 /// This is the collection of Errors that can occur during the installation of an update.
@@ -36,15 +36,25 @@ pub struct StubPlan;
 impl Plan for StubPlan {
     type Error = StubPlanErrors;
 
-    fn try_create_from(_response: &Response) -> Result<Self, Self::Error> {
-        Ok(StubPlan)
+    fn try_create_from(
+        _request_params: &RequestParams,
+        response: &Response,
+    ) -> Result<Self, Self::Error> {
+        if response.protocol_version != "3.0" {
+            Err(StubPlanErrors::Failed)
+        } else {
+            Ok(StubPlan)
+        }
     }
 }
 
 /// The Installer is responsible for performing (or triggering) the installation of the update
 /// that's referred to by the InstallPlan.
 ///
-pub struct StubInstaller;
+#[derive(Debug, Default)]
+pub struct StubInstaller {
+    pub should_fail: bool,
+}
 
 impl Installer for StubInstaller {
     type InstallPlan = StubPlan;
@@ -57,7 +67,11 @@ impl Installer for StubInstaller {
         &mut self,
         _install_plan: &StubPlan,
         _observer: Option<&ProgressObserver>,
-    ) -> FutureObj<Result<(), StubInstallErrors>> {
-        FutureObj::new(future::ready(Ok(())).boxed())
+    ) -> BoxFuture<Result<(), StubInstallErrors>> {
+        if self.should_fail {
+            future::ready(Err(StubInstallErrors::Failed)).boxed()
+        } else {
+            future::ready(Ok(())).boxed()
+        }
     }
 }

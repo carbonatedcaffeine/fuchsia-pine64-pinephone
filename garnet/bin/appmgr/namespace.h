@@ -5,14 +5,15 @@
 #ifndef GARNET_BIN_APPMGR_NAMESPACE_H_
 #define GARNET_BIN_APPMGR_NAMESPACE_H_
 
+#include <fs/synchronous-vfs.h>
+#include <fuchsia/process/cpp/fidl.h>
+#include <fuchsia/sys/cpp/fidl.h>
+
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include <fs/synchronous-vfs.h>
-#include <fuchsia/process/cpp/fidl.h>
-#include <fuchsia/sys/cpp/fidl.h>
 #include "garnet/bin/appmgr/job_provider_impl.h"
 #include "garnet/bin/appmgr/service_provider_dir_impl.h"
 #include "lib/fidl/cpp/binding_set.h"

@@ -14,25 +14,26 @@ executable("app") {
   ]
 
   deps = [
+    ":constants",
     ":lib",
     "//garnet/public/lib/backoff",
     "//garnet/public/lib/fsl",
     "//sdk/fidl/fuchsia.modular.auth",
     "//sdk/fidl/fuchsia.net.oldhttp",
-    "//sdk/fidl/fuchsia.netconnector",
     "//sdk/lib/fidl/cpp",
     "//sdk/lib/sys/cpp",
     "//src/ledger/bin/cobalt",
     "//src/ledger/bin/environment",
     "//src/ledger/bin/fidl",
-    "//src/ledger/bin/fidl:error_notifier",
+    "//src/ledger/bin/fidl:syncable",
     "//src/ledger/bin/fidl/include",
+    "//src/ledger/bin/inspect",
     "//src/ledger/bin/p2p_sync/impl",
     "//src/ledger/bin/storage/impl:lib",
     "//src/ledger/bin/storage/public",
     "//src/lib/fxl",
     "//zircon/public/lib/async-loop-cpp",
-    "//zircon/public/lib/trace-provider",
+    "//zircon/public/lib/trace-provider-with-fdio",
   ]
 
   configs += [ "//src/ledger:ledger_config" ]
@@ -40,10 +41,12 @@ executable("app") {
 
 source_set("lib") {
   sources = [
+    "active_page_manager.cc",
+    "active_page_manager.h",
+    "active_page_manager_container.cc",
+    "active_page_manager_container.h",
     "branch_tracker.cc",
     "branch_tracker.h",
-    "constants.cc",
-    "constants.h",
     "delaying_facade.h",
     "diff_utils.cc",
     "diff_utils.h",
@@ -90,8 +93,6 @@ source_set("lib") {
     "page_impl.h",
     "page_manager.cc",
     "page_manager.h",
-    "page_manager_container.cc",
-    "page_manager_container.h",
     "page_snapshot_impl.cc",
     "page_snapshot_impl.h",
     "page_usage_db.cc",
@@ -105,10 +106,10 @@ source_set("lib") {
   ]
 
   deps = [
+    ":constants",
     ":serialization_version",
     "//garnet/public/lib/callback",
     "//garnet/public/lib/fsl",
-    "//garnet/public/lib/inspect:inspect",
     "//peridot/lib/base64url:base64url",
     "//peridot/lib/convert",
     "//peridot/lib/socket",
@@ -119,10 +120,11 @@ source_set("lib") {
     "//src/ledger/bin/encryption/primitives",
     "//src/ledger/bin/environment",
     "//src/ledger/bin/fidl",
-    "//src/ledger/bin/fidl:error_notifier",
+    "//src/ledger/bin/fidl:syncable",
     "//src/ledger/bin/fidl/include",
     "//src/ledger/bin/fidl_helpers",
     "//src/ledger/bin/filesystem",
+    "//src/ledger/bin/inspect",
     "//src/ledger/bin/lock",
     "//src/ledger/bin/p2p_provider/impl",
     "//src/ledger/bin/p2p_sync/impl",
@@ -136,11 +138,27 @@ source_set("lib") {
   ]
 
   public_deps = [
-    "//garnet/public/lib/inspect",
+    "//garnet/public/lib/inspect_deprecated",
     "//sdk/fidl/fuchsia.ledger",
     "//sdk/fidl/fuchsia.modular.auth",
-    "//sdk/fidl/fuchsia.netconnector",
     "//sdk/lib/sys/cpp",
+  ]
+
+  configs += [ "//src/ledger:ledger_config" ]
+}
+
+source_set("constants") {
+  sources = [
+    "constants.cc",
+    "constants.h",
+  ]
+
+  deps = [
+    "//sdk/fidl/fuchsia.ledger",
+  ]
+
+  public_deps = [
+    "//src/lib/fxl",
   ]
 
   configs += [ "//src/ledger:ledger_config" ]
@@ -162,6 +180,8 @@ source_set("unittests") {
   testonly = true
 
   sources = [
+    "active_page_manager_container_unittest.cc",
+    "active_page_manager_unittest.cc",
     "delaying_facade_unittest.cc",
     "disk_cleanup_manager_unittest.cc",
     "fidl/serialization_size_unittest.cc",
@@ -175,22 +195,23 @@ source_set("unittests") {
     "merging/test_utils.h",
     "page_availability_manager_unittest.cc",
     "page_connection_notifier_unittest.cc",
+    "page_delegate_unittest.cc",
     "page_eviction_manager_impl_unittest.cc",
     "page_eviction_policies_unittest.cc",
     "page_impl_unittest.cc",
-    "page_manager_container_unittest.cc",
     "page_manager_unittest.cc",
     "page_usage_db_unittest.cc",
     "sync_watcher_set_unittest.cc",
   ]
 
   deps = [
+    ":constants",
     ":lib",
     "//garnet/public/lib/backoff/testing",
     "//garnet/public/lib/fsl",
-    "//garnet/public/lib/inspect:inspect",
-    "//garnet/public/lib/inspect:reader",
-    "//garnet/public/lib/inspect/testing:testing",
+    "//garnet/public/lib/inspect_deprecated",
+    "//garnet/public/lib/inspect_deprecated:reader",
+    "//garnet/public/lib/inspect_deprecated/testing:testing",
     "//peridot/lib/convert",
     "//peridot/lib/scoped_tmpfs",
     "//sdk/fidl/fuchsia.modular.auth",
@@ -201,6 +222,7 @@ source_set("unittests") {
     "//src/ledger/bin/encryption/fake",
     "//src/ledger/bin/encryption/primitives",
     "//src/ledger/bin/fidl/include:include",
+    "//src/ledger/bin/inspect",
     "//src/ledger/bin/storage/fake:lib",
     "//src/ledger/bin/storage/impl:lib",
     "//src/ledger/bin/storage/public",

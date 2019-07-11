@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/fuchsia/zircon.gni")
+import("//build/config/fuchsia/zircon_images.gni")
 import("//build/images/manifest.gni")
 import("//build/package.gni")
 
@@ -11,21 +11,6 @@ executable("garnet_benchmarks_bin") {
 
   sources = [
     "benchmarks.cc",
-    "gfx_benchmarks.cc",
-    "gfx_benchmarks.h",
-  ]
-
-  deps = [
-    "//garnet/testing/benchmarking:benchmarking",
-    "//garnet/testing/benchmarking:is_vulkan_supported",
-  ]
-}
-
-executable("garnet_benchmarks_perfcompare_bin") {
-  output_name = "garnet_benchmarks_perfcompare"
-
-  sources = [
-    "benchmarks_perfcompare.cc",
   ]
 
   deps = [
@@ -39,7 +24,6 @@ zircon_extras_manifest("zircon-test-manifest") {
   patterns = [
     "test/fs/fs-bench-test",
     "test/sys/blobfs-bench-test",
-    "test/sys/perf-test",
   ]
 }
 
@@ -48,7 +32,6 @@ package("garnet_benchmarks") {
 
   deps = [
     ":garnet_benchmarks_bin",
-    ":garnet_benchmarks_perfcompare_bin",
     ":zircon-test-manifest",
   ]
 
@@ -62,14 +45,6 @@ package("garnet_benchmarks") {
     {
       shell = true
       name = "garnet_benchmarks"
-    },
-    {
-      name = rebase_path("benchmarks_perfcompare.sh")
-      dest = "benchmarks_perfcompare.sh"
-    },
-    {
-      shell = true
-      name = "garnet_benchmarks_perfcompare"
     },
   ]
 }

@@ -41,11 +41,11 @@ static_library("lib") {
     "process_memory_accessor.h",
     "process_watchpoint.cc",
     "process_watchpoint.h",
-    "software_breakpoint.cc",
-    "software_breakpoint.h",
     "remote_api.h",
     "remote_api_adapter.cc",
     "remote_api_adapter.h",
+    "software_breakpoint.cc",
+    "software_breakpoint.h",
     "system_info.cc",
     "system_info.h",
     "unwind.cc",
@@ -115,11 +115,13 @@ executable("bin") {
   deps = [
     ":lib",
     "//sdk/lib/sys/cpp",
-    "//zircon/public/lib/cmdline"
+    "//zircon/public/lib/cmdline",
   ]
 }
 
 package("debug_agent") {
+  deprecated_shell = "//build"
+
   deps = [
     ":bin",
   ]
@@ -145,6 +147,8 @@ executable("unit_tests") {
     "mock_arch_provider.h",
     "mock_process.cc",
     "mock_process.h",
+    "mock_thread.cc",
+    "mock_thread.h",
     "process_breakpoint_unittest.cc",
     "process_watchpoint_unittest.cc",
     "system_info_unittests.cc",
@@ -169,6 +173,8 @@ executable("unit_tests") {
 }
 
 test_package("debug_agent_tests") {
+  deprecated_shell = "//build"
+
   package_name = "debug_agent_tests"
   deps = []
   binaries = []
@@ -261,10 +267,13 @@ test_package("debug_agent_tests") {
       name = "printer"
     },
     {
+      name = "process_loop"
+    },
+    {
       name = "process_spawner"
     },
     {
-      name = "process_loop"
+      name = "thread_signals"
     },
   ]
 

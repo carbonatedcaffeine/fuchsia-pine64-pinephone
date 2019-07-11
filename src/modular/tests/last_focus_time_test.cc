@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <fuchsia/modular/cpp/fidl.h>
 #include <fuchsia/modular/testing/cpp/fidl.h>
 #include <lib/modular_test_harness/cpp/fake_component.h>
 #include <lib/modular_test_harness/cpp/test_harness_fixture.h>
-#include <sdk/lib/sys/cpp/component_context.h>
-#include <sdk/lib/sys/cpp/service_directory.h>
-#include <sdk/lib/sys/cpp/testing/test_with_environment.h>
 #include <src/lib/fxl/logging.h>
 
+#include "gmock/gmock.h"
 #include "peridot/lib/testing/session_shell_impl.h"
+
+using testing::ElementsAre;
+using testing::Gt;
 
 namespace {
 
@@ -22,17 +22,13 @@ class LastFocusTimeTest : public modular::testing::TestHarnessFixture {};
 // implementation of fuchsia::modular::SessionShell built for tests.
 class TestSessionShell : public modular::testing::FakeComponent {
  public:
-  modular::testing::SessionShellImpl* session_shell_impl() {
-    return &session_shell_impl_;
-  }
+  modular::testing::SessionShellImpl* session_shell_impl() { return &session_shell_impl_; }
 
   fuchsia::modular::SessionShellContext* session_shell_context() {
     return session_shell_context_.get();
   }
 
-  fuchsia::modular::StoryProvider* story_provider() {
-    return story_provider_.get();
-  }
+  fuchsia::modular::StoryProvider* story_provider() { return story_provider_.get(); }
 
  private:
   // |modular::testing::FakeComponent|
@@ -40,8 +36,7 @@ class TestSessionShell : public modular::testing::FakeComponent {
     component_context()->svc()->Connect(session_shell_context_.NewRequest());
     session_shell_context_->GetStoryProvider(story_provider_.NewRequest());
 
-    component_context()->outgoing()->AddPublicService(
-        session_shell_impl_.GetHandler());
+    component_context()->outgoing()->AddPublicService(session_shell_impl_.GetHandler());
   }
 
   modular::testing::SessionShellImpl session_shell_impl_;
@@ -70,10 +65,8 @@ class TestStoryProviderWatcher : public fuchsia::modular::StoryProviderWatcher {
   void OnDelete(::std::string story_id) override {}
 
   // |fuchsia::modular::StoryProviderWatcher|
-  void OnChange(
-      fuchsia::modular::StoryInfo story_info,
-      fuchsia::modular::StoryState story_state,
-      fuchsia::modular::StoryVisibilityState story_visibility_state) override {
+  void OnChange(fuchsia::modular::StoryInfo story_info, fuchsia::modular::StoryState story_state,
+                fuchsia::modular::StoryVisibilityState story_visibility_state) override {
     on_change_(std::move(story_info));
     return;
   }
@@ -125,34 +118,23 @@ TEST_F(LastFocusTimeTest, LastFocusTimeIncreases) {
   modular::testing::TestHarnessBuilder builder;
 
   TestSessionShell test_session_shell;
-  builder.InterceptSessionShell(
-      test_session_shell.GetOnCreateHandler(),
-      {.sandbox_services = {"fuchsia.modular.SessionShellContext",
-                            "fuchsia.modular.PuppetMaster"}});
+  builder.InterceptSessionShell(test_session_shell.GetOnCreateHandler(),
+                                {.sandbox_services = {"fuchsia.modular.SessionShellContext",
+                                                      "fuchsia.modular.PuppetMaster"}});
 
   // Listen for the module we're going to create.
   modular::testing::FakeComponent test_module;
-  const auto test_module_url = builder.GenerateFakeUrl();
-  builder.InterceptComponent(test_module.GetOnCreateHandler(),
-                             {.url = test_module_url});
-
-  test_harness().events().OnNewComponent = builder.BuildOnNewComponentHandler();
-  test_harness()->Run(builder.BuildSpec());
+  const auto test_module_url = modular::testing::GenerateFakeUrl();
+  builder.InterceptComponent(test_module.GetOnCreateHandler(), {.url = test_module_url});
+  builder.BuildAndRun(test_harness());
 
   // Wait for our session shell to start.
   RunLoopUntil([&] { return test_session_shell.is_running(); });
 
-  // Connect to extra services also provided to session shells.
-  fuchsia::modular::PuppetMasterPtr puppet_master;
-  test_session_shell.component_context()->svc()->Connect(
-      puppet_master.NewRequest());
-
   fuchsia::modular::FocusControllerPtr focus_controller;
   fuchsia::modular::FocusProviderPtr focus_provider;
-  test_session_shell.session_shell_context()->GetFocusController(
-      focus_controller.NewRequest());
-  test_session_shell.session_shell_context()->GetFocusProvider(
-      focus_provider.NewRequest());
+  test_session_shell.session_shell_context()->GetFocusController(focus_controller.NewRequest());
+  test_session_shell.session_shell_context()->GetFocusProvider(focus_provider.NewRequest());
 
   // Watch for changes to the session.
   TestStoryProviderWatcher story_provider_watcher;
@@ -167,28 +149,18 @@ TEST_F(LastFocusTimeTest, LastFocusTimeIncreases) {
   });
 
   // Create a story so that we can signal the framework to focus it.
-  fuchsia::modular::StoryPuppetMasterPtr story_puppet_master;
-  puppet_master->ControlStory(kStoryName, story_puppet_master.NewRequest());
+  fuchsia::modular::Intent intent;
+  intent.handler = test_module_url;
+  intent.action = "action";
 
-  fuchsia::modular::AddMod add_mod;
-  add_mod.mod_name_transitional = "modname";
-  add_mod.intent.handler = test_module_url;
-  add_mod.intent.action = "action";
+  modular::testing::AddModToStory(test_harness(), kStoryName, "modname", std::move(intent));
 
-  std::vector<fuchsia::modular::StoryCommand> commands(1);
-  commands.at(0).set_add_mod(std::move(add_mod));
-
-  story_puppet_master->Enqueue(std::move(commands));
-  bool story_created{false};
-  story_puppet_master->Execute(
-      [&](fuchsia::modular::ExecuteResult result) { story_created = true; });
-  RunLoopUntil([&] { return story_created; });
+  RunLoopUntil([&] { return test_module.is_running(); });
 
   // Watch the story and then start it.
   TestStoryWatcher story_watcher;
   fuchsia::modular::StoryControllerPtr story_controller;
-  test_session_shell.story_provider()->GetController(
-      kStoryName, story_controller.NewRequest());
+  test_session_shell.story_provider()->GetController(kStoryName, story_controller.NewRequest());
   story_watcher.Watch(story_controller.get());
   story_controller->RequestStart();
 
@@ -203,7 +175,5 @@ TEST_F(LastFocusTimeTest, LastFocusTimeIncreases) {
   // 2) The story transitions to running.
   // 3) The story is focused.
   RunLoopUntil([&] { return last_focus_timestamps.size() == 3; });
-  EXPECT_EQ(0, last_focus_timestamps[0]);
-  EXPECT_EQ(0, last_focus_timestamps[1]);
-  EXPECT_LT(0, last_focus_timestamps[2]);
+  EXPECT_THAT(last_focus_timestamps, ElementsAre(0, 0, Gt(0)));
 }

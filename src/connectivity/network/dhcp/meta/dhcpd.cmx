@@ -1,0 +1,16 @@
+{
+    "program": {
+        "binary": "bin/dhcpd"
+    },
+    "sandbox": {
+        "features": [
+            "isolated-persistent-storage"
+        ],
+        "services": [
+            "fuchsia.logger.LogSink",
+            "fuchsia.net.NameLookup",
+            "fuchsia.posix.socket.Provider",
+            "fuchsia.net.SocketProvider"
+        ]
+    }
+}

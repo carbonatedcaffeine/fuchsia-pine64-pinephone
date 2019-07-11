@@ -1,0 +1,21 @@
+{
+    "facets": {
+        "fuchsia.test": {
+            "injected-services": {
+                "fuchsia.feedback.DataProvider": "fuchsia-pkg://fuchsia.com/feedback_agent#meta/feedback_agent.cmx",
+                "fuchsia.logger.Log": "fuchsia-pkg://fuchsia.com/logger#meta/logger.cmx"
+            }
+        }
+    },
+    "program": {
+        "binary": "test/bugreport_integration_test"
+    },
+    "sandbox": {
+        "features": [
+            "system-temp"
+        ],
+        "services": [
+            "fuchsia.feedback.DataProvider"
+        ]
+    }
+}

@@ -6,20 +6,20 @@ import("$zx/public/gn/toolchain/environment_redirect.gni")
 
 test("channel-fatal") {
   sources = [
-    "channel-fatal-test.c",
+    "channel-fatal-test.cc",
   ]
   deps = [
     ":vdso-code-header",
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/launchpad",
-    "$zx/system/ulib/unittest",
     "$zx/system/ulib/zircon",
+    "$zx/system/ulib/zxtest",
   ]
 }
 
 environment_redirect("vdso-code-header") {
   environment_label = "$zx/kernel"
   deps = [
-    "$zx/kernel/lib/vdso:vdso-code-header",
+    "$zx/kernel/lib/userabi:vdso-code-header",
   ]
 }

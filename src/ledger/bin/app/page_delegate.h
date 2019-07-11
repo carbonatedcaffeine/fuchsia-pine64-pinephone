@@ -8,6 +8,7 @@
 #include <lib/callback/operation_serializer.h>
 #include <lib/fidl/cpp/interface_ptr_set.h>
 #include <lib/fit/function.h>
+#include <lib/fit/result.h>
 
 #include <memory>
 #include <queue>
@@ -27,7 +28,7 @@
 #include "src/lib/fxl/memory/weak_ptr.h"
 
 namespace ledger {
-class PageManager;
+class ActivePageManager;
 
 // A delegate for the implementation of the |Page| interface.
 //
@@ -38,13 +39,14 @@ class PageManager;
 // |set_on_empty()|).
 class PageDelegate {
  public:
-  PageDelegate(coroutine::CoroutineService* coroutine_service,
-               PageManager* manager, storage::PageStorage* storage,
-               MergeResolver* merge_resolver, SyncWatcherSet* watchers,
-               std::unique_ptr<PageImpl> page_impl);
+  PageDelegate(coroutine::CoroutineService* coroutine_service, ActivePageManager* manager,
+               storage::PageStorage* storage, MergeResolver* merge_resolver,
+               SyncWatcherSet* watchers, std::unique_ptr<PageImpl> page_impl);
   ~PageDelegate();
 
-  void Init(fit::function<void(storage::Status)> on_done);
+  // Initializes this PageDelegate. |Init| may call the |on_empty| callback if
+  // the Page connection is already cut.
+  void Init(fit::function<void(Status)> on_done);
 
   void set_on_empty(fit::closure on_empty_callback) {
     on_empty_callback_ = std::move(on_empty_callback);
@@ -53,27 +55,24 @@ class PageDelegate {
   // From Page interface, called by PageImpl:
 
   void GetSnapshot(fidl::InterfaceRequest<PageSnapshot> snapshot_request,
-                   std::vector<uint8_t> key_prefix,
-                   fidl::InterfaceHandle<PageWatcher> watcher,
+                   std::vector<uint8_t> key_prefix, fidl::InterfaceHandle<PageWatcher> watcher,
                    fit::function<void(Status)> callback);
 
   void Put(std::vector<uint8_t> key, std::vector<uint8_t> value,
            fit::function<void(Status)> callback);
 
-  void PutWithPriority(std::vector<uint8_t> key, std::vector<uint8_t> value,
-                       Priority priority, fit::function<void(Status)> callback);
+  void PutWithPriority(std::vector<uint8_t> key, std::vector<uint8_t> value, Priority priority,
+                       fit::function<void(Status)> callback);
 
-  void PutReference(std::vector<uint8_t> key, Reference reference,
-                    Priority priority, fit::function<void(Status)> callback);
+  void PutReference(std::vector<uint8_t> key, Reference reference, Priority priority,
+                    fit::function<void(Status)> callback);
 
   void Delete(std::vector<uint8_t> key, fit::function<void(Status)> callback);
 
   void Clear(fit::function<void(Status)> callback);
 
-  void CreateReference(
-      std::unique_ptr<storage::DataSource> data,
-      fit::function<void(Status, CreateReferenceStatus, ReferencePtr)>
-          callback);
+  void CreateReference(std::unique_ptr<storage::DataSource> data,
+                       fit::function<void(Status, fit::result<Reference, zx_status_t>)> callback);
 
   void StartTransaction(fit::function<void(Status)> callback);
 
@@ -88,27 +87,23 @@ class PageDelegate {
       fit::function<void(Status, ConflictResolutionWaitStatus)> callback);
 
  private:
-  using StatusCallback = fit::function<void(storage::Status)>;
+  using StatusCallback = fit::function<void(Status)>;
 
-  void PutInCommit(std::vector<uint8_t> key,
-                   storage::ObjectIdentifier object_identifier,
+  void PutInCommit(std::vector<uint8_t> key, storage::ObjectIdentifier object_identifier,
                    storage::KeyPriority priority, StatusCallback callback);
 
   // Runs |runnable| in a transaction, and notifies |callback| of the result. If
   // a transaction is currently in progress, it reuses it, otherwise creates a
   // new one and commits it before calling |callback|. This method is not
   // serialized, and should only be called from a callsite that is serialized.
-  void RunInTransaction(fit::function<void(storage::Journal*)> runnable,
-                        StatusCallback callback);
+  void RunInTransaction(fit::function<void(storage::Journal*)> runnable, StatusCallback callback);
 
   void CommitJournal(std::unique_ptr<storage::Journal> journal,
-                     fit::function<void(storage::Status,
-                                        std::unique_ptr<const storage::Commit>)>
-                         callback);
+                     fit::function<void(Status, std::unique_ptr<const storage::Commit>)> callback);
 
   void CheckEmpty();
 
-  PageManager* manager_;
+  ActivePageManager* manager_;
   storage::PageStorage* storage_;
   MergeResolver* merge_resolver_;
 

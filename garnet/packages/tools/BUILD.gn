@@ -35,13 +35,6 @@ group("system_monitor") {
   ]
 }
 
-group("zxdb") {
-  testonly = true
-  public_deps = [
-    "//src/developer/debug/zxdb:zxdb_host",
-  ]
-}
-
 group("fidl_tools") {
   testonly = true
   public_deps = [
@@ -54,9 +47,11 @@ group("fidl_tools") {
 group("all") {
   testonly = true
   public_deps = [
+    "//garnet/bin/pkg_ctl",
     "//garnet/packages/tools:audio",
     "//garnet/packages/tools:banjo_toolchain",
     "//garnet/packages/tools:bluetooth",
+    "//garnet/packages/tools:boringssl",
     "//garnet/packages/tools:crashpad_database_util",
     "//garnet/packages/tools:cs",
     "//garnet/packages/tools:curl",
@@ -73,8 +68,6 @@ group("all") {
     "//garnet/packages/tools:sl4f",
     "//garnet/packages/tools:system_monitor",
     "//garnet/packages/tools:tiles",
-    "//garnet/packages/tools:zxdb",
-    "//garnet/packages/tools:boringssl",
     "//garnet/packages/tools:whereiscl",
     "//src/connectivity/wlan:tools",
     "//src/sys/locate",
@@ -154,7 +147,7 @@ group("sl4f") {
 group("bluetooth") {
   testonly = true
   public_deps = [
-    "//src/connectivity/bluetooth/hci/fake",
+    "//src/connectivity/bluetooth/hci/emulator",
     "//src/connectivity/bluetooth/tools",
     "//src/connectivity/bluetooth/tools/bt-snoop",
   ]
@@ -192,13 +185,6 @@ group("gidl") {
   testonly = true
   public_deps = [
     "//tools/fidl/gidl:host",
-  ]
-}
-
-group("fidlcat") {
-  testonly = true
-  public_deps = [
-    "//tools/fidlcat:fidlcat_host",
   ]
 }
 

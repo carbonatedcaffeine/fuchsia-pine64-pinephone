@@ -3,6 +3,8 @@
 #include <fidl_llcpp_controlflow.h>
 #include <memory>
 
+namespace llcpp {
+
 namespace fidl {
 namespace test {
 namespace llcpp {
@@ -11,11 +13,12 @@ namespace controlflow {
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kControlFlow_Shutdown_Ordinal = 2097819959u;
+constexpr uint64_t kControlFlow_Shutdown_Ordinal = 2097819959lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kControlFlow_NoReplyMustSendAccessDeniedEpitaph_Ordinal = 557953488u;
+constexpr uint64_t kControlFlow_NoReplyMustSendAccessDeniedEpitaph_Ordinal = 557953488lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kControlFlow_MustSendAccessDeniedEpitaph_Ordinal = 1394461447u;
+constexpr uint64_t kControlFlow_MustSendAccessDeniedEpitaph_Ordinal = 1394461447lu << 32;
+extern "C" const fidl_type_t fidl_test_llcpp_controlflow_ControlFlowMustSendAccessDeniedEpitaphResponseTable;
 
 }  // namespace
 
@@ -235,3 +238,4 @@ void ControlFlow::Interface::MustSendAccessDeniedEpitaphCompleterBase::Reply(::f
 }  // namespace llcpp
 }  // namespace test
 }  // namespace fidl
+}  // namespace llcpp

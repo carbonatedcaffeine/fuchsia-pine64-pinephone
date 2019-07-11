@@ -9,13 +9,13 @@ driver_module("wlantap_driver") {
   output_name = "wlantap"
 
   sources = [
-    "utils.cpp",
+    "utils.cc",
     "utils.h",
     "wlanmac-ifc-proxy.h",
-    "wlantap-ctl.cpp",
-    "wlantap-mac.cpp",
+    "wlantap-ctl.cc",
+    "wlantap-mac.cc",
     "wlantap-mac.h",
-    "wlantap-phy.cpp",
+    "wlantap-phy.cc",
     "wlantap-phy.h",
   ]
 
@@ -23,6 +23,8 @@ driver_module("wlantap_driver") {
     "//garnet/lib/wlan/fidl:wlantap",
     "//garnet/lib/wlan/protocol",
     "//src/connectivity/wlan/lib/common/cpp:common",
+    "//zircon/public/banjo/ddk.hw.wlan.wlaninfo",
+    "//zircon/public/banjo/ddk.protocol.wlanphyimpl",
     "//zircon/public/lib/async-cpp",
     "//zircon/public/lib/async-loop-cpp",
     "//zircon/public/lib/driver",

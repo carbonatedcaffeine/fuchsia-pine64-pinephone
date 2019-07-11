@@ -5,19 +5,21 @@
 #ifndef SAFEMATH_SAFE_CONVERSIONS_H_
 #define SAFEMATH_SAFE_CONVERSIONS_H_
 
+#include <safemath/safe_conversions_impl.h>
 #include <stddef.h>
 
 #include <limits>
-#include <ostream>
 #include <type_traits>
-
-#include <safemath/safe_conversions_impl.h>
 
 #if !defined(__native_client__) && (defined(__ARMEL__) || defined(__arch64__))
 #include <safemath/safe_conversions_arm_impl.h>
 #define SAFEMATH_HAS_OPTIMIZED_SAFE_CONVERSIONS (1)
 #else
 #define SAFEMATH_HAS_OPTIMIZED_SAFE_CONVERSIONS (0)
+#endif
+
+#if !SAFEMATH_DISABLE_OSTREAM_OPERATORS
+#include <ostream>
 #endif
 
 namespace safemath {
@@ -308,12 +310,14 @@ constexpr StrictNumeric<typename UnderlyingType<T>::type> MakeStrictNum(
   return value;
 }
 
+#if !SAFEMATH_DISABLE_OSTREAM_OPERATORS
 // Overload the ostream output operator to make logging work nicely.
 template <typename T>
 std::ostream& operator<<(std::ostream& os, const StrictNumeric<T>& value) {
   os << static_cast<T>(value);
   return os;
 }
+#endif
 
 #define SAFEMATH_NUMERIC_COMPARISON_OPERATORS(CLASS, NAME, OP)          \
   template <typename L, typename R,                                     \

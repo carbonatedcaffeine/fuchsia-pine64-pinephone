@@ -2,20 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <memory>
-
 #include <fuchsia/ui/scenic/cpp/fidl.h>
 #include <lib/async/cpp/time.h>
 #include <lib/zx/eventpair.h>
 
+#include <memory>
+
 #include "garnet/lib/ui/input/tests/util.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "src/lib/fxl/logging.h"
 #include "lib/gtest/test_loop_fixture.h"
 #include "lib/ui/input/cpp/formatting.h"
 #include "lib/ui/scenic/cpp/resources.h"
 #include "lib/ui/scenic/cpp/session.h"
+#include "src/lib/fxl/logging.h"
 
 // This test exercises the event delivery logic for mouse and touchpad events.
 // The mouse moves from the bottom left corner to the upper right corner.  While
@@ -47,14 +47,14 @@
 //
 // We have the following correspondence of coordinates:
 //
-// Event   Mark  Device  View-1  View-2
-// Move-1  M     (0,6)   (0, 4)  n/a
-// Move-2  M     (1,5)   (1, 3)  n/a
-// Move-3  M     (2,4)   (2, 2)  n/a
-// Down    D     (3,3)   (3, 1)  n/a
-// Move-4  M     (4,2)   (4, 0)  n/a
-// Up      U     (5,1)   (5,-1)  n/a
-// Move-5  M     (6,0)   n/a     (4,0)
+// Event   Mark  Device  View-1      View-2
+// Move-1  M     (0,6)   (0.5, 4.5)  n/a
+// Move-2  M     (1,5)   (1.5, 3.5)  n/a
+// Move-3  M     (2,4)   (2.5, 2.5)  n/a
+// Down    D     (3,3)   (3.5, 1.5)  n/a
+// Move-4  M     (4,2)   (4.5, 0.5)  n/a
+// Up      U     (5,1)   (5.5,-0.5)  n/a
+// Move-5  M     (6,0)   n/a         (4.5,0.5)
 //
 // NOTE: This test is carefully constructed to avoid Vulkan functionality.
 
@@ -73,9 +73,8 @@ class MouseDeliveryTest : public InputSystemTest {
 
 namespace {
 // Every client in this test file set up the same way.
-void CreateClient(scenic::Session* session, zx::eventpair view_token,
-                  scenic::EntityNode* root_node, std::string client_name,
-                  InputSystemTest* test) {
+void CreateClient(scenic::Session* session, zx::eventpair view_token, scenic::EntityNode* root_node,
+                  std::string client_name, InputSystemTest* test) {
   // Connect our root node to the presenter's node.
   scenic::View view(session, std::move(view_token), client_name);
   view.AddChild(*root_node);
@@ -107,8 +106,7 @@ TEST_F(MouseDeliveryTest, StandardTest) {
   // "Presenter" sets up a scene with two views.
   uint32_t compositor_id = 0;
   presenter.RunNow(
-      [this, &compositor_id, vh1_token = std::move(vh1_token),
-       vh2_token = std::move(vh2_token)](
+      [this, &compositor_id, vh1_token = std::move(vh1_token), vh2_token = std::move(vh2_token)](
           scenic::Session* session, scenic::EntityNode* root_node) mutable {
         // Minimal scene.
         scenic::Compositor compositor(session);
@@ -132,6 +130,14 @@ TEST_F(MouseDeliveryTest, StandardTest) {
         scenic::EntityNode translate_1(session), translate_2(session);
         scenic::ViewHolder holder_1(session, std::move(vh1_token), "holder_1"),
             holder_2(session, std::move(vh2_token), "holder_2");
+
+        // Create the view bounds.
+        const float bbox_min[3] = {0, 0, 0};
+        const float bbox_max[3] = {5, 5, 1};
+        const float inset_min[3] = {0, 0, 0};
+        const float inset_max[3] = {0, 0, 0};
+        holder_1.SetViewProperties(bbox_min, bbox_max, inset_min, inset_max);
+        holder_2.SetViewProperties(bbox_min, bbox_max, inset_min, inset_max);
 
         root_node->AddChild(translate_1);
         translate_1.SetTranslation(0, 2, -2);
@@ -160,23 +166,20 @@ TEST_F(MouseDeliveryTest, StandardTest) {
 
   // Client 1 sets up its content.
   SessionWrapper client_1(scenic());
-  client_1.RunNow(
-      [this, v1_token = std::move(v1_token)](
-          scenic::Session* session, scenic::EntityNode* root_node) mutable {
-        CreateClient(session, std::move(v1_token), root_node, "View 1", this);
-      });
+  client_1.RunNow([this, v1_token = std::move(v1_token)](scenic::Session* session,
+                                                         scenic::EntityNode* root_node) mutable {
+    CreateClient(session, std::move(v1_token), root_node, "View 1", this);
+  });
 
   // Client 2 sets up its content.
   SessionWrapper client_2(scenic());
-  client_2.RunNow(
-      [this, v2_token = std::move(v2_token)](
-          scenic::Session* session, scenic::EntityNode* root_node) mutable {
-        CreateClient(session, std::move(v2_token), root_node, "View 2", this);
-      });
+  client_2.RunNow([this, v2_token = std::move(v2_token)](scenic::Session* session,
+                                                         scenic::EntityNode* root_node) mutable {
+    CreateClient(session, std::move(v2_token), root_node, "View 2", this);
+  });
 
   // Scene is now set up, send in the input.
-  presenter.RunNow([this, compositor_id](scenic::Session* session,
-                                         scenic::EntityNode* root_node) {
+  presenter.RunNow([this, compositor_id](scenic::Session* session, scenic::EntityNode* root_node) {
     PointerCommandGenerator pointer(compositor_id, /*device id*/ 1,
                                     /*pointer id*/ 1, PointerEventType::MOUSE);
     // A touch sequence that starts at the (0,6) location of the 7x7 display and
@@ -201,18 +204,15 @@ TEST_F(MouseDeliveryTest, StandardTest) {
 
     // MOVE
     EXPECT_TRUE(events[0].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[0].pointer(), 1u, PointerEventPhase::MOVE, 0, 4));
+    EXPECT_TRUE(PointerMatches(events[0].pointer(), 1u, PointerEventPhase::MOVE, 0.5, 4.5));
 
     // MOVE
     EXPECT_TRUE(events[1].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[1].pointer(), 1u, PointerEventPhase::MOVE, 1, 3));
+    EXPECT_TRUE(PointerMatches(events[1].pointer(), 1u, PointerEventPhase::MOVE, 1.5, 3.5));
 
     // MOVE
     EXPECT_TRUE(events[2].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[2].pointer(), 1u, PointerEventPhase::MOVE, 2, 2));
+    EXPECT_TRUE(PointerMatches(events[2].pointer(), 1u, PointerEventPhase::MOVE, 2.5, 2.5));
 
     // FOCUS
     EXPECT_TRUE(events[3].is_focus());
@@ -220,18 +220,15 @@ TEST_F(MouseDeliveryTest, StandardTest) {
 
     // DOWN
     EXPECT_TRUE(events[4].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[4].pointer(), 1u, PointerEventPhase::DOWN, 3, 1));
+    EXPECT_TRUE(PointerMatches(events[4].pointer(), 1u, PointerEventPhase::DOWN, 3.5, 1.5));
 
     // MOVE
     EXPECT_TRUE(events[5].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[5].pointer(), 1u, PointerEventPhase::MOVE, 4, 0));
+    EXPECT_TRUE(PointerMatches(events[5].pointer(), 1u, PointerEventPhase::MOVE, 4.5, 0.5));
 
     // UP
     EXPECT_TRUE(events[6].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[6].pointer(), 1u, PointerEventPhase::UP, 5, -1));
+    EXPECT_TRUE(PointerMatches(events[6].pointer(), 1u, PointerEventPhase::UP, 5.5, -0.5));
   });
 
   // Verify client 2's input has one mouse event.
@@ -240,8 +237,7 @@ TEST_F(MouseDeliveryTest, StandardTest) {
 
     // MOVE
     EXPECT_TRUE(events[0].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[0].pointer(), 1u, PointerEventPhase::MOVE, 4, 0));
+    EXPECT_TRUE(PointerMatches(events[0].pointer(), 1u, PointerEventPhase::MOVE, 4.5, 0.5));
   });
 }
 
@@ -258,8 +254,7 @@ TEST_F(MouseDeliveryTest, NoFocusTest) {
   // "Presenter" sets up a scene with two views.
   uint32_t compositor_id = 0;
   presenter.RunNow(
-      [this, &compositor_id, vh1_token = std::move(vh1_token),
-       vh2_token = std::move(vh2_token)](
+      [this, &compositor_id, vh1_token = std::move(vh1_token), vh2_token = std::move(vh2_token)](
           scenic::Session* session, scenic::EntityNode* root_node) mutable {
         // Minimal scene.
         scenic::Compositor compositor(session);
@@ -284,6 +279,13 @@ TEST_F(MouseDeliveryTest, NoFocusTest) {
         scenic::ViewHolder holder_1(session, std::move(vh1_token), "holder_1"),
             holder_2(session, std::move(vh2_token), "holder_2");
 
+        // Define bounds for each view.
+        const float bbox_min[3] = {0, 0, 0};
+        const float bbox_max[3] = {5, 5, 1};
+        const float inset_min[3] = {0, 0, 0};
+        const float inset_max[3] = {0, 0, 0};
+        holder_2.SetViewProperties(bbox_min, bbox_max, inset_min, inset_max);
+
         root_node->AddChild(translate_1);
         translate_1.SetTranslation(0, 2, -2);
         translate_1.Attach(holder_1);
@@ -292,6 +294,9 @@ TEST_F(MouseDeliveryTest, NoFocusTest) {
         {
           fuchsia::ui::gfx::ViewProperties properties;
           properties.focus_change = false;
+
+          properties.bounding_box.min = fuchsia::ui::gfx::vec3{.x = 0, .y = 0, .z = 0};
+          properties.bounding_box.max = fuchsia::ui::gfx::vec3{.x = 5, .y = 5, .z = 1};
           holder_1.SetViewProperties(std::move(properties));
         }
 
@@ -318,23 +323,20 @@ TEST_F(MouseDeliveryTest, NoFocusTest) {
 
   // Client 1 sets up its content.
   SessionWrapper client_1(scenic());
-  client_1.RunNow(
-      [this, v1_token = std::move(v1_token)](
-          scenic::Session* session, scenic::EntityNode* root_node) mutable {
-        CreateClient(session, std::move(v1_token), root_node, "View 1", this);
-      });
+  client_1.RunNow([this, v1_token = std::move(v1_token)](scenic::Session* session,
+                                                         scenic::EntityNode* root_node) mutable {
+    CreateClient(session, std::move(v1_token), root_node, "View 1", this);
+  });
 
   // Client 2 sets up its content.
   SessionWrapper client_2(scenic());
-  client_2.RunNow(
-      [this, v2_token = std::move(v2_token)](
-          scenic::Session* session, scenic::EntityNode* root_node) mutable {
-        CreateClient(session, std::move(v2_token), root_node, "View 2", this);
-      });
+  client_2.RunNow([this, v2_token = std::move(v2_token)](scenic::Session* session,
+                                                         scenic::EntityNode* root_node) mutable {
+    CreateClient(session, std::move(v2_token), root_node, "View 2", this);
+  });
 
   // Scene is now set up, send in the input.
-  presenter.RunNow([this, compositor_id](scenic::Session* session,
-                                         scenic::EntityNode* root_node) {
+  presenter.RunNow([this, compositor_id](scenic::Session* session, scenic::EntityNode* root_node) {
     PointerCommandGenerator pointer(compositor_id, /*device id*/ 1,
                                     /*pointer id*/ 1, PointerEventType::MOUSE);
     // A touch sequence that starts at the (0,6) location of the 7x7 display and
@@ -359,33 +361,27 @@ TEST_F(MouseDeliveryTest, NoFocusTest) {
 
     // MOVE
     EXPECT_TRUE(events[0].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[0].pointer(), 1u, PointerEventPhase::MOVE, 0, 4));
+    EXPECT_TRUE(PointerMatches(events[0].pointer(), 1u, PointerEventPhase::MOVE, 0.5, 4.5));
 
     // MOVE
     EXPECT_TRUE(events[1].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[1].pointer(), 1u, PointerEventPhase::MOVE, 1, 3));
+    EXPECT_TRUE(PointerMatches(events[1].pointer(), 1u, PointerEventPhase::MOVE, 1.5, 3.5));
 
     // MOVE
     EXPECT_TRUE(events[2].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[2].pointer(), 1u, PointerEventPhase::MOVE, 2, 2));
+    EXPECT_TRUE(PointerMatches(events[2].pointer(), 1u, PointerEventPhase::MOVE, 2.5, 2.5));
 
     // DOWN
     EXPECT_TRUE(events[3].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[3].pointer(), 1u, PointerEventPhase::DOWN, 3, 1));
+    EXPECT_TRUE(PointerMatches(events[3].pointer(), 1u, PointerEventPhase::DOWN, 3.5, 1.5));
 
     // MOVE
     EXPECT_TRUE(events[4].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[4].pointer(), 1u, PointerEventPhase::MOVE, 4, 0));
+    EXPECT_TRUE(PointerMatches(events[4].pointer(), 1u, PointerEventPhase::MOVE, 4.5, 0.5));
 
     // UP
     EXPECT_TRUE(events[5].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[5].pointer(), 1u, PointerEventPhase::UP, 5, -1));
+    EXPECT_TRUE(PointerMatches(events[5].pointer(), 1u, PointerEventPhase::UP, 5.5, -0.5));
   });
 
   // Verify client 2's input has one mouse event.
@@ -394,8 +390,7 @@ TEST_F(MouseDeliveryTest, NoFocusTest) {
 
     // MOVE
     EXPECT_TRUE(events[0].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[0].pointer(), 1u, PointerEventPhase::MOVE, 4, 0));
+    EXPECT_TRUE(PointerMatches(events[0].pointer(), 1u, PointerEventPhase::MOVE, 4.5, 0.5));
   });
 }
 

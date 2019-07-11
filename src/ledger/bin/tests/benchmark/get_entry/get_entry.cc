@@ -58,10 +58,8 @@ void PrintUsage() {
 //   the entry directly as String).
 class GetEntryBenchmark {
  public:
-  GetEntryBenchmark(async::Loop* loop,
-                    std::unique_ptr<sys::ComponentContext> component_context,
-                    size_t entry_count, size_t key_size, size_t value_size,
-                    bool get_inline);
+  GetEntryBenchmark(async::Loop* loop, std::unique_ptr<sys::ComponentContext> component_context,
+                    size_t entry_count, size_t key_size, size_t value_size, bool get_inline);
 
   void Run();
 
@@ -93,9 +91,10 @@ class GetEntryBenchmark {
   FXL_DISALLOW_COPY_AND_ASSIGN(GetEntryBenchmark);
 };
 
-GetEntryBenchmark::GetEntryBenchmark(
-    async::Loop* loop, std::unique_ptr<sys::ComponentContext> component_context,
-    size_t entry_count, size_t key_size, size_t value_size, bool get_inline)
+GetEntryBenchmark::GetEntryBenchmark(async::Loop* loop,
+                                     std::unique_ptr<sys::ComponentContext> component_context,
+                                     size_t entry_count, size_t key_size, size_t value_size,
+                                     bool get_inline)
     : loop_(loop),
       random_(0),
       tmp_dir_(kStoragePath),
@@ -113,22 +112,21 @@ GetEntryBenchmark::GetEntryBenchmark(
 }
 
 void GetEntryBenchmark::Run() {
-  Status status = GetLedger(
-      component_context_.get(), component_controller_.NewRequest(), nullptr, "",
-      "get_entry", DetachedPath(tmp_dir_.path()), QuitLoopClosure(), &ledger_);
+  Status status =
+      GetLedger(component_context_.get(), component_controller_.NewRequest(), nullptr, "",
+                "get_entry", DetachedPath(tmp_dir_.path()), QuitLoopClosure(), &ledger_);
   if (QuitOnError(QuitLoopClosure(), status, "GetLedger")) {
     return;
   }
 
-  GetPageEnsureInitialized(
-      &ledger_, nullptr, DelayCallback::YES, QuitLoopClosure(),
-      [this](Status status, PagePtr page, PageId id) {
-        if (QuitOnError(QuitLoopClosure(), status, "Page initialization")) {
-          return;
-        }
-        page_ = std::move(page);
-        Populate();
-      });
+  GetPageEnsureInitialized(&ledger_, nullptr, DelayCallback::YES, QuitLoopClosure(),
+                           [this](Status status, PagePtr page, PageId id) {
+                             if (QuitOnError(QuitLoopClosure(), status, "Page initialization")) {
+                               return;
+                             }
+                             page_ = std::move(page);
+                             Populate();
+                           });
 }
 
 void GetEntryBenchmark::Populate() {
@@ -136,8 +134,7 @@ void GetEntryBenchmark::Populate() {
 
   page_data_generator_.Populate(
       &page_, std::move(keys), value_size_, entry_count_,
-      PageDataGenerator::ReferenceStrategy::REFERENCE, Priority::EAGER,
-      [this](Status status) {
+      PageDataGenerator::ReferenceStrategy::REFERENCE, Priority::EAGER, [this](Status status) {
         if (QuitOnError(QuitLoopClosure(), status, "PageGenerator::Populate")) {
           return;
         }
@@ -147,8 +144,7 @@ void GetEntryBenchmark::Populate() {
 
 void GetEntryBenchmark::GetSnapshot() {
   TRACE_ASYNC_BEGIN("benchmark", "get_snapshot", 0);
-  page_->GetSnapshot(snapshot_.NewRequest(), fidl::VectorPtr<uint8_t>::New(0),
-                     nullptr);
+  page_->GetSnapshot(snapshot_.NewRequest(), fidl::VectorPtr<uint8_t>::New(0), nullptr);
   page_->Sync([this] {
     TRACE_ASYNC_END("benchmark", "get_snapshot", 0);
     TRACE_ASYNC_BEGIN("benchmark", "get_keys", 0);
@@ -157,23 +153,24 @@ void GetEntryBenchmark::GetSnapshot() {
 }
 
 void GetEntryBenchmark::GetKeys(std::unique_ptr<Token> token) {
-  snapshot_->GetKeys(
-      fidl::VectorPtr<uint8_t>::New(0), std::move(token),
-      [this](IterationStatus status, auto keys, auto next_token) {
-        if (status == IterationStatus::PARTIAL_RESULT) {
-          GetKeys(std::move(next_token));
-          return;
-        }
-        TRACE_ASYNC_END("benchmark", "get_keys", 0);
-        for (size_t i = 0; i < keys.size(); i++) {
-          keys_.push_back(std::move(keys[i]));
-        }
-        if (get_inline_) {
-          GetNextEntryInline(0);
-        } else {
-          GetNextEntry(0);
-        }
-      });
+  snapshot_->GetKeys(fidl::VectorPtr<uint8_t>::New(0), std::move(token),
+                     [this](auto keys, auto next_token) {
+                       if (!next_token) {
+                         TRACE_ASYNC_END("benchmark", "get_keys", 0);
+                       }
+                       for (size_t i = 0; i < keys.size(); i++) {
+                         keys_.push_back(std::move(keys[i]));
+                       }
+                       if (next_token) {
+                         GetKeys(std::move(next_token));
+                         return;
+                       }
+                       if (get_inline_) {
+                         GetNextEntryInline(0);
+                       } else {
+                         GetNextEntry(0);
+                       }
+                     });
 }
 
 void GetEntryBenchmark::GetNextEntry(size_t i) {
@@ -183,15 +180,13 @@ void GetEntryBenchmark::GetNextEntry(size_t i) {
   }
 
   TRACE_ASYNC_BEGIN("benchmark", "get_entry", i);
-  snapshot_->Get(
-      std::move(keys_[i]),
-      [this, i](fuchsia::ledger::PageSnapshot_Get_Result result) {
-        if (QuitOnError(QuitLoopClosure(), result, "PageShapshot::Get")) {
-          return;
-        }
-        TRACE_ASYNC_END("benchmark", "get_entry", i);
-        GetNextEntry(i + 1);
-      });
+  snapshot_->Get(std::move(keys_[i]), [this, i](fuchsia::ledger::PageSnapshot_Get_Result result) {
+    if (QuitOnError(QuitLoopClosure(), result, "PageShapshot::Get")) {
+      return;
+    }
+    TRACE_ASYNC_END("benchmark", "get_entry", i);
+    GetNextEntry(i + 1);
+  });
 }
 
 void GetEntryBenchmark::GetNextEntryInline(size_t i) {
@@ -201,15 +196,14 @@ void GetEntryBenchmark::GetNextEntryInline(size_t i) {
   }
 
   TRACE_ASYNC_BEGIN("benchmark", "get_entry_inline", i);
-  snapshot_->GetInline(
-      std::move(keys_[i]),
-      [this, i](fuchsia::ledger::PageSnapshot_GetInline_Result result) {
-        if (QuitOnError(QuitLoopClosure(), result, "PageShapshot::GetInline")) {
-          return;
-        }
-        TRACE_ASYNC_END("benchmark", "get_entry_inline", i);
-        GetNextEntryInline(i + 1);
-      });
+  snapshot_->GetInline(std::move(keys_[i]),
+                       [this, i](fuchsia::ledger::PageSnapshot_GetInline_Result result) {
+                         if (QuitOnError(QuitLoopClosure(), result, "PageShapshot::GetInline")) {
+                           return;
+                         }
+                         TRACE_ASYNC_END("benchmark", "get_entry_inline", i);
+                         GetNextEntryInline(i + 1);
+                       });
 }
 
 void GetEntryBenchmark::ShutDown() {
@@ -233,22 +227,18 @@ int Main(int argc, const char** argv) {
   std::string value_size_str;
   size_t value_size;
   bool get_inline = command_line.HasOption(kInlineFlag.ToString());
-  if (!command_line.GetOptionValue(kEntryCountFlag.ToString(),
-                                   &entry_count_str) ||
-      !fxl::StringToNumberWithError(entry_count_str, &entry_count) ||
-      entry_count == 0 ||
+  if (!command_line.GetOptionValue(kEntryCountFlag.ToString(), &entry_count_str) ||
+      !fxl::StringToNumberWithError(entry_count_str, &entry_count) || entry_count == 0 ||
       !command_line.GetOptionValue(kKeySizeFlag.ToString(), &key_size_str) ||
       !fxl::StringToNumberWithError(key_size_str, &key_size) || key_size == 0 ||
-      !command_line.GetOptionValue(kValueSizeFlag.ToString(),
-                                   &value_size_str) ||
-      !fxl::StringToNumberWithError(value_size_str, &value_size) ||
-      value_size == 0) {
+      !command_line.GetOptionValue(kValueSizeFlag.ToString(), &value_size_str) ||
+      !fxl::StringToNumberWithError(value_size_str, &value_size) || value_size == 0) {
     PrintUsage();
     return -1;
   }
 
-  GetEntryBenchmark app(&loop, std::move(component_context), entry_count,
-                        key_size, value_size, get_inline);
+  GetEntryBenchmark app(&loop, std::move(component_context), entry_count, key_size, value_size,
+                        get_inline);
 
   return RunWithTracing(&loop, [&app] { app.Run(); });
 }

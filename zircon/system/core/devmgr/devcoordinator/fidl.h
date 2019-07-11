@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef ZIRCON_SYSTEM_CORE_DEVMGR_DEVCOORDINATOR_FIDL_H_
+#define ZIRCON_SYSTEM_CORE_DEVMGR_DEVCOORDINATOR_FIDL_H_
 
 #include <lib/zx/channel.h>
 #include <lib/zx/vmo.h>
@@ -22,8 +23,12 @@ zx_status_t dh_send_create_device_stub(Device* dev, Devhost* dh, zx::channel rpc
 zx_status_t dh_send_bind_driver(const Device* dev, const char* libname, zx::vmo driver);
 zx_status_t dh_send_connect_proxy(const Device* dev, zx::channel proxy);
 zx_status_t dh_send_suspend(const Device* dev, uint32_t flags);
+zx_status_t dh_send_unbind(const Device* dev);
+zx_status_t dh_send_complete_compatibility_tests(const Device* dev, zx_status_t test_status_);
 zx_status_t dh_send_create_composite_device(Devhost* dh, const Device* composite_dev,
                                             const CompositeDevice& composite,
                                             const uint64_t* component_local_ids, zx::channel rpc);
 
-} // namespace devmgr
+}  // namespace devmgr
+
+#endif  // ZIRCON_SYSTEM_CORE_DEVMGR_DEVCOORDINATOR_FIDL_H_

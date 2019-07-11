@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/package.gni")
+import("//build/test/test_package.gni")
 
 group("cobalt") {
   testonly = true
@@ -20,17 +21,15 @@ executable("unittests") {
 
   deps = [
     "//src/lib/cobalt/cpp:unittests",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 }
 
-package("cobalt_lib_tests") {
-  testonly = true
-
+unittest_package("cobalt_lib_tests") {
   deps = [
     ":unittests",
     "//src/lib/cobalt/cpp:test_metrics_registry",
-    "//src/lib/cobalt/rust:fuchsia-cobalt",
+    "//src/lib/cobalt/rust:fuchsia-cobalt_test",
   ]
 
   tests = [
@@ -57,7 +56,7 @@ package("cobalt_lib_tests") {
 group("tests") {
   testonly = true
 
-  data_deps = [
+  deps = [
     ":cobalt_lib_tests",
   ]
 }

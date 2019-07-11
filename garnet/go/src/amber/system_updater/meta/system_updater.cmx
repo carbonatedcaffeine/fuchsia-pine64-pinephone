@@ -5,12 +5,13 @@
     "sandbox": {
         "features": [
             "build-info",
-            "shell",
+            "deprecated-shell",
             "deprecated-misc-storage",
             "isolated-persistent-storage"
         ],
         "pkgfs": [
-            "packages"
+            "packages",
+            "versions"
         ],
         "services": [
             "fuchsia.cobalt.LoggerFactory",

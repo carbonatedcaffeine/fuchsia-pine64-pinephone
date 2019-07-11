@@ -32,14 +32,17 @@
 
 #![warn(missing_docs)]
 
-use {
-    crate::common::{send_on_open_with_error, try_inherit_rights_for_clone},
-    crate::directory::entry::{DirectoryEntry, EntryInfo},
-    crate::file::{
+use crate::{
+    common::{inherit_rights_for_clone, send_on_open_with_error},
+    directory::entry::{DirectoryEntry, EntryInfo},
+    file::{
         connection::{ConnectionState, FileConnection},
         DEFAULT_READ_ONLY_PROTECTION_ATTRIBUTES, DEFAULT_READ_WRITE_PROTECTION_ATTRIBUTES,
         DEFAULT_WRITE_ONLY_PROTECTION_ATTRIBUTES,
     },
+};
+
+use {
     failure::Error,
     fidl::endpoints::ServerEnd,
     fidl_fuchsia_io::{
@@ -258,9 +261,9 @@ where
     on_read: Option<OnRead>,
 
     /// Maximum size the buffer that holds the value written into this file can grow to.  When the
-    /// buffer is populated by a the [`on_read`] handler, this restriction is not enforced.  The
+    /// buffer is populated by the [`on_read`] handler, this restriction is not enforced.  The
     /// maximum size of the buffer passed into [`on_write`] is the maximum of the size of the
-    /// buffer that [`on_read`] have returnd and this value.
+    /// buffer that [`on_read`] have returned and this value.
     capacity: u64,
 
     /// A handler to be invoked to "update" the file content, if it was modified during a
@@ -293,18 +296,11 @@ where
 
     /// Attaches a new connection, client end `server_end`, to this object.  Any error are reported
     /// as `OnOpen` events on the `server_end` itself.
-    fn add_connection(
-        &mut self,
-        parent_flags: u32,
-        flags: u32,
-        mode: u32,
-        server_end: ServerEnd<NodeMarker>,
-    ) {
+    fn add_connection(&mut self, flags: u32, mode: u32, server_end: ServerEnd<NodeMarker>) {
         if let Some(conn) = FileConnection::connect(
-            parent_flags,
             flags,
-            self.protection_attributes,
             mode,
+            self.protection_attributes,
             server_end,
             self.on_read.is_some(),
             self.on_write.is_some(),
@@ -322,12 +318,7 @@ where
     ) -> Result<ConnectionState, Error> {
         match req {
             FileRequest::Clone { flags, object, control_handle: _ } => {
-                match try_inherit_rights_for_clone(connection.flags, flags) {
-                    Ok(clone_flags) => {
-                        self.add_connection(connection.flags, clone_flags, 0, object)
-                    }
-                    Err(status) => send_on_open_with_error(flags, object, status),
-                }
+                self.handle_clone(connection.flags, flags, object);
                 Ok(ConnectionState::Alive)
             }
             FileRequest::Close { responder } => {
@@ -360,6 +351,18 @@ where
                 }
             }
         }
+    }
+
+    fn handle_clone(&mut self, parent_flags: u32, flags: u32, server_end: ServerEnd<NodeMarker>) {
+        let flags = match inherit_rights_for_clone(parent_flags, flags) {
+            Ok(updated) => updated,
+            Err(status) => {
+                send_on_open_with_error(flags, server_end, status);
+                return;
+            }
+        };
+
+        self.add_connection(flags, 0, server_end);
     }
 
     fn handle_close<R>(
@@ -397,7 +400,7 @@ where
             return;
         }
 
-        self.add_connection(!0, flags, mode, server_end);
+        self.add_connection(flags, mode, server_end);
     }
 
     fn entry_info(&self) -> EntryInfo {
@@ -434,6 +437,8 @@ where
     type Output = Void;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // NOTE See `crate::directory::Simple::poll` for the discussion on why we need a loop here.
+
         loop {
             match self.connections.poll_next_unpin(cx) {
                 Poll::Ready(Some((maybe_request, mut connection))) => {
@@ -454,9 +459,11 @@ where
                 }
                 // Even when we have no connections any more we still report Pending state, as we
                 // may get more connections open in the future.
-                Poll::Ready(None) | Poll::Pending => return Poll::Pending,
+                Poll::Ready(None) | Poll::Pending => break,
             }
         }
+
+        Poll::Pending
     }
 }
 
@@ -491,6 +498,86 @@ mod tests {
             read_only(|| Ok(b"Read only test".to_vec())),
             async move |proxy| {
                 assert_read!(proxy, "Read only test");
+                assert_close!(proxy);
+            },
+        );
+    }
+
+    #[test]
+    fn get_buffer() {
+        run_server_client(
+            OPEN_RIGHT_READABLE,
+            read_only(|| Ok(b"Get buffer test".to_vec())),
+            async move |proxy| {
+                assert_get_buffer!(proxy, "Get buffer test");
+                assert_close!(proxy);
+            },
+        );
+    }
+
+    #[test]
+    fn get_buffer_with_rw_file() {
+        run_server_client(
+            OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE,
+            read_write_str(
+                || Ok("Hello".to_string()),
+                100,
+                |_| panic!("file shouldn't be written to"),
+            ),
+            async move |proxy| {
+                assert_get_buffer_err!(proxy, OPEN_RIGHT_READABLE, Status::NOT_SUPPORTED);
+                assert_close!(proxy);
+            },
+        );
+    }
+
+    #[test]
+    fn get_buffer_writable_with_readonly_file() {
+        run_server_client(
+            OPEN_RIGHT_READABLE,
+            read_only(|| Ok(b"Get buffer test".to_vec())),
+            async move |proxy| {
+                assert_get_buffer_err!(proxy, OPEN_RIGHT_WRITABLE, Status::ACCESS_DENIED);
+                assert_close!(proxy);
+            },
+        );
+    }
+
+    #[test]
+    fn get_buffer_readable_with_writable_file() {
+        run_server_client(
+            OPEN_RIGHT_WRITABLE,
+            write_only_str(100, |_| panic!("file shouldn't be written to")),
+            async move |proxy| {
+                assert_get_buffer_err!(proxy, OPEN_RIGHT_READABLE, Status::NOT_SUPPORTED);
+                assert_close!(proxy);
+            },
+        );
+    }
+
+    #[test]
+    fn get_buffer_writable_with_writable_file() {
+        run_server_client(
+            OPEN_RIGHT_WRITABLE,
+            write_only_str(100, |_| panic!("file shouldn't be written to")),
+            async move |proxy| {
+                assert_get_buffer_err!(proxy, OPEN_RIGHT_WRITABLE, Status::NOT_SUPPORTED);
+                assert_close!(proxy);
+            },
+        );
+    }
+
+    #[test]
+    fn get_buffer_writable_with_rw_file() {
+        run_server_client(
+            OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE,
+            read_write_str(
+                || Ok("Hello".to_string()),
+                100,
+                |_| panic!("file shouldn't be written to"),
+            ),
+            async move |proxy| {
+                assert_get_buffer_err!(proxy, OPEN_RIGHT_WRITABLE, Status::NOT_SUPPORTED);
                 assert_close!(proxy);
             },
         );

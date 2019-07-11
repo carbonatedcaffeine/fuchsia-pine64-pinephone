@@ -17,6 +17,7 @@
 #ifndef BRCMFMAC_SDIO_H
 #define BRCMFMAC_SDIO_H
 
+#include <ddk/device.h>
 #include <ddk/protocol/sdio.h>
 #include <ddk/protocol/gpio.h>
 
@@ -168,7 +169,8 @@
 enum brcmf_sdiod_state { BRCMF_SDIOD_DOWN, BRCMF_SDIOD_DATA, BRCMF_SDIOD_NOMEDIUM };
 
 enum {
-    COMPONENT_SDIO,
+    COMPONENT_SDIO_FN1,
+    COMPONENT_SDIO_FN2,
     COMPONENT_OOB_GPIO,
     COMPONENT_DEBUG_GPIO,
     COMPONENT_COUNT,
@@ -187,14 +189,14 @@ struct brcmf_sdreg {
 };
 
 struct brcmf_sdio;
-struct brcmf_sdiod_freezer;
 
 struct brcmf_sdio_dev {
     struct sdio_func *func1;
     struct sdio_func *func2;
     uint32_t manufacturer_id;
     uint32_t product_id;
-    sdio_protocol_t sdio_proto;
+    sdio_protocol_t sdio_proto_fn1;
+    sdio_protocol_t sdio_proto_fn2;
     gpio_protocol_t gpios[GPIO_COUNT];
     bool has_debug_gpio;
     zx_handle_t irq_handle;
@@ -212,7 +214,6 @@ struct brcmf_sdio_dev {
     char nvram_name[BRCMF_FW_NAME_LEN];
     bool wowl_enabled;
     enum brcmf_sdiod_state state;
-    struct brcmf_sdiod_freezer* freezer;
 };
 
 /* sdio core registers */
@@ -316,11 +317,11 @@ void brcmf_sdiod_intr_unregister(struct brcmf_sdio_dev* sdiodev);
  * wb, wl - write byte / word.
  * Success is returned in result_out which may be NULL.
  */
-uint8_t brcmf_sdiod_func0_rb(struct brcmf_sdio_dev* sdiodev, uint32_t addr,
-                             zx_status_t *result_out);
+uint8_t brcmf_sdiod_vendor_control_rb(struct brcmf_sdio_dev* sdiodev, uint32_t addr,
+                                      zx_status_t *result_out);
 
-void brcmf_sdiod_func0_wb(struct brcmf_sdio_dev* sdiodev, uint32_t addr, uint8_t value,
-                          zx_status_t *result_out);
+void brcmf_sdiod_vendor_control_wb(struct brcmf_sdio_dev* sdiodev, uint32_t addr, uint8_t value,
+                                   zx_status_t *result_out);
 
 uint8_t brcmf_sdiod_func1_rb(struct brcmf_sdio_dev* sdiodev, uint32_t addr,
                              zx_status_t *result_out);
@@ -387,19 +388,6 @@ zx_status_t brcmf_sdiod_ramrw(struct brcmf_sdio_dev* sdiodev, bool write, uint32
 int brcmf_sdiod_abort(struct brcmf_sdio_dev* sdiodev, uint32_t func);
 
 void brcmf_sdiod_change_state(struct brcmf_sdio_dev* sdiodev, enum brcmf_sdiod_state state);
-#ifdef CONFIG_PM_SLEEP
-bool brcmf_sdiod_freezing(struct brcmf_sdio_dev* sdiodev);
-void brcmf_sdiod_try_freeze(struct brcmf_sdio_dev* sdiodev);
-void brcmf_sdiod_freezer_count(struct brcmf_sdio_dev* sdiodev);
-void brcmf_sdiod_freezer_uncount(struct brcmf_sdio_dev* sdiodev);
-#else
-static inline bool brcmf_sdiod_freezing(struct brcmf_sdio_dev* sdiodev) {
-    return false;
-}
-static inline void brcmf_sdiod_try_freeze(struct brcmf_sdio_dev* sdiodev) {}
-static inline void brcmf_sdiod_freezer_count(struct brcmf_sdio_dev* sdiodev) {}
-static inline void brcmf_sdiod_freezer_uncount(struct brcmf_sdio_dev* sdiodev) {}
-#endif /* CONFIG_PM_SLEEP */
 
 struct brcmf_sdio* brcmf_sdio_probe(struct brcmf_sdio_dev* sdiodev);
 void brcmf_sdio_remove(struct brcmf_sdio* bus);

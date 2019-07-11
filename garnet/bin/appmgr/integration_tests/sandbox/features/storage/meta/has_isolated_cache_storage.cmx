@@ -1,4 +1,11 @@
 {
+    "facets": {
+        "fuchsia.test": {
+            "system-services": [
+                "fuchsia.sys.test.CacheControl"
+            ]
+        }
+    },
     "program": {
         "binary": "test/has_isolated_cache_storage"
     },
@@ -6,7 +13,10 @@
         "features": [
             "isolated-cache-storage"
         ],
-        "services": ["fuchsia.sys.Environment", "fuchsia.logger.LogSink"]
+        "services": [
+            "fuchsia.logger.LogSink",
+            "fuchsia.sys.Environment",
+            "fuchsia.sys.test.CacheControl"
+        ]
     }
 }
-

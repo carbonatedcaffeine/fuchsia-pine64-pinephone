@@ -320,7 +320,9 @@ func (e *endpoint) IsAttached() bool {
 }
 
 func (*endpoint) MTU() uint32 {
-	return 0
+	// This value is used by IPv4 fragmentation.  It must be at least 68 bytes as
+	// required by RFC 791.
+	return 1000
 }
 
 func (*endpoint) Capabilities() stack.LinkEndpointCapabilities {

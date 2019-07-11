@@ -9,6 +9,8 @@ import("//build/testing/environments.gni")
 
 source_set("lib") {
   sources = [
+    "cache_control.cc",
+    "cache_control.h",
     "component_controller_impl.cc",
     "component_controller_impl.h",
     "debug_info_retriever.cc",
@@ -52,29 +54,23 @@ source_set("lib") {
     "//garnet/lib/loader",
     "//garnet/public/lib/backoff",
     "//garnet/public/lib/fsl",
-    "//garnet/public/lib/inspect",
+    "//garnet/public/lib/inspect_deprecated",
     "//garnet/public/lib/json",
     "//sdk/fidl/fuchsia.sys",
+    "//sdk/fidl/fuchsia.sys.test",
     "//sdk/lib/sys/cpp",
     "//src/lib/fxl",
     "//src/lib/pkg_url",
     "//third_party/rapidjson",
     "//zircon/public/fidl/fuchsia-inspect",
     "//zircon/public/fidl/fuchsia-process",
-    "//zircon/public/fidl/fuchsia-scheduler",
-    "//zircon/public/fidl/fuchsia-virtualconsole",
     "//zircon/public/lib/async-loop-cpp",
     "//zircon/public/lib/fit",
     "//zircon/public/lib/fs",
     "//zircon/public/lib/inspector",
     "//zircon/public/lib/loader-service",
-    "//zircon/public/lib/trace-provider",
+    "//zircon/public/lib/trace-provider-with-fdio",
     "//zircon/public/lib/zx",
-  ]
-
-  deps = [
-    "//zircon/public/fidl/fuchsia-device-manager",
-    "//zircon/public/fidl/fuchsia-kernel",
   ]
 
   defines = [ "_ALL_SOURCE=1" ]
@@ -91,6 +87,7 @@ source_set("appmgr_for_test") {
   public_deps = [
     ":lib",
     "//sdk/fidl/fuchsia.sys",
+    "//sdk/fidl/fuchsia.sys.test",
     "//sdk/lib/sys/cpp",
     "//src/lib/fxl",
     "//zircon/public/lib/fs",
@@ -110,6 +107,11 @@ executable("bin") {
   deps = [
     ":lib",
     "//sdk/lib/sys/cpp",
+    "//zircon/public/fidl/fuchsia-device-manager",
+    "//zircon/public/fidl/fuchsia-kernel",
+    "//zircon/public/fidl/fuchsia-paver",
+    "//zircon/public/fidl/fuchsia-scheduler",
+    "//zircon/public/fidl/fuchsia-virtualconsole",
   ]
 
   # appmgr starts early in the boot sequence before shared libraries from
@@ -176,7 +178,17 @@ config_data("appmgr_scheme_config") {
   ]
 }
 
+group("unittests") {
+  testonly = true
+  public_deps = [
+    ":appmgr_unittests",
+    ":system_data_file",
+  ]
+}
+
 test_package("appmgr_unittests") {
+  deprecated_shell = "//build"
+
   deps = [
     ":tests",
   ]
@@ -184,6 +196,20 @@ test_package("appmgr_unittests") {
     {
       name = "appmgr_unittests"
       environments = basic_envs
+    },
+  ]
+}
+
+package("system_data_file") {
+  deprecated_system_image = true
+  resources = [
+    {
+      path = "test_file.txt"
+      dest = "test_file.txt"
+    },
+    {
+      path = "test_file.txt"
+      dest = "subdir/test_file.txt"
     },
   ]
 }

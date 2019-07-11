@@ -7,11 +7,16 @@ use crate::{
     installer::Plan,
     request_builder::RequestParams,
 };
-use futures::future::FutureObj;
+use futures::future::BoxFuture;
 use std::time::SystemTime;
 
-pub mod stub;
+#[cfg(test)]
+mod mock;
+#[cfg(test)]
+pub use mock::MockPolicyEngine;
+mod stub;
 pub use stub::StubPolicy;
+pub use stub::StubPolicyEngine;
 
 /// Data about the local system that's needed to fulfill Policy questions
 pub struct PolicyData {
@@ -20,7 +25,7 @@ pub struct PolicyData {
 }
 
 /// Reasons why a check can/cannot be performed at this time
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CheckDecision {
     /// positive responses
     Ok(RequestParams),
@@ -33,8 +38,15 @@ pub enum CheckDecision {
     DeniedByPolicy,
 }
 
+#[cfg(test)]
+impl Default for CheckDecision {
+    fn default() -> Self {
+        CheckDecision::Ok(RequestParams::default())
+    }
+}
+
 /// Reasons why an update can/cannot be performed at this time
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UpdateDecision {
     /// Update can be performed.
     Ok,
@@ -42,6 +54,13 @@ pub enum UpdateDecision {
     DeferredByPolicy,
     /// Update is rejected by Policy.
     DeniedByPolicy,
+}
+
+#[cfg(test)]
+impl Default for UpdateDecision {
+    fn default() -> Self {
+        UpdateDecision::Ok
+    }
 }
 
 /// The policy implementation itself
@@ -82,7 +101,7 @@ pub trait PolicyEngine {
         apps: &[App],
         scheduling: &UpdateCheckSchedule,
         protocol_state: &ProtocolState,
-    ) -> FutureObj<UpdateCheckSchedule>;
+    ) -> BoxFuture<UpdateCheckSchedule>;
 
     /// Given the context provided by State, does the Policy allow an update check to
     /// happen at this time?  This should be consistent with the compute_next_update_time
@@ -94,9 +113,9 @@ pub trait PolicyEngine {
         scheduling: &UpdateCheckSchedule,
         protocol_state: &ProtocolState,
         check_options: &CheckOptions,
-    ) -> FutureObj<CheckDecision>;
+    ) -> BoxFuture<CheckDecision>;
 
     /// Given the current State, the current PolicyData, can the proposed InstallPlan
     /// be executed at this time.
-    fn update_can_start(&mut self, proposed_install_plan: &impl Plan) -> FutureObj<UpdateDecision>;
+    fn update_can_start(&mut self, proposed_install_plan: &impl Plan) -> BoxFuture<UpdateDecision>;
 }

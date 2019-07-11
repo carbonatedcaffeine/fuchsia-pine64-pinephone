@@ -4,7 +4,7 @@
 
 source_set("debug") {
   sources = [
-    "debug.cpp",
+    "debug.cc",
   ]
   deps = [
     "$zx/kernel/dev/hw_rng",

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_BIN_ZXDB_CLIENT_JOB_H_
-#define GARNET_BIN_ZXDB_CLIENT_JOB_H_
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_JOB_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_JOB_H_
 
 #include <stdint.h>
 
@@ -17,13 +17,12 @@ namespace zxdb {
 
 class JobContext;
 
-class JobFilter {
-  // TODO: decide structure
-};
-
+// Represents a running job the debugger is attached to.
+//
+// This is owned by the JobContext when it is attached.
 class Job : public ClientObject {
  public:
-  Job(Session* session);
+  explicit Job(Session* session);
   ~Job() override;
 
   fxl::WeakPtr<Job> GetWeakPtr();
@@ -37,18 +36,6 @@ class Job : public ClientObject {
   // Returns the "name" of the job.
   virtual const std::string& GetName() const = 0;
 
-  // Get all filters from this job.
-  const std::vector<JobFilter>& GetFilters() const { return filters_; };
-
-  // Add filter to this job
-  void AddFilter(std::string filter);
-
-  // Remove filter from this job
-  JobFilter RemoveFilter(uint32_t index);
-
- protected:
-  std::vector<JobFilter> filters_;
-
  private:
   fxl::WeakPtrFactory<Job> weak_factory_;
 
@@ -57,4 +44,4 @@ class Job : public ClientObject {
 
 }  // namespace zxdb
 
-#endif  // GARNET_BIN_ZXDB_CLIENT_JOB_H_
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_JOB_H_

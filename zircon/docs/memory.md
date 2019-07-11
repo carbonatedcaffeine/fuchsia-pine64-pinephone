@@ -3,11 +3,9 @@
 This file contains information about memory and resource management in Zircon,
 and talks about ways to examine process and system memory usage.
 
-*** note
-**TODO**(dbort): Talk about the relationship between address spaces,
+Note: **TODO**(dbort): Talk about the relationship between address spaces,
 [VMARs](objects/vm_address_region.md), [mappings](syscalls/vmar_map.md), and
 [VMOs](objects/vm_object.md)
-***
 
 [TOC]
 
@@ -67,6 +65,7 @@ the system.
     Fuchsia checkout:
 
     ```./scripts/fx shell memgraph -vt | ./scripts/memory/treemap.py > mem.html```
+
  2. Open `mem.html` in a browser.
 
 The `memgraph` tool generates a JSON description of system task and memory
@@ -202,7 +201,7 @@ PSS     =  PRIVATE + (SHARED / #shr)
 
 ### Dump "hidden" (unmapped and kernel) VMOs
 
-> NOTE: This is a kernel command, and will print to the kernel console.
+Note: This is a kernel command, and will print to the kernel console.
 
 ```
 k zx vmos hidden
@@ -210,6 +209,7 @@ k zx vmos hidden
 
 Similar to `vmos <pid>`, but dumps all VMOs in the system that are not mapped
 into any process:
+
 -   VMOs that userspace has handles to but does not map
 -   VMOs that are mapped only into kernel space
 -   Kernel-only, unmapped VMOs that have no handles
@@ -287,7 +287,7 @@ Fields:
 
 ### Dump the kernel address space
 
-> NOTE: This is a kernel command, and will print to the kernel console.
+Note: This is a kernel command, and will print to the kernel console.
 
 ```
 k zx asd kernel

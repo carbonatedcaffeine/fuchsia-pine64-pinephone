@@ -16,8 +16,6 @@ pub enum Error {
     InvalidHexInput(#[cause] hex::FromHexError),
     #[fail(display = "expected ASCII or hex format for WEP-40 or WEP-104 keys")]
     InvalidInputLength,
-    #[fail(display = "WEP is not supported")]
-    NotSupported,
 }
 
 #[derive(Debug, Clone)]
@@ -54,9 +52,6 @@ impl Deref for Key {
 /// WEP-40 and WEP-104 is supported.
 /// Returns an Error if WEP support is disabled.
 pub fn derive_key(input: &[u8]) -> Result<Key, Error> {
-    if !is_supported() {
-        return Err(Error::NotSupported);
-    }
     match input.len() {
         // WEP-40:
         5 => Ok(Key::Bits40(to_array(input))),
@@ -68,10 +63,6 @@ pub fn derive_key(input: &[u8]) -> Result<Key, Error> {
     }
 }
 
-pub fn is_supported() -> bool {
-    cfg!(feature = "wep_enabled")
-}
-
 /// Create an MLME-SETKEYS.request primitive for the given key and BSSID.
 pub fn make_mlme_set_keys_request(peer: [u8; 6], key: &Key) -> fidl_mlme::SetKeysRequest {
     fidl_mlme::SetKeysRequest {
@@ -80,7 +71,7 @@ pub fn make_mlme_set_keys_request(peer: [u8; 6], key: &Key) -> fidl_mlme::SetKey
             key: key.to_vec(),
             key_id: 0,
             address: peer,
-            cipher_suite_oui: OUI,
+            cipher_suite_oui: OUI.into(),
             cipher_suite_type: key.cipher_suite_type(),
             rsc: 0,
         }],
@@ -113,7 +104,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg(feature = "wep_enabled")]
     fn test_derive_key_supported() {
         // Invalid WEP key length:
         derive_key(&[1; 3]).expect_err("expected failure for invalid WEP key");
@@ -144,12 +134,6 @@ mod tests {
 
         // Invalid HEX characters:
         derive_key(&[75; 26]).expect_err("cannot derive WEP key from invalid hex string");
-    }
-
-    #[test]
-    #[cfg(not(feature = "wep_enabled"))]
-    fn test_derive_key_unsupported() {
-        derive_key(&[1; 5]).expect_err("WEP is not supported");
     }
 
     #[test]

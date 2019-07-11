@@ -4,10 +4,10 @@
 
 //! Implementation of a "simple" pseudo directory.  See [`Simple`] for details.
 
-use {
-    crate::common::{send_on_open_with_error, try_inherit_rights_for_clone},
-    crate::directory::{
-        common::{encode_dirent, validate_and_split_path},
+use crate::{
+    common::{inherit_rights_for_clone, send_on_open_with_error},
+    directory::{
+        common::{check_child_connection_flags, encode_dirent, validate_and_split_path},
         connection::DirectoryConnection,
         controllable::Controllable,
         entry::{DirectoryEntry, EntryInfo},
@@ -15,6 +15,9 @@ use {
         watchers::{Watchers, WatchersAddError, WatchersSendError},
         DEFAULT_DIRECTORY_PROTECTION_ATTRIBUTES,
     },
+};
+
+use {
     fidl::endpoints::ServerEnd,
     fidl_fuchsia_io::{
         DirectoryObject, DirectoryRequest, NodeAttributes, NodeInfo, NodeMarker,
@@ -28,7 +31,7 @@ use {
     },
     futures::{
         future::{FusedFuture, FutureExt},
-        stream::{FuturesUnordered, StreamExt, StreamFuture},
+        stream::{FusedStream, FuturesUnordered, StreamExt, StreamFuture},
         task::Context,
         Future, Poll,
     },
@@ -77,6 +80,16 @@ pub struct Simple<'entries> {
 }
 
 /// Return type for Simple::handle_request().
+struct HandleRequestResult {
+    /// Current connection state.
+    connection_state: ConnectionState,
+
+    /// If the command may have an effect on the children we will need to make sure we execute
+    /// their `poll` method after processing this command.
+    may_affect_children: bool,
+}
+
+#[derive(PartialEq, Eq)]
 enum ConnectionState {
     Alive,
     Closed,
@@ -105,18 +118,10 @@ impl<'entries> Simple<'entries> {
         self.add_boxed_entry(name, Box::new(entry))
     }
 
-    /// Attaches a new connection, client end `server_end`, to this object.  Any error are reported
-    /// as `OnOpen` events on the `server_end` itself.
-    fn add_connection(
-        &mut self,
-        parent_flags: u32,
-        flags: u32,
-        mode: u32,
-        server_end: ServerEnd<NodeMarker>,
-    ) {
-        if let Some(conn) =
-            SimpleDirectoryConnection::connect(parent_flags, flags, mode, server_end)
-        {
+    /// Attaches a new connection (`server_end`) to this object.  Any error are reported as
+    /// `OnOpen` events on the `server_end` itself.
+    fn add_connection(&mut self, flags: u32, mode: u32, server_end: ServerEnd<NodeMarker>) {
+        if let Some(conn) = SimpleDirectoryConnection::connect(flags, mode, server_end) {
             self.connections.push(conn);
         }
     }
@@ -125,19 +130,19 @@ impl<'entries> Simple<'entries> {
         &mut self,
         req: DirectoryRequest,
         connection: &mut SimpleDirectoryConnection,
-    ) -> Result<ConnectionState, failure::Error> {
+    ) -> Result<HandleRequestResult, failure::Error> {
+        let mut may_affect_children = false;
+
         match req {
             DirectoryRequest::Clone { flags, object, control_handle: _ } => {
-                match try_inherit_rights_for_clone(connection.flags, flags) {
-                    Ok(clone_flags) => {
-                        self.add_connection(connection.flags, clone_flags, 0, object)
-                    }
-                    Err(status) => send_on_open_with_error(flags, object, status),
-                }
+                self.handle_clone(connection.flags, flags, 0, object);
             }
             DirectoryRequest::Close { responder } => {
                 responder.send(ZX_OK)?;
-                return Ok(ConnectionState::Closed);
+                return Ok(HandleRequestResult {
+                    connection_state: ConnectionState::Closed,
+                    may_affect_children,
+                });
             }
             DirectoryRequest::Describe { responder } => {
                 let mut info = NodeInfo::Directory(DirectoryObject);
@@ -168,7 +173,10 @@ impl<'entries> Simple<'entries> {
                 responder.send(ZX_ERR_NOT_SUPPORTED, &mut iter::empty(), &mut iter::empty())?;
             }
             DirectoryRequest::Open { flags, mode, path, object, control_handle: _ } => {
-                self.handle_open(flags, mode, &path, object);
+                self.handle_open(connection.flags, flags, mode, &path, object);
+                // As we optimize our `Open` requests by navigating multiple path components at
+                // once, we may attach a connected to a child node.
+                may_affect_children = true;
             }
             DirectoryRequest::Unlink { path: _, responder } => {
                 responder.send(ZX_ERR_NOT_SUPPORTED)?;
@@ -215,11 +223,30 @@ impl<'entries> Simple<'entries> {
                 }
             }
         }
-        Ok(ConnectionState::Alive)
+        Ok(HandleRequestResult { connection_state: ConnectionState::Alive, may_affect_children })
+    }
+
+    fn handle_clone(
+        &mut self,
+        parent_flags: u32,
+        flags: u32,
+        mode: u32,
+        server_end: ServerEnd<NodeMarker>,
+    ) {
+        let flags = match inherit_rights_for_clone(parent_flags, flags) {
+            Ok(updated) => updated,
+            Err(status) => {
+                send_on_open_with_error(flags, server_end, status);
+                return;
+            }
+        };
+
+        self.add_connection(flags, mode, server_end);
     }
 
     fn handle_open(
         &mut self,
+        parent_flags: u32,
         flags: u32,
         mut mode: u32,
         path: &str,
@@ -230,8 +257,8 @@ impl<'entries> Simple<'entries> {
             return;
         }
 
-        if path == "." {
-            self.open(flags, mode, &mut iter::empty(), server_end);
+        if path == "." || path == "./" {
+            self.handle_clone(parent_flags, flags, mode, server_end);
             return;
         }
 
@@ -246,6 +273,14 @@ impl<'entries> Simple<'entries> {
         if is_dir {
             mode |= MODE_TYPE_DIRECTORY;
         }
+
+        let flags = match check_child_connection_flags(parent_flags, flags) {
+            Ok(updated) => updated,
+            Err(status) => {
+                send_on_open_with_error(flags, server_end, status);
+                return;
+            }
+        };
 
         // It is up to the open method to handle OPEN_FLAG_DESCRIBE from this point on.
         self.open(flags, mode, &mut names, server_end);
@@ -321,6 +356,71 @@ impl<'entries> Simple<'entries> {
         connection.seek = AlphabeticalTraversal::End;
         return responder(Status::OK, &mut buf.iter().cloned());
     }
+
+    fn poll_entries(&mut self, cx: &mut Context<'_>) {
+        for (name, entry) in self.entries.iter_mut() {
+            match entry.poll_unpin(cx) {
+                Poll::Ready(result) => {
+                    panic!(
+                        "Entry futures in a pseudo directory should never complete.\n\
+                         Entry name: {}\n\
+                         Result: {:#?}",
+                        name, result
+                    );
+                }
+                Poll::Pending => (),
+            }
+        }
+    }
+
+    fn poll_connections(&mut self, cx: &mut Context<'_>) -> bool {
+        // In case a command may establish a connection to a child node we need to make sure to run
+        // the child node `poll` method as well to allow the new connection to register itself in
+        // the context.
+        let mut rerun_children = false;
+
+        // This loop is needed to make sure we do not miss any activations of the futures we are
+        // managing.  For example, if a stream was activated and has several outstanding items, if
+        // we do not loop, we would only process the first item and then exit the `poll` method.
+        // And we would leave item(s) in the stream and would not process them until the next
+        // activation due to another item been added.  So we need to poll the stream while we
+        // receive Poll::Pending.
+        //
+        // This approach has a downside, as we do not give up control until if we have more items
+        // coming in.  Ideally we would want to check if there is anything else left in the stream
+        // and just set the waker to activate us again, giving the executor (and other futures
+        // sharing this task) to do work.  Unfortunately, Stream does not provide an ability to see
+        // if there are any items pending.
+        loop {
+            match self.connections.poll_next_unpin(cx) {
+                Poll::Ready(Some((maybe_request, mut connection))) => {
+                    if let Some(Ok(request)) = maybe_request {
+                        match self.handle_request(request, &mut connection) {
+                            Ok(HandleRequestResult { connection_state, may_affect_children }) => {
+                                rerun_children |= may_affect_children;
+                                if connection_state == ConnectionState::Alive {
+                                    self.connections.push(connection.into_future());
+                                }
+                            }
+                            // An error occurred while processing a request.  We will just close
+                            // the connection, effectively closing the underlying channel in the
+                            // destructor.
+                            _ => (),
+                        }
+                    }
+                    // Similarly to the error that occurs while handing a FIDL request, any
+                    // connection level errors cause the connection to be closed.
+                }
+                // Even when we have no connections any more we still report Pending state, as we
+                // may get more connections open in the future.  We will return Poll::Pending
+                // below.  Getting any of these two values means that we have processed all the
+                // items that might have been triggered current waker activation.
+                Poll::Ready(None) | Poll::Pending => break,
+            }
+        }
+
+        rerun_children
+    }
 }
 
 impl<'entries> DirectoryEntry for Simple<'entries> {
@@ -334,7 +434,7 @@ impl<'entries> DirectoryEntry for Simple<'entries> {
         let name = match path.next() {
             Some(name) => name,
             None => {
-                self.add_connection(!0, flags, mode, server_end);
+                self.add_connection(flags, mode, server_end);
                 return;
             }
         };
@@ -440,55 +540,24 @@ impl<'entries> Future for Simple<'entries> {
     type Output = Void;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // This loop is needed to make sure we do not miss any activations of the futures we are
-        // managing.  For example, if a stream was activated and has several outstanding items, if
-        // we do not loop, we would only process the first item and then exit the `poll` method.
-        // And we would leave item(s) in the stream and would not process them until the next
-        // activation due to another item been added.  So we need to poll the stream while we
-        // receive Poll::Pending.
+        // NOTE Ordering here is important.  We need to give execution to all the child nodes
+        // first, as if any of those nodes will somehow cause new connections to be added to the
+        // `connections` list, we need to make sure we call `poll_next` at least once after a
+        // connection has been added.  Otherwise we will return `Pending` and the context would not
+        // be updated to include a waker for this new connection.  This can be observed in unit
+        // tests where `run_until_stalled` will cause the test to be reported as stalled somewhere
+        // in the middle.
         //
-        // This approach has a downside, as we do not give up control until if we have more items
-        // coming in.  Ideally we would want to check if there is anything else left in the stream
-        // and just set the waker to activate us again, giving the executor (and other futures
-        // sharing this task) to do work.  Unfortunately, Stream does not provide an ability to see
-        // if there are any items pending.
-        loop {
-            match self.connections.poll_next_unpin(cx) {
-                Poll::Ready(Some((maybe_request, mut connection))) => {
-                    if let Some(Ok(request)) = maybe_request {
-                        match self.handle_request(request, &mut connection) {
-                            Ok(ConnectionState::Alive) => {
-                                self.connections.push(connection.into_future())
-                            }
-                            Ok(ConnectionState::Closed) => (),
-                            // An error occurred while processing a request.  We will just close
-                            // the connection, effectively closing the underlying channel in the
-                            // destructor.
-                            _ => (),
-                        }
-                    }
-                    // Similarly to the error that occurs while handing a FIDL request, any
-                    // connection level errors cause the connection to be closed.
-                }
-                // Even when we have no connections any more we still report Pending state, as we
-                // may get more connections open in the future.  We will return Poll::Pending
-                // below.  Getting any of these two values means that we have processed all the
-                // items that might have been triggered current waker activation.
-                Poll::Ready(None) | Poll::Pending => break,
-            }
-        }
+        // But as we optimize the way we open connections, an `Open` request may add connections to
+        // child nodes directly, so we need to rerun `poll` for children in case of an `Open`
+        // request.
 
-        for (name, entry) in self.entries.iter_mut() {
-            match entry.poll_unpin(cx) {
-                Poll::Ready(result) => {
-                    panic!(
-                        "Entry futures in a pseudo directory should never complete.\n\
-                         Entry name: {}\n\
-                         Result: {:#?}",
-                        name, result
-                    );
-                }
-                Poll::Pending => (),
+        loop {
+            self.poll_entries(cx);
+
+            let rerun_children = self.poll_connections(cx);
+            if !rerun_children {
+                break;
             }
         }
 
@@ -508,13 +577,7 @@ impl<'entries> FusedFuture for Simple<'entries> {
 
         // If we have any watcher connections, we may still make progress when a watcher connection
         // is closed.
-        //
-        // As a pseudo directory blocks when no connections are available, it can not use
-        // `connections.is_terminated()`.  `FuturesUnordered::is_terminated()` will return `false`
-        // for an empty set of connections for the first time, while `Simple::poll()` will return
-        // `Pending` in the same situation.  If we do not return `true` here for the empty
-        // connections case for the first time instead, we will hang.
-        !self.watchers.has_connections() && self.connections.len() == 0
+        !self.watchers.has_connections() && self.connections.is_terminated()
     }
 }
 
@@ -691,7 +754,7 @@ mod tests {
             "file" => read_only(|| Ok(b"Content".to_vec())),
         };
 
-        run_server_client(0, root, async move |first_proxy| {
+        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
             async fn assert_read_file(root: &DirectoryProxy) {
                 let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
                 let file = open_get_file_proxy_assert_ok!(&root, flags, "file");
@@ -700,15 +763,15 @@ mod tests {
                 assert_close!(file);
             }
 
-            await!(assert_read_file(&first_proxy));
+            await!(assert_read_file(&root));
 
             clone_as_directory_assert_err!(
-                &first_proxy,
-                OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE,
+                &root,
+                OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE | OPEN_FLAG_DESCRIBE,
                 Status::ACCESS_DENIED
             );
 
-            assert_close!(first_proxy);
+            assert_close!(root);
         });
     }
 
@@ -827,7 +890,7 @@ mod tests {
             }
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
+        run_server_client(OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE, root, async move |root| {
             async fn open_read_write_close<'a>(
                 from_dir: &'a DirectoryProxy,
                 path: &'a str,
@@ -847,7 +910,7 @@ mod tests {
             }
 
             {
-                let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
+                let flags = OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE | OPEN_FLAG_DESCRIBE;
                 let ssh_dir = open_get_directory_proxy_assert_ok!(&root, flags, "etc/ssh");
 
                 await!(open_read_write_close(
@@ -889,7 +952,7 @@ mod tests {
             }
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
+        run_server_client(OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE, root, async move |root| {
             async fn open_write_close<'a>(
                 from_dir: &'a DirectoryProxy,
                 new_content: &'a str,
@@ -1092,26 +1155,42 @@ mod tests {
     }
 
     #[test]
-    fn directories_do_not_restrict_write_permission() {
+    fn directories_restrict_nested_read_permissions() {
         let root = pseudo_directory! {
-            "file" => read_write(
-                || Ok(b"Content".to_vec()),
-                20,
-                |content| {
-                    assert_eq!(*&content, b"New content");
-                    Ok(())
-                }),
+            "dir" => pseudo_directory! {
+                "file" => read_only(|| Ok(b"Content".to_vec())),
+            },
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let flags = OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE | OPEN_FLAG_DESCRIBE;
-            let file = open_get_file_proxy_assert_ok!(&root, flags, "file");
+        run_server_client(0, root, async move |root| {
+            open_as_file_assert_err!(
+                &root,
+                OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE,
+                "dir/file",
+                Status::ACCESS_DENIED
+            );
 
-            assert_read!(file, "Content");
-            assert_seek!(file, 0, Start);
-            assert_write!(file, "New content");
+            assert_close!(root);
+        });
+    }
 
-            assert_close!(file);
+    #[test]
+    fn directories_restrict_nested_write_permissions() {
+        let root = pseudo_directory! {
+            "dir" => pseudo_directory! {
+                "file" => write_only(100, |_content| {
+                    panic!("Access permissions should not allow this file to be written");
+                }),
+            },
+        };
+
+        run_server_client(0, root, async move |root| {
+            open_as_file_assert_err!(
+                &root,
+                OPEN_RIGHT_WRITABLE | OPEN_FLAG_DESCRIBE,
+                "dir/file",
+                Status::ACCESS_DENIED
+            );
 
             assert_close!(root);
         });
@@ -1119,12 +1198,14 @@ mod tests {
 
     #[test]
     fn flag_posix_means_writable() {
+        let write_count = &AtomicUsize::new(0);
         let root = pseudo_directory! {
             "nested" => pseudo_directory! {
                 "file" => read_write(
                     || Ok(b"Content".to_vec()),
                     20,
                     |content| {
+                        write_count.fetch_add(1, Ordering::Relaxed);
                         assert_eq!(*&content, b"New content");
                         Ok(())
                     }),
@@ -1134,7 +1215,7 @@ mod tests {
         run_server_client(OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE, root, async move |root| {
             let nested = open_get_directory_proxy_assert_ok!(
                 &root,
-                OPEN_RIGHT_READABLE | OPEN_FLAG_POSIX,
+                OPEN_RIGHT_READABLE | OPEN_FLAG_POSIX | OPEN_FLAG_DESCRIBE,
                 "nested"
             );
 
@@ -1156,6 +1237,8 @@ mod tests {
 
             assert_close!(nested);
             assert_close!(root);
+
+            assert_eq!(write_count.load(Ordering::Relaxed), 1);
         });
     }
 
@@ -1175,7 +1258,7 @@ mod tests {
         run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
             let nested = open_get_directory_proxy_assert_ok!(
                 &root,
-                OPEN_RIGHT_READABLE | OPEN_FLAG_POSIX,
+                OPEN_RIGHT_READABLE | OPEN_FLAG_POSIX | OPEN_FLAG_DESCRIBE,
                 "nested"
             );
 
@@ -1298,6 +1381,7 @@ mod tests {
             }
 
             assert_read_dirents!(root, 100, vec![]);
+            assert_close!(root);
         });
     }
 
@@ -1310,6 +1394,7 @@ mod tests {
         run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
             // Entry header is 10 bytes, so this read should not be able to return a single entry.
             assert_read_dirents_err!(root, 8, Status::BUFFER_TOO_SMALL);
+            assert_close!(root);
         });
     }
 
@@ -1359,6 +1444,7 @@ mod tests {
             }
 
             assert_read_dirents!(root, 100, vec![]);
+            assert_close!(root);
         });
     }
 
@@ -1372,13 +1458,12 @@ mod tests {
             OPEN_FLAG_NODE_REFERENCE | OPEN_RIGHT_READABLE,
             root,
             async move |root| {
-                {
-                    let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
-                    let file = open_get_file_proxy_assert_ok!(&root, flags, "file");
-
-                    assert_read!(file, "Content");
-                    assert_close!(file);
-                }
+                open_as_file_assert_err!(
+                    &root,
+                    OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE,
+                    "file",
+                    Status::ACCESS_DENIED
+                );
 
                 clone_as_directory_assert_err!(
                     &root,
@@ -1398,16 +1483,15 @@ mod tests {
         };
 
         run_server_client(
-            OPEN_FLAG_NODE_REFERENCE | OPEN_RIGHT_WRITABLE,
+            OPEN_RIGHT_WRITABLE | OPEN_FLAG_NODE_REFERENCE,
             root,
             async move |root| {
-                {
-                    let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
-                    let file = open_get_file_proxy_assert_ok!(&root, flags, "file");
-
-                    assert_read!(file, "Content");
-                    assert_close!(file);
-                }
+                open_as_file_assert_err!(
+                    &root,
+                    OPEN_RIGHT_WRITABLE | OPEN_FLAG_DESCRIBE,
+                    "file",
+                    Status::ACCESS_DENIED
+                );
 
                 clone_as_directory_assert_err!(
                     &root,
@@ -1421,7 +1505,7 @@ mod tests {
     }
 
     #[test]
-    fn node_reference_allows_read_dirent() {
+    fn node_reference_allows_read_dirents() {
         let root = pseudo_directory! {
             "etc" => pseudo_directory! {
                 "fstab" => read_only(|| Ok(b"/dev/fs /".to_vec())),
@@ -1432,48 +1516,44 @@ mod tests {
             "files" => read_only(|| Ok(b"Content".to_vec())),
         };
 
-        run_server_client(
-            OPEN_RIGHT_READABLE | OPEN_FLAG_NODE_REFERENCE,
-            root,
-            async move |root| {
-                {
-                    let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
-                    expected
-                        .add(DIRENT_TYPE_DIRECTORY, b".")
-                        .add(DIRENT_TYPE_DIRECTORY, b"etc")
-                        .add(DIRENT_TYPE_FILE, b"files");
+        run_server_client(OPEN_FLAG_NODE_REFERENCE, root, async move |root| {
+            {
+                let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
+                expected
+                    .add(DIRENT_TYPE_DIRECTORY, b".")
+                    .add(DIRENT_TYPE_DIRECTORY, b"etc")
+                    .add(DIRENT_TYPE_FILE, b"files");
 
-                    assert_read_dirents!(root, 1000, expected.into_vec());
-                }
+                assert_read_dirents!(root, 1000, expected.into_vec());
+            }
 
-                {
-                    let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
-                    let etc_dir = open_get_directory_proxy_assert_ok!(&root, flags, "etc");
+            {
+                let flags = OPEN_FLAG_DESCRIBE;
+                let etc_dir = open_get_directory_proxy_assert_ok!(&root, flags, "etc");
 
-                    let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
-                    expected
-                        .add(DIRENT_TYPE_DIRECTORY, b".")
-                        .add(DIRENT_TYPE_FILE, b"fstab")
-                        .add(DIRENT_TYPE_DIRECTORY, b"ssh");
+                let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
+                expected
+                    .add(DIRENT_TYPE_DIRECTORY, b".")
+                    .add(DIRENT_TYPE_FILE, b"fstab")
+                    .add(DIRENT_TYPE_DIRECTORY, b"ssh");
 
-                    assert_read_dirents!(etc_dir, 1000, expected.into_vec());
-                    assert_close!(etc_dir);
-                }
+                assert_read_dirents!(etc_dir, 1000, expected.into_vec());
+                assert_close!(etc_dir);
+            }
 
-                {
-                    let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
-                    let ssh_dir = open_get_directory_proxy_assert_ok!(&root, flags, "etc/ssh");
+            {
+                let flags = OPEN_FLAG_DESCRIBE;
+                let ssh_dir = open_get_directory_proxy_assert_ok!(&root, flags, "etc/ssh");
 
-                    let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
-                    expected.add(DIRENT_TYPE_DIRECTORY, b".").add(DIRENT_TYPE_FILE, b"sshd_config");
+                let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
+                expected.add(DIRENT_TYPE_DIRECTORY, b".").add(DIRENT_TYPE_FILE, b"sshd_config");
 
-                    assert_read_dirents!(ssh_dir, 1000, expected.into_vec());
-                    assert_close!(ssh_dir);
-                }
+                assert_read_dirents!(ssh_dir, 1000, expected.into_vec());
+                assert_close!(ssh_dir);
+            }
 
-                assert_close!(root);
-            },
-        );
+            assert_close!(root);
+        });
     }
 
     #[test]
@@ -1486,6 +1566,7 @@ mod tests {
             assert_watcher_one_message_watched_events!(watcher_client, { EXISTING, "." });
             assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
 
+            drop(watcher_client);
             assert_close!(root);
         });
     }
@@ -1515,6 +1596,7 @@ mod tests {
             );
             assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
 
+            drop(watcher_client);
             assert_close!(root);
         });
     }
@@ -1554,6 +1636,8 @@ mod tests {
             );
             assert_watcher_one_message_watched_events!(watcher2_client, { IDLE, vec![] });
 
+            drop(watcher1_client);
+            drop(watcher2_client);
             assert_close!(root);
         });
     }
@@ -1576,6 +1660,7 @@ mod tests {
 
             assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
 
+            drop(watcher_client);
             assert_close!(root);
         });
     }

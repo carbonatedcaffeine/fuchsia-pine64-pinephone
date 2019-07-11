@@ -73,6 +73,19 @@ All other libraries should be statically linked into a driver.
 
 Turn on verbose logging.
 
+## driver.\<name>.compatibility-tests-enable
+
+If this option is set, devmgr will run compatibility tests for the driver.
+zircon\_driver\_info, and can be found as the first argument to the
+ZIRCON\_DRIVER\_BEGIN macro.
+
+## driver.\<name>.compatibility-tests-wait-time
+
+This timeout lets you configure the wait time in milliseconds for each of
+bind/unbind/suspend hooks to complete in compatibility tests.
+zircon\_driver\_info, and can be found as the first argument to the
+ZIRCON\_DRIVER\_BEGIN macro.
+
 ## driver.\<name>.disable
 
 Disables the driver with the given name. The driver name comes from the
@@ -99,6 +112,23 @@ Note again that the name of the driver is the "Driver" argument to the
 ZIRCON\_DRIVER\_BEGIN macro. It is not, for example, the name of the device,
 which for some drivers is almost identical, except that the device may be
 named "foo-bar" whereas the driver name must use underscores, e.g., "foo_bar".
+
+## driver.\<name>.tests.enable=\<bool>
+
+Enable the unit tests for an individual driver. The unit tests will run before
+the driver binds any devices. If `driver.tests.enable` is true then this
+defaults to enabled, otherwise the default is disabled.
+
+Note again that the name of the driver is the "Driver" argument to the
+ZIRCON\_DRIVER\_BEGIN macro. It is not, for example, the name of the device,
+which for some drivers is almost identical, except that the device may be
+named "foo-bar" whereas the driver name must use underscores, e.g., "foo_bar".
+
+## driver.tests.enable=\<bool>
+
+Enable the unit tests for all drivers. The unit tests will run before the
+drivers bind any devices. It's also possible to enable tests for an individual
+driver, see `driver.\<name>.enable_tests`. The default is disabled.
 
 ## driver.tracing.enable=\<bool>
 
@@ -247,13 +277,16 @@ to true.
 ## kernel.serial=\<string\>
 
 This controls what serial port is used.  If provided, it overrides the serial
-port described by the system's bootdata.
+port described by the system's bootdata.  The kernel debug serial port is
+a reserved resource and may not be used outside of the kernel.
 
-If set to "none", the kernel debug serial port will be disabled.
+If set to "none", the kernel debug serial port will be disabled and will not
+be reserved, allowing the default serial port to be used outside the kernel.
 
 ### x64 specific values
 
 On x64, some additional values are supported for configuring 8250-like UARTs:
+
 - If set to "legacy", the legacy COM1 interface is used.
 - A port-io UART can be specified using "ioport,\<portno>,\<irq>".
 - An MMIO UART can be specified using "mmio,\<physaddr>,\<irq>".
@@ -401,26 +434,40 @@ normal userspace startup process (launching the device manager, etc).
 It is useful for alternate boot modes (like a factory test or system
 unit tests).
 
-The pathname used here is relative to `/boot`, so it should not start with
-a `/` prefix.
+The pathname used here is relative to `userboot.root` (below), if set,
+or else relative to the root of the BOOTFS (which later is ordinarily
+seen at `/boot`).  It should not start with a `/` prefix.
 
-Note that this option does not work for executables that are linked with
-libraries other than libc and the dynamic linker.
+If this executable uses `PT_INTERP` (i.e. the dynamic linker), the userboot
+process provides a [loader service](program_loading.md#the-loader-service) to
+resolve the `PT_INTERP` (dynamic linker) name and any shared library names it
+may request.  That service simply looks in the `lib/` directory (under
+`userboot.root`) in the BOOTFS.
 
 Example: `userboot=bin/core-tests`
+
+## userboot.root=\<path>
+
+This sets a "root" path prefix within the BOOTFS where the `userboot` path and
+the `lib/` directory for the loader service will be found.  By default, there
+is no prefix so paths are treated as exact relative paths from the root of the
+BOOTFS.  e.g. with `userboot.root=pkg/foo` and `userboot=bin/app`, the names
+found in the BOOTFS will be `pkg/foo/bin/app`, `pkg/foo/lib/ld.so.1`, etc.
 
 ## userboot.reboot
 
 If this option is set, userboot will attempt to reboot the machine after
 waiting 3 seconds when the process it launches exits.
 
-*If running with userboot=bin/core-tests in QEMU, this will cause the system to
-continually run tests and reboot.*
+*If running a "ZBI test" image in QEMU, this will cause the system to
+continually run tests and reboot.*  For QEMU, `userboot.shutdown` is usually
+preferable.
 
 ## userboot.shutdown
 
 If this option is set, userboot will attempt to power off the machine
-when the process it launches exits.
+when the process it launches exits.  Note if `userboot.reboot` is set
+then `userboot.shutdown` will be ignored.
 
 ## vdso.soft_ticks=\<bool>
 
@@ -479,16 +526,18 @@ This option sets the default boot device to netboot, use a local zircon.bin or t
 
 # How to pass the commandline to the kernel
 
-## in Qemu, using scripts/run-zircon*
+## in Qemu, using fx run
 
 Pass each option using -c, for example:
+
 ```
-./scripts/run-zircon-x64 -c gfxconsole.font=18x32 -c gfxconsole.early=false
+fx run -c gfxconsole.font=18x32 -c gfxconsole.early=false
 ```
 
 ## in GigaBoot20x6, when netbooting
 
 Pass the kernel commandline at the end, after a -- separator, for example:
+
 ```
 bootserver zircon.bin bootfs.bin -- gfxconsole.font=18x32 gfxconsole.early=false
 ```

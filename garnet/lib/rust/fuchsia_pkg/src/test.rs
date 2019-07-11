@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+use crate::CreationManifest;
 use proptest::prelude::*;
-use proptest::{prop_compose, proptest_helper};
 
 /// Helper to assist asserting a single match branch.
 ///
@@ -20,26 +20,27 @@ macro_rules! assert_matches(
     )
 );
 
-pub const ANY_UNICODE_EXCEPT_SLASH_NULL_OR_DOT: &str = r"[^/\x00\.]";
+// TODO(PKG-597) allow newline once meta/contents supports it in blob paths
+pub const ANY_UNICODE_EXCEPT_SLASH_NULL_DOT_OR_NEWLINE: &str = "[^/\0\\.\n]";
 
 prop_compose! {
-    [pub] fn always_valid_char()(c in ANY_UNICODE_EXCEPT_SLASH_NULL_OR_DOT) -> String {
+    pub fn always_valid_resource_path_char()(c in ANY_UNICODE_EXCEPT_SLASH_NULL_DOT_OR_NEWLINE) -> String {
         c
     }
 }
 
 prop_compose! {
-    [pub] fn always_valid_chars
+    pub fn always_valid_resource_path_chars
         (min: usize, max: usize)
-        (s in prop::collection::vec(always_valid_char(), min..max)) -> String {
+        (s in prop::collection::vec(always_valid_resource_path_char(), min..max)) -> String {
             s.join("")
         }
 }
 
 prop_compose! {
-    [pub] fn valid_path
+    pub fn random_resource_path
         (min: usize, max: usize)
-        (s in prop::collection::vec(always_valid_chars(1, 4), min..max))
+        (s in prop::collection::vec(always_valid_resource_path_chars(1, 4), min..max))
          -> String
     {
         s.join("/")
@@ -47,10 +48,10 @@ prop_compose! {
 }
 
 prop_compose! {
-    [pub] fn path_with_regex_segment_string
+    pub fn random_resource_path_with_regex_segment_string
         (max_segments: usize, inner: String)
         (vec in prop::collection::vec(
-            always_valid_chars(1, 3), 3..max_segments),
+            always_valid_resource_path_chars(1, 3), 3..max_segments),
          inner in prop::string::string_regex(inner.as_str()).unwrap())
         (index in ..vec.len(),
          inner in Just(inner),
@@ -63,9 +64,9 @@ prop_compose! {
 }
 
 prop_compose! {
-    [pub] fn path_with_regex_segment_str
+    pub fn random_resource_path_with_regex_segment_str
         (max_segments: usize, inner: &'static str)
-        (s in path_with_regex_segment_string(
+        (s in random_resource_path_with_regex_segment_string(
             max_segments, inner.to_string())) -> String
     {
         s
@@ -73,7 +74,59 @@ prop_compose! {
 }
 
 prop_compose! {
-    [pub] fn merkle_hex()(s in "[[:xdigit:]]{64}") -> String {
+    pub fn random_external_resource_path()
+        (s in random_resource_path(1, 4)
+         .prop_filter(
+             "External package contents cannot be in the 'meta/' directory",
+             |s| !s.starts_with("meta/"))
+        ) -> String
+    {
         s
+    }
+}
+
+prop_compose! {
+    pub fn random_far_resource_path()
+        (s in random_resource_path(1, 4)) -> String
+    {
+        format!("meta/{}", s)
+    }
+}
+
+prop_compose! {
+    pub fn random_hash()(s: [u8; 32]) -> fuchsia_merkle::Hash {
+        s.into()
+    }
+}
+
+prop_compose! {
+    pub fn random_merkle_hex()(s in "[[:xdigit:]]{64}") -> String {
+        s
+    }
+}
+
+prop_compose! {
+    pub fn random_package_name()(s in r"[-0-9a-z\.]{1, 100}") -> String {
+        s
+    }
+}
+
+prop_compose! {
+    pub fn random_package_variant()(s in r"[-0-9a-z\.]{1, 100}") -> String {
+        s
+    }
+}
+
+prop_compose! {
+    pub fn random_creation_manifest()
+        (external_content in prop::collection::btree_map(
+            random_external_resource_path(), random_resource_path(1, 2), 1..4),
+         far_content in prop::collection::btree_map(
+             random_far_resource_path(), random_resource_path(1, 2), 1..4),)
+         -> CreationManifest
+    {
+        CreationManifest::from_external_and_far_contents(
+            external_content, far_content)
+            .unwrap()
     }
 }

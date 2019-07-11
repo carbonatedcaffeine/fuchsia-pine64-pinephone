@@ -38,8 +38,8 @@ namespace impl {
 
 // Filter the |desired_formats| list to contain only those formats which support
 // optimal tiling.
-std::vector<vk::Format> GetSupportedDepthFormats(
-    vk::PhysicalDevice device, std::vector<vk::Format> desired_formats);
+std::vector<vk::Format> GetSupportedDepthFormats(vk::PhysicalDevice device,
+                                                 std::vector<vk::Format> desired_formats);
 
 // Pick the lowest precision depth format that supports optimal tiling.
 typedef vk::ResultValueType<vk::Format>::type FormatResult;
@@ -50,7 +50,8 @@ typedef vk::ResultValueType<vk::Format>::type FormatResult;
 FormatResult GetSupportedDepthStencilFormat(vk::PhysicalDevice device);
 
 // Search through all memory types specified by |type_bits| and return the index
-// of the first one that has all necessary flags.  Panic if nones is found.
+// of the first one that has all necessary flags.  Returns memoryTypeCount of
+// |device|'s memory properties if nones is found.
 uint32_t GetMemoryTypeIndex(vk::PhysicalDevice device, uint32_t type_bits,
                             vk::MemoryPropertyFlags required_properties);
 

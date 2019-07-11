@@ -9,8 +9,7 @@
 
 set -e
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"/lib/vars.sh || exit $?
-fx-config-read
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"/lib/image_build_vars.sh || exit $?
 
 name_args=()
 name="$(get-device-name)"
@@ -18,7 +17,20 @@ if [[ -n "$name" ]]; then
   name_args+=("-n" "${name}")
 fi
 
-"${ZIRCON_TOOLS_DIR}/zbi" -o "${FUCHSIA_BUILD_DIR}/netboot.zbi" "${FUCHSIA_BUILD_DIR}/netboot.zbi" \
-  --replace --entry "data/ssh/authorized_keys=${FUCHSIA_DIR}/.ssh/authorized_keys"
+tmpdir="${FUCHSIA_BUILD_DIR}.netboot.tmp"
+mkdir "${tmpdir}"
+trap 'rm -rf "${tmpdir}"' EXIT
 
-exec "${FUCHSIA_BUILD_DIR}/netboot.sh" "${name_args[@]}" "$@"
+# The script uses the ${IMAGE_NETBOOT_ZBI} relative path, relative to its own
+# location.  So copy the script into a temporary location next to the location
+# where we'll write the temporary copy of ${IMAGE_NETBOOT_ZBI}.
+cp "${FUCHSIA_BUILD_DIR}/netboot.sh" "${tmpdir}"
+
+# Make a temporary image that adds in the .ssh/authorized_keys file.
+"${ZIRCON_TOOLS_DIR}/zbi" \
+  -o "${tmpdir}/${IMAGE_NETBOOT_ZBI}" \
+  "${FUCHSIA_BUILD_DIR}/${IMAGE_NETBOOT_ZBI}" \
+  "--entry=data/ssh/authorized_keys=${FUCHSIA_DIR}/.ssh/authorized_keys"
+
+# Now run the copied script, which will use the temporary ZBI.
+"${tmpdir}/netboot.sh" "${name_args[@]}" "$@"

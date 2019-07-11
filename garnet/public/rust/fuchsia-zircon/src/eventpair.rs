@@ -4,8 +4,8 @@
 
 //! Type-safe bindings for Zircon event pairs.
 
-use crate::{AsHandleRef, HandleBased, Handle, HandleRef, Peered, Status};
 use crate::ok;
+use crate::{AsHandleRef, Handle, HandleBased, HandleRef, Peered, Status};
 use fuchsia_zircon_sys as sys;
 
 /// An object representing a Zircon
@@ -28,19 +28,14 @@ impl EventPair {
         let options = 0;
         let status = unsafe { sys::zx_eventpair_create(options, &mut out0, &mut out1) };
         ok(status)?;
-        unsafe {
-            Ok((
-                Self::from(Handle::from_raw(out0)),
-                Self::from(Handle::from_raw(out1))
-            ))
-        }
+        unsafe { Ok((Self::from(Handle::from_raw(out0)), Self::from(Handle::from_raw(out1)))) }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DurationNum, Signals};
+    use crate::{DurationNum, Signals, Time};
 
     #[test]
     fn wait_and_signal_peer() {
@@ -48,19 +43,23 @@ mod tests {
         let eighty_ms = 80.millis();
 
         // Waiting on one without setting any signal should time out.
-        assert_eq!(p2.wait_handle(Signals::USER_0, eighty_ms.after_now()), Err(Status::TIMED_OUT));
+        assert_eq!(p2.wait_handle(Signals::USER_0, Time::after(eighty_ms)), Err(Status::TIMED_OUT));
 
         // If we set a signal, we should be able to wait for it.
         assert!(p1.signal_peer(Signals::NONE, Signals::USER_0).is_ok());
-        assert_eq!(p2.wait_handle(Signals::USER_0, eighty_ms.after_now()).unwrap(),
-            Signals::USER_0);
+        assert_eq!(
+            p2.wait_handle(Signals::USER_0, Time::after(eighty_ms)).unwrap(),
+            Signals::USER_0
+        );
 
         // Should still work, signals aren't automatically cleared.
-        assert_eq!(p2.wait_handle(Signals::USER_0, eighty_ms.after_now()).unwrap(),
-            Signals::USER_0);
+        assert_eq!(
+            p2.wait_handle(Signals::USER_0, Time::after(eighty_ms)).unwrap(),
+            Signals::USER_0
+        );
 
         // Now clear it, and waiting should time out again.
         assert!(p1.signal_peer(Signals::USER_0, Signals::NONE).is_ok());
-        assert_eq!(p2.wait_handle(Signals::USER_0, eighty_ms.after_now()), Err(Status::TIMED_OUT));
+        assert_eq!(p2.wait_handle(Signals::USER_0, Time::after(eighty_ms)), Err(Status::TIMED_OUT));
     }
 }

@@ -9,14 +9,17 @@ fidl("fuchsia.web") {
 
   sources = [
     "context.fidl",
+    "cookie.fidl",
     "debug.fidl",
     "frame.fidl",
     "navigation.fidl",
   ]
 
   public_deps = [
+    "//sdk/fidl/fuchsia.media.sessions",
     "//sdk/fidl/fuchsia.net.http",
     "//sdk/fidl/fuchsia.ui.views",
     "//zircon/public/fidl/fuchsia-io",
+    "//zircon/public/fidl/fuchsia-mem",
   ]
 }

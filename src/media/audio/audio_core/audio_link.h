@@ -8,11 +8,9 @@
 #include <fbl/intrusive_wavl_tree.h>
 #include <fbl/ref_counted.h>
 
-#include "lib/media/timeline/timeline_function.h"
-#include "lib/media/timeline/timeline_rate.h"
+#include <memory>
+
 #include "src/lib/fxl/logging.h"
-#include "src/lib/fxl/synchronization/thread_annotations.h"
-#include "src/media/audio/audio_core/mixer/gain.h"
 #include "src/media/audio/audio_core/mixer/mixer.h"
 
 namespace media::audio {
@@ -29,11 +27,10 @@ struct AudioLinkDestTag {};
 //
 // TODO(mpuryear): Finish docs.
 //
-class AudioLink
-    : public fbl::RefCounted<AudioLink>,
-      public fbl::ContainableBaseClasses<
-          fbl::WAVLTreeContainable<fbl::RefPtr<AudioLink>, AudioLinkSourceTag>,
-          fbl::WAVLTreeContainable<fbl::RefPtr<AudioLink>, AudioLinkDestTag>> {
+class AudioLink : public fbl::RefCounted<AudioLink>,
+                  public fbl::ContainableBaseClasses<
+                      fbl::WAVLTreeContainable<fbl::RefPtr<AudioLink>, AudioLinkSourceTag>,
+                      fbl::WAVLTreeContainable<fbl::RefPtr<AudioLink>, AudioLinkDestTag>> {
  protected:
   struct KeyTraits;
 
@@ -42,8 +39,7 @@ class AudioLink
   using Dest = AudioLinkDestTag;
 
   template <typename TagType>
-  using Set =
-      fbl::TaggedWAVLTree<const AudioLink*, fbl::RefPtr<AudioLink>, TagType>;
+  using Set = fbl::TaggedWAVLTree<const AudioLink*, fbl::RefPtr<AudioLink>, TagType>;
 
   enum class SourceType {
     Packet,
@@ -62,17 +58,14 @@ class AudioLink
   bool valid() const { return valid_.load(); }
 
   // Bookkeeping access.
-  const std::unique_ptr<Bookkeeping>& bookkeeping() const {
-    return bookkeeping_;
-  }
+  const std::unique_ptr<Bookkeeping>& bookkeeping() const { return bookkeeping_; }
   void set_bookkeeping(std::unique_ptr<Bookkeeping> bookkeeping) {
     FXL_DCHECK(bookkeeping_ == nullptr);
     bookkeeping_ = std::move(bookkeeping);
   }
 
  protected:
-  AudioLink(SourceType source_type, fbl::RefPtr<AudioObject> source,
-            fbl::RefPtr<AudioObject> dest);
+  AudioLink(SourceType source_type, fbl::RefPtr<AudioObject> source, fbl::RefPtr<AudioObject> dest);
 
   friend struct fbl::DefaultKeyedObjectTraits<const AudioLink*, AudioLink>;
   const AudioLink* GetKey() const { return this; }

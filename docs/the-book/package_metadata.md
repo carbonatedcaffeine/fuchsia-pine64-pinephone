@@ -4,20 +4,16 @@ The Fuchsia package format contains an extensive metadata directory. This
 document describes the metadata extensions that are understood by Fuchsia
 itself.
 
-See [/garnet/go/src/pm#Structure-of-a-Fuchsia-Package] for
+See [/garnet/go/src/pm#Structure-of-a-Fuchsia-Package][pm-structure] for
 more information about where these files appear in a package.
 
-## metadata
+## Metadata
 
-See [/garnet/go/src/pm#metadata]
+See [/garnet/go/src/pm#metadata][pm-metadata]
 
 ## contents
 
-See [/garnet/go/src/pm#contents]
-
-## signature
-
-See [/garnet/go/src/pm#signature]
+See [/garnet/go/src/pm#contents][pm-contents]
 
 ## Component manifest
 
@@ -113,6 +109,24 @@ shell script.
 
 The `runner` property is a JSON string.
 
+### facets
+
+`facets` is an optional property that contains free-form JSON about the
+component. Facets can be consumed by things on the system to acquire additional
+metadata about a component.
+
+The schema for `facets` is:
+
+```
+{
+    "type": "object"
+}
+```
+
+As an example of a facet, the `fuchsia.test` field is used to convey what
+additional services should be [injected into testing
+environments][test-components].
+
 ### sandbox
 
 The `sandbox` property controls the environment in which the component
@@ -172,8 +186,8 @@ in the `system` array, then `/system/bin` will appear in the namespaces of
 components loaded from the package.
 
 The `pkgfs` array contains a list of well-known paths within the pkgfs tree
-that are provided to the component. For example, if the string `packages`
-appears in the `pkgfs` array, then `/pkgfs/packages` will appear in the
+that are provided to the component. For example, if the string `versions`
+appears in the `pkgfs` array, then `/pkgfs/versions` will appear in the
 namespaces of components loaded from the package, providing access to all
 packages fully cached on the system.
 
@@ -184,7 +198,7 @@ component may access. A typical component will require a number services from
 component will have the ability to launch other components and access network
 services. A component may declare any list of services in its `services`
 whitelist, but it will only be able to access services present in its
-[environment](../glossary.md#environment). This property should be defined by
+[environment](/docs/glossary.md#environment). This property should be defined by
 all new components, and soon a migration will take place to convert all
 components to define `services`.
 
@@ -196,7 +210,7 @@ to use that feature.
 The set of currently known features are as follows:
 
 - `config-data`, which will provide any configuration data available to the
-  package this component is in that was provided in the [config-data](../development/config_data.md)
+  package this component is in that was provided in the [config-data](/docs/development/config_data.md)
   package on the system.
 
 - `introspection`, which requests access to introspect the system. The
@@ -237,7 +251,14 @@ The set of currently known features are as follows:
   graphics interface. This adds layer configuration data in the `/config/vulkan`
   directory in the package's namespace.
 
+- `deprecated-ambient-replace-as-executable`, which provides legacy support for
+  using the invalid handle with replace_as_executable.
+
 See [sandboxing.md](sandboxing.md) for more information about sandboxing.
 
 
 [runner]: /sdk/fidl/fuchsia.sys/runner.fidl
+[test-components]: /docs/development/testing/running_tests_as_components.md
+[pm-contents]: /garnet/go/src/pm#metadata
+[pm-metadata]: /garnet/go/src/pm#metadata
+[pm-structure]: /garnet/go/src/pm#Structure-of-a-Fuchsia-Package

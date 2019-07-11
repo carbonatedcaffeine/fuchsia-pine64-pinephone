@@ -1,6 +1,5 @@
 // Copyright 2018 The Fuchsia Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 #include "src/developer/crashpad_agent/report_annotations.h"
 
@@ -24,8 +23,7 @@ namespace fuchsia {
 namespace crash {
 namespace {
 
-// The crash server expects specific key and values for some annotations in Dart
-// crash reports.
+// The crash server expects specific key and values for some annotations in Dart crash reports.
 const char kDartTypeKey[] = "type";
 const char kDartTypeValue[] = "DartError";
 const char kDartErrorMessageKey[] = "error_message";
@@ -43,14 +41,12 @@ std::string ReadStringFromFile(const std::string& filepath) {
 }  // namespace
 
 std::map<std::string, std::string> MakeDefaultAnnotations(
-    const fuchsia::feedback::Data& feedback_data,
-    const std::string& package_name) {
+    const fuchsia::feedback::Data& feedback_data, const std::string& program_name) {
   std::map<std::string, std::string> annotations = {
       {"product", "Fuchsia"},
       {"version", ReadStringFromFile("/config/build-info/version")},
-      // We use ptype to benefit from Chrome's "Process type" handling in
-      // the crash server UI.
-      {"ptype", package_name},
+      // We use ptype to benefit from Chrome's "Process type" handling in the crash server UI.
+      {"ptype", program_name},
   };
 
   if (feedback_data.has_annotations()) {
@@ -63,8 +59,8 @@ std::map<std::string, std::string> MakeDefaultAnnotations(
 }
 
 std::map<std::string, std::string> MakeManagedRuntimeExceptionAnnotations(
-    const fuchsia::feedback::Data& feedback_data,
-    const std::string& component_url, ManagedRuntimeException* exception) {
+    const fuchsia::feedback::Data& feedback_data, const std::string& component_url,
+    ManagedRuntimeException* exception) {
   std::map<std::string, std::string> annotations =
       MakeDefaultAnnotations(feedback_data, component_url);
   switch (exception->Which()) {
@@ -76,10 +72,10 @@ std::map<std::string, std::string> MakeManagedRuntimeExceptionAnnotations(
       break;
     case ManagedRuntimeException::Tag::kDart:
       annotations[kDartTypeKey] = kDartTypeValue;
-      annotations[kDartErrorRuntimeTypeKey] = std::string(
-          reinterpret_cast<const char*>(exception->dart().type.data()));
-      annotations[kDartErrorMessageKey] = std::string(
-          reinterpret_cast<const char*>(exception->dart().message.data()));
+      annotations[kDartErrorRuntimeTypeKey] =
+          std::string(reinterpret_cast<const char*>(exception->dart().type.data()));
+      annotations[kDartErrorMessageKey] =
+          std::string(reinterpret_cast<const char*>(exception->dart().message.data()));
       break;
   }
   return annotations;

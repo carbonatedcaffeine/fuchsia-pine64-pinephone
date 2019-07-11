@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_TOKEN_TYPE_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_TOKEN_TYPE_H_
 
 #include <string_view>
 
@@ -48,12 +49,11 @@ enum class ExprTokenType : size_t {
   kNumTypes
 };
 
-constexpr size_t kNumExprTokenTypes =
-    static_cast<size_t>(ExprTokenType::kNumTypes);
+constexpr size_t kNumExprTokenTypes = static_cast<size_t>(ExprTokenType::kNumTypes);
 
 struct ExprTokenRecord {
   constexpr ExprTokenRecord() = default;
-  constexpr ExprTokenRecord(ExprTokenType t,
+  constexpr ExprTokenRecord(ExprTokenType t, unsigned langs,
                             std::string_view static_val = std::string_view());
 
   ExprTokenType type = ExprTokenType::kInvalid;
@@ -66,10 +66,12 @@ struct ExprTokenRecord {
   // to separate it from another token requires a non-alphanumeric character.
   bool is_alphanum = false;
 
-  // We will likely need more stuff here such as what languages this token
-  // applies to (C, Rust, etc.).
+  // A bitfield consisting of a combination of ExprLanguage values.
+  unsigned languages = 0;
 };
 
 const ExprTokenRecord& RecordForTokenType(ExprTokenType);
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_TOKEN_TYPE_H_

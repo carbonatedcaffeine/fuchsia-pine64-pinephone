@@ -4,7 +4,7 @@
 
 driver("mtk-power") {
   sources = [
-    "mtk-power.cpp",
+    "mtk-power.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.gpio",
@@ -12,6 +12,7 @@ driver("mtk-power") {
     "$zx/system/banjo/ddk.protocol.platform.bus",
     "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/banjo/ddk.protocol.powerimpl",
+    "$zx/system/dev/lib/device-protocol-pdev",
     "$zx/system/dev/lib/mmio",
     "$zx/system/dev/lib/mt8167",
     "$zx/system/ulib/ddk",
@@ -29,13 +30,14 @@ test("mtk-power-test") {
   testonly = true
   output_name = "mtk-power-test"
   sources = [
-    "mtk-power-test.cpp",
-    "mtk-power.cpp",
+    "mtk-power-test.cc",
+    "mtk-power.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.platform.bus",
     "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/banjo/ddk.protocol.powerimpl",
+    "$zx/system/dev/lib/device-protocol-pdev",
     "$zx/system/dev/lib/mock-mmio-reg",
     "$zx/system/dev/lib/mt8167",
     "$zx/system/ulib/ddk",

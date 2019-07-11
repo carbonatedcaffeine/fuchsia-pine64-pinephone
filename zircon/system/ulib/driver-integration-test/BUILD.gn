@@ -5,7 +5,7 @@
 library("driver-integration-test") {
   shared = true
   sources = [
-    "launcher.cpp",
+    "launcher.cc",
   ]
   deps = [
     "$zx/system/ulib/ddk",
@@ -16,6 +16,11 @@ library("driver-integration-test") {
     "$zx/system/ulib/libzbi",
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",
+  ]
+  public_deps = [
+    "$zx/system/ulib/ddk:headers",
+    "$zx/system/ulib/devmgr-integration-test:headers",
+    "$zx/system/ulib/fbl:headers",
   ]
   configs += [ "$zx/public/gn/config:static-libc++" ]
 }

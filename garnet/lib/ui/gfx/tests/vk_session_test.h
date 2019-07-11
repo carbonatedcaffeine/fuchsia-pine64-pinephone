@@ -14,21 +14,24 @@ namespace test {
 class VkSessionTest : public SessionTest {
  public:
   static escher::VulkanDeviceQueuesPtr CreateVulkanDeviceQueues();
-  static vk::DeviceMemory AllocateExportableMemory(
-      vk::Device device, vk::PhysicalDevice physical_device,
-      vk::MemoryRequirements requirements, vk::MemoryPropertyFlags flags);
-  static zx::vmo ExportMemoryAsVmo(vk::Device device,
-                                   vk::DispatchLoaderDynamic dispatch_loader,
+  static vk::DeviceMemory AllocateExportableMemory(vk::Device device,
+                                                   vk::PhysicalDevice physical_device,
+                                                   vk::MemoryRequirements requirements,
+                                                   vk::MemoryPropertyFlags flags);
+  static zx::vmo ExportMemoryAsVmo(vk::Device device, vk::DispatchLoaderDynamic dispatch_loader,
                                    vk::DeviceMemory memory);
-  static vk::MemoryRequirements GetBufferRequirements(
-      vk::Device device, vk::DeviceSize size, vk::BufferUsageFlags usage_flags);
+  static vk::MemoryRequirements GetBufferRequirements(vk::Device device, vk::DeviceSize size,
+                                                      vk::BufferUsageFlags usage_flags);
 
+  void TearDown() override;
+
+  escher::Escher* escher() { return escher_.get(); }
+
+ protected:
   // |SessionTest|
-  std::unique_ptr<SessionForTest> CreateSession() override;
-
-  // This function provides a mechanism for tests to inject their own objects
-  // into the SessionContext before construction.
-  virtual void OnSessionContextCreated(SessionContext* context) {}
+  SessionContext CreateSessionContext() override;
+  // |SessionTest|
+  CommandContext CreateCommandContext() override;
 
  private:
   std::unique_ptr<escher::Escher> escher_;

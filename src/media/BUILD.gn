@@ -10,14 +10,23 @@ group("media") {
     "lib",
     "playback",
     "sessions",
+    "stream_processors",
   ]
 }
 
 group("tests") {
   testonly = true
 
-  data_deps = [
+  deps = [
     "audio:tests",
     "sessions:tests",
+    "stream_processors:tests",
+  ]
+}
+
+group("examples") {
+  testonly = true
+  deps = [
+    "sessions:examples",
   ]
 }

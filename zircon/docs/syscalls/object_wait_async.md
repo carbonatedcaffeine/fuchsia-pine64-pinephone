@@ -10,7 +10,7 @@ Subscribe for signals on an object.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_status_t zx_object_wait_async(zx_handle_t handle,
@@ -35,7 +35,9 @@ will cause a packet to be enqueued, and if **any** of those signals are asserted
 `zx_object_wait_async()` is called, or become asserted afterwards, a packet will be
 enqueued on *port* containing all of the currently-asserted signals (not just the ones
 listed in the *signals* argument).  Once a packet has been enqueued the asynchronous
-waiting ends.  No further packets will be enqueued.
+waiting ends.  No further packets will be enqueued. Note that signals are OR'd
+into the state maintained by the port thus you may see any combination of
+requested signals when [`zx_port_wait()`] returns.
 
 [`zx_port_cancel()`] will terminate the operation and if a packet was
 in the queue on behalf of the operation, that packet will be removed from the queue.

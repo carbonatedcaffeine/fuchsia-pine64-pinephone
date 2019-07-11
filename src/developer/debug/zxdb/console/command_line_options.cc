@@ -40,6 +40,12 @@ const char kRunHelp[] = R"(  --run=<program>
       Attempts to run a binary in the target system. The debugger must be
       already connected to the debug_agent (use with -c).)";
 
+const char kFilterHelp[] = R"(  --filter=<regexp>
+  -f <regexp>
+      Adds a job filter to the default job. This will automatically attach
+      to processes matching this regexp that are launched in the job. Multiple
+      filters can be specified to match more than one process.)";
+
 const char kQuitAgentOnExit[] = R"(  --quit-agent-on-exit
       Will send a quit message to a connected debug agent in order for it to
       shutdown. This is so that zxdb doesn't leak unwanted debug agents on
@@ -75,31 +81,25 @@ const char kSymbolServerHelp[] = R"(  --symbol-server=<url>
 
 }  // namespace
 
-cmdline::Status ParseCommandLine(int argc, const char* argv[],
-                                 CommandLineOptions* options,
+cmdline::Status ParseCommandLine(int argc, const char* argv[], CommandLineOptions* options,
                                  std::vector<std::string>* params) {
   cmdline::ArgsParser<CommandLineOptions> parser;
 
   parser.AddSwitch("connect", 'c', kConnectHelp, &CommandLineOptions::connect);
   parser.AddSwitch("core", 0, kCoreHelp, &CommandLineOptions::core);
-  parser.AddSwitch("debug-mode", 'd', kDebugModeHelp,
-                   &CommandLineOptions::debug_mode);
+  parser.AddSwitch("debug-mode", 'd', kDebugModeHelp, &CommandLineOptions::debug_mode);
   parser.AddSwitch("quit-agent-on-exit", 0, kQuitAgentOnExit,
                    &CommandLineOptions::quit_agent_on_quit);
   parser.AddSwitch("run", 'r', kRunHelp, &CommandLineOptions::run);
-  parser.AddSwitch("script-file", 'S', kScriptFileHelp,
-                   &CommandLineOptions::script_file);
-  parser.AddSwitch("symbol-cache", 0, kSymbolCachePathHelp,
-                   &CommandLineOptions::symbol_cache_path);
-  parser.AddSwitch("symbol-path", 's', kSymbolPathHelp,
-                   &CommandLineOptions::symbol_paths);
-  parser.AddSwitch("symbol-server", 0, kSymbolServerHelp,
-                   &CommandLineOptions::symbol_servers);
+  parser.AddSwitch("filter", 'f', kFilterHelp, &CommandLineOptions::filter);
+  parser.AddSwitch("script-file", 'S', kScriptFileHelp, &CommandLineOptions::script_file);
+  parser.AddSwitch("symbol-cache", 0, kSymbolCachePathHelp, &CommandLineOptions::symbol_cache_path);
+  parser.AddSwitch("symbol-path", 's', kSymbolPathHelp, &CommandLineOptions::symbol_paths);
+  parser.AddSwitch("symbol-server", 0, kSymbolServerHelp, &CommandLineOptions::symbol_servers);
 
   // Special --help switch which doesn't exist in the options structure.
   bool requested_help = false;
-  parser.AddGeneralSwitch("help", 'h', kHelpHelp,
-                          [&requested_help]() { requested_help = true; });
+  parser.AddGeneralSwitch("help", 'h', kHelpHelp, [&requested_help]() { requested_help = true; });
 
   cmdline::Status status = parser.Parse(argc, argv, options, params);
   if (status.has_error())

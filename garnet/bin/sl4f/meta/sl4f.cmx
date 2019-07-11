@@ -4,7 +4,7 @@
     },
     "sandbox": {
         "features": [
-            "shell"
+            "deprecated-shell"
         ],
         "services": [
             "fuchsia.bluetooth.bredr.Profile",
@@ -14,16 +14,22 @@
             "fuchsia.bluetooth.le.Peripheral",
             "fuchsia.logger.Log",
             "fuchsia.logger.LogSink",
+            "fuchsia.net.NameLookup",
+            "fuchsia.posix.socket.Provider",
             "fuchsia.net.SocketProvider",
             "fuchsia.net.stack.Stack",
-            "fuchsia.sys.Launcher",
+            "fuchsia.netstack.Netstack",
+            "fuchsia.process.Launcher",
             "fuchsia.setui.SetUiService",
-            "fuchsia.tracelink.Registry",
+            "fuchsia.sys.Launcher",
+            "fuchsia.sysmem.Allocator",
+            "fuchsia.tracing.provider.Registry",
             "fuchsia.ui.policy.Presenter",
             "fuchsia.ui.scenic.Scenic",
             "fuchsia.virtualaudio.Control",
             "fuchsia.virtualaudio.Input",
             "fuchsia.virtualaudio.Output",
+            "fuchsia.web.ContextProvider",
             "fuchsia.wlan.device.service.DeviceService"
         ]
     }

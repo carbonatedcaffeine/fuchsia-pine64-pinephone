@@ -10,7 +10,6 @@
 #include <string>
 
 #include "garnet/bin/trace/command.h"
-#include "src/lib/fxl/macros.h"
 
 namespace tracing {
 
@@ -29,7 +28,10 @@ class App : public Command {
   std::map<std::string, Command::Info> known_commands_;
   std::unique_ptr<Command> command_;
 
-  FXL_DISALLOW_COPY_AND_ASSIGN(App);
+  App(const App&) = delete;
+  App(App&&) = delete;
+  App& operator=(const App&) = delete;
+  App& operator=(App&&) = delete;
 };
 
 }  // namespace tracing

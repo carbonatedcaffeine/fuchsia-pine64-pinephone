@@ -14,14 +14,23 @@ bool ImagePipeSurfaceAsync::CreateImage(
     fuchsia::images::ImageInfo image_info, uint32_t image_count,
     const VkAllocationCallbacks* pAllocator,
     std::vector<ImageInfo>* image_info_out) {
+  uint32_t image_flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+  if (swapchain_flags & VK_SWAPCHAIN_CREATE_PROTECTED_BIT_KHR)
+    image_flags |= VK_IMAGE_CREATE_PROTECTED_BIT;
   for (uint32_t i = 0; i < image_count; ++i) {
     // Allocate a buffer.
+    VkExternalMemoryImageCreateInfo external_image_create_info{
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+        .pNext = nullptr,
+        .handleTypes =
+            VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA,
+    };
     uint32_t width = image_info.width;
     uint32_t height = image_info.height;
     VkImageCreateInfo create_info{
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT,
+        .pNext = &external_image_create_info,
+        .flags = image_flags,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = format,
         .extent = {.width = width, .height = height, .depth = 1},

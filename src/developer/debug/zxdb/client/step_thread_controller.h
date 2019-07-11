@@ -2,7 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_STEP_THREAD_CONTROLLER_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_STEP_THREAD_CONTROLLER_H_
+
+#include <optional>
 
 #include "src/developer/debug/zxdb/client/frame_fingerprint.h"
 #include "src/developer/debug/zxdb/client/step_mode.h"
@@ -29,6 +32,9 @@ class StepThreadController : public ThreadController {
   // itself to the thread's current position when the thread is attached.
   explicit StepThreadController(StepMode mode);
 
+  // Steps given the source file/line.
+  explicit StepThreadController(const FileLine& line);
+
   // Constructor for a kAddressRange mode (the mode is implicit). Continues
   // execution as long as the IP is in range.
   explicit StepThreadController(AddressRanges ranges);
@@ -44,12 +50,10 @@ class StepThreadController : public ThreadController {
   void set_stop_on_no_symbols(bool stop) { stop_on_no_symbols_ = stop; }
 
   // ThreadController implementation.
-  void InitWithThread(Thread* thread,
-                      std::function<void(const Err&)> cb) override;
+  void InitWithThread(Thread* thread, std::function<void(const Err&)> cb) override;
   ContinueOp GetContinueOp() override;
-  StopOp OnThreadStop(
-      debug_ipc::NotifyException::Type stop_type,
-      const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) override;
+  StopOp OnThreadStop(debug_ipc::NotifyException::Type stop_type,
+                      const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) override;
   const char* GetName() const override { return "Step"; }
 
  private:
@@ -79,9 +83,11 @@ class StepThreadController : public ThreadController {
 
   StepMode step_mode_;
 
-  // When construction_mode_ == kSourceLine, this represents the line
-  // information and the stack fingerprint of where stepping started.
-  FileLine file_line_;
+  // When step_mode_ == kSourceLine, this represents the line information and
+  // the stack fingerprint of where stepping started. The file/line may be
+  // given in the constructor or we may need to compute it upon init from the
+  // current location (whether it needs setting is encoded by the optional).
+  std::optional<FileLine> file_line_;
   FrameFingerprint original_frame_fingerprint_;
 
   // Range of addresses we're currently stepping in. This may change when we're
@@ -97,3 +103,5 @@ class StepThreadController : public ThreadController {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_STEP_THREAD_CONTROLLER_H_

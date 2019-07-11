@@ -30,6 +30,7 @@ use {
             },
         },
         path::Path,
+        ptr,
     },
 };
 
@@ -104,6 +105,19 @@ pub fn transfer_fd(file: std::fs::File) -> Result<zx::Handle, zx::Status> {
     }
 }
 
+/// Create a open file descriptor from a Handle.
+///
+/// Afterward, the handle is owned by fdio, and will close with the File.
+/// See `transfer_fd` for a way to get it back.
+pub fn create_fd(handle: zx::Handle) -> Result<File, zx::Status> {
+    unsafe {
+        let mut raw_fd = -1;
+        let status = fdio_sys::fdio_fd_create(handle.into_raw(), &mut raw_fd);
+        zx::Status::ok(status)?;
+        Ok(File::from_raw_fd(raw_fd))
+    }
+}
+
 /// Open a new connection to `file` by sending a request to open
 /// a new connection to the sever.
 pub fn clone_channel(file: &std::fs::File) -> Result<zx::Channel, zx::Status> {
@@ -142,7 +156,7 @@ pub fn pipe_half() -> Result<(std::fs::File, zx::Socket), zx::Status> {
     unsafe {
         let mut fd = -1;
         let mut handle = zx::sys::ZX_HANDLE_INVALID;
-        let status = fdio_sys::fdio_pipe_half2(
+        let status = fdio_sys::fdio_pipe_half(
             &mut fd as *mut i32,
             &mut handle as *mut zx::sys::zx_handle_t,
         );
@@ -278,7 +292,7 @@ impl<'a> SpawnAction<'a> {
     }
 
     /// Add the given handle to the process arguments of the spawned process.
-    pub fn add_handle(kind: fuchsia_runtime::HandleId, handle: zx::Handle) -> Self {
+    pub fn add_handle(kind: fuchsia_runtime::HandleInfo, handle: zx::Handle) -> Self {
         // Safety: ownership of the `handle` is consumed.
         // The prefix string must stay valid through the 'a lifetime.
         Self(
@@ -286,7 +300,7 @@ impl<'a> SpawnAction<'a> {
                 action_tag: fdio_sys::FDIO_SPAWN_ACTION_ADD_HANDLE,
                 action_value: fdio_sys::fdio_spawn_action_union_t {
                     h: fdio_sys::fdio_spawn_action_h_t {
-                        id: kind.into_raw(),
+                        id: kind.as_raw(),
                         handle: handle.into_raw(),
                     },
                 },
@@ -331,7 +345,7 @@ fn spawn_with_actions(
     job: &zx::Job,
     options: SpawnOptions,
     argv: &[&CStr],
-    environ: &[&CStr],
+    environ: Option<&[&CStr]>,
     actions: &mut [SpawnAction],
     spawn_fn: impl FnOnce(
         zx_handle_t,                                                          // job
@@ -347,7 +361,14 @@ fn spawn_with_actions(
     let job = job.raw_handle();
     let flags = options.bits();
     let argv = nul_term_from_slice(argv);
-    let environ = nul_term_from_slice(environ);
+    let environ_vec;
+    let environ_ptr = match environ {
+        Some(e) => {
+            environ_vec = nul_term_from_slice(e);
+            environ_vec.as_ptr()
+        }
+        None => std::ptr::null(),
+    };
 
     if actions.iter().any(|a| a.is_null()) {
         return Err((zx::Status::INVALID_ARGS, "null SpawnAction".to_string()));
@@ -364,7 +385,7 @@ fn spawn_with_actions(
         job,
         flags,
         argv.as_ptr(),
-        environ.as_ptr(),
+        environ_ptr,
         action_count,
         actions_ptr,
         &mut process_out,
@@ -389,7 +410,7 @@ pub fn spawn_etc(
     options: SpawnOptions,
     path: &CStr,
     argv: &[&CStr],
-    environ: &[&CStr],
+    environ: Option<&[&CStr]>,
     actions: &mut [SpawnAction],
 ) -> Result<zx::Process, (zx::Status, String)> {
     let path = path.as_ptr();
@@ -421,7 +442,7 @@ pub fn spawn_vmo(
     options: SpawnOptions,
     executable_vmo: zx::Vmo,
     argv: &[&CStr],
-    environ: &[&CStr],
+    environ: Option<&[&CStr]>,
     actions: &mut [SpawnAction],
 ) -> Result<zx::Process, (zx::Status, String)> {
     let executable_vmo = executable_vmo.into_raw();
@@ -549,4 +570,187 @@ pub fn get_vmo_copy_from_file(file: &File) -> Result<zx::Vmo, zx::Status> {
             error_code => Err(zx::Status::from_raw(error_code)),
         }
     }
+}
+
+pub struct Namespace {
+    ns: *mut fdio_sys::fdio_ns_t,
+}
+
+impl Namespace {
+    /// Get the currently installed namespace.
+    pub fn installed() -> Result<Self, zx::Status> {
+        let mut ns_ptr: *mut fdio_sys::fdio_ns_t = ptr::null_mut();
+        let status = unsafe { fdio_sys::fdio_ns_get_installed(&mut ns_ptr) };
+        zx::Status::ok(status)?;
+        Ok(Namespace { ns: ns_ptr })
+    }
+
+    /// Create a channel that is connected to a service bound in this namespace at path. The path
+    /// must be an absolute path, like "/x/y/z", containing no "." nor ".." entries. It is relative
+    /// to the root of the namespace.
+    ///
+    /// This corresponds with fdio_ns_connect in C.
+    pub fn connect(&self, path: &str, flags: u32, channel: zx::Channel) -> Result<(), zx::Status> {
+        let cstr = CString::new(path)?;
+        let status =
+            unsafe { fdio_sys::fdio_ns_connect(self.ns, cstr.as_ptr(), flags, channel.into_raw()) };
+        zx::Status::ok(status)?;
+        Ok(())
+    }
+
+    /// Create a new directory within the namespace, bound to the provided
+    /// directory-protocol-compatible channel. The path must be an absolute path, like "/x/y/z",
+    /// containing no "." nor ".." entries. It is relative to the root of the namespace.
+    ///
+    /// This corresponds with fdio_ns_bind in C.
+    pub fn bind(&self, path: &str, channel: zx::Channel) -> Result<(), zx::Status> {
+        let cstr = CString::new(path)?;
+        let status = unsafe { fdio_sys::fdio_ns_bind(self.ns, cstr.as_ptr(), channel.into_raw()) };
+        zx::Status::ok(status)
+    }
+
+    /// Unbind the channel at path, closing the associated handle when all references to the node go
+    /// out of scope. The path must be an absolute path, like "/x/y/z", containing no "." nor ".."
+    /// entries. It is relative to the root of the namespace.
+    ///
+    /// This corresponds with fdio_ns_unbind in C.
+    pub fn unbind(&self, path: &str) -> Result<(), zx::Status> {
+        let cstr = CString::new(path)?;
+        let status = unsafe { fdio_sys::fdio_ns_unbind(self.ns, cstr.as_ptr()) };
+        zx::Status::ok(status)
+    }
+
+    pub fn into_raw(self) -> *mut fdio_sys::fdio_ns_t {
+        self.ns
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fuchsia_zircon::{object_wait_many, Signals, Status, Time, WaitItem};
+
+    #[test]
+    fn namespace_get_installed() {
+        let namespace = Namespace::installed().expect("failed to get installed namespace");
+        assert!(!namespace.into_raw().is_null());
+    }
+
+    #[test]
+    fn namespace_bind_connect_unbind() {
+        let namespace = Namespace::installed().unwrap();
+        // client => ns_server => ns_client => server
+        //        ^            ^            ^-- zx channel connection
+        //        |            |-- connected through namespace bind/connect
+        //        |-- zx channel connection
+        let (ns_client, _server) = zx::Channel::create().unwrap();
+        let (_client, ns_server) = zx::Channel::create().unwrap();
+        let path = "/test_path1";
+
+        assert_eq!(namespace.bind(path, ns_client), Ok(()));
+        assert_eq!(namespace.connect(path, 0, ns_server), Ok(()));
+        assert_eq!(namespace.unbind(path), Ok(()));
+    }
+
+    #[test]
+    fn namespace_double_bind_fail() {
+        let namespace = Namespace::installed().unwrap();
+        let (ns_client1, _server1) = zx::Channel::create().unwrap();
+        let (ns_client2, _server2) = zx::Channel::create().unwrap();
+        let path = "/test_path2";
+
+        assert_eq!(namespace.bind(path, ns_client1), Ok(()));
+        assert_eq!(namespace.bind(path, ns_client2), Err(zx::Status::ALREADY_EXISTS));
+        assert_eq!(namespace.unbind(path), Ok(()));
+    }
+
+    #[test]
+    fn namespace_connect_fail() {
+        let namespace = Namespace::installed().unwrap();
+        let (_client, ns_server) = zx::Channel::create().unwrap();
+        let path = "/test_path3";
+
+        assert_eq!(namespace.connect(path, 0, ns_server), Err(zx::Status::NOT_FOUND));
+    }
+
+    #[test]
+    fn namespace_unbind_fail() {
+        let namespace = Namespace::installed().unwrap();
+        let path = "/test_path4";
+
+        assert_eq!(namespace.unbind(path), Err(zx::Status::NOT_FOUND));
+    }
+
+    fn cstr(orig: &str) -> CString {
+        CString::new(orig).expect("CString::new failed")
+    }
+
+    #[test]
+    fn fdio_spawn_run_target_bin_no_env() {
+        let job = zx::Job::from(zx::Handle::invalid());
+        let cpath = cstr("/pkg/bin/spawn_test_target");
+        let (stdout_file, stdout_sock) = pipe_half().expect("Failed to make pipe");
+        let mut spawn_actions = [SpawnAction::clone_fd(&stdout_file, 1)];
+
+        let cstrags: Vec<CString> = vec![cstr("test_arg")];
+        let mut cargs: Vec<&CStr> = cstrags.iter().map(|x| x.as_c_str()).collect();
+        cargs.insert(0, cpath.as_c_str());
+        let process = spawn_etc(
+            &job,
+            SpawnOptions::CLONE_ALL,
+            cpath.as_c_str(),
+            cargs.as_slice(),
+            None,
+            &mut spawn_actions,
+        )
+        .expect("Unable to spawn process");
+
+        let mut output = vec![];
+        loop {
+            let mut items = vec![
+                WaitItem {
+                    handle: process.as_handle_ref(),
+                    waitfor: Signals::PROCESS_TERMINATED,
+                    pending: Signals::NONE,
+                },
+                WaitItem {
+                    handle: stdout_sock.as_handle_ref(),
+                    waitfor: Signals::SOCKET_READABLE | Signals::SOCKET_PEER_CLOSED,
+                    pending: Signals::NONE,
+                },
+            ];
+
+            let signals_result =
+                object_wait_many(&mut items, Time::INFINITE).expect("unable to wait");
+
+            if items[1].pending.contains(Signals::SOCKET_READABLE) {
+                let bytes_len = stdout_sock.outstanding_read_bytes().expect("Socket error");
+                let mut buf: Vec<u8> = vec![0; bytes_len];
+                let read_len = stdout_sock
+                    .read(&mut buf[..])
+                    .or_else(|status| match status {
+                        Status::SHOULD_WAIT => Ok(0),
+                        _ => Err(status),
+                    })
+                    .expect("Unable to read buff");
+                output.extend_from_slice(&buf[0..read_len]);
+            }
+
+            // read stdout buffer until test process dies or the socket is closed
+            if items[1].pending.contains(Signals::SOCKET_PEER_CLOSED) {
+                break;
+            }
+
+            if items[0].pending.contains(Signals::PROCESS_TERMINATED) {
+                break;
+            }
+
+            if signals_result {
+                break;
+            };
+        }
+
+        assert_eq!(String::from_utf8(output).expect("unable to decode stdout"), "hello world\n");
+    }
+
 }

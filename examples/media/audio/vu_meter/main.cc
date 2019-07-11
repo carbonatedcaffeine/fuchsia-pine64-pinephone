@@ -12,7 +12,7 @@
 
 int main(int argc, const char** argv) {
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
-  trace::TraceProvider trace_provider(loop.dispatcher());
+  trace::TraceProviderWithFdio trace_provider(loop.dispatcher());
 
   auto command_line = fxl::CommandLineFromArgcArgv(argc, argv);
   if (!fxl::SetLogSettingsFromCommandLine(command_line))
@@ -20,8 +20,7 @@ int main(int argc, const char** argv) {
 
   scenic::ViewProviderComponent component(
       [&loop](scenic::ViewContext view_context) {
-        return std::make_unique<examples::VuMeterView>(std::move(view_context),
-                                                       &loop);
+        return std::make_unique<examples::VuMeterView>(std::move(view_context), &loop);
       },
       &loop);
 

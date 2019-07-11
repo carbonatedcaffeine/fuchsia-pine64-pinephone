@@ -4,7 +4,7 @@
 
 driver("component") {
   sources = [
-    "component.cpp",
+    "component.cc",
   ]
   data_deps = [
     ":component.proxy",
@@ -12,6 +12,7 @@ driver("component") {
   deps = [
     "$zx/system/banjo/ddk.protocol.amlogiccanvas",
     "$zx/system/banjo/ddk.protocol.clock",
+    "$zx/system/banjo/ddk.protocol.codec",
     "$zx/system/banjo/ddk.protocol.ethernet.board",
     "$zx/system/banjo/ddk.protocol.gpio",
     "$zx/system/banjo/ddk.protocol.i2c",
@@ -31,11 +32,12 @@ driver("component") {
 
 driver("component.proxy") {
   sources = [
-    "component-proxy.cpp",
+    "component-proxy.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.amlogiccanvas",
     "$zx/system/banjo/ddk.protocol.clock",
+    "$zx/system/banjo/ddk.protocol.codec",
     "$zx/system/banjo/ddk.protocol.ethernet.board",
     "$zx/system/banjo/ddk.protocol.gpio",
     "$zx/system/banjo/ddk.protocol.i2c",

@@ -8,11 +8,14 @@
 #include <string.h>
 
 #include "src/developer/debug/shared/zx_status.h"
+#include "src/developer/debug/zxdb/expr/eval_context.h"
 #include "src/developer/debug/zxdb/expr/expr_value.h"
+#include "src/developer/debug/zxdb/expr/format.h"
+#include "src/developer/debug/zxdb/expr/format_node.h"
 #include "src/developer/debug/zxdb/expr/resolve_array.h"
 #include "src/developer/debug/zxdb/expr/resolve_collection.h"
 #include "src/developer/debug/zxdb/expr/resolve_ptr_ref.h"
-#include "src/developer/debug/zxdb/expr/symbol_variable_resolver.h"
+#include "src/developer/debug/zxdb/symbols/arch.h"
 #include "src/developer/debug/zxdb/symbols/array_type.h"
 #include "src/developer/debug/zxdb/symbols/base_type.h"
 #include "src/developer/debug/zxdb/symbols/collection.h"
@@ -73,21 +76,18 @@ std::string GetElidedTypeName(const std::string& name) {
 // Returns true if the base type is some kind of number such that the NumFormat
 // of the format options should be applied.
 bool IsNumericBaseType(int base_type) {
-  return base_type == BaseType::kBaseTypeSigned ||
-         base_type == BaseType::kBaseTypeUnsigned ||
-         base_type == BaseType::kBaseTypeBoolean ||
-         base_type == BaseType::kBaseTypeFloat ||
+  return base_type == BaseType::kBaseTypeSigned || base_type == BaseType::kBaseTypeUnsigned ||
+         base_type == BaseType::kBaseTypeBoolean || base_type == BaseType::kBaseTypeFloat ||
          base_type == BaseType::kBaseTypeSignedChar ||
-         base_type == BaseType::kBaseTypeUnsignedChar ||
-         base_type == BaseType::kBaseTypeUTF;
+         base_type == BaseType::kBaseTypeUnsignedChar || base_type == BaseType::kBaseTypeUTF;
 }
 
 // Returns true if the given symbol points to a character type that would
 // appear in a pretty-printed string.
-bool IsCharacterType(const Type* type) {
+bool IsCharacterType(fxl::RefPtr<EvalContext>& eval_context, const Type* type) {
   if (!type)
     return false;
-  const Type* concrete = type->GetConcreteType();
+  fxl::RefPtr<Type> concrete = eval_context->GetConcreteType(type);
 
   // Expect a 1-byte character type.
   // TODO(brettw) handle Unicode.
@@ -100,8 +100,8 @@ bool IsCharacterType(const Type* type) {
   return base_type->base_type() == BaseType::kBaseTypeSignedChar ||
          base_type->base_type() == BaseType::kBaseTypeUnsignedChar;
 }
-bool IsCharacterType(const LazySymbol& symbol) {
-  return IsCharacterType(symbol.Get()->AsType());
+bool IsCharacterType(fxl::RefPtr<EvalContext>& eval_context, const LazySymbol& symbol) {
+  return IsCharacterType(eval_context, symbol.Get()->AsType());
 }
 
 // Appends the given byte to the destination, escaping as per C rules.
@@ -133,48 +133,36 @@ bool IsPointerToFunction(const ModifiedType* pointer) {
 
 }  // namespace
 
-FormatValue::FormatValue(std::unique_ptr<ProcessContext> process_context)
-    : process_context_(std::move(process_context)), weak_factory_(this) {}
+FormatValue::FormatValue() : weak_factory_(this) {}
 FormatValue::~FormatValue() = default;
 
-void FormatValue::AppendValue(fxl::RefPtr<SymbolDataProvider> data_provider,
-                              const ExprValue& value,
+void FormatValue::AppendValue(fxl::RefPtr<EvalContext> eval_context, const ExprValue& value,
                               const FormatExprValueOptions& options) {
-  FormatExprValue(data_provider, value, options, false,
-                  AsyncAppend(GetRootOutputKey()));
+  FormatExprValue(eval_context, value, options, false, AsyncAppend(GetRootOutputKey()));
 }
 
 void FormatValue::AppendVariable(const SymbolContext& symbol_context,
-                                 fxl::RefPtr<SymbolDataProvider> data_provider,
-                                 const Variable* var,
+                                 fxl::RefPtr<EvalContext> eval_context, const Variable* var,
                                  const FormatExprValueOptions& options) {
-  OutputKey output_key = AsyncAppend(
-      NodeType::kVariable, var->GetAssignedName(), GetRootOutputKey());
-  auto resolver = std::make_unique<SymbolVariableResolver>(data_provider);
+  OutputKey output_key =
+      AsyncAppend(NodeType::kVariable, var->GetAssignedName(), GetRootOutputKey());
 
-  // We can capture "this" here since the callback will be scoped to the
-  // lifetime of the resolver which this class owns.
-  resolver->ResolveVariable(symbol_context, var,
-                            [this, data_provider, options, output_key](
-                                const Err& err, ExprValue val) {
-                              // The variable has been resolved, now we need to
-                              // print it (which could in itself be
-                              // asynchronous).
-                              FormatExprValue(data_provider, err, val, options,
-                                              false, output_key);
-                            });
-
-  // Keep in our class scope so the callbacks will be run.
-  resolvers_.push_back(std::move(resolver));
+  eval_context->GetVariableValue(
+      RefPtrTo(var), [weak_this = weak_factory_.GetWeakPtr(), eval_context, options, output_key](
+                         const Err& err, fxl::RefPtr<Symbol>, ExprValue val) {
+        // The variable has been resolved, now we need to print it (which
+        // could in itself be asynchronous).
+        if (weak_this) {
+          weak_this->FormatExprValue(eval_context, err, val, options, false, output_key);
+        }
+      });
 }
 
 void FormatValue::Append(OutputBuffer out) {
   AppendToOutputKey(GetRootOutputKey(), std::move(out));
 }
 
-void FormatValue::Append(std::string str) {
-  Append(OutputBuffer(std::move(str)));
-}
+void FormatValue::Append(std::string str) { Append(OutputBuffer(std::move(str))); }
 
 void FormatValue::Complete(Callback callback) {
   FXL_DCHECK(!complete_callback_);
@@ -185,56 +173,52 @@ void FormatValue::Complete(Callback callback) {
   // WARNING: |this| may be deleted.
 }
 
-void FormatValue::FormatExprValue(fxl::RefPtr<SymbolDataProvider> data_provider,
-                                  const ExprValue& value,
+void FormatValue::FormatExprValue(fxl::RefPtr<EvalContext> eval_context, const ExprValue& value,
                                   const FormatExprValueOptions& options,
-                                  bool suppress_type_printing,
-                                  OutputKey output_key) {
-  // Always use this variable instead of value.type() since it will be modified
-  // below to strip unneeded stuff.
-  const Type* type = value.type();
-  if (!type) {
+                                  bool suppress_type_printing, OutputKey output_key) {
+  if (!value.type()) {
     OutputKeyComplete(output_key, ErrStringToOutput("no type"));
     return;
   }
 
-  // First output the type if required.
+  // First output the type if required. Do this before stripping C-V
+  // qualifications so the printed name is the original.
   if (options.verbosity == Verbosity::kAllTypes && !suppress_type_printing) {
     AppendToOutputKey(
-        output_key,
-        OutputBuffer(Syntax::kComment,
-                     fxl::StringPrintf("(%s) ", type->GetFullName().c_str())));
+        output_key, OutputBuffer(Syntax::kComment,
+                                 fxl::StringPrintf("(%s) ", value.type()->GetFullName().c_str())));
   }
 
   // Special-case zx_status_t. Long-term this should be removed and replaced
   // with a pretty-printing system where this can be expressed generically.
   // This code needs to go here because zx_status_t is a typedef that will be
   // expanded away by GetConcreteType().
-  if (type->GetFullName() == "zx_status_t" &&
-      type->byte_size() == sizeof(debug_ipc::zx_status_t)) {
+  if (value.type()->GetFullName() == "zx_status_t" &&
+      value.type()->byte_size() == sizeof(debug_ipc::zx_status_t)) {
     FormatZxStatusT(value, options, output_key);
     return;
   }
 
   // Trim "const", "volatile", etc. and follow typedef and using for the type
   // checking below.
-  type = type->GetConcreteType();
+  //
+  // Always use this variable below instead of value.type().
+  fxl::RefPtr<Type> type = value.GetConcreteType(eval_context.get());
 
   // Structs and classes.
   if (const Collection* coll = type->AsCollection()) {
-    FormatCollection(data_provider, coll, value, options, output_key);
+    FormatCollection(eval_context, coll, value, options, output_key);
     return;
   }
 
   // Arrays and strings.
-  if (TryFormatArrayOrString(data_provider, type, value, options, output_key))
+  if (TryFormatArrayOrString(eval_context, type.get(), value, options, output_key))
     return;
 
   // References (these require asynchronous calls to format so can't be in the
   // "modified types" block below in the synchronous section).
-  if (type->tag() == DwarfTag::kReferenceType ||
-      type->tag() == DwarfTag::kRvalueReferenceType) {
-    FormatReference(data_provider, value, options, output_key);
+  if (type->tag() == DwarfTag::kReferenceType || type->tag() == DwarfTag::kRvalueReferenceType) {
+    FormatReference(eval_context, value, options, output_key);
     return;
   }
 
@@ -249,24 +233,23 @@ void FormatValue::FormatExprValue(fxl::RefPtr<SymbolDataProvider> data_provider,
       case DwarfTag::kPointerType:
         // Function pointers need special handling.
         if (IsPointerToFunction(modified_type))
-          FormatFunctionPointer(value, options, &out);
+          FormatFunctionPointer(eval_context, value, options, &out);
         else
           FormatPointer(value, options, &out);
         break;
       default:
         out.Append(Syntax::kComment,
-                   fxl::StringPrintf(
-                       "<Unhandled type modifier 0x%x, please file a bug.>",
-                       static_cast<unsigned>(modified_type->tag())));
+                   fxl::StringPrintf("<Unhandled type modifier 0x%x, please file a bug.>",
+                                     static_cast<unsigned>(modified_type->tag())));
         break;
     }
   } else if (const MemberPtr* member_ptr = type->AsMemberPtr()) {
     // Pointers to class/struct members.
-    FormatMemberPtr(value, member_ptr, options, &out);
+    FormatMemberPtr(eval_context, value, member_ptr, options, &out);
   } else if (const FunctionType* func = type->AsFunctionType()) {
     // Functions. These don't have a direct C++ equivalent without being
     // modified by a "pointer". Assume these act like pointers to functions.
-    FormatFunctionPointer(value, options, &out);
+    FormatFunctionPointer(eval_context, value, options, &out);
   } else if (const Enumeration* enum_type = type->AsEnumeration()) {
     // Enumerations.
     FormatEnum(value, enum_type, options, &out);
@@ -313,11 +296,9 @@ void FormatValue::FormatExprValue(fxl::RefPtr<SymbolDataProvider> data_provider,
   OutputKeyComplete(output_key, std::move(out));
 }
 
-void FormatValue::FormatExprValue(fxl::RefPtr<SymbolDataProvider> data_provider,
-                                  const Err& err, const ExprValue& value,
-                                  const FormatExprValueOptions& options,
-                                  bool suppress_type_printing,
-                                  OutputKey output_key) {
+void FormatValue::FormatExprValue(fxl::RefPtr<EvalContext> eval_context, const Err& err,
+                                  const ExprValue& value, const FormatExprValueOptions& options,
+                                  bool suppress_type_printing, OutputKey output_key) {
   if (err.has_error()) {
     // If the future we probably want to rewrite "optimized out" errors to
     // something shorter. The evaluator makes a longer message suitable for
@@ -328,8 +309,7 @@ void FormatValue::FormatExprValue(fxl::RefPtr<SymbolDataProvider> data_provider,
     //      out->Append(ErrStringToOutput("optimized out"));
     OutputKeyComplete(output_key, ErrToOutput(err));
   } else {
-    FormatExprValue(std::move(data_provider), value, options,
-                    suppress_type_printing, output_key);
+    FormatExprValue(std::move(eval_context), value, options, suppress_type_printing, output_key);
   }
 }
 
@@ -346,10 +326,28 @@ void FormatValue::FormatExprValue(fxl::RefPtr<SymbolDataProvider> data_provider,
 //       bar = 2
 //     }
 //   }
-void FormatValue::FormatCollection(
-    fxl::RefPtr<SymbolDataProvider> data_provider, const Collection* coll,
-    const ExprValue& value, const FormatExprValueOptions& options,
-    OutputKey output_key) {
+void FormatValue::FormatCollection(fxl::RefPtr<EvalContext> eval_context, const Collection* coll,
+                                   const ExprValue& value, const FormatExprValueOptions& options,
+                                   OutputKey output_key) {
+  if (coll->is_declaration()) {
+    // Sometimes a value will have a type that's a forward declaration and we
+    // couldn't resolve its concrete type. Print an error instead of "{}".
+    OutputKeyComplete(output_key, OutputBuffer(Syntax::kComment, "<No definition>"));
+    return;
+  }
+
+  switch (coll->GetSpecialType()) {
+    case Collection::kNotSpecial:
+      break;
+    case Collection::kRustEnum:
+      FormatRustEnum(eval_context, value, options, output_key);
+      return;
+    case Collection::kRustTuple:
+    case Collection::kRustTupleStruct:
+      FormatRustTuple(eval_context, coll, value, options, output_key);
+      return;
+  }
+
   AppendToOutputKey(output_key, OutputBuffer("{"));
 
   // True after printing the first item.
@@ -367,12 +365,11 @@ void FormatValue::FormatCollection(
 
     // Some base classes are empty. Only show if this base class or any of
     // its base classes have member values.
-    VisitResult has_members_result =
-        VisitClassHierarchy(from, [](const Collection* cur, uint64_t) {
-          if (cur->data_members().empty())
-            return VisitResult::kContinue;
-          return VisitResult::kDone;
-        });
+    VisitResult has_members_result = VisitClassHierarchy(from, [](const Collection* cur, uint64_t) {
+      if (cur->data_members().empty())
+        return VisitResult::kContinue;
+      return VisitResult::kDone;
+    });
     if (has_members_result == VisitResult::kContinue)
       continue;
 
@@ -389,9 +386,8 @@ void FormatValue::FormatCollection(
     // Pass "true" to suppress type printing since we just printed the type.
     ExprValue from_value;
     Err err = ResolveInherited(value, inherited, &from_value);
-    FormatExprValue(
-        data_provider, err, from_value, options, true,
-        AsyncAppend(NodeType::kBaseClass, std::move(base_name), output_key));
+    FormatExprValue(eval_context, err, from_value, options, true,
+                    AsyncAppend(NodeType::kBaseClass, std::move(base_name), output_key));
   }
 
   // Data members.
@@ -406,16 +402,14 @@ void FormatValue::FormatCollection(
       needs_comma = true;
 
     ExprValue member_value;
-    Err err = ResolveMember(value, member, &member_value);
+    Err err = ResolveMember(eval_context, value, member, &member_value);
 
     // Type info if requested.
     if (options.verbosity == Verbosity::kAllTypes && member_value.type()) {
       AppendToOutputKey(
           output_key,
-          OutputBuffer(
-              Syntax::kComment,
-              fxl::StringPrintf("(%s) ",
-                                member_value.type()->GetFullName().c_str())));
+          OutputBuffer(Syntax::kComment,
+                       fxl::StringPrintf("(%s) ", member_value.type()->GetFullName().c_str())));
     }
 
     // Force omitting the type info since we already handled that before
@@ -423,19 +417,18 @@ void FormatValue::FormatCollection(
     //   (int) b = 12
     // looks better than:
     //   b = (int) 12
-    FormatExprValue(data_provider, err, member_value, options, true,
-                    AsyncAppend(NodeType::kVariable, member->GetAssignedName(),
-                                output_key));
+    FormatExprValue(eval_context, err, member_value, options, true,
+                    AsyncAppend(NodeType::kVariable, member->GetAssignedName(), output_key));
   }
   AppendToOutputKey(output_key, OutputBuffer("}"));
   OutputKeyComplete(output_key);
 }
 
-bool FormatValue::TryFormatArrayOrString(
-    fxl::RefPtr<SymbolDataProvider> data_provider, const Type* type,
-    const ExprValue& value, const FormatExprValueOptions& options,
-    OutputKey output_key) {
-  FXL_DCHECK(type == type->GetConcreteType());
+bool FormatValue::TryFormatArrayOrString(fxl::RefPtr<EvalContext> eval_context, const Type* type,
+                                         const ExprValue& value,
+                                         const FormatExprValueOptions& options,
+                                         OutputKey output_key) {
+  FXL_DCHECK(type == type->StripCVT());
 
   if (type->tag() == DwarfTag::kPointerType) {
     // Any pointer type (we only char about char*).
@@ -443,8 +436,8 @@ bool FormatValue::TryFormatArrayOrString(
     if (!modified)
       return false;
 
-    if (IsCharacterType(modified->modified())) {
-      FormatCharPointer(data_provider, type, value, options, output_key);
+    if (IsCharacterType(eval_context, modified->modified())) {
+      FormatCharPointer(eval_context, type, value, options, output_key);
       return true;
     }
     return false;  // All other pointer types are unhandled.
@@ -454,7 +447,11 @@ bool FormatValue::TryFormatArrayOrString(
     if (!array)
       return false;
 
-    if (IsCharacterType(array->value_type())) {
+    auto value_type = eval_context->GetConcreteType(array->value_type());
+    if (!value_type)
+      return false;
+
+    if (IsCharacterType(eval_context, value_type.get())) {
       size_t length = array->num_elts();
       bool truncated = false;
       if (length > options.max_array_size) {
@@ -463,17 +460,16 @@ bool FormatValue::TryFormatArrayOrString(
       }
       FormatCharArray(value.data().data(), length, truncated, output_key);
     } else {
-      FormatArray(data_provider, value, array->num_elts(), options, output_key);
+      FormatArray(eval_context, value, array->num_elts(), options, output_key);
     }
     return true;
   }
   return false;
 }
 
-void FormatValue::FormatCharPointer(
-    fxl::RefPtr<SymbolDataProvider> data_provider, const Type* type,
-    const ExprValue& value, const FormatExprValueOptions& options,
-    OutputKey output_key) {
+void FormatValue::FormatCharPointer(fxl::RefPtr<EvalContext> eval_context, const Type* type,
+                                    const ExprValue& value, const FormatExprValueOptions& options,
+                                    OutputKey output_key) {
   if (value.data().size() != kTargetPointerSize) {
     OutputKeyComplete(output_key, ErrStringToOutput("Bad pointer data."));
     return;
@@ -494,18 +490,18 @@ void FormatValue::FormatCharPointer(
     return;
   }
 
+  fxl::RefPtr<SymbolDataProvider> data_provider = eval_context->GetDataProvider();
   data_provider->GetMemoryAsync(
       address, bytes_to_fetch,
-      [address, bytes_to_fetch, weak_this = weak_factory_.GetWeakPtr(),
-       output_key](const Err& err, std::vector<uint8_t> data) {
+      [address, bytes_to_fetch, weak_this = weak_factory_.GetWeakPtr(), output_key](
+          const Err& err, std::vector<uint8_t> data) {
         if (!weak_this)
           return;
 
         if (data.empty()) {
           // Should not have requested 0 size, so it if came back empty the
           // pointer was invalid.
-          weak_this->OutputKeyComplete(output_key,
-                                       InvalidPointerToOutput(address));
+          weak_this->OutputKeyComplete(output_key, InvalidPointerToOutput(address));
           return;
         }
 
@@ -517,13 +513,12 @@ void FormatValue::FormatCharPointer(
         // size, this means it hit the end of valid memory, so we're not
         // omitting data by only showing that part of it.
         bool truncated = data.size() == bytes_to_fetch;
-        weak_this->FormatCharArray(&data[0], data.size(), truncated,
-                                   output_key);
+        weak_this->FormatCharArray(&data[0], data.size(), truncated, output_key);
       });
 }
 
-void FormatValue::FormatCharArray(const uint8_t* data, size_t length,
-                                  bool truncated, OutputKey output_key) {
+void FormatValue::FormatCharArray(const uint8_t* data, size_t length, bool truncated,
+                                  OutputKey output_key) {
   // Expect the string to be null-terminated. If we didn't find a null before
   // the end of the buffer, mark as truncated.
   size_t output_len = strnlen(reinterpret_cast<const char*>(data), length);
@@ -545,17 +540,15 @@ void FormatValue::FormatCharArray(const uint8_t* data, size_t length,
   OutputKeyComplete(output_key, OutputBuffer(result));
 }
 
-void FormatValue::FormatArray(fxl::RefPtr<SymbolDataProvider> data_provider,
-                              const ExprValue& value, int elt_count,
-                              const FormatExprValueOptions& options,
+void FormatValue::FormatArray(fxl::RefPtr<EvalContext> eval_context, const ExprValue& value,
+                              int elt_count, const FormatExprValueOptions& options,
                               OutputKey output_key) {
   // Arrays should have known non-zero sizes.
   FXL_DCHECK(elt_count >= 0);
-  int print_count =
-      std::min(static_cast<int>(options.max_array_size), elt_count);
+  int print_count = std::min(static_cast<int>(options.max_array_size), elt_count);
 
   std::vector<ExprValue> items;
-  Err err = ResolveArray(value, 0, print_count, &items);
+  Err err = ResolveArray(eval_context, value, 0, print_count, &items);
   if (err.has_error()) {
     OutputKeyComplete(output_key, ErrToOutput(err));
     return;
@@ -569,22 +562,18 @@ void FormatValue::FormatArray(fxl::RefPtr<SymbolDataProvider> data_provider,
 
     // Avoid forcing type info for every array value. This will be encoded in
     // the main array type.
-    FormatExprValue(data_provider, items[i], options, true,
-                    AsyncAppend(output_key));
+    FormatExprValue(eval_context, items[i], options, true, AsyncAppend(output_key));
   }
 
-  AppendToOutputKey(
-      output_key,
-      OutputBuffer(static_cast<uint32_t>(elt_count) > items.size() ? ", ...}"
-                                                                   : "}"));
+  AppendToOutputKey(output_key,
+                    OutputBuffer(static_cast<uint32_t>(elt_count) > items.size() ? ", ...}" : "}"));
 
   // Now we can mark the root output key as complete. The children added above
   // may or may not have completed synchronously.
   OutputKeyComplete(output_key);
 }
 
-void FormatValue::FormatNumeric(const ExprValue& value,
-                                const FormatExprValueOptions& options,
+void FormatValue::FormatNumeric(const ExprValue& value, const FormatExprValueOptions& options,
                                 OutputBuffer* out) {
   if (options.num_format != NumFormat::kDefault) {
     // Overridden format option.
@@ -638,10 +627,8 @@ void FormatValue::FormatBoolean(const ExprValue& value, OutputBuffer* out) {
     out->Append("false");
 }
 
-void FormatValue::FormatEnum(const ExprValue& value,
-                             const Enumeration* enum_type,
-                             const FormatExprValueOptions& options,
-                             OutputBuffer* out) {
+void FormatValue::FormatEnum(const ExprValue& value, const Enumeration* enum_type,
+                             const FormatExprValueOptions& options, OutputBuffer* out) {
   // Get the value out casted to a uint64.
   Err err;
   uint64_t numeric_value;
@@ -677,8 +664,7 @@ void FormatValue::FormatEnum(const ExprValue& value,
   if (modified_opts.num_format == NumFormat::kDefault) {
     // Compute the formatting for invalid enum values when there is no numeric
     // override.
-    modified_opts.num_format =
-        enum_type->is_signed() ? NumFormat::kSigned : NumFormat::kUnsigned;
+    modified_opts.num_format = enum_type->is_signed() ? NumFormat::kSigned : NumFormat::kUnsigned;
   }
   FormatNumeric(value, modified_opts, out);
 }
@@ -692,8 +678,8 @@ void FormatValue::FormatFloat(const ExprValue& value, OutputBuffer* out) {
       out->Append(fxl::StringPrintf("%g", value.GetAs<double>()));
       break;
     default:
-      out->Append(ErrStringToOutput(fxl::StringPrintf(
-          "unknown float of size %d", static_cast<int>(value.data().size()))));
+      out->Append(ErrStringToOutput(
+          fxl::StringPrintf("unknown float of size %d", static_cast<int>(value.data().size()))));
       break;
   }
 }
@@ -707,8 +693,7 @@ void FormatValue::FormatSignedInt(const ExprValue& value, OutputBuffer* out) {
     out->Append(fxl::StringPrintf("%" PRId64, int_val));
 }
 
-void FormatValue::FormatUnsignedInt(const ExprValue& value,
-                                    const FormatExprValueOptions& options,
+void FormatValue::FormatUnsignedInt(const ExprValue& value, const FormatExprValueOptions& options,
                                     OutputBuffer* out) {
   // This formatter handles unsigned and hex output.
   uint64_t int_val = 0;
@@ -734,8 +719,7 @@ void FormatValue::FormatChar(const ExprValue& value, OutputBuffer* out) {
   out->Append(str);
 }
 
-void FormatValue::FormatPointer(const ExprValue& value,
-                                const FormatExprValueOptions& options,
+void FormatValue::FormatPointer(const ExprValue& value, const FormatExprValueOptions& options,
                                 OutputBuffer* out) {
   // Don't make assumptions about the type of value.type() since it isn't
   // necessarily a ModifiedType representing a pointer, but could be other
@@ -746,9 +730,7 @@ void FormatValue::FormatPointer(const ExprValue& value,
   if (options.verbosity == Verbosity::kMinimal) {
     out->Append(Syntax::kComment, "(*) ");
   } else if (options.verbosity == Verbosity::kMedium) {
-    out->Append(
-        Syntax::kComment,
-        fxl::StringPrintf("(%s) ", value.type()->GetFullName().c_str()));
+    out->Append(Syntax::kComment, fxl::StringPrintf("(%s) ", value.type()->GetFullName().c_str()));
   }
 
   Err err = value.EnsureSizeIs(kTargetPointerSize);
@@ -758,14 +740,11 @@ void FormatValue::FormatPointer(const ExprValue& value,
     out->Append(fxl::StringPrintf("0x%" PRIx64, value.GetAs<TargetPointer>()));
 }
 
-void FormatValue::FormatReference(fxl::RefPtr<SymbolDataProvider> data_provider,
-                                  const ExprValue& value,
-                                  const FormatExprValueOptions& options,
-                                  OutputKey output_key) {
+void FormatValue::FormatReference(fxl::RefPtr<EvalContext> eval_context, const ExprValue& value,
+                                  const FormatExprValueOptions& options, OutputKey output_key) {
   EnsureResolveReference(
-      data_provider, value,
-      [weak_this = weak_factory_.GetWeakPtr(), data_provider,
-       original_value = value, options,
+      eval_context, value,
+      [weak_this = weak_factory_.GetWeakPtr(), eval_context, original_value = value, options,
        output_key](const Err& err, ExprValue resolved_value) {
         if (!weak_this)
           return;
@@ -777,9 +756,7 @@ void FormatValue::FormatReference(fxl::RefPtr<SymbolDataProvider> data_provider,
         if (options.verbosity == Verbosity::kMedium) {
           out.Append(Syntax::kComment,
                      fxl::StringPrintf(
-                         "(%s) ",
-                         GetElidedTypeName(original_value.type()->GetFullName())
-                             .c_str()));
+                         "(%s) ", GetElidedTypeName(original_value.type()->GetFullName()).c_str()));
         }
 
         // Followed by the address (only in non-minimal modes).
@@ -792,8 +769,7 @@ void FormatValue::FormatReference(fxl::RefPtr<SymbolDataProvider> data_provider,
             weak_this->OutputKeyComplete(output_key, std::move(out));
             return;
           }
-          out.Append(Syntax::kComment,
-                     fxl::StringPrintf("0x%" PRIx64 " = ", address));
+          out.Append(Syntax::kComment, fxl::StringPrintf("0x%" PRIx64 " = ", address));
         }
 
         // Follow with the resolved value.
@@ -805,15 +781,14 @@ void FormatValue::FormatReference(fxl::RefPtr<SymbolDataProvider> data_provider,
           // formatting. Pass true for suppress_type_printing since the type of
           // the reference was printed above.
           weak_this->AppendToOutputKey(output_key, std::move(out));
-          weak_this->FormatExprValue(data_provider, resolved_value, options,
-                                     true, output_key);
+          weak_this->FormatExprValue(eval_context, resolved_value, options, true, output_key);
         }
       });
 }
 
-void FormatValue::FormatFunctionPointer(const ExprValue& value,
-                                        const FormatExprValueOptions& options,
-                                        OutputBuffer* out) {
+void FormatValue::FormatFunctionPointer(fxl::RefPtr<EvalContext> eval_context,
+                                        const ExprValue& value,
+                                        const FormatExprValueOptions& options, OutputBuffer* out) {
   // Unlike pointers, we don't print the type for function pointers. These
   // are usually very long and not very informative. If explicitly requested,
   // the types will be printed out by the calling function.
@@ -841,7 +816,7 @@ void FormatValue::FormatFunctionPointer(const ExprValue& value,
   }
 
   // Try to symbolize the function being pointed to.
-  Location loc = process_context_->GetLocationForAddress(address);
+  Location loc = eval_context->GetLocationForAddress(address);
   std::string function_name;
   if (loc.symbol()) {
     if (const Function* func = loc.symbol().Get()->AsFunction())
@@ -855,8 +830,8 @@ void FormatValue::FormatFunctionPointer(const ExprValue& value,
   }
 }
 
-void FormatValue::FormatMemberPtr(const ExprValue& value, const MemberPtr* type,
-                                  const FormatExprValueOptions& options,
+void FormatValue::FormatMemberPtr(fxl::RefPtr<EvalContext> eval_context, const ExprValue& value,
+                                  const MemberPtr* type, const FormatExprValueOptions& options,
                                   OutputBuffer* out) {
   const Type* container_type = type->container_type().Get()->AsType();
   const Type* pointed_to_type = type->member_type().Get()->AsType();
@@ -868,25 +843,108 @@ void FormatValue::FormatMemberPtr(const ExprValue& value, const MemberPtr* type,
   if (const FunctionType* func = pointed_to_type->AsFunctionType()) {
     // Pointers to member functions can be handled just like regular function
     // pointers.
-    FormatFunctionPointer(value, options, out);
+    FormatFunctionPointer(eval_context, value, options, out);
   } else {
     // Pointers to everything else can be handled like normal pointers.
     FormatPointer(value, options, out);
   }
 }
 
-void FormatValue::FormatZxStatusT(const ExprValue& value,
-                                  const FormatExprValueOptions& options,
+void FormatValue::FormatZxStatusT(const ExprValue& value, const FormatExprValueOptions& options,
                                   OutputKey output_key) {
   OutputBuffer out;
   FormatNumeric(value, options, &out);
 
   // Caller should have checked this is the right size.
   debug_ipc::zx_status_t int_val = value.GetAs<debug_ipc::zx_status_t>();
-  out.Append(
-      Syntax::kComment,
-      fxl::StringPrintf(" (%s)", debug_ipc::ZxStatusToString(int_val)));
+  out.Append(Syntax::kComment, fxl::StringPrintf(" (%s)", debug_ipc::ZxStatusToString(int_val)));
   OutputKeyComplete(output_key, std::move(out));
+}
+
+void FormatValue::FormatRustEnum(fxl::RefPtr<EvalContext> eval_context, const ExprValue& value,
+                                 const FormatExprValueOptions& options, OutputKey output_key) {
+  // This shims to the new formatting system which supports Rust enums and
+  // converts to a nice string.
+  auto node = std::make_unique<FormatNode>(std::string(), value);
+  FormatNode* node_ptr = node.get();
+  FillFormatNodeDescription(
+      node_ptr, options, eval_context,
+      fit::deferred_action<fit::callback<void()>>([weak_this = weak_factory_.GetWeakPtr(), options,
+                                                   eval_context, node = std::move(node),
+                                                   output_key]() {
+        if (!weak_this)
+          return;
+
+        if (node->err().has_error()) {
+          weak_this->OutputKeyComplete(output_key, ErrToOutput(node->err()));
+          return;
+        }
+
+        // If there is a child, append it after the description with no
+        // space which will end up formatting the structure like "Point{x =
+        // 1, y = 2}"
+        if (node->children().empty()) {
+          // No child, just output the type name.
+          weak_this->OutputKeyComplete(output_key, node->description());
+        } else {
+          // This assumes there is only one child which is the case for Rust
+          // enums.
+          //
+          // Our Rust structure printing support with type names is still
+          // in-flux. If you do "EnumValue(u32)" you'll actually get a
+          // "tuple struct" and our printing knows to print them properly
+          // with the name. But the struct printing system doesn't know when
+          // to add Rust type names. So as a hack add that now if required
+          // but not if it's a tuple struct.
+          bool is_tuple_struct = false;
+          if (const Type* child_type = node->children()[0]->value().type()) {
+            if (const Collection* child_coll = child_type->AsCollection()) {
+              is_tuple_struct = child_coll->GetSpecialType() == Collection::kRustTupleStruct;
+            }
+          }
+          if (!is_tuple_struct)
+            weak_this->AppendToOutputKey(output_key, node->description());
+
+          weak_this->FormatExprValue(eval_context, node->children()[0]->value(), options, true,
+                                     output_key);
+        }
+      }));
+}
+
+void FormatValue::FormatRustTuple(fxl::RefPtr<EvalContext> eval_context, const Collection* coll,
+                                  const ExprValue& value, const FormatExprValueOptions& options,
+                                  OutputKey output_key) {
+  auto node = std::make_unique<FormatNode>(std::string(), value);
+  FormatNode* node_ptr = node.get();
+  FillFormatNodeDescription(
+      node_ptr, options, eval_context,
+      fit::deferred_action<fit::callback<void()>>([weak_this = weak_factory_.GetWeakPtr(),
+                                                   node = std::move(node), eval_context,
+                                                   coll = RefPtrTo(coll), options, output_key]() {
+        if (!weak_this)
+          return;
+
+        if (node->err().has_error()) {
+          weak_this->OutputKeyComplete(output_key, ErrToOutput(node->err()));
+          return;
+        }
+
+        // Display tuple structs with the non-qualified type name, e.g.
+        // "Some(32)".
+        if (coll->GetSpecialType() == Collection::kRustTupleStruct)
+          weak_this->AppendToOutputKey(output_key, coll->GetAssignedName() + "(");
+        else
+          weak_this->AppendToOutputKey(output_key, OutputBuffer("("));
+
+        for (size_t i = 0; i < node->children().size(); i++) {
+          if (i > 0)
+            weak_this->AppendToOutputKey(output_key, OutputBuffer(", "));
+          weak_this->FormatExprValue(eval_context, node->children()[i]->value(), options, false,
+                                     weak_this->AsyncAppend(output_key));
+        }
+
+        weak_this->OutputKeyComplete(output_key, OutputBuffer(")"));
+      }));
 }
 
 FormatValue::OutputKey FormatValue::GetRootOutputKey() {
@@ -905,8 +963,7 @@ FormatValue::OutputKey FormatValue::AsyncAppend(OutputKey parent) {
   return AsyncAppend(NodeType::kGeneric, std::string(), parent);
 }
 
-FormatValue::OutputKey FormatValue::AsyncAppend(NodeType type, std::string name,
-                                                OutputKey parent) {
+FormatValue::OutputKey FormatValue::AsyncAppend(NodeType type, std::string name, OutputKey parent) {
   OutputNode* parent_node = reinterpret_cast<OutputNode*>(parent);
   auto new_node = std::make_unique<OutputNode>();
   new_node->type = type;

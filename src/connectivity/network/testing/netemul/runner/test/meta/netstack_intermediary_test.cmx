@@ -47,12 +47,20 @@
                         }
                     ],
                     "name": "net"
+                },
+                {
+                    "endpoints": [
+                        {
+                            "name": "mock-ep"
+                        }
+                    ],
+                    "name": "mock_guest"
                 }
             ]
         }
     },
     "program": {
-        "binary": "bin/app"
+        "binary": "test/netstack_intermediary_test"
     },
     "runner": "fuchsia-pkg://fuchsia.com/netemul_runner#meta/netemul_runner.cmx"
 }

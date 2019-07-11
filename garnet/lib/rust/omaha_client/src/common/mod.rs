@@ -5,7 +5,7 @@
 //! The omaha_client::common module contains those types that are common to many parts of the
 //! library.  Many of these don't belong to a specific sub-module.
 
-use crate::protocol::request::InstallSource;
+use crate::protocol::{self, request::InstallSource, Cohort};
 use itertools::Itertools;
 use std::fmt;
 use std::str::FromStr;
@@ -15,12 +15,23 @@ use std::time::SystemTime;
 /// only recommended method is the Client Regulated - Date method.
 ///
 /// See https://github.com/google/omaha/blob/master/doc/ServerProtocolV3.md#client-regulated-counting-date-based
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UserCounting {
     ClientRegulatedByDate(
         /// Date (sent by the server) of the last contact with Omaha.
         Option<i32>,
     ),
+}
+
+/// Helper implementation to bridge from the protocol to the internal representation for tracking
+/// the data for client-regulated user counting.
+impl From<Option<protocol::response::DayStart>> for UserCounting {
+    fn from(opt_day_start: Option<protocol::response::DayStart>) -> Self {
+        match opt_day_start {
+            Some(day_start) => UserCounting::ClientRegulatedByDate(day_start.elapsed_days),
+            None => UserCounting::ClientRegulatedByDate(None),
+        }
+    }
 }
 
 /// Omaha only supports versions in the form of A.B.C.D, A.B.C, A.B or A.  This is a utility
@@ -82,7 +93,7 @@ macro_rules! impl_from {
 impl_from!(&[u32], [u32; 1], [u32; 2], [u32; 3], [u32; 4]);
 
 /// The App struct holds information about an application to perform an update check for.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct App {
     /// This is the app_id that Omaha uses to identify a given application.
     pub id: String,
@@ -94,13 +105,27 @@ pub struct App {
     ///
     /// See https://github.com/google/omaha/blob/master/doc/ServerProtocolV3.md#packages--fingerprints
     pub fingerprint: Option<String>,
+
+    /// The app's current cohort information (cohort id, hint, etc).  This is both provided to Omaha
+    /// as well as returned by Omaha.
+    pub cohort: Cohort,
+
+    /// The app's current user-counting infomation.  This is both provided to Omaha as well as
+    /// returned by Omaha.
+    pub user_counting: UserCounting,
 }
 
 impl App {
     /// Construct an App from an ID and version, from anything that can be converted into a String
     /// and a Version.
-    pub fn new<I: Into<String>, V: Into<Version>>(id: I, version: V) -> Self {
-        App { id: id.into(), version: version.into(), fingerprint: None }
+    pub fn new<I: Into<String>, V: Into<Version>>(id: I, version: V, cohort: Cohort) -> Self {
+        App {
+            id: id.into(),
+            version: version.into(),
+            fingerprint: None,
+            cohort,
+            user_counting: UserCounting::ClientRegulatedByDate(None),
+        }
     }
 
     /// Construct an App from an ID, version, and fingerprint.  From anything that can be converted
@@ -109,13 +134,20 @@ impl App {
         id: I,
         version: V,
         fingerprint: F,
+        cohort: Cohort,
     ) -> Self {
-        App { id: id.into(), version: version.into(), fingerprint: Some(fingerprint.into()) }
+        App {
+            id: id.into(),
+            version: version.into(),
+            fingerprint: Some(fingerprint.into()),
+            cohort,
+            user_counting: UserCounting::ClientRegulatedByDate(None),
+        }
     }
 }
 
 /// Options controlling a single update check
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct CheckOptions {
     /// Was this check initiated by a person that's waiting for an answer?
     ///  This is used to ignore the background poll rate, and to be aggressive about
@@ -134,6 +166,17 @@ pub struct UpdateCheckSchedule {
 
     /// When the update should happen (in the update window).
     pub next_update_time: SystemTime,
+}
+
+#[cfg(test)]
+impl Default for UpdateCheckSchedule {
+    fn default() -> Self {
+        UpdateCheckSchedule {
+            last_update_time: SystemTime::UNIX_EPOCH,
+            next_update_time: SystemTime::UNIX_EPOCH,
+            next_update_window_start: SystemTime::UNIX_EPOCH,
+        }
+    }
 }
 
 /// These hold the data maintained request-to-request so that the requirements for
@@ -161,7 +204,7 @@ mod tests {
     use super::*;
 
     #[test]
-    pub fn test_version_display() {
+    fn test_version_display() {
         let version = Version::from([1, 2, 3, 4]);
         assert_eq!("1.2.3.4", version.to_string());
 
@@ -170,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_version_debug() {
+    fn test_version_debug() {
         let version = Version::from([1, 2, 3, 4]);
         assert_eq!("1.2.3.4", format!("{:?}", version));
 
@@ -179,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_version_parse() {
+    fn test_version_parse() {
         let version = Version::from([1, 2, 3, 4]);
         assert_eq!("1.2.3.4".parse::<Version>().unwrap(), version);
 
@@ -191,7 +234,19 @@ mod tests {
     }
 
     #[test]
-    pub fn test_version_parse_error() {
+    fn test_version_parse_leading_zeros() {
+        let version = Version::from([1, 2, 3, 4]);
+        assert_eq!("1.02.003.0004".parse::<Version>().unwrap(), version);
+
+        let version = Version::from([6, 4, 7]);
+        assert_eq!("06.4.07".parse::<Version>().unwrap(), version);
+
+        let version = Version::from([999]);
+        assert_eq!("0000999".parse::<Version>().unwrap(), version);
+    }
+
+    #[test]
+    fn test_version_parse_error() {
         assert!("1.2.3.4.5".parse::<Version>().is_err());
         assert!("1.2.".parse::<Version>().is_err());
         assert!(".1.2".parse::<Version>().is_err());
@@ -203,24 +258,37 @@ mod tests {
     }
 
     #[test]
-    pub fn test_version_compare() {
+    fn test_version_compare() {
         assert!(Version::from([1, 2, 3, 4]) < Version::from([2, 0, 3]));
         assert!(Version::from([1, 2, 3]) < Version::from([1, 2, 3, 4]));
     }
 
     #[test]
-    pub fn test_app_new_version() {
-        let app = App::new("some_id", [1, 2]);
+    fn test_app_new_version() {
+        let app = App::new("some_id", [1, 2], Cohort::from_hint("some-channel"));
         assert_eq!(app.id, "some_id");
         assert_eq!(app.version, [1, 2].into());
         assert_eq!(app.fingerprint, None);
+        assert_eq!(app.cohort.hint, Some("some-channel".to_string()));
+        assert_eq!(app.cohort.name, None);
+        assert_eq!(app.cohort.id, None);
+        assert_eq!(app.user_counting, UserCounting::ClientRegulatedByDate(None));
     }
 
     #[test]
-    pub fn test_app_with_fingerprint() {
-        let app = App::with_fingerprint("some_id_2", [4, 6], "some_fp");
+    fn test_app_with_fingerprint() {
+        let app = App::with_fingerprint(
+            "some_id_2",
+            [4, 6],
+            "some_fp",
+            Cohort::from_hint("test-channel"),
+        );
         assert_eq!(app.id, "some_id_2");
         assert_eq!(app.version, [4, 6].into());
         assert_eq!(app.fingerprint, Some("some_fp".to_string()));
+        assert_eq!(app.cohort.hint, Some("test-channel".to_string()));
+        assert_eq!(app.cohort.name, None);
+        assert_eq!(app.cohort.id, None);
+        assert_eq!(app.user_counting, UserCounting::ClientRegulatedByDate(None));
     }
 }

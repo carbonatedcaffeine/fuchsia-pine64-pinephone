@@ -6,9 +6,11 @@ group("src") {
   testonly = true
   deps = [
     ":tests",
+    "camera",
     "cobalt",
     "connectivity",
     "developer",
+    "experiences",
     "graphics",
     "identity",
     "ledger",
@@ -17,8 +19,10 @@ group("src") {
     "modular",
     "recovery",
     "speech",
+    "storage",
     "sys",
     "testing",
+    "ui",
     "virtualization",
   ]
 }
@@ -26,11 +30,14 @@ group("src") {
 group("tests") {
   testonly = true
 
-  data_deps = [
+  deps = [
+    "camera:tests",
     "cobalt:tests",
     "connectivity:tests",
     "developer:tests",
+    "experiences:tests",
     "fuzzing:tests",
+    "graphics:tests",
     "identity:tests",
     "ledger:tests",
     "lib:tests",
@@ -38,6 +45,11 @@ group("tests") {
     "modular:tests",
     "recovery:tests",
     "speech:tests",
+    "storage:tests",
+    "sys:tests",
     "testing:tests",
+    "tests",
+    "ui:tests",
+    "virtualization:tests",
   ]
 }

@@ -34,14 +34,12 @@ class FakeAudio : public fuchsia::media::Audio {
 
   // Audio implementation.
   void CreateAudioRenderer(
-      ::fidl::InterfaceRequest<fuchsia::media::AudioRenderer>
-          audio_renderer_request) override {
+      fidl::InterfaceRequest<fuchsia::media::AudioRenderer> audio_renderer_request) override {
     fake_audio_renderer_.Bind(std::move(audio_renderer_request));
   }
 
   void CreateAudioCapturer(
-      ::fidl::InterfaceRequest<fuchsia::media::AudioCapturer>
-          audio_capturer_request,
+      fidl::InterfaceRequest<fuchsia::media::AudioCapturer> audio_capturer_request,
       bool loopback) override {
     FXL_NOTIMPLEMENTED();
   }
@@ -50,8 +48,7 @@ class FakeAudio : public fuchsia::media::Audio {
 
   void SetSystemMute(bool muted) override { FXL_NOTIMPLEMENTED(); }
 
-  void SetRoutingPolicy(
-      fuchsia::media::AudioOutputRoutingPolicy policy) override {
+  void SetRoutingPolicy(fuchsia::media::AudioOutputRoutingPolicy policy) override {
     FXL_NOTIMPLEMENTED();
   }
 

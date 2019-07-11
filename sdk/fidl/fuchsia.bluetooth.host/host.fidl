@@ -12,18 +12,6 @@ using fuchsia.bluetooth.bredr;
 
 // TODO(BT-814): Convert all comments below to doc-comments.
 
-/// Represents persistent local host data.
-// TODO(BT-813): Consider using a table instead of struct.
-struct HostData {
-    /// The local Identity Resolving Key used by a bt-host device to generate Resolvable Private
-    /// Addresses when privacy is enabled.
-    ///
-    /// NOTE: This key is distributed to LE peers during pairing procedures. The client must take
-    /// care to assign an IRK that consistent with the local bt-host identity.
-    // TODO(BT-815): Document behavior once there is a better privacy policy when |irk| is null.
-    LocalKey? irk;
-};
-
 // Interface for interacting with a Bluetooth host device (bt-host)
 protocol Host {
     // The following methods fulfill a given interface request. bt-host device
@@ -53,7 +41,7 @@ protocol Host {
     GetInfo() -> (fuchsia.bluetooth.control.AdapterInfo info);
 
     /// Assigns local data to this host.
-    SetLocalData(HostData host_data);
+    SetLocalData(fuchsia.bluetooth.control.HostData host_data);
 
     // Returns a list of all known connectable devices, included those that are
     // currently connected and/or bonded. This list does not include
@@ -105,7 +93,7 @@ protocol Host {
     // Sets whether this host should be discoverable.
     SetDiscoverable(bool enabled) -> (fuchsia.bluetooth.Status status);
 
-    // Establish a BR/EDR and/or LE connection to the remote device with identifier |device_id|:
+    // Establish a BR/EDR and/or LE connection to the remote device with identifier `device_id`:
     //
     //   - If the device is known to support the BR/EDR transport then a logical link over that
     //     transport will be established to the device. If the connection attempt is successful,
@@ -120,21 +108,26 @@ protocol Host {
     //     peer will become available to holders of a gatt.Client capability and to device drivers
     //     that can bind to the bt-gatt-svc class of devices.
     //
-    // The result of the procedure will be communicated via |status|. If the remote device
+    // The result of the procedure will be communicated via `status`. If the remote device
     // supports both BR/EDR and LE transports and a link cannot be established over both, then an
     // error Status will be returned and neither transport will be connected.
     Connect(string device_id) -> (fuchsia.bluetooth.Status status);
 
-    /// Deletes a peer from the Bluetooth host. If the peer is connected, it
-    /// will be disconnected, then OnDeviceUpdated will be sent. No
-    /// OnBondRemoved will be sent. |device_id| will no longer to refer to any
-    /// peer, even if the same device is discovered again.
+    /// Terminate all connections (BR/EDR or LE) to the remote peer with identifier `peer_id`.
     ///
-    /// Returns a success only if the peer was found and it contained bond data
-    /// that was deleted.
+    /// + request `peer_id` The identifier of the peer to disconnect.
+    /// - response `status` Contains an error if either LE or BR/EDR transport fails to disconnect. Contains
+    ///                     success when both transports are successfully disconnected or if the peer is already
+    ///                     disconnected.
+    Disconnect(string peer_id) -> (fuchsia.bluetooth.Status status);
+
+    /// Deletes a peer from the Bluetooth host. If the peer is connected, it will be disconnected,
+    /// then OnDeviceUpdated will be sent. OnDeviceRemoved will be sent. `device_id` will no longer
+    /// refer to any peer, even if a device with the same address(es) is discovered again.
     ///
-    /// TODO(BT-824): Delete peer immediately, not eventually.
-    /// TODO(BT-562): Respond when disconnection completes, not immediately.
+    /// Returns success after no peer exists that's identified by `device_id` (even if it didn't
+    /// exist before Forget), failure if the peer specified by `device_id` could not be
+    /// disconnected or deleted and still exists.
     Forget(string device_id) -> (fuchsia.bluetooth.Status status);
 
     // Enable or disable a passive LE background scan. When enabled, the bt-host
@@ -160,7 +153,7 @@ protocol Host {
     // Adds existing bonded devices to the host. The host will be configured to automatically connect
     // to these devices when they are in range and connectable. Future connections will be encrypted
     // using the provided bonding data.
-    AddBondedDevices(vector<BondingData> bonds) -> (fuchsia.bluetooth.Status status);
+    AddBondedDevices(vector<fuchsia.bluetooth.control.BondingData> bonds) -> (fuchsia.bluetooth.Status status);
 
     // ===== Events =====
 
@@ -173,7 +166,7 @@ protocol Host {
     -> OnDeviceRemoved(string identifier);
 
     // Notifies when bonding data for a device has been updated.
-    -> OnNewBondingData(BondingData data);
+    -> OnNewBondingData(fuchsia.bluetooth.control.BondingData data);
 
     // TODO(BT-194): Introduce a "OnBondRemoved()" event to notify when existing
     // keys become stale.

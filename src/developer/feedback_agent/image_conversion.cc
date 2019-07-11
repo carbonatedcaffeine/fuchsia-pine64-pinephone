@@ -1,6 +1,5 @@
 // Copyright 2019 The Fuchsia Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 #include "src/developer/feedback_agent/image_conversion.h"
 
@@ -17,9 +16,8 @@ namespace feedback {
 namespace {
 
 bool RawToPng(const png_structp png_ptr, const png_infop info_ptr,
-              const fuchsia::mem::Buffer& raw_image, const size_t height,
-              const size_t width, const size_t stride,
-              const fuchsia::images::PixelFormat pixel_format,
+              const fuchsia::mem::Buffer& raw_image, const size_t height, const size_t width,
+              const size_t stride, const fuchsia::images::PixelFormat pixel_format,
               fuchsia::mem::Buffer* png_image) {
   // This is libpng obscure syntax for setting up the error handler.
   if (setjmp(png_jmpbuf(png_ptr))) {
@@ -34,9 +32,8 @@ bool RawToPng(const png_structp png_ptr, const png_infop info_ptr,
   const int bit_depth = 8;
 
   // Set the headers: output is 8-bit depth, RGBA format like the input.
-  png_set_IHDR(png_ptr, info_ptr, width, height, bit_depth, PNG_COLOR_TYPE_RGBA,
-               PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
-               PNG_FILTER_TYPE_DEFAULT);
+  png_set_IHDR(png_ptr, info_ptr, width, height, bit_depth, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
+               PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
 
   std::vector<uint8_t> imgdata;
   if (!fsl::VectorFromVmo(raw_image, &imgdata)) {
@@ -51,20 +48,17 @@ bool RawToPng(const png_structp png_ptr, const png_infop info_ptr,
   }
   png_set_rows(png_ptr, info_ptr, &rows[0]);
 
-  // Tell libpng how to process each row?
-  // libpng is so obscure.
+  // Tell libpng how to process each row? libpng is so obscure.
   std::vector<uint8_t> pixels;
   png_set_write_fn(
       png_ptr, &pixels,
       [](png_structp png_ptr, png_bytep data, png_size_t length) {
-        auto p =
-            reinterpret_cast<std::vector<uint8_t>*>(png_get_io_ptr(png_ptr));
+        auto p = reinterpret_cast<std::vector<uint8_t>*>(png_get_io_ptr(png_ptr));
         p->insert(p->end(), data, data + length);
       },
       NULL);
 
-  // This is actually the blocking call. At the end, the info and image will be
-  // written to |pixels|.
+  // This is actually the blocking call. At the end, the info and image will be written to |pixels|.
   png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_BGR, NULL);
 
   fsl::SizedVmo sized_vmo;
@@ -78,12 +72,10 @@ bool RawToPng(const png_structp png_ptr, const png_infop info_ptr,
 
 }  // namespace
 
-bool RawToPng(const fuchsia::mem::Buffer& raw_image, const size_t height,
-              const size_t width, const size_t stride,
-              const fuchsia::images::PixelFormat pixel_format,
+bool RawToPng(const fuchsia::mem::Buffer& raw_image, const size_t height, const size_t width,
+              const size_t stride, const fuchsia::images::PixelFormat pixel_format,
               fuchsia::mem::Buffer* png_image) {
-  png_structp png_ptr =
-      png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+  png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
   if (!png_ptr) {
     return false;
   }
@@ -93,8 +85,8 @@ bool RawToPng(const fuchsia::mem::Buffer& raw_image, const size_t height,
     return false;
   }
 
-  bool success = RawToPng(png_ptr, info_ptr, raw_image, height, width, stride,
-                          pixel_format, png_image);
+  bool success =
+      RawToPng(png_ptr, info_ptr, raw_image, height, width, stride, pixel_format, png_image);
   png_destroy_write_struct(&png_ptr, &info_ptr);
   return success;
 }

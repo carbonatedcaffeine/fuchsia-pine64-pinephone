@@ -15,7 +15,6 @@ use {
         stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt},
     },
     log::{error, info},
-    parking_lot::Mutex,
     std::{marker::Unpin, sync::Arc},
     void::Void,
     wlan_inspect,
@@ -24,24 +23,40 @@ use {
 
 use crate::{
     device_watch::{self, NewIfaceDevice},
+    inspect,
     mlme_query_proxy::MlmeQueryProxy,
     station,
     stats_scheduler::{self, StatsScheduler},
     watchable_map::WatchableMap,
+    ServiceCfg,
 };
 
-const MAX_DEAD_IFACE_NODES: usize = 3;
-
+// TODO(WLAN-927): Obsolete once all drivers support this feature.
 #[derive(Debug)]
-pub struct NewIface {
-    // Global iface ID.
-    pub id: u16,
+pub enum DirectMlmeChannel<S> {
+    NotSupported,
+    Supported(S),
+}
+
+/// Iface's PHY information.
+#[derive(Debug, PartialEq)]
+pub struct PhyOwnership {
     // Iface's global PHY ID.
     pub phy_id: u16,
     // Local ID assigned by this iface's PHY.
     pub phy_assigned_id: u16,
-    // TODO(WLAN-927): mlme_proxy is None if the iface's driver doesn't support SME channels.
-    pub mlme_proxy: Option<fidl_mlme::MlmeProxy>,
+}
+
+#[derive(Debug)]
+pub struct NewIface {
+    // Global, unique iface ID.
+    pub id: u16,
+    // Information about this iface's PHY.
+    pub phy_ownership: PhyOwnership,
+    // A channel to communicate with the iface's underlying MLME.
+    // The MLME proxy is only available if the device driver indicates support in its
+    // feature flags. See WLAN-927 (direct SME Channel support).
+    pub mlme_channel: DirectMlmeChannel<fidl_mlme::MlmeProxy>,
 }
 
 pub struct PhyDevice {
@@ -60,6 +75,9 @@ pub enum SmeServer {
 }
 
 pub struct IfaceDevice {
+    // If the iface's underlying driver supports the direct SME Channel feature, the iface can
+    // be mapped to its PHY; otherwise, an iface cannot be linked to its PHY.
+    pub phy_ownership: DirectMlmeChannel<PhyOwnership>,
     pub sme_server: SmeServer,
     pub stats_sched: StatsScheduler,
     // TODO(WLAN-927): Remove. Present for drivers which don't support new SME channel.
@@ -105,15 +123,14 @@ async fn serve_phy(phys: &PhyMap, new_phy: device_watch::NewPhyDevice) {
 }
 
 pub async fn serve_ifaces(
+    cfg: ServiceCfg,
     ifaces: Arc<IfaceMap>,
     cobalt_sender: CobaltSender,
-    inspect_root: wlan_inspect::SharedNodePtr,
+    inspect_tree: Arc<inspect::WlanstackTree>,
 ) -> Result<Void, Error> {
     #[allow(deprecated)]
     let mut new_ifaces = device_watch::watch_iface_devices()?;
     let mut active_ifaces = FuturesUnordered::new();
-    let inspect_ifacemgr =
-        Arc::new(Mutex::new(wlan_inspect::IfaceManager::new(inspect_root, MAX_DEAD_IFACE_NODES)));
     loop {
         select! {
             new_iface = new_ifaces.next().fuse() => match new_iface {
@@ -121,13 +138,15 @@ pub async fn serve_ifaces(
                 Some(Err(e)) => bail!("new iface stream returned an error: {}", e),
                 Some(Ok(new_iface)) => {
                     let iface_id = new_iface.id;
-                    let inspect_ifacemgr = inspect_ifacemgr.clone();
-                    let inspect_sme = inspect_ifacemgr.lock().create_iface_child(iface_id);
+
+                    let inspect_tree = inspect_tree.clone();
+                    let iface_tree_holder = inspect_tree.create_iface_child(iface_id);
                     #[allow(deprecated)]
                     let fut = query_and_serve_iface_deprecated(
-                            new_iface, &ifaces, cobalt_sender.clone(), inspect_sme
+                    cfg.clone(),
+                            new_iface, &ifaces, cobalt_sender.clone(), iface_tree_holder
                         ).then(move |_| async move {
-                            inspect_ifacemgr.lock().notify_iface_removed(iface_id);
+                            inspect_tree.notify_iface_removed(iface_id);
                         });
                     active_ifaces.push(fut);
                 }
@@ -139,10 +158,11 @@ pub async fn serve_ifaces(
 
 #[deprecated(note = "function is obsolete once WLAN-927 landed")]
 async fn query_and_serve_iface_deprecated(
+    cfg: ServiceCfg,
     new_iface: NewIfaceDevice,
     ifaces: &IfaceMap,
     cobalt_sender: CobaltSender,
-    inspect_sme: wlan_inspect::SharedNodePtr,
+    iface_tree_holder: Arc<wlan_inspect::iface_mgr::IfaceTreeHolder>,
 ) {
     let NewIfaceDevice { id, device, proxy } = new_iface;
     let event_stream = proxy.take_event_stream();
@@ -156,12 +176,13 @@ async fn query_and_serve_iface_deprecated(
         }
     };
     let result = create_sme(
+        cfg,
         proxy.clone(),
         event_stream,
         &device_info,
         stats_reqs,
         cobalt_sender,
-        inspect_sme,
+        iface_tree_holder,
     );
     let (sme, sme_fut) = match result {
         Ok(x) => x,
@@ -180,7 +201,14 @@ async fn query_and_serve_iface_deprecated(
     let mlme_query = MlmeQueryProxy::new(proxy);
     ifaces.insert(
         id,
-        IfaceDevice { sme_server: sme, stats_sched, device: Some(device), mlme_query, device_info },
+        IfaceDevice {
+            phy_ownership: DirectMlmeChannel::NotSupported,
+            sme_server: sme,
+            stats_sched,
+            device: Some(device),
+            mlme_query,
+            device_info,
+        },
     );
 
     let r = await!(sme_fut);
@@ -192,47 +220,58 @@ async fn query_and_serve_iface_deprecated(
 }
 
 pub async fn query_and_serve_iface(
-    new_iface: NewIface,
+    cfg: ServiceCfg,
+    id: u16,
+    phy_ownership: PhyOwnership,
+    mlme_proxy: fidl_mlme::MlmeProxy,
     ifaces: Arc<IfaceMap>,
-    inspect_sme: wlan_inspect::SharedNodePtr,
+    iface_tree_holder: Arc<wlan_inspect::iface_mgr::IfaceTreeHolder>,
     cobalt_sender: CobaltSender,
 ) -> Result<(), failure::Error> {
-    let mlme_proxy = new_iface.mlme_proxy.expect("MlmeProxy must not be None");
     let event_stream = mlme_proxy.take_event_stream();
     let (stats_sched, stats_reqs) = stats_scheduler::create_scheduler();
 
     let device_info = await!(mlme_proxy.query_device_info())
         .map_err(|e| format_err!("failed querying iface: {}", e))?;
     let (sme, sme_fut) = create_sme(
+        cfg,
         mlme_proxy.clone(),
         event_stream,
         &device_info,
         stats_reqs,
         cobalt_sender,
-        inspect_sme,
+        iface_tree_holder,
     )
     .map_err(|e| format_err!("failed to creating SME: {}", e))?;
 
-    info!("new iface #{} with role '{:?}'", new_iface.id, device_info.role,);
+    info!("new iface #{} with role '{:?}'", id, device_info.role,);
     let mlme_query = MlmeQueryProxy::new(mlme_proxy);
     ifaces.insert(
-        new_iface.id,
-        IfaceDevice { sme_server: sme, stats_sched, device: None, mlme_query, device_info },
+        id,
+        IfaceDevice {
+            phy_ownership: DirectMlmeChannel::Supported(phy_ownership),
+            sme_server: sme,
+            stats_sched,
+            device: None,
+            mlme_query,
+            device_info,
+        },
     );
 
     let result = await!(sme_fut).map_err(|e| format_err!("error while serving SME: {}", e));
-    info!("iface removed: {}", new_iface.id);
-    ifaces.remove(&new_iface.id);
+    info!("iface removed: {:?}", id);
+    ifaces.remove(&id);
     result
 }
 
 fn create_sme<S>(
+    cfg: ServiceCfg,
     proxy: fidl_mlme::MlmeProxy,
     event_stream: fidl_mlme::MlmeEventStream,
     device_info: &DeviceInfo,
     stats_requests: S,
     cobalt_sender: CobaltSender,
-    inspect_sme: wlan_inspect::SharedNodePtr,
+    iface_tree_holder: Arc<wlan_inspect::iface_mgr::IfaceTreeHolder>,
 ) -> Result<(SmeServer, impl Future<Output = Result<(), Error>>), Error>
 where
     S: Stream<Item = stats_scheduler::StatsRequest> + Send + Unpin + 'static,
@@ -248,13 +287,14 @@ where
         fidl_mlme::MacRole::Client => {
             let (sender, receiver) = mpsc::unbounded();
             let fut = station::client::serve(
+                cfg.into(),
                 proxy,
                 device_info,
                 event_stream,
                 receiver,
                 stats_requests,
                 cobalt_sender,
-                inspect_sme,
+                iface_tree_holder,
             );
             Ok((SmeServer::Client(sender), FutureObj::new(Box::new(fut))))
         }
@@ -270,5 +310,119 @@ where
                 station::mesh::serve(proxy, device_info, event_stream, receiver, stats_requests);
             Ok((SmeServer::Mesh(sender), FutureObj::new(Box::new(fut))))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        fidl::endpoints::create_proxy,
+        fidl_fuchsia_wlan_common::DriverFeature,
+        fidl_fuchsia_wlan_mlme::MlmeMarker,
+        fuchsia_async as fasync,
+        fuchsia_cobalt::{self, CobaltSender},
+        fuchsia_inspect::Inspector,
+        futures::channel::mpsc,
+        futures::sink::SinkExt,
+        futures::task::Poll,
+        pin_utils::pin_mut,
+    };
+
+    fn fake_device_info() -> DeviceInfo {
+        fidl_mlme::DeviceInfo {
+            role: fidl_mlme::MacRole::Client,
+            bands: vec![],
+            mac_addr: [0xAC; 6],
+            driver_features: vec![DriverFeature::TempDirectSmeChannel],
+        }
+    }
+
+    #[test]
+    fn query_serve_with_sme_channel() {
+        let mut exec = fasync::Executor::new().expect("failed to create an executor");
+        let (mlme_proxy, mlme_server) =
+            create_proxy::<MlmeMarker>().expect("failed to create MlmeProxy");
+        let mut mlme_stream = mlme_server.into_stream().expect("failed to create stream");
+        let (iface_map, _iface_map_events) = IfaceMap::new();
+        let iface_map = Arc::new(iface_map);
+        let sme_root_node = Inspector::new().root().create_child("sme");
+        let inspect = Arc::new(wlan_inspect::iface_mgr::IfaceTreeHolder::new(sme_root_node));
+        let (sender, _receiver) = mpsc::channel(1);
+        let cobalt_sender = CobaltSender::new(sender);
+
+        let serve_fut = query_and_serve_iface(
+            ServiceCfg::default(),
+            5,
+            PhyOwnership { phy_id: 1, phy_assigned_id: 2 },
+            mlme_proxy,
+            iface_map.clone(),
+            inspect,
+            cobalt_sender,
+        );
+        pin_mut!(serve_fut);
+        // Progress to cause query request.
+        match exec.run_until_stalled(&mut serve_fut) {
+            Poll::Pending => (),
+            _ => panic!("expected pending iface creation"),
+        };
+
+        // The call above should trigger a Query message to the iface.
+        let responder = match exec.run_until_stalled(&mut mlme_stream.next()) {
+            Poll::Ready(Some(Ok(fidl_mlme::MlmeRequest::QueryDeviceInfo { responder }))) => {
+                responder
+            }
+            _ => panic!("phy_stream returned unexpected result"),
+        };
+
+        // Respond with query message.
+        responder.send(&mut fake_device_info()).expect("failed to send QueryResponse");
+
+        // Progress to cause SME creation and serving.
+        assert!(iface_map.get(&5).is_none());
+        match exec.run_until_stalled(&mut serve_fut) {
+            Poll::Pending => (),
+            _ => panic!("expected pending SME serving"),
+        };
+
+        // Retrieve SME instance and close SME (iface must be acquired).
+        let mut iface = iface_map.get(&5).expect("expected iface");
+        iface_map.remove(&5);
+        let mut_iface = Arc::get_mut(&mut iface).expect("error yielding iface");
+        match mut_iface.sme_server {
+            SmeServer::Client(ref mut sme) => {
+                let close_fut = sme.close();
+                pin_mut!(close_fut);
+                match exec.run_until_stalled(&mut close_fut) {
+                    Poll::Ready(_) => (),
+                    _ => panic!("expected closing SME to succeed"),
+                };
+            }
+            _ => panic!("expected Client SME to be spawned"),
+        };
+
+        // Insert iface back into map.
+        let (mlme_proxy, _) = create_proxy::<MlmeMarker>().expect("failed to create MlmeProxy");
+        let (sender, _) = mpsc::unbounded();
+        let (stats_sched, _) = stats_scheduler::create_scheduler();
+        iface_map.insert(
+            5,
+            IfaceDevice {
+                phy_ownership: DirectMlmeChannel::NotSupported,
+                sme_server: SmeServer::Client(sender),
+                stats_sched,
+                device: None,
+                mlme_query: MlmeQueryProxy::new(mlme_proxy),
+                device_info: fake_device_info(),
+            },
+        );
+        iface_map.get(&5).expect("expected iface");
+
+        // Progress SME serving to completion and verify iface was deleted
+        match exec.run_until_stalled(&mut serve_fut) {
+            Poll::Ready(_) => (),
+            _ => panic!("expected SME serving to be terminated"),
+        };
+        assert!(iface_map.get(&5).is_none());
     }
 }

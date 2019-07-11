@@ -4,8 +4,8 @@
 
 //! Type-safe bindings for Zircon vmo objects.
 
-use crate::{AsHandleRef, HandleBased, Handle, HandleRef, Status};
 use crate::ok;
+use crate::{AsHandleRef, Handle, HandleBased, HandleRef, Status};
 use bitflags::bitflags;
 use fuchsia_zircon_sys as sys;
 use std::ptr;
@@ -40,9 +40,7 @@ impl Vmo {
         let mut handle = 0;
         let status = unsafe { sys::zx_vmo_create(size, opts.bits(), &mut handle) };
         ok(status)?;
-        unsafe {
-            Ok(Vmo::from(Handle::from_raw(handle)))
-        }
+        unsafe { Ok(Vmo::from(Handle::from_raw(handle))) }
     }
 
     /// Read from a virtual memory object.
@@ -50,8 +48,7 @@ impl Vmo {
     /// Wraps the `zx_vmo_read` syscall.
     pub fn read(&self, data: &mut [u8], offset: u64) -> Result<(), Status> {
         unsafe {
-            let status = sys::zx_vmo_read(self.raw_handle(), data.as_mut_ptr(),
-                offset, data.len());
+            let status = sys::zx_vmo_read(self.raw_handle(), data.as_mut_ptr(), offset, data.len());
             ok(status)
         }
     }
@@ -61,8 +58,7 @@ impl Vmo {
     /// Wraps the `zx_vmo_write` syscall.
     pub fn write(&self, data: &[u8], offset: u64) -> Result<(), Status> {
         unsafe {
-            let status = sys::zx_vmo_write(self.raw_handle(), data.as_ptr(),
-                offset, data.len());
+            let status = sys::zx_vmo_write(self.raw_handle(), data.as_ptr(), offset, data.len());
             ok(status)
         }
     }
@@ -88,7 +84,8 @@ impl Vmo {
     ///
     /// Wraps the `zx_vmo_set_cache_policy` syscall.
     pub fn set_cache_policy(&self, cache_policy: sys::zx_cache_policy_t) -> Result<(), Status> {
-        let status = unsafe { sys::zx_vmo_set_cache_policy(self.raw_handle(), cache_policy as u32) };
+        let status =
+            unsafe { sys::zx_vmo_set_cache_policy(self.raw_handle(), cache_policy as u32) };
         ok(status)
     }
 
@@ -145,7 +142,6 @@ bitflags! {
     /// Options that may be used when creating a `Vmo`.
     #[repr(transparent)]
     pub struct VmoOptions: u32 {
-        const NON_RESIZABLE = sys::ZX_VMO_NON_RESIZABLE;
         const RESIZABLE = sys::ZX_VMO_RESIZABLE;
     }
 }
@@ -155,7 +151,6 @@ bitflags! {
     #[repr(transparent)]
     pub struct VmoChildOptions: u32 {
         const COPY_ON_WRITE = sys::ZX_VMO_CHILD_COPY_ON_WRITE;
-        const NON_RESIZABLE = sys::ZX_VMO_CHILD_NON_RESIZEABLE;
         const RESIZABLE = sys::ZX_VMO_CHILD_RESIZABLE;
     }
 }
@@ -183,7 +178,6 @@ assoc_values!(VmoOp, [
     CACHE_CLEAN =      sys::ZX_VMO_OP_CACHE_CLEAN;
     CACHE_CLEAN_INVALIDATE = sys::ZX_VMO_OP_CACHE_CLEAN_INVALIDATE;
 ]);
-
 
 #[cfg(test)]
 mod tests {
@@ -213,7 +207,7 @@ mod tests {
     #[test]
     fn vmo_set_size_fails_on_non_resizable() {
         let size = 4096;
-        let vmo = Vmo::create_with_opts(VmoOptions::NON_RESIZABLE, size).unwrap();
+        let vmo = Vmo::create(size).unwrap();
         assert_eq!(size, vmo.get_size().unwrap());
 
         let new_size = 8192;
@@ -298,12 +292,10 @@ mod tests {
         let vmo = Vmo::create(16).unwrap();
 
         let info = vmo.as_handle_ref().basic_info().unwrap();
-        let rights = Rights::from_bits(info.rights).unwrap();
-        assert!(!rights.contains(Rights::EXECUTE));
+        assert!(!info.rights.contains(Rights::EXECUTE));
 
         let exec_vmo = vmo.replace_as_executable().unwrap();
         let info = exec_vmo.as_handle_ref().basic_info().unwrap();
-        let rights = Rights::from_bits(info.rights).unwrap();
-        assert!(rights.contains(Rights::EXECUTE));
+        assert!(info.rights.contains(Rights::EXECUTE));
     }
 }

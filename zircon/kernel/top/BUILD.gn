@@ -4,14 +4,16 @@
 
 source_set("top") {
   sources = [
-    "init.cpp",
-    "main.cpp",
+    "debug.cc",
+    "init.cc",
+    "main.cc",
   ]
   deps = [
     "$zx/kernel/arch/$zircon_cpu",
+    "$zx/kernel/dev/hw_rng",
     "$zx/kernel/kernel",
     "$zx/kernel/lib/debuglog",
-    "$zx/kernel/lib/userboot",
+    "$zx/kernel/lib/userabi",
     "$zx/kernel/lib/version",
     "$zx/kernel/platform",
     "$zx/kernel/target",

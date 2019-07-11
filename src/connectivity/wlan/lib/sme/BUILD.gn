@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/package.gni")
 import("//build/rust/rustc_library.gni")
 import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
@@ -16,7 +15,9 @@ rustc_library("wlan-sme") {
   deps = [
     "//garnet/lib/wlan/fidl:sme-rustc",
     "//garnet/public/rust/fuchsia-inspect",
+    "//garnet/public/rust/fuchsia-inspect-contrib",
     "//garnet/public/rust/fuchsia-zircon",
+    "//garnet/public/rust/zerocopy",
     "//sdk/fidl/fuchsia.wlan.common:fuchsia.wlan.common-rustc",
     "//sdk/fidl/fuchsia.wlan.mesh:fuchsia.wlan.mesh-rustc",
     "//sdk/fidl/fuchsia.wlan.mlme:fuchsia.wlan.mlme-rustc",
@@ -38,7 +39,7 @@ rustc_library("wlan-sme") {
 
 test_package("wlan-sme-tests") {
   deps = [
-    ":wlan-sme",
+    ":wlan-sme_test",
   ]
 
   tests = [

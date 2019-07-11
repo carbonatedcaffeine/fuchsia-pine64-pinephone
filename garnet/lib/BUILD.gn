@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/package.gni")
+import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
 
 executable("unittests") {
@@ -13,16 +14,13 @@ executable("unittests") {
     "//garnet/public/lib/backoff:unittests",
     "//garnet/public/lib/callback:unittests",
     "//garnet/public/lib/gtest:unittests",
-    "//garnet/public/lib/netconnector/cpp:unittests",
     "//garnet/public/lib/network_wrapper:unittests",
     "//garnet/public/lib/timekeeper:unittests",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 }
 
-package("garnet_lib_tests") {
-  testonly = true
-
+unittest_package("garnet_lib_tests") {
   deps = [
     ":unittests",
   ]

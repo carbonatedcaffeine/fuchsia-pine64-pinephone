@@ -3,7 +3,9 @@
 # found in the LICENSE file.
 
 import("//build/cpp/sdk_source_set.gni")
+import("//build/fidl/fidl.gni")
 import("//build/package.gni")
+import("//build/test/test_package.gni")
 
 group("unittests") {
   testonly = true
@@ -13,39 +15,47 @@ group("unittests") {
   ]
 }
 
-# This library has a run-time dependency on the `modular_test_harness` package.
-sdk_source_set("test_harness_fixture") {
+source_set("test_harness_fixture") {
   testonly = true
-
-  category = "partner"
-  sdk_name = "modular_testing_cpp"
-  include_base = "//sdk"
 
   public_configs = [ "//sdk/config" ]
 
   sources = [
+    "fake_agent.cc",
+    "fake_agent.h",
     "fake_component.cc",
     "fake_component.h",
     "fake_module.cc",
     "fake_module.h",
+    "fake_session_shell.cc",
+    "fake_session_shell.h",
+    "fake_story_shell.cc",
+    "fake_story_shell.h",
     "test_harness_fixture.cc",
     "test_harness_fixture.h",
   ]
 
+  public_deps = [
+    "//sdk/lib/modular/testing/cpp",
+  ]
+
   deps = [
+    "//garnet/public/lib/svc/cpp",
+    "//peridot/lib/testing:session_shell_impl",
     "//sdk/fidl/fuchsia.modular.testing",
     "//sdk/lib/sys/cpp",
     "//sdk/lib/sys/cpp/testing:integration",
     "//third_party/googletest:gtest",
-    "//third_party/rapidjson",
   ]
 }
 
 executable("test_harness_fixture_test_bin") {
   testonly = true
+
   sources = [
     "test_harness_fixture_test.cc",
   ]
+
   deps = [
     ":test_harness_fixture",
     "//garnet/public/lib/fsl",
@@ -53,24 +63,21 @@ executable("test_harness_fixture_test_bin") {
     "//sdk/fidl/fuchsia.sys",
     "//sdk/lib/sys/cpp",
     "//sdk/lib/sys/cpp/testing:integration",
-    "//third_party/googletest:gtest_main",
+    "//sdk/lib/sys/cpp/testing:unit",
+    "//src/lib/fxl/test:gtest_main",
+    "//third_party/googletest:gmock",
   ]
 }
 
-package("test_harness_fixture_test") {
-  testonly = true
+test_package("test_harness_fixture_test") {
+  deprecated_shell = "//build"
 
   tests = [
     {
       name = "test_harness_fixture_test_bin"
+      # TODO(FLK-410): deflake and reenable this test.
+      disabled = true
       environments = basic_envs
-    },
-  ]
-
-  meta = [
-    {
-      path = "meta/test_harness_fixture_test.cmx"
-      dest = "test_harness_fixture_test.cmx"
     },
   ]
 
@@ -90,6 +97,7 @@ source_set("test_harness_impl") {
   public_deps = [
     "//garnet/public/lib/fsl",
     "//garnet/public/lib/fxl",
+    "//peridot/lib/modular_config",
     "//peridot/public/lib/app_driver/cpp:agent_driver",
     "//sdk/fidl/fuchsia.auth.account",
     "//sdk/fidl/fuchsia.devicesettings",
@@ -118,12 +126,13 @@ source_set("test_harness_impl_unittest") {
   deps = [
     ":test_harness_impl",
     "//peridot/lib/modular_config",
+    "//peridot/lib/rapidjson",
     "//peridot/lib/util:pseudo_dir_server",
     "//sdk/fidl/fuchsia.modular",
     "//sdk/fidl/fuchsia.modular.testing",
     "//sdk/lib/sys/cpp/testing:integration",
     "//sdk/lib/sys/cpp/testing:unit",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
     "//zircon/public/lib/fidl",
   ]
 }

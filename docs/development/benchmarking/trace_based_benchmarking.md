@@ -154,6 +154,7 @@ See [examples/benchmark] for a full example of a traced-based benchmark.
 
 
 This example can be run with the following command:
+
 ```{shell}
 trace record --spec-file=/pkgfs/packages/benchmark/0/data/benchmark_example.tspec
 ```
@@ -195,4 +196,4 @@ the [dashboard user guide] and the instructions for [automating benchmarks].
 [examples/benchmark]: /garnet/examples/benchmark/
 [results schema]: results_schema.md
 [best practices]: #best-practices
-[tracing]: ../tracing/usage-guide.md
+[tracing]: /docs/development/tracing/usage-guide.md

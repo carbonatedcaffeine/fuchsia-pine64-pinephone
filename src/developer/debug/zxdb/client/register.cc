@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/developer/debug/zxdb/client/register.h"
+
 #include <inttypes.h>
 
-#include "src/developer/debug/zxdb/client/register.h"
 #include "src/developer/debug/zxdb/client/session.h"
 #include "src/lib/fxl/logging.h"
 #include "src/lib/fxl/strings/string_printf.h"
@@ -15,8 +16,7 @@ namespace zxdb {
 
 RegisterSet::RegisterSet() = default;
 
-RegisterSet::RegisterSet(debug_ipc::Arch arch,
-                         std::vector<debug_ipc::RegisterCategory> categories)
+RegisterSet::RegisterSet(debug_ipc::Arch arch, std::vector<debug_ipc::RegisterCategory> categories)
     : arch_(arch) {
   for (auto& category : categories) {
     std::vector<Register> registers;
@@ -67,6 +67,8 @@ inline UintType ReadRegisterData(const Register& reg) {
 
 Register::Register(debug_ipc::Register reg) : reg_(std::move(reg)) {}
 
+Register::Register(debug_ipc::RegisterID id, uint64_t value) : reg_(id, value) {}
+
 uint64_t Register::GetValue() const {
   switch (size()) {
     case 1:
@@ -78,8 +80,8 @@ uint64_t Register::GetValue() const {
     case 8:
       return ReadRegisterData<uint64_t>(*this);
     default:
-      FXL_NOTREACHED() << fxl::StringPrintf("Invalid size for %s: %lu",
-                                            __PRETTY_FUNCTION__, size());
+      FXL_NOTREACHED() << fxl::StringPrintf("Invalid size for %s: %lu", __PRETTY_FUNCTION__,
+                                            size());
       return 0;
   }
 }

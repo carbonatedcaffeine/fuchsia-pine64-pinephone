@@ -4,8 +4,7 @@
 
 driver("realtek-8211f") {
   sources = [
-    "binding.c",
-    "rtl8211f.cpp",
+    "rtl8211f.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.ethernet.mac",

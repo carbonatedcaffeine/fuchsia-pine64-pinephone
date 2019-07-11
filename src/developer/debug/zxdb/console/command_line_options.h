@@ -19,6 +19,7 @@ struct CommandLineOptions {
   bool quit_agent_on_quit = false;
   std::optional<std::string> core;
   std::optional<std::string> run;
+  std::vector<std::string> filter;
   std::optional<std::string> script_file;
   std::optional<std::string> symbol_cache_path;
   std::vector<std::string> symbol_paths;
@@ -31,8 +32,7 @@ struct CommandLineOptions {
 //
 // Returns an error if the command-line is badly formed. In addition, --help
 // text will be returned as an error.
-cmdline::Status ParseCommandLine(int argc, const char* argv[],
-                                 CommandLineOptions* options,
+cmdline::Status ParseCommandLine(int argc, const char* argv[], CommandLineOptions* options,
                                  std::vector<std::string>* params);
 
 }  // namespace zxdb

@@ -16,9 +16,10 @@
 
 namespace zxdb {
 
-class ExprEvalContext;
+class EvalContext;
 class Location;
 class Thread;
+class Register;
 
 // Represents one stack frame.
 //
@@ -48,12 +49,25 @@ class Frame : public ClientObject {
   // GetLocation().address() since it doesn't need to be symbolized.
   virtual uint64_t GetAddress() const = 0;
 
+  // Returns the general registers that were saved with this stack frame. The
+  // order is not guaranteed. The top stack frame should contain all general
+  // registers which should be the current state of the CPU.
+  //
+  // Lower stack frames should at least contain the IP and probably SP, and if
+  // any registers were found saved on the stack they will be here too.
+  // Non-general registers are not saved per-frame and must be requested from
+  // the thread separately.
+  //
+  // Inline frames will report the registers from the physical frame they're
+  // associated with.
+  virtual const std::vector<Register>& GetGeneralRegisters() const = 0;
+
   // The frame base pointer.
   //
   // This is not necessarily the "BP" register. The symbols can specify
   // an arbitrary frame base for a location and this value will reflect that.
-  // For unsymbolized code or if the symbols do not declare a frame base, this
-  // will default to the CPU register.
+  // If the base pointer is known-unknown, it will be reported as 0 rather than
+  // nullopt (nullopt from GetBasePointer() indicates it needs an async call).
   //
   // In most cases the frame base is available synchronously (when it's in
   // a register which is the common case), but symbols can declare any DWARF
@@ -68,13 +82,17 @@ class Frame : public ClientObject {
   // Returns the stack pointer at this location.
   virtual uint64_t GetStackPointer() const = 0;
 
+  // The canonical frame address is the stack pointer immediately before
+  // calling into the current frame. This will be 0 if unknown.
+  virtual uint64_t GetCanonicalFrameAddress() const = 0;
+
   // Returns the SymbolDataProvider that can be used to evaluate symbols
   // in the context of this frame.
   virtual fxl::RefPtr<SymbolDataProvider> GetSymbolDataProvider() const = 0;
 
-  // Returns the ExprEvalContext that can be used to evaluate expressions in
+  // Returns the EvalContext that can be used to evaluate expressions in
   // the context of this frame.
-  virtual fxl::RefPtr<ExprEvalContext> GetExprEvalContext() const = 0;
+  virtual fxl::RefPtr<EvalContext> GetEvalContext() const = 0;
 
   // Determines if the code location this frame's address corresponds to is
   // potentially ambiguous. This happens when the instruction is the beginning

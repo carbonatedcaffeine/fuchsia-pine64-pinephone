@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_BIN_ZXDB_CLIENT_JOB_CONTEXT_IMPL_H_
-#define GARNET_BIN_ZXDB_CLIENT_JOB_CONTEXT_IMPL_H_
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_JOB_CONTEXT_IMPL_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_JOB_CONTEXT_IMPL_H_
 
 #include "src/developer/debug/ipc/protocol.h"
 #include "src/developer/debug/zxdb/client/job_context.h"
@@ -31,9 +31,7 @@ class JobContextImpl : public JobContext, public SettingStoreObserver {
   //
   // If the job is explicitly detached, this flag will be cleared (because the
   // user is taking responsibility for where it's attached).
-  bool is_implicit_root() const {
-    return is_implicit_root_;
-  }
+  bool is_implicit_root() const { return is_implicit_root_; }
 
   // Allocates a new job_context with the same settings as this one. This isn't
   // a real copy, because any job information is not cloned.
@@ -47,6 +45,9 @@ class JobContextImpl : public JobContext, public SettingStoreObserver {
   // If the job is not running, this will do nothing.
   void ImplicitlyDetach();
 
+  // Same as the two-argument version below but forces an update if the last one failed.
+  void SendAndUpdateFilters(std::vector<std::string> filters);
+
   // JobContext implementation:
   State GetState() const override;
   Job* GetJob() const override;
@@ -56,8 +57,7 @@ class JobContextImpl : public JobContext, public SettingStoreObserver {
   void Detach(Callback callback) override;
 
   // SettingStoreObserver implementation
-  void OnSettingChanged(const SettingStore&,
-                        const std::string& setting_name) override;
+  void OnSettingChanged(const SettingStore&, const std::string& setting_name) override;
 
  private:
   SystemImpl* system_;  // Owns |this|.
@@ -68,28 +68,26 @@ class JobContextImpl : public JobContext, public SettingStoreObserver {
   std::unique_ptr<JobImpl> job_;
   std::vector<std::string> filters_;
   bool is_implicit_root_;
+  bool last_filter_set_failed_ = false;
 
   fxl::WeakPtrFactory<JobContextImpl> impl_weak_factory_;
 
-  void AttachInternal(debug_ipc::TaskType type, uint64_t koid,
-                      Callback callback);
+  void AttachInternal(debug_ipc::TaskType type, uint64_t koid, Callback callback);
 
-  static void OnAttachReplyThunk(fxl::WeakPtr<JobContextImpl> job_context,
-                                 Callback callback, const Err& err,
-                                 uint64_t koid, uint32_t status,
+  static void OnAttachReplyThunk(fxl::WeakPtr<JobContextImpl> job_context, Callback callback,
+                                 const Err& err, uint64_t koid, uint32_t status,
                                  const std::string& job_name);
-  void OnAttachReply(Callback callback, const Err& err, uint64_t koid,
-                     uint32_t status, const std::string& job_name);
+  void OnAttachReply(Callback callback, const Err& err, uint64_t koid, uint32_t status,
+                     const std::string& job_name);
   void OnDetachReply(const Err& err, uint32_t status, Callback callback);
 
   // If job is running this will update |filters_| only after getting OK from
   // agent else it will set |filters_| and return.
-  void SendAndUpdateFilters(std::vector<std::string> filters,
-                            bool force_send = false);
+  void SendAndUpdateFilters(std::vector<std::string> filters, bool force_send);
 
   FXL_DISALLOW_COPY_AND_ASSIGN(JobContextImpl);
 };
 
 }  // namespace zxdb
 
-#endif  // GARNET_BIN_ZXDB_CLIENT_JOB_CONTEXT_IMPL_H_
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_JOB_CONTEXT_IMPL_H_

@@ -4,7 +4,7 @@
 
 #include "garnet/lib/ui/gfx/util/event_timestamper.h"
 
-#include <lib/gtest/test_loop_fixture.h>
+#include <lib/gtest/real_loop_fixture.h>
 #include <lib/sys/cpp/testing/component_context_provider.h>
 #include <math.h>
 
@@ -18,7 +18,31 @@ namespace scenic_impl {
 namespace gfx {
 namespace test {
 
-using EventTimestamperTest = gtest::TestLoopFixture;
+using EventTimestamperTest = gtest::RealLoopFixture;
+
+TEST_F(EventTimestamperTest, WatchingState) {
+  sys::testing::ComponentContextProvider context_provider_;
+  auto app_context = context_provider_.TakeContext();
+  auto timestamper = std::make_unique<EventTimestamper>(app_context.get());
+
+  bool callback_triggered = false;
+  zx::event event;
+  ASSERT_EQ(ZX_OK, zx::event::create(0u, &event));
+  EventTimestamper::Watch watch(
+      timestamper.get(), CopyEvent(event), ZX_EVENT_SIGNALED,
+      [&callback_triggered](zx_time_t timestamp) { callback_triggered = true; });
+
+  // IsWatching() should only be true if the watcher has started..
+  EXPECT_FALSE(watch.IsWatching());
+  watch.Start();
+  EXPECT_TRUE(watch.IsWatching());
+
+  // ... and the event was not signaled.
+  event.signal(0u, ZX_EVENT_SIGNALED);
+  RunLoopUntil([&]() { return callback_triggered; });
+  EXPECT_TRUE(callback_triggered);
+  EXPECT_FALSE(watch.IsWatching());
+}
 
 TEST_F(EventTimestamperTest, DISABLED_SmokeTest) {
   sys::testing::ComponentContextProvider context_provider_;
@@ -36,8 +60,8 @@ TEST_F(EventTimestamperTest, DISABLED_SmokeTest) {
 
   for (size_t i = 0; i < kEventCount; ++i) {
     ASSERT_EQ(ZX_OK, zx::event::create(0u, &(events[i])));
-    watches.emplace_back(timestamper.get(), CopyEvent(events[i]),
-                         ZX_EVENT_SIGNALED, [&, i = i](zx_time_t timestamp) {
+    watches.emplace_back(timestamper.get(), CopyEvent(events[i]), ZX_EVENT_SIGNALED,
+                         [&, i = i](zx_time_t timestamp) {
                            ASSERT_GT(kEventCount, i);
                            EXPECT_GT(target_callback_times[i], 0u);
                            EXPECT_LE(target_callback_times[i], timestamp);

@@ -10,7 +10,7 @@ group("testing") {
     ":lib",
     ":unittests",
     "ledger_test_instance_provider",
-    "netconnector",
+    "overnet",
   ]
 }
 
@@ -25,6 +25,8 @@ source_set("lib") {
     "fake_disk_cleanup_manager.h",
     "get_page_ensure_initialized.cc",
     "get_page_ensure_initialized.h",
+    "inspect.cc",
+    "inspect.h",
     "ledger_matcher.cc",
     "ledger_matcher.h",
     "ledger_memory_usage.cc",
@@ -44,6 +46,7 @@ source_set("lib") {
   public_deps = [
     "//garnet/public/lib/fsl",
     "//garnet/public/lib/gtest",
+    "//garnet/public/lib/inspect_deprecated",
     "//garnet/public/lib/rapidjson_utils",
     "//garnet/public/lib/timekeeper:testing",
     "//peridot/lib/convert",
@@ -56,21 +59,25 @@ source_set("lib") {
     "//src/ledger/bin/app:lib",
     "//src/ledger/bin/environment",
     "//src/ledger/bin/fidl/include",
+    "//src/ledger/bin/public",
     "//src/ledger/bin/storage/public:public",
     "//src/ledger/lib/firebase_auth/testing:service_account",
     "//src/lib/fxl",
     "//third_party/googletest:gmock",
     "//third_party/googletest:gtest",
     "//third_party/rapidjson",
+    "//zircon/public/lib/async-testing",
     "//zircon/public/lib/fit",
     "//zircon/public/lib/task-utils",
-    "//zircon/public/lib/trace-provider",
+    "//zircon/public/lib/trace-provider-with-fdio",
     "//zircon/public/lib/zx",
   ]
 
   deps = [
+    "//garnet/public/lib/async_promise",
     "//garnet/public/lib/callback",
     "//garnet/public/lib/fsl",
+    "//garnet/public/lib/inspect_deprecated:reader",
     "//sdk/fidl/fuchsia.net.oldhttp",
     "//src/ledger/bin/fidl",
     "//src/ledger/lib/coroutine",
@@ -136,6 +143,7 @@ source_set("get_ledger") {
     "//sdk/lib/sys/cpp",
     "//src/ledger/bin/fidl/include",
     "//src/ledger/bin/filesystem",
+    "//src/ledger/bin/public",
     "//src/lib/fxl",
     "//zircon/public/lib/fit",
   ]
@@ -154,9 +162,11 @@ source_set("unittests") {
   sources = [
     "blocking_callback_waiter_unittest.cc",
     "ledger_matcher_unittest.cc",
+    "ledger_memory_usage_unittest.cc",
   ]
 
   deps = [
+    ":get_ledger",
     ":ledger_instance_factory",
     ":lib",
     "//garnet/public/lib/callback",
@@ -165,4 +175,20 @@ source_set("unittests") {
   ]
 
   configs += [ "//src/ledger:ledger_config" ]
+}
+
+executable("memory_usage_test_benchmark") {
+  testonly = true
+
+  sources = [
+    "memory_usage_test_benchmark.cc",
+  ]
+
+  deps = [
+    ":get_ledger",
+    ":lib",
+    "//garnet/public/lib/svc/cpp",
+    "//peridot/lib/scoped_tmpfs",
+    "//zircon/public/lib/async-loop-cpp",
+  ]
 }

@@ -2,33 +2,33 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/package.gni")
 import("//build/rust/rustc_library.gni")
+import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
 
 rustc_library("eapol") {
   with_unit_tests = true
   edition = "2018"
   deps = [
+    "//garnet/public/rust/zerocopy",
+    "//src/connectivity/wlan/lib/bitfield:wlan-bitfield",
+    "//src/connectivity/wlan/lib/common/rust:wlan-common",
     "//third_party/rust_crates:bitfield",
     "//third_party/rust_crates:byteorder",
     "//third_party/rust_crates:bytes",
     "//third_party/rust_crates:failure",
-    "//third_party/rust_crates:nom",
   ]
 }
 
-package("eapol-tests") {
-  testonly = true
-
+unittest_package("eapol-tests") {
   deps = [
-    ":eapol",
+    ":eapol_test",
   ]
 
   tests = [
-      {
-          name = "eapol_lib_test"
-          environments = basic_envs
-      }
+    {
+      name = "eapol_lib_test"
+      environments = basic_envs
+    },
   ]
 }

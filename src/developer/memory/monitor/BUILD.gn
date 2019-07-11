@@ -1,0 +1,63 @@
+# Copyright 2018 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config.gni")
+import("//build/package.gni")
+
+source_set("lib") {
+  sources = [
+    "monitor.cc",
+    "monitor.h",
+  ]
+  public_deps = [
+    "//garnet/public/lib/inspect",
+    "//sdk/fidl/fuchsia.memory",
+    "//sdk/lib/sys/cpp",
+    "//src/developer/memory/metrics",
+  ]
+  deps = [
+    "//garnet/public/lib/fsl",
+    "//src/lib/fxl",
+    "//zircon/public/fidl/fuchsia-sysinfo:fuchsia-sysinfo_c",
+    "//zircon/public/lib/async-loop-cpp",
+    "//zircon/public/lib/trace-provider-with-fdio",
+  ]
+}
+
+executable("bin") {
+  output_name = "memory_monitor"
+  sources = [
+    "main.cc",
+  ]
+  deps = [
+    ":lib",
+    "//sdk/lib/sys/cpp",
+    "//src/lib/fxl",
+    "//zircon/public/lib/async-default",
+    "//zircon/public/lib/async-loop-cpp",
+    "//zircon/public/lib/trace-provider-with-fdio",
+  ]
+}
+
+package("monitor") {
+  package_name = "memory_monitor"
+  deps = [
+    ":bin",
+    ":config",
+  ]
+  binary = "memory_monitor"
+  meta = [
+    {
+      path = rebase_path("meta/memory_monitor.cmx")
+      dest = "memory_monitor.cmx"
+    },
+  ]
+}
+
+config_data("config") {
+  for_pkg = "sysmgr"
+  sources = [
+    "memory_monitor.config",
+  ]
+}

@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/package.gni")
 import("//build/rust/rustc_library.gni")
 import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
@@ -15,6 +14,7 @@ rustc_library("wlan-rsn") {
 
   deps = [
     "//garnet/public/rust/mundane",
+    "//garnet/public/rust/zerocopy",
     "//src/connectivity/wlan/lib/common/rust:wlan-common",
     "//src/connectivity/wlan/lib/eapol",
     "//third_party/rust_crates:bitfield",
@@ -26,6 +26,7 @@ rustc_library("wlan-rsn") {
     "//third_party/rust_crates:nom",
     "//third_party/rust_crates:num",
     "//third_party/rust_crates:num-bigint",
+    "//third_party/rust_crates:parking_lot",
     "//third_party/rust_crates:rand",
     "//third_party/rust_crates:rust-crypto",
     "//third_party/rust_crates:time",
@@ -34,7 +35,7 @@ rustc_library("wlan-rsn") {
 
 test_package("wlan-rsn-tests") {
   deps = [
-    ":wlan-rsn",
+    ":wlan-rsn_test",
   ]
 
   tests = [

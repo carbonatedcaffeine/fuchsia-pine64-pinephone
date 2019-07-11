@@ -12,22 +12,24 @@
 #include <vector>
 
 #include "flat_ast.h"
+#include "json_writer.h"
 
 namespace fidl {
 
 struct NameLocation {
-    explicit NameLocation(const SourceLocation& location)
-        : filename(location.source_file().filename()) {
-      location.SourceLine(&position);
-    }
+  explicit NameLocation(const SourceLocation& location)
+      : filename(location.source_file().filename()) {
+    location.SourceLine(&position);
+  }
 
-    // TODO(FIDL-596): We are incorrectly assuming that the provided name is not
-    // anonymous, and relying on callers to avoid derefencing a nullptr
-    // location.
-    explicit NameLocation(const flat::Name& name) : NameLocation(*name.maybe_location()) {}
+  // TODO(FIDL-596): We are incorrectly assuming that the provided name is not
+  // anonymous, and relying on callers to avoid derefencing a nullptr
+  // location.
+  explicit NameLocation(const flat::Name& name)
+      : NameLocation(*name.maybe_location()) {}
 
-    const std::string filename;
-    SourceFile::Position position;
+  const std::string filename;
+  SourceFile::Position position;
 };
 
 // Methods or functions named "Emit..." are the actual interface to
@@ -40,94 +42,98 @@ struct NameLocation {
 // the Generate methods, and should not call the "Emit" functions
 // directly.
 
-class JSONGenerator {
-public:
-    explicit JSONGenerator(const flat::Library* library)
-        : library_(library) {}
+// |JsonWriter| requires the derived type as a template parameter so it can
+// match methods declared with parameter overrides in the derived class.
+class JSONGenerator : public utils::JsonWriter<JSONGenerator> {
+ public:
+  // "using" is required for overridden methods, so the implementations in
+  // both the base class and in this derived class are visible when matching
+  // parameter types
+  using utils::JsonWriter<JSONGenerator>::Generate;
+  using utils::JsonWriter<JSONGenerator>::GenerateArray;
 
-    ~JSONGenerator() = default;
+  explicit JSONGenerator(const flat::Library* library)
+      : JsonWriter(json_file_), library_(library) {}
 
-    std::ostringstream Produce();
+  ~JSONGenerator() = default;
 
-private:
-    enum class Position {
-        kFirst,
-        kSubsequent,
-    };
+  std::ostringstream Produce();
 
-    void GenerateEOF();
+  // Temporarily specializing for structs to avoid printing anonymous
+  // declarations.
+  void GenerateArray(std::vector<std::unique_ptr<flat::Struct>>::const_iterator begin,
+                     std::vector<std::unique_ptr<flat::Struct>>::const_iterator end) {
+    EmitArrayBegin();
 
-    template <typename Iterator>
-    void GenerateArray(Iterator begin, Iterator end);
+    bool is_first = true;
+    for (std::vector<std::unique_ptr<flat::Struct>>::const_iterator it = begin; it != end; ++it) {
+      if ((*it)->anonymous)
+        continue;
+      if (is_first) {
+        Indent();
+        EmitNewlineWithIndent();
+        is_first = false;
+      } else {
+        EmitArraySeparator();
+      }
+      Generate(**it);
+    }
+    if (!is_first) {
+      Outdent();
+      EmitNewlineWithIndent();
+    }
 
-    template <typename Collection>
-    void GenerateArray(const Collection& collection);
+    EmitArrayEnd();
+  }
 
-    void GenerateObjectPunctuation(Position position);
+  void Generate(const flat::Decl* decl);
 
-    template <typename Callback>
-    void GenerateObject(Callback callback);
+  void Generate(SourceLocation value);
+  void Generate(NameLocation value);
 
-    template <typename Type>
-    void GenerateObjectMember(std::string_view key, const Type& value,
-                              Position position = Position::kSubsequent);
+  void Generate(types::HandleSubtype value);
+  void Generate(types::Nullability value);
 
-    template <typename T>
-    void Generate(const std::unique_ptr<T>& value);
+  void Generate(const raw::Identifier& value);
+  void Generate(const raw::Attribute& value);
+  void Generate(const raw::AttributeList& value);
+  void Generate(const raw::Ordinal32& value);
+  void Generate(const raw::Ordinal64& value);
 
-    void Generate(const flat::Decl* decl);
+  void Generate(const flat::Name& value);
+  void Generate(const flat::Type* value);
+  void Generate(const flat::Constant& value);
+  void Generate(const flat::ConstantValue& value);
+  void Generate(const flat::Bits& value);
+  void Generate(const flat::Bits::Member& value);
+  void Generate(const flat::Const& value);
+  void Generate(const flat::Enum& value);
+  void Generate(const flat::Enum::Member& value);
+  void Generate(const flat::Protocol& value);
+  void Generate(const flat::Protocol::MethodWithInfo& value);
+  void Generate(const flat::LiteralConstant& value);
+  void Generate(const flat::Struct& value);
+  void Generate(const flat::Struct::Member& value);
+  void Generate(const flat::Table& value);
+  void Generate(const flat::Table::Member& value);
+  void Generate(const flat::Union& value);
+  void Generate(const flat::Union::Member& value);
+  void Generate(const flat::XUnion& value);
+  void Generate(const flat::XUnion::Member& value);
+  void Generate(const flat::TypeConstructor& value);
+  void Generate(const flat::TypeAlias& value);
+  void Generate(const flat::Library* library);
 
-    template <typename T>
-    void Generate(const std::vector<T>& value);
+ private:
+  void GenerateRequest(const std::string& prefix, const flat::Struct& value);
+  void GenerateDeclarationsEntry(int count, const flat::Name& name, std::string_view decl);
+  void GenerateDeclarationsMember(const flat::Library* library,
+                                  Position position = Position::kSubsequent);
 
-    void Generate(bool value);
-    void Generate(std::string_view value);
-    void Generate(SourceLocation value);
-    void Generate(NameLocation value);
-    void Generate(uint32_t value);
-
-    void Generate(types::HandleSubtype value);
-    void Generate(types::Nullability value);
-    void Generate(types::PrimitiveSubtype value);
-
-    void Generate(const raw::Identifier& value);
-    void Generate(const raw::TypeConstructor& value);
-    void Generate(const raw::Attribute& value);
-    void Generate(const raw::AttributeList& value);
-    void Generate(const raw::Ordinal& value);
-
-    void Generate(const flat::Name& value);
-    void Generate(const flat::Type* value);
-    void Generate(const flat::Constant& value);
-    void Generate(const flat::ConstantValue& value);
-    void Generate(const flat::Bits& value);
-    void Generate(const flat::Bits::Member& value);
-    void Generate(const flat::Const& value);
-    void Generate(const flat::Enum& value);
-    void Generate(const flat::Enum::Member& value);
-    void Generate(const flat::Interface& value);
-    void Generate(const flat::Interface::Method* value);
-    void GenerateRequest(const std::string& prefix, const flat::Struct& value);
-    void Generate(const flat::LiteralConstant& value);
-    void Generate(const flat::Struct& value);
-    void Generate(const flat::Struct::Member& value);
-    void Generate(const flat::Table& value);
-    void Generate(const flat::Table::Member& value);
-    void Generate(const flat::Union& value);
-    void Generate(const flat::Union::Member& value);
-    void Generate(const flat::XUnion& value);
-    void Generate(const flat::XUnion::Member& value);
-    void Generate(const flat::Library* library);
-
-    void GenerateDeclarationsEntry(int count, const flat::Name& name, std::string_view decl);
-    void GenerateDeclarationsMember(const flat::Library* library,
-                                    Position position = Position::kSubsequent);
-
-    const flat::Library* library_;
-    int indent_level_;
-    std::ostringstream json_file_;
+  const flat::Library* library_;
+  std::ostringstream json_file_;
 };
 
-} // namespace fidl
+}  // namespace fidl
 
-#endif // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_JSON_GENERATOR_H_
+#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_JSON_GENERATOR_H_

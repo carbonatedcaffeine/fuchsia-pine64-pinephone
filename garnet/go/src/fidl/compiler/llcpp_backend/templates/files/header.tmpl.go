@@ -29,7 +29,9 @@ const Header = `
 {{ end -}}
 {{ end -}}
 
-{{- range .Library }}
+{{- "" }}
+namespace llcpp {
+{{ range .Library }}
 namespace {{ . }} {
 {{- end }}
 {{ "" }}
@@ -56,10 +58,12 @@ namespace {{ . }} {
 {{- range .LibraryReversed }}
 }  // namespace {{ . }}
 {{- end }}
+}  // namespace llcpp
 
 namespace fidl {
 
 {{- range .Decls }}
+{{- if Eq .Kind Kinds.Bits }}{{ template "BitsTraits" . }}{{- end }}
 {{- if Eq .Kind Kinds.Interface }}{{ template "InterfaceTraits" . }}{{- end }}
 {{- if Eq .Kind Kinds.Struct }}{{ template "StructTraits" . }}{{- end }}
 {{- if Eq .Kind Kinds.Union }}{{ template "UnionTraits" . }}{{- end }}

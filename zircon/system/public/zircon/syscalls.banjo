@@ -68,7 +68,7 @@ protocol Api {
     //
 
     /// Acquire the current time.
-    clock_get(zx.clock clock_id) -> (zx.time time);
+    clock_get(zx.clock clock_id) -> (zx.status status, zx.time out);
 
     /// Acquire the current time.
     clock_get_new(zx.clock clock_id) -> (zx.status status, zx.time out);
@@ -126,6 +126,10 @@ protocol Api {
     [vdsocall,
      argtype="features features"]
     system_get_features(uint32 kind) -> (zx.status status, uint32 features);
+
+    /// Retrieve a handle to a system event.
+    [rights="None."]
+    system_get_event(handle<job> root_job, uint32 kind) -> (zx.status status, handle<event> event);
 
     //
     //
@@ -257,6 +261,7 @@ protocol Api {
     object_get_child(handle handle, uint64 koid, zx.rights rights) ->
         (zx.status status, handle out);
 
+    /// Apply a scheduling profile to a thread.
     [rights="handle must be of type ZX_OBJ_TYPE_THREAD and have ZX_RIGHT_MANAGE_THREAD.",
      rights="profile must be of type ZX_OBJ_TYPE_PROFILE and have ZX_RIGHT_APPLY_PROFILE."]
     object_set_profile(handle handle, handle profile, uint32 options) -> (zx.status status);
@@ -709,13 +714,6 @@ protocol Api {
                  array<voidptr>:buffer_size buffer, usize buffer_size) ->
         (zx.status status);
 
-    /// Shim for vmo_create_child
-    [rights="handle must be of type ZX_OBJ_TYPE_VMO and have ZX_RIGHT_DUPLICATE and have ZX_RIGHT_READ.",
-     argtype="out handle_acquire",
-     vdsocall]
-    vmo_clone(handle<vmo> handle, uint32 options, uint64 offset, uint64 size) ->
-        (zx.status status, handle<vmo> out);
-
     /// Create a child of a VM Object.
     [rights="handle must be of type ZX_OBJ_TYPE_VMO and have ZX_RIGHT_DUPLICATE and have ZX_RIGHT_READ.",
      argtype="out handle_acquire"]
@@ -832,10 +830,11 @@ protocol Api {
     //
     //
 
+    /// Create a scheduler profile.
     [rights="root_job must be of type ZX_OBJ_TYPE_JOB and have ZX_RIGHT_MANAGE_PROCESS.",
      argtype="profile IN",
      argtype="out handle_acquire"]
-    profile_create(handle<job> root_job, array<zx_profile_info_t>:1 profile) ->
+    profile_create(handle<job> root_job, uint32 options, array<zx_profile_info_t>:1 profile) ->
         (zx.status status, handle<profile> out);
 
 

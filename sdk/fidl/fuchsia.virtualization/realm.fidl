@@ -58,11 +58,20 @@ struct WaylandDevice {
     // The amount of guest-physical address space to allocate for virtio_wl
     // buffers.
     //
-    // Default to a 1GB allocation.
+    // Default to a 1GiB allocation.
     uint64 memory = 1073741824;
 
     // The dispatcher for new virtio_wl connections.
     WaylandDispatcher dispatcher;
+};
+
+// Properties describing a virtio_magma device.
+struct MagmaDevice {
+    // The amount of guest-physical address space to allocate for virtio_magma
+    // buffers.
+    //
+    // Default to a 16GiB allocation.
+    uint64 memory = 17179869184;
 };
 
 struct LaunchInfo {
@@ -71,7 +80,7 @@ struct LaunchInfo {
 
     // Arguments that will be passed to the VMM binary when launching this guest.
     //
-    // See //garnet/bin/guest/vmm/guest_config.cc for valid options.
+    // See //src/virtualization/bin/vmm/guest_config.cc for valid options.
     vector<string>? args;
 
     // A diagnostic string to associate with this instance.
@@ -88,10 +97,15 @@ struct LaunchInfo {
     //
     // If not provided, no virtio_wl device will be created by the VMM.
     WaylandDevice? wayland_device;
+
+    // An optional virtio_magma device.
+    //
+    // If not provided, no virtio_magma device will be created by the VMM.
+    MagmaDevice? magma_device;
 };
 
 protocol Realm {
-    // Launch a new guest instance into this environment. The |cid| of the
+    // Launch a new guest instance into this environment. The `cid` of the
     // instance is returned so that it can be uniquely identified.
     LaunchInstance(LaunchInfo launch_info,
                    request<Guest> controller)
@@ -100,13 +114,13 @@ protocol Realm {
     // Query for guests running in this environment.
     ListInstances() -> (vector<InstanceInfo> instances);
 
-    // Connect to a currently running guest instance identified by |cid|. The
-    // |cid| can be found via the return value of |LaunchInstance| or a call to
-    // |ListInstances|.
+    // Connect to a currently running guest instance identified by `cid`. The
+    // `cid` can be found via the return value of `LaunchInstance` or a call to
+    // `ListInstances`.
     ConnectToInstance(uint32 cid, request<Guest> controller);
 
     // Connect to the memory balloon of a currently running guest instance
-    // identified by |cid|.
+    // identified by `cid`.
     ConnectToBalloon(uint32 cid, request<BalloonController> controller);
 
     // Returns an interface that can be used to access the host vsock endpoint.

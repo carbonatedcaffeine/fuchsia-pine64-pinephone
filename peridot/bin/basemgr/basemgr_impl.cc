@@ -4,6 +4,7 @@
 
 #include "peridot/bin/basemgr/basemgr_impl.h"
 
+#include <fuchsia/device/manager/cpp/fidl.h>
 #include <fuchsia/ui/app/cpp/fidl.h>
 #include <lib/fidl/cpp/type_converter.h>
 #include <lib/fsl/types/type_converters.h>
@@ -11,6 +12,7 @@
 #include <src/lib/fxl/logging.h>
 
 #include "peridot/bin/basemgr/basemgr_settings.h"
+#include "peridot/bin/basemgr/noop_clipboard_impl.h"
 #include "peridot/bin/basemgr/session_provider.h"
 #include "peridot/bin/basemgr/wait_for_minfs.h"
 #include "peridot/lib/common/async_holder.h"
@@ -43,6 +45,8 @@ struct TypeConverter<fuchsia::modular::AppConfig,
 
 namespace modular {
 
+using cobalt_registry::ModularLifetimeEventsMetricDimensionEventType;
+
 namespace {
 
 // TODO(MF-134): This key is duplicated in
@@ -59,18 +63,22 @@ constexpr char kTokenManagerFactoryUrl[] =
 
 BasemgrImpl::BasemgrImpl(
     fuchsia::modular::session::BasemgrConfig config,
-    fuchsia::sys::Launcher* const launcher,
+    const std::shared_ptr<sys::ServiceDirectory> incoming_services,
+    fuchsia::sys::LauncherPtr launcher,
     fuchsia::ui::policy::PresenterPtr presenter,
     fuchsia::devicesettings::DeviceSettingsManagerPtr device_settings_manager,
     fuchsia::wlan::service::WlanPtr wlan,
     fuchsia::auth::account::AccountManagerPtr account_manager,
+    fuchsia::device::manager::AdministratorPtr device_administrator,
     fit::function<void()> on_shutdown)
     : config_(std::move(config)),
-      launcher_(launcher),
+      component_context_services_(std::move(incoming_services)),
+      launcher_(std::move(launcher)),
       presenter_(std::move(presenter)),
       device_settings_manager_(std::move(device_settings_manager)),
       wlan_(std::move(wlan)),
       account_manager_(std::move(account_manager)),
+      device_administrator_(std::move(device_administrator)),
       on_shutdown_(std::move(on_shutdown)),
       base_shell_context_binding_(this),
       authentication_context_provider_binding_(this),
@@ -96,9 +104,22 @@ void BasemgrImpl::StartBaseShell() {
 
   auto base_shell_config =
       fidl::To<fuchsia::modular::AppConfig>(config_.base_shell().app_config());
-  base_shell_app_ = std::make_unique<AppClient<fuchsia::modular::Lifecycle>>(
-      launcher_, std::move(base_shell_config));
 
+  fuchsia::sys::ServiceProviderPtr service_provider;
+  services_.AddBinding(service_provider.NewRequest());
+  noop_clipboard_ = std::make_unique<NoopClipboardImpl>();
+
+  services_.AddService<fuchsia::modular::Clipboard>(
+      [this](fidl::InterfaceRequest<fuchsia::modular::Clipboard> request) {
+        noop_clipboard_->Connect(std::move(request));
+      });
+  fuchsia::sys::ServiceListPtr service_list(new fuchsia::sys::ServiceList);
+  service_list->names.push_back(fuchsia::modular::Clipboard::Name_);
+  service_list->provider = std::move(service_provider);
+
+  base_shell_app_ = std::make_unique<AppClient<fuchsia::modular::Lifecycle>>(
+      launcher_.get(), std::move(base_shell_config), /* data_origin = */ "",
+      std::move(service_list));
   auto [view_token, view_holder_token] = scenic::ViewTokenPair::New();
 
   fuchsia::ui::app::ViewProviderPtr base_shell_view_provider;
@@ -184,7 +205,8 @@ void BasemgrImpl::Start() {
   auto story_shell_config =
       fidl::To<fuchsia::modular::AppConfig>(config_.story_shell().app_config());
   session_provider_.reset(new SessionProvider(
-      /* delegate= */ this, launcher_, std::move(sessionmgr_config),
+      /* delegate= */ this, component_context_services_, launcher_.get(),
+      std::move(device_administrator_), std::move(sessionmgr_config),
       CloneStruct(session_shell_config_), std::move(story_shell_config),
       config_.use_session_shell_for_story_shell_factory(),
       /* on_zero_sessions= */
@@ -205,7 +227,7 @@ void BasemgrImpl::Start() {
 
   InitializeUserProvider();
 
-  ReportEvent(ModularEvent::BOOTED_TO_BASEMGR);
+  ReportEvent(ModularLifetimeEventsMetricDimensionEventType::BootedToBaseMgr);
 }
 
 void BasemgrImpl::InitializeUserProvider() {
@@ -214,7 +236,7 @@ void BasemgrImpl::InitializeUserProvider() {
   token_manager_config.url = kTokenManagerFactoryUrl;
   token_manager_factory_app_ =
       std::make_unique<AppClient<fuchsia::modular::Lifecycle>>(
-          launcher_, CloneStruct(token_manager_config));
+          launcher_.get(), CloneStruct(token_manager_config));
   token_manager_factory_app_->services().ConnectToService(
       token_manager_factory_.NewRequest());
 

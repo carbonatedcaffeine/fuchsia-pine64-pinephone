@@ -5,6 +5,8 @@
 #ifndef SRC_MEDIA_PLAYBACK_MEDIAPLAYER_FFMPEG_AV_PACKET_H_
 #define SRC_MEDIA_PLAYBACK_MEDIAPLAYER_FFMPEG_AV_PACKET_H_
 
+#include <memory>
+
 extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libavformat/avformat.h"
@@ -17,7 +19,7 @@ struct AVPacketDeleter {
   inline void operator()(AVPacket* ptr) const { av_packet_free(&ptr); }
 };
 
-using AvPacketPtr = std::unique_ptr<AVPacket, AVPacketDeleter>;
+using AvPacketPtr = ::std::unique_ptr<AVPacket, AVPacketDeleter>;
 
 struct AvPacket {
   static AvPacketPtr Create() { return AvPacketPtr(av_packet_alloc()); }

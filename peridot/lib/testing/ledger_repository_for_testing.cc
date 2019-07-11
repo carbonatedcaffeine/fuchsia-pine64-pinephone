@@ -4,34 +4,34 @@
 
 #include "peridot/lib/testing/ledger_repository_for_testing.h"
 
-#include <utility>
-
 #include <fuchsia/modular/cpp/fidl.h>
 #include <lib/fsl/io/fd.h>
+#include <zircon/status.h>
+
+#include <utility>
 
 #include "peridot/lib/common/teardown.h"
 #include "peridot/lib/fidl/app_client.h"
 #include "peridot/lib/ledger_client/constants.h"
-#include "peridot/lib/ledger_client/status.h"
 
 namespace modular {
 
 namespace testing {
 
 LedgerRepositoryForTesting::LedgerRepositoryForTesting()
-    : startup_context_(component::StartupContext::CreateFromStartupInfo()),
+    : component_context_(sys::ComponentContext::Create()),
       weak_ptr_factory_(this) {
   fuchsia::modular::AppConfig ledger_config;
   ledger_config.url = kLedgerAppUrl;
 
-  auto& launcher = startup_context_->launcher();
+  auto launcher = component_context_->svc()->Connect<fuchsia::sys::Launcher>();
   ledger_app_client_ =
       std::make_unique<AppClient<fuchsia::ledger::internal::LedgerController>>(
           launcher.get(), std::move(ledger_config));
 
   ledger_repo_factory_.set_error_handler([](zx_status_t status) {
     FXL_CHECK(false) << "LedgerRepositoryFactory returned an error. Status: "
-                     << LedgerEpitaphToString(status);
+                     << zx_status_get_string(status);
   });
   ledger_app_client_->services().ConnectToService(
       ledger_repo_factory_.NewRequest());

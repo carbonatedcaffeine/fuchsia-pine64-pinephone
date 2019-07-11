@@ -16,8 +16,7 @@
 
 namespace ledger {
 
-BaseIntegrationTest::BaseIntegrationTest(
-    const LedgerAppInstanceFactoryBuilder* factory_builder)
+BaseIntegrationTest::BaseIntegrationTest(const LedgerAppInstanceFactoryBuilder* factory_builder)
     : factory_builder_(factory_builder) {}
 
 BaseIntegrationTest::~BaseIntegrationTest() = default;
@@ -25,7 +24,7 @@ BaseIntegrationTest::~BaseIntegrationTest() = default;
 void BaseIntegrationTest::SetUp() {
   ::testing::Test::SetUp();
   factory_ = factory_builder_->NewFactory();
-  trace_provider_ = std::make_unique<trace::TraceProvider>(dispatcher());
+  trace_provider_ = std::make_unique<trace::TraceProviderWithFdio>(dispatcher());
   services_loop_ = GetLoopController()->StartNewLoop();
 }
 
@@ -46,9 +45,7 @@ std::unique_ptr<CallbackWaiter> BaseIntegrationTest::NewWaiter() {
   return GetLoopController()->NewWaiter();
 }
 
-async_dispatcher_t* BaseIntegrationTest::dispatcher() {
-  return GetLoopController()->dispatcher();
-}
+async_dispatcher_t* BaseIntegrationTest::dispatcher() { return GetLoopController()->dispatcher(); }
 
 bool BaseIntegrationTest::RunLoopUntil(fit::function<bool()> condition) {
   return GetLoopController()->RunLoopUntil(std::move(condition));
@@ -60,12 +57,11 @@ void BaseIntegrationTest::RunLoopFor(zx::duration duration) {
 
 zx::socket BaseIntegrationTest::StreamDataToSocket(std::string data) {
   socket::SocketPair sockets;
-  async::PostTask(
-      services_loop_->dispatcher(),
-      [socket = std::move(sockets.socket1), data = std::move(data)]() mutable {
-        auto writer = new socket::StringSocketWriter();
-        writer->Start(std::move(data), std::move(socket));
-      });
+  async::PostTask(services_loop_->dispatcher(),
+                  [socket = std::move(sockets.socket1), data = std::move(data)]() mutable {
+                    auto writer = new socket::StringSocketWriter();
+                    writer->Start(std::move(data), std::move(socket));
+                  });
   return std::move(sockets.socket2);
 }
 
@@ -83,9 +79,7 @@ LoopController* BaseIntegrationTest::GetLoopController() {
   return GetAppFactory()->GetLoopController();
 }
 
-rng::Random* BaseIntegrationTest::GetRandom() {
-  return GetAppFactory()->GetRandom();
-}
+rng::Random* BaseIntegrationTest::GetRandom() { return GetAppFactory()->GetRandom(); }
 
 IntegrationTest::IntegrationTest() : BaseIntegrationTest(GetParam()) {}
 

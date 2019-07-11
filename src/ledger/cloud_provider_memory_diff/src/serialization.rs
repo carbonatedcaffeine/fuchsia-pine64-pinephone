@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 use failure::Error;
-use fidl_fuchsia_ledger_cloud::{SerializedCommit, SerializedCommits, Status};
+use fidl_fuchsia_ledger_cloud::{self as cloud, Status};
 use fuchsia_zircon::Vmo;
 use std::convert::{TryFrom, TryInto};
 
@@ -28,9 +28,9 @@ impl PageId {
 }
 
 /// Reads bytes from a fidl buffer into `result`.
-pub fn read_buffer(buffer: fidl_fuchsia_mem::Buffer, output: &mut Vec<u8>) -> Result<(), Error> {
+pub fn read_buffer(buffer: &fidl_fuchsia_mem::Buffer, output: &mut Vec<u8>) -> Result<(), Error> {
     let size = buffer.size;
-    let vmo = buffer.vmo;
+    let vmo = &buffer.vmo;
     output.resize(size as usize, 0);
     vmo.read(output.as_mut_slice(), 0)?;
     Ok(())
@@ -44,9 +44,11 @@ pub fn write_buffer(data: &[u8]) -> Result<fidl_fuchsia_mem::Buffer, Error> {
     Ok(fidl_fuchsia_mem::Buffer { vmo, size })
 }
 
-impl TryFrom<Option<Box<fidl_fuchsia_ledger_cloud::Token>>> for Token {
+impl TryFrom<Option<Box<fidl_fuchsia_ledger_cloud::PositionToken>>> for Token {
     type Error = ();
-    fn try_from(val: Option<Box<fidl_fuchsia_ledger_cloud::Token>>) -> Result<Self, Self::Error> {
+    fn try_from(
+        val: Option<Box<fidl_fuchsia_ledger_cloud::PositionToken>>,
+    ) -> Result<Self, Self::Error> {
         match val {
             None => Ok(Token(0)),
             Some(t) => match t.opaque_id.as_slice().try_into().map(usize::from_le_bytes) {
@@ -57,9 +59,11 @@ impl TryFrom<Option<Box<fidl_fuchsia_ledger_cloud::Token>>> for Token {
     }
 }
 
-impl Into<fidl_fuchsia_ledger_cloud::Token> for Token {
-    fn into(self: Token) -> fidl_fuchsia_ledger_cloud::Token {
-        fidl_fuchsia_ledger_cloud::Token { opaque_id: Vec::from(&self.0.to_le_bytes() as &[u8]) }
+impl Into<fidl_fuchsia_ledger_cloud::PositionToken> for Token {
+    fn into(self: Token) -> fidl_fuchsia_ledger_cloud::PositionToken {
+        fidl_fuchsia_ledger_cloud::PositionToken {
+            opaque_id: Vec::from(&self.0.to_le_bytes() as &[u8]),
+        }
     }
 }
 
@@ -83,37 +87,41 @@ impl CloudError {
     }
 }
 
-impl From<SerializedCommit> for Commit {
-    fn from(commit: SerializedCommit) -> Commit {
-        Commit { id: CommitId(commit.id), data: commit.data }
+impl TryFrom<cloud::Commit> for Commit {
+    type Error = CloudError;
+
+    fn try_from(commit: cloud::Commit) -> Result<Commit, CloudError> {
+        Ok(Commit {
+            id: CommitId(commit.id.ok_or(CloudError::ParseError)?),
+            data: commit.data.ok_or(CloudError::ParseError)?,
+        })
     }
 }
 
-impl From<&Commit> for SerializedCommit {
-    fn from(commit: &Commit) -> SerializedCommit {
-        SerializedCommit { id: commit.id.0.clone(), data: commit.data.clone() }
+impl From<&Commit> for cloud::Commit {
+    fn from(commit: &Commit) -> cloud::Commit {
+        cloud::Commit { id: Some(commit.id.0.clone()), data: Some(commit.data.clone()) }
     }
 }
 
-/// Converts from and to SerializedCommits.
+/// Converts from and to a buffer with serialized cloud::Commits.
 impl Commit {
     pub fn serialize_vec(commits: Vec<&Commit>) -> fidl_fuchsia_mem::Buffer {
-        let mut serialized = SerializedCommits {
-            commits: commits.into_iter().map(SerializedCommit::from).collect(),
-        };
+        let mut serialized =
+            cloud::Commits { commits: commits.into_iter().map(cloud::Commit::from).collect() };
         fidl::encoding::with_tls_encoded(&mut serialized, |data, _handles| {
             write_buffer(data.as_slice())
         })
         .expect("Failed to write FIDL-encoded commit data to buffer")
     }
 
-    pub fn deserialize_vec(buf: fidl_fuchsia_mem::Buffer) -> Result<Vec<Commit>, CloudError> {
+    pub fn deserialize_vec(buf: &fidl_fuchsia_mem::Buffer) -> Result<Vec<Commit>, CloudError> {
         fidl::encoding::with_tls_coding_bufs(|data, _handles| {
             read_buffer(buf, data).map_err(|_| CloudError::ParseError)?;
-            let mut serialized_commits = SerializedCommits { commits: vec![] };
+            let mut serialized_commits = cloud::Commits { commits: vec![] };
             fidl::encoding::Decoder::decode_into(&data, &mut [], &mut serialized_commits)
                 .map_err(|_| CloudError::ParseError)?;
-            Ok(serialized_commits.commits.into_iter().map(Self::from).collect())
+            serialized_commits.commits.into_iter().map(Self::try_from).collect()
         })
     }
 }

@@ -10,11 +10,14 @@
 #include <utility>
 
 #include "src/developer/debug/zxdb/client/breakpoint.h"
+#include "src/developer/debug/zxdb/client/breakpoint_location.h"
+#include "src/developer/debug/zxdb/client/filter.h"
 #include "src/developer/debug/zxdb/client/frame.h"
 #include "src/developer/debug/zxdb/client/job.h"
 #include "src/developer/debug/zxdb/client/process.h"
 #include "src/developer/debug/zxdb/client/session.h"
 #include "src/developer/debug/zxdb/client/system.h"
+#include "src/developer/debug/zxdb/client/target.h"
 #include "src/developer/debug/zxdb/client/thread.h"
 #include "src/developer/debug/zxdb/common/err.h"
 #include "src/developer/debug/zxdb/console/command.h"
@@ -22,9 +25,10 @@
 #include "src/developer/debug/zxdb/console/console.h"
 #include "src/developer/debug/zxdb/console/console_context.h"
 #include "src/developer/debug/zxdb/console/format_frame.h"
+#include "src/developer/debug/zxdb/console/format_job.h"
 #include "src/developer/debug/zxdb/console/format_table.h"
+#include "src/developer/debug/zxdb/console/format_target.h"
 #include "src/developer/debug/zxdb/console/format_value.h"
-#include "src/developer/debug/zxdb/console/format_value_process_context_impl.h"
 #include "src/developer/debug/zxdb/console/output_buffer.h"
 #include "src/developer/debug/zxdb/console/string_util.h"
 #include "src/developer/debug/zxdb/symbols/location.h"
@@ -97,8 +101,7 @@ bool HandleFrameNoun(ConsoleContext* context, const Command& cmd, Err* err) {
 
   if (cmd.GetNounIndex(Noun::kFrame) == Command::kNoIndex) {
     // Just "frame", this lists available frames.
-    OutputFrameList(cmd.thread(), cmd.HasSwitch(kForceTypes),
-                    cmd.HasSwitch(kVerboseSwitch));
+    OutputFrameList(cmd.thread(), cmd.HasSwitch(kForceTypes), cmd.HasSwitch(kVerboseSwitch));
     return true;
   }
 
@@ -111,8 +114,101 @@ bool HandleFrameNoun(ConsoleContext* context, const Command& cmd, Err* err) {
   context->SetActiveThreadForTarget(cmd.thread());
   context->SetActiveTarget(cmd.target());
 
-  FormatFrameAsync(context, cmd.target(), cmd.thread(), cmd.frame(),
-                   cmd.HasSwitch(kForceTypes));
+  FormatFrameAsync(context, cmd.target(), cmd.thread(), cmd.frame(), cmd.HasSwitch(kForceTypes));
+  return true;
+}
+
+// Filters ---------------------------------------------------------------------
+
+const char kFilterShortHelp[] = "filter: Select or list process filters.";
+const char kFilterHelp[] =
+    R"(filter [ <id> [ <command> ... ] ]
+
+  Selects or lists process filters. Process filters allow you to attach to
+  processes that spawn under a job as soon as they spawn. You can use "attach"
+  to create a new filter.
+
+  The debugger watches for processes launched from within all jobs currently
+  attached (see "help job") and applies the relevant filters. Filters can either
+  be global (the default, applying to all jobs the debugger is attached to) or
+  apply only to specific jobs.
+
+Examples
+
+  filter
+    Lists all filters on the current job.
+
+  filter 1
+    Selects filter 1 to be the active filter.
+
+  job 3 filter
+    List all filters on job 3.
+
+  filter 3 attach foo
+    Update filter 3 to attach to processes named "foo".
+)";
+
+void ListFilters(ConsoleContext* context, JobContext* job) {
+  int active_filter_id = context->GetActiveFilterId();
+  auto filters = context->session()->system().GetFilters();
+
+  std::vector<std::vector<std::string>> rows;
+  for (auto& filter : filters) {
+    if (job && filter->job() && filter->job() != job) {
+      continue;
+    }
+
+    auto id = context->IdForFilter(filter);
+
+    std::vector<std::string>& row = rows.emplace_back();
+
+    // "Current thread" marker.
+    if (id == active_filter_id)
+      row.push_back(GetRightArrow());
+    else
+      row.emplace_back();
+
+    row.push_back(fxl::StringPrintf("%d", id));
+    row.push_back(filter->pattern());
+
+    if (filter->job()) {
+      auto job_id = context->IdForJobContext(filter->job());
+      row.push_back(fxl::StringPrintf("%d", job_id));
+    } else {
+      row.push_back("*");
+    }
+  }
+
+  if (rows.empty()) {
+    Console::get()->Output("No filters.\n");
+    return;
+  }
+
+  OutputBuffer out;
+  FormatTable({ColSpec(Align::kLeft), ColSpec(Align::kRight, 0, "#", 0, Syntax::kSpecial),
+               ColSpec(Align::kLeft, 0, "Pattern"), ColSpec(Align::kRight, 0, "Job")},
+              rows, &out);
+  Console::get()->Output(out);
+}
+
+// Returns true if processing should stop (either a filter command or an error),
+// false to continue processing to the next noun type.
+bool HandleFilterNoun(ConsoleContext* context, const Command& cmd, Err* err) {
+  if (!cmd.HasNoun(Noun::kFilter))
+    return false;
+
+  *err = cmd.ValidateNouns({Noun::kJob, Noun::kFilter});
+  if (err->has_error())
+    return true;
+
+  if (cmd.GetNounIndex(Noun::kFilter) == Command::kNoIndex) {
+    // Just "filter", this lists available filters.
+    ListFilters(context, cmd.job_context());
+    return true;
+  }
+
+  FXL_DCHECK(cmd.filter());
+  context->SetActiveFilter(cmd.filter());
   return true;
 }
 
@@ -161,8 +257,7 @@ Examples
 // Prints the thread list for the given process to the console.
 void ListThreads(ConsoleContext* context, Process* process) {
   std::vector<Thread*> threads = process->GetThreads();
-  int active_thread_id =
-      context->GetActiveThreadIdForTarget(process->GetTarget());
+  int active_thread_id = context->GetActiveThreadIdForTarget(process->GetTarget());
 
   // Sort by ID.
   std::vector<std::pair<int, Thread*>> id_threads;
@@ -182,19 +277,16 @@ void ListThreads(ConsoleContext* context, Process* process) {
       row.emplace_back();
 
     row.push_back(fxl::StringPrintf("%d", pair.first));
-    row.push_back(ThreadStateToString(pair.second->GetState(),
-                                      pair.second->GetBlockedReason()));
+    row.push_back(ThreadStateToString(pair.second->GetState(), pair.second->GetBlockedReason()));
     row.push_back(fxl::StringPrintf("%" PRIu64, pair.second->GetKoid()));
     row.push_back(pair.second->GetName());
   }
 
   OutputBuffer out;
-  FormatTable(
-      {ColSpec(Align::kLeft),
-       ColSpec(Align::kRight, 0, "#", 0, Syntax::kSpecial),
-       ColSpec(Align::kLeft, 0, "State"), ColSpec(Align::kRight, 0, "Koid"),
-       ColSpec(Align::kLeft, 0, "Name")},
-      rows, &out);
+  FormatTable({ColSpec(Align::kLeft), ColSpec(Align::kRight, 0, "#", 0, Syntax::kSpecial),
+               ColSpec(Align::kLeft, 0, "State"), ColSpec(Align::kRight, 0, "Koid"),
+               ColSpec(Align::kLeft, 0, "Name")},
+              rows, &out);
   Console::get()->Output(out);
 }
 
@@ -205,8 +297,7 @@ void ListThreads(ConsoleContext* context, Process* process) {
 // (which should be fast) before displaying the thread list.
 void ScheduleListThreads(Process* process) {
   // Since the Process issues the callback, it's OK to capture the pointer.
-  process->SyncThreads(
-      [process]() { ListThreads(&Console::get()->context(), process); });
+  process->SyncThreads([process]() { ListThreads(&Console::get()->context(), process); });
 }
 
 // Returns true if processing should stop (either a thread command or an error),
@@ -247,7 +338,9 @@ const char kJobHelp[] =
 
   Alias: "j"
 
-  Selects or lists job contexts.
+  Selects or lists job contexts. A job context is attached to a Zircon job (a
+  node in the process tree) and watches for processes launched inside of it.
+  See "help attach" on how to automatically attach to these processes.
 
   By itself, "job" will list available job contexts with their IDs. New
   job contexts can be created with the "new" command. This list of debugger
@@ -278,54 +371,6 @@ Examples
       Attach to job context 2, regardless of the active one.
 )";
 
-void ListJobs(ConsoleContext* context) {
-  auto job_contexts = context->session()->system().GetJobContexts();
-
-  int active_job_context_id = context->GetActiveJobContextId();
-
-  // Sort by ID.
-  std::vector<std::pair<int, JobContext*>> id_job_contexts;
-  for (auto& job_context : job_contexts)
-    id_job_contexts.push_back(
-        std::make_pair(context->IdForJobContext(job_context), job_context));
-  std::sort(id_job_contexts.begin(), id_job_contexts.end());
-
-  std::vector<std::vector<std::string>> rows;
-  for (const auto& pair : id_job_contexts) {
-    rows.emplace_back();
-    std::vector<std::string>& row = rows.back();
-
-    // "Current process" marker (or nothing).
-    if (pair.first == active_job_context_id)
-      row.emplace_back(GetRightArrow());
-    else
-      row.emplace_back();
-
-    // ID.
-    row.push_back(fxl::StringPrintf("%d", pair.first));
-
-    // State and koid (if running).
-    row.push_back(JobContextStateToString(pair.second->GetState()));
-    if (pair.second->GetState() == JobContext::State::kAttached) {
-      row.push_back(
-          fxl::StringPrintf("%" PRIu64, pair.second->GetJob()->GetKoid()));
-    } else {
-      row.emplace_back();
-    }
-
-    row.push_back(DescribeJobContextName(pair.second));
-  }
-
-  OutputBuffer out;
-  FormatTable(
-      {ColSpec(Align::kLeft),
-       ColSpec(Align::kRight, 0, "#", 0, Syntax::kSpecial),
-       ColSpec(Align::kLeft, 0, "State"), ColSpec(Align::kRight, 0, "Koid"),
-       ColSpec(Align::kLeft, 0, "Name")},
-      rows, &out);
-  Console::get()->Output(out);
-}
-
 // Returns true if processing should stop (either a thread command or an error),
 // false to continue processing to the nex noun type.
 bool HandleJobNoun(ConsoleContext* context, const Command& cmd, Err* err) {
@@ -333,21 +378,20 @@ bool HandleJobNoun(ConsoleContext* context, const Command& cmd, Err* err) {
     return false;
 
   if (cmd.GetNounIndex(Noun::kJob) == Command::kNoIndex) {
-    // Just "job", this lists available job.
-    ListJobs(context);
+    // Just "job", this lists the jobs.
+    Console::get()->Output(FormatJobList(context));
     return true;
   }
 
   FXL_DCHECK(cmd.job_context());
   context->SetActiveJobContext(cmd.job_context());
-  Console::get()->Output(DescribeJobContext(context, cmd.job_context()));
+  Console::get()->Output(FormatJobContext(context, cmd.job_context()));
   return true;
 }
 
 // Processes -------------------------------------------------------------------
 
-const char kProcessShortHelp[] =
-    "process / pr: Select or list process contexts.";
+const char kProcessShortHelp[] = "process / pr: Select or list process contexts.";
 const char kProcessHelp[] =
     R"(process [ <id> [ <command> ... ] ]
 
@@ -384,53 +428,6 @@ Examples
       Runs process context 2, regardless of the active one.
 )";
 
-void ListProcesses(ConsoleContext* context) {
-  auto targets = context->session()->system().GetTargets();
-
-  int active_target_id = context->GetActiveTargetId();
-
-  // Sort by ID.
-  std::vector<std::pair<int, Target*>> id_targets;
-  for (auto& target : targets)
-    id_targets.push_back(std::make_pair(context->IdForTarget(target), target));
-  std::sort(id_targets.begin(), id_targets.end());
-
-  std::vector<std::vector<std::string>> rows;
-  for (const auto& pair : id_targets) {
-    rows.emplace_back();
-    std::vector<std::string>& row = rows.back();
-
-    // "Current process" marker (or nothing).
-    if (pair.first == active_target_id)
-      row.emplace_back(GetRightArrow());
-    else
-      row.emplace_back();
-
-    // ID.
-    row.push_back(fxl::StringPrintf("%d", pair.first));
-
-    // State and koid (if running).
-    row.push_back(TargetStateToString(pair.second->GetState()));
-    if (pair.second->GetState() == Target::State::kRunning) {
-      row.push_back(
-          fxl::StringPrintf("%" PRIu64, pair.second->GetProcess()->GetKoid()));
-    } else {
-      row.emplace_back();
-    }
-
-    row.push_back(DescribeTargetName(pair.second));
-  }
-
-  OutputBuffer out;
-  FormatTable(
-      {ColSpec(Align::kLeft),
-       ColSpec(Align::kRight, 0, "#", 0, Syntax::kSpecial),
-       ColSpec(Align::kLeft, 0, "State"), ColSpec(Align::kRight, 0, "Koid"),
-       ColSpec(Align::kLeft, 0, "Name")},
-      rows, &out);
-  Console::get()->Output(out);
-}
-
 // Returns true if processing should stop (either a thread command or an error),
 // false to continue processing to the next noun type.
 bool HandleProcessNoun(ConsoleContext* context, const Command& cmd, Err* err) {
@@ -439,7 +436,7 @@ bool HandleProcessNoun(ConsoleContext* context, const Command& cmd, Err* err) {
 
   if (cmd.GetNounIndex(Noun::kProcess) == Command::kNoIndex) {
     // Just "process", this lists available processes.
-    ListProcesses(context);
+    Console::get()->Output(FormatTargetList(context));
     return true;
   }
 
@@ -448,7 +445,7 @@ bool HandleProcessNoun(ConsoleContext* context, const Command& cmd, Err* err) {
   // command line (otherwise the command would have been rejected before here).
   FXL_DCHECK(cmd.target());
   context->SetActiveTarget(cmd.target());
-  Console::get()->Output(DescribeTarget(context, cmd.target()));
+  Console::get()->Output(FormatTarget(context, cmd.target()));
   return true;
 }
 
@@ -476,8 +473,7 @@ bool HandleGlobalNoun(ConsoleContext* context, const Command& cmd, Err* err) {
 
 // Breakpoints -----------------------------------------------------------------
 
-const char kBreakpointShortHelp[] =
-    "breakpoint / bp: Select or list breakpoints.";
+const char kBreakpointShortHelp[] = "breakpoint / bp: Select or list breakpoints.";
 const char kBreakpointHelp[] =
     R"(breakpoint [ <id> [ <command> ... ] ]
 
@@ -496,6 +492,14 @@ const char kBreakpointHelp[] =
   the breakpoint context for that command only. This allows modifying
   breakpoints regardless of the active one.
 
+Options
+
+  -v
+  --verbose
+      When listing breakpoints, show information on each address that the
+      breakpoint applies to. A symbolic breakpoint can apply to many processes
+      and can expand to more than one address in a process.
+
 Examples
 
   bp
@@ -511,7 +515,7 @@ Examples
       Clears breakpoint 2.
 )";
 
-void ListBreakpoints(ConsoleContext* context) {
+void ListBreakpoints(ConsoleContext* context, bool include_locations) {
   auto breakpoints = context->session()->system().GetBreakpoints();
   if (breakpoints.empty()) {
     Console::get()->Output("No breakpoints.\n");
@@ -526,10 +530,8 @@ void ListBreakpoints(ConsoleContext* context) {
     id_bp[context->IdForBreakpoint(bp)] = bp;
 
   std::vector<std::vector<OutputBuffer>> rows;
-
   for (const auto& pair : id_bp) {
-    rows.emplace_back();
-    std::vector<OutputBuffer>& row = rows.back();
+    std::vector<OutputBuffer>& row = rows.emplace_back();
 
     // "Current breakpoint" marker.
     if (pair.first == active_breakpoint_id)
@@ -538,31 +540,42 @@ void ListBreakpoints(ConsoleContext* context) {
       row.emplace_back();
 
     BreakpointSettings settings = pair.second->GetSettings();
-    row.push_back(
-        OutputBuffer(Syntax::kSpecial, fxl::StringPrintf("%d", pair.first)));
+
+    row.push_back(OutputBuffer(Syntax::kSpecial, fxl::StringPrintf("%d", pair.first)));
     row.emplace_back(BreakpointScopeToString(context, settings));
     row.emplace_back(BreakpointStopToString(settings.stop_mode));
     row.emplace_back(BreakpointEnabledToString(settings.enabled));
     row.emplace_back(BreakpointTypeToString(settings.type));
     row.push_back(FormatInputLocation(settings.location));
+
+    if (include_locations) {
+      for (const auto& loc : pair.second->GetLocations()) {
+        std::vector<OutputBuffer>& loc_row = rows.emplace_back();
+
+        loc_row.resize(2);  // Empty columns.
+        Process* process = loc->GetProcess();
+        OutputBuffer out(GetBullet() + " ");
+        out.Append(
+            FormatLocation(process->GetTarget()->GetSymbols(), loc->GetLocation(), true, false));
+
+        loc_row.push_back(out);
+      }
+    }
   }
 
   OutputBuffer out;
-  FormatTable(
-      {ColSpec(Align::kLeft),
-       ColSpec(Align::kRight, 0, "#", 0, Syntax::kSpecial),
-       ColSpec(Align::kLeft, 0, "Scope"), ColSpec(Align::kLeft, 0, "Stop"),
-       ColSpec(Align::kLeft, 0, "Enabled"), ColSpec(Align::kLeft, 0, "Type"),
-       ColSpec(Align::kLeft, 0, "Location")},
-      rows, &out);
+  FormatTable({ColSpec(Align::kLeft), ColSpec(Align::kRight, 0, "#", 0, Syntax::kSpecial),
+               ColSpec(Align::kLeft, 0, "Scope"), ColSpec(Align::kLeft, 0, "Stop"),
+               ColSpec(Align::kLeft, 0, "Enabled"), ColSpec(Align::kLeft, 0, "Type"),
+               ColSpec(Align::kLeft, 0, "Location")},
+              rows, &out);
   Console::get()->Output(out);
 }
 
 // Returns true if breakpoint was specified (and therefore nothing else
 // should be called. If breakpoint is specified but there was an error, *err
 // will be set.
-bool HandleBreakpointNoun(ConsoleContext* context, const Command& cmd,
-                          Err* err) {
+bool HandleBreakpointNoun(ConsoleContext* context, const Command& cmd, Err* err) {
   if (!cmd.HasNoun(Noun::kBreakpoint))
     return false;
 
@@ -573,8 +586,10 @@ bool HandleBreakpointNoun(ConsoleContext* context, const Command& cmd,
     return true;
 
   if (cmd.GetNounIndex(Noun::kBreakpoint) == Command::kNoIndex) {
-    // Just "breakpoint", this lists available breakpoints.
-    ListBreakpoints(context);
+    // Just "breakpoint", this lists available breakpoints. The verbose switch
+    // expands each individual breakpoint location.
+    bool include_locations = cmd.HasSwitch(kVerboseSwitch);
+    ListBreakpoints(context, include_locations);
     return true;
   }
 
@@ -632,15 +647,14 @@ OutputBuffer SymbolServerStateToColorString(SymbolServer::State state) {
 }
 
 void ListSymbolServers(ConsoleContext* context) {
-  std::vector<SymbolServer*> symbol_servers =
-      context->session()->system().GetSymbolServers();
+  std::vector<SymbolServer*> symbol_servers = context->session()->system().GetSymbolServers();
   int active_symbol_server_id = context->GetActiveSymbolServerId();
 
   // Sort by ID.
   std::vector<std::pair<int, SymbolServer*>> id_symbol_servers;
   for (SymbolServer* symbol_server : symbol_servers) {
-    id_symbol_servers.push_back(std::make_pair(
-        context->IdForSymbolServer(symbol_server), symbol_server));
+    id_symbol_servers.push_back(
+        std::make_pair(context->IdForSymbolServer(symbol_server), symbol_server));
   }
   std::sort(id_symbol_servers.begin(), id_symbol_servers.end());
 
@@ -672,16 +686,13 @@ void ListSymbolServers(ConsoleContext* context) {
   }
 
   OutputBuffer out;
-  FormatTable(
-      {ColSpec(Align::kLeft),
-       ColSpec(Align::kRight, 0, "#", 0, Syntax::kSpecial),
-       ColSpec(Align::kLeft, 0, "URL"), ColSpec(Align::kLeft, 0, "State")},
-      rows, &out);
+  FormatTable({ColSpec(Align::kLeft), ColSpec(Align::kRight, 0, "#", 0, Syntax::kSpecial),
+               ColSpec(Align::kLeft, 0, "URL"), ColSpec(Align::kLeft, 0, "State")},
+              rows, &out);
   Console::get()->Output(out);
 }
 
-bool HandleSymbolServerNoun(ConsoleContext* context, const Command& cmd,
-                            Err* err) {
+bool HandleSymbolServerNoun(ConsoleContext* context, const Command& cmd, Err* err) {
   if (!cmd.HasNoun(Noun::kSymServer))
     return false;
 
@@ -713,8 +724,7 @@ bool HandleSymbolServerNoun(ConsoleContext* context, const Command& cmd,
   auto iter = error_log.begin();
   if (error_log.size() > 10) {
     iter += error_log.size() - 10;
-    out.Append("  ... " + std::to_string(error_log.size() - 10) +
-               " more ...\n");
+    out.Append("  ... " + std::to_string(error_log.size() - 10) + " more ...\n");
   }
 
   for (; iter != error_log.end(); iter++) {
@@ -728,13 +738,9 @@ bool HandleSymbolServerNoun(ConsoleContext* context, const Command& cmd,
 }  // namespace
 
 NounRecord::NounRecord() = default;
-NounRecord::NounRecord(std::initializer_list<std::string> aliases,
-                       const char* short_help, const char* help,
-                       CommandGroup command_group)
-    : aliases(aliases),
-      short_help(short_help),
-      help(help),
-      command_group(command_group) {}
+NounRecord::NounRecord(std::initializer_list<std::string> aliases, const char* short_help,
+                       const char* help, CommandGroup command_group)
+    : aliases(aliases), short_help(short_help), help(help), command_group(command_group) {}
 NounRecord::~NounRecord() = default;
 
 const std::map<Noun, NounRecord>& GetNouns() {
@@ -774,6 +780,8 @@ Err ExecuteNoun(ConsoleContext* context, const Command& cmd) {
 
   if (HandleBreakpointNoun(context, cmd, &result))
     return result;
+  if (HandleFilterNoun(context, cmd, &result))
+    return result;
 
   // Work backwards in specificity (frame -> thread -> process).
   if (HandleFrameNoun(context, cmd, &result))
@@ -796,24 +804,23 @@ void AppendNouns(std::map<Noun, NounRecord>* nouns) {
   // If non-kNone, the "command groups" on the noun will cause the help for
   // that noun to additionall appear under that section (people expect the
   // "thread" command to appear in the process section).
-  (*nouns)[Noun::kBreakpoint] =
-      NounRecord({"breakpoint", "bp"}, kBreakpointShortHelp, kBreakpointHelp,
-                 CommandGroup::kBreakpoint);
+  (*nouns)[Noun::kBreakpoint] = NounRecord({"breakpoint", "bp"}, kBreakpointShortHelp,
+                                           kBreakpointHelp, CommandGroup::kBreakpoint);
 
-  (*nouns)[Noun::kFrame] = NounRecord({"frame", "f"}, kFrameShortHelp,
-                                      kFrameHelp, CommandGroup::kQuery);
+  (*nouns)[Noun::kFrame] =
+      NounRecord({"frame", "f"}, kFrameShortHelp, kFrameHelp, CommandGroup::kQuery);
 
-  (*nouns)[Noun::kThread] = NounRecord({"thread", "t"}, kThreadShortHelp,
-                                       kThreadHelp, CommandGroup::kProcess);
-  (*nouns)[Noun::kProcess] = NounRecord({"process", "pr"}, kProcessShortHelp,
-                                        kProcessHelp, CommandGroup::kProcess);
-  (*nouns)[Noun::kGlobal] = NounRecord({"global", "gl"}, kGlobalShortHelp,
-                                       kGlobalHelp, CommandGroup::kNone);
+  (*nouns)[Noun::kThread] =
+      NounRecord({"thread", "t"}, kThreadShortHelp, kThreadHelp, CommandGroup::kProcess);
+  (*nouns)[Noun::kProcess] =
+      NounRecord({"process", "pr"}, kProcessShortHelp, kProcessHelp, CommandGroup::kProcess);
+  (*nouns)[Noun::kGlobal] =
+      NounRecord({"global", "gl"}, kGlobalShortHelp, kGlobalHelp, CommandGroup::kNone);
   (*nouns)[Noun::kSymServer] =
-      NounRecord({"sym-server"}, kSymServerShortHelp, kSymServerHelp,
-                 CommandGroup::kSymbol);
-  (*nouns)[Noun::kJob] =
-      NounRecord({"job", "j"}, kJobShortHelp, kJobHelp, CommandGroup::kJob);
+      NounRecord({"sym-server"}, kSymServerShortHelp, kSymServerHelp, CommandGroup::kSymbol);
+  (*nouns)[Noun::kJob] = NounRecord({"job", "j"}, kJobShortHelp, kJobHelp, CommandGroup::kJob);
+  (*nouns)[Noun::kFilter] =
+      NounRecord({"filter"}, kFilterShortHelp, kFilterHelp, CommandGroup::kJob);
 }
 
 const std::vector<SwitchRecord>& GetNounSwitches() {

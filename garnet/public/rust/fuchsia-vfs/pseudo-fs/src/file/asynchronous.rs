@@ -24,10 +24,10 @@
 
 #![warn(missing_docs)]
 
-use {
-    crate::common::{send_on_open_with_error, try_inherit_rights_for_clone},
-    crate::directory::entry::{DirectoryEntry, EntryInfo},
-    crate::file::{
+use crate::{
+    common::{inherit_rights_for_clone, send_on_open_with_error},
+    directory::entry::{DirectoryEntry, EntryInfo},
+    file::{
         connection::{
             BufferResult, ConnectionState, FileConnection, FileConnectionFuture,
             InitialConnectionState,
@@ -35,6 +35,9 @@ use {
         DEFAULT_READ_ONLY_PROTECTION_ATTRIBUTES, DEFAULT_READ_WRITE_PROTECTION_ATTRIBUTES,
         DEFAULT_WRITE_ONLY_PROTECTION_ATTRIBUTES,
     },
+};
+
+use {
     failure::Error,
     fidl::endpoints::ServerEnd,
     fidl_fuchsia_io::{
@@ -231,6 +234,16 @@ where
     }
 }
 
+/// Return type for AsyncPseudoFile::handle_request().
+struct HandleRequestResult {
+    /// Current connection state.
+    connection_state: ConnectionState,
+
+    /// If the command might have added a new connection to this file, in which case we need to
+    /// make sure to run `poll` method for the connections list again.
+    added_new_connection: bool,
+}
+
 /// Implementation of an asychronous pseudo file in a virtual filesystem. This is created by passing
 /// on_read and/or on_write callbacks to the exported constructor functions. These callbacks return
 /// futures, unlike the simple pseudo file, where the callbacks are synchronous. See the module
@@ -275,18 +288,11 @@ where
         }
     }
 
-    fn add_connection(
-        &mut self,
-        parent_flags: u32,
-        flags: u32,
-        mode: u32,
-        server_end: ServerEnd<NodeMarker>,
-    ) {
+    fn add_connection(&mut self, flags: u32, mode: u32, server_end: ServerEnd<NodeMarker>) {
         match FileConnection::connect_async(
-            parent_flags,
             flags,
-            self.protection_attributes,
             mode,
+            self.protection_attributes,
             server_end,
             self.on_read.is_some(),
             self.on_write.is_some(),
@@ -320,26 +326,42 @@ where
         &mut self,
         req: FileRequest,
         connection: &mut FileConnection,
-    ) -> Result<ConnectionState, Error> {
+    ) -> Result<HandleRequestResult, Error> {
         match req {
             FileRequest::Clone { flags, object, control_handle: _ } => {
-                match try_inherit_rights_for_clone(connection.flags, flags) {
-                    Ok(clone_flags) => {
-                        self.add_connection(connection.flags, clone_flags, 0, object)
-                    }
-                    Err(status) => send_on_open_with_error(flags, object, status),
-                }
-                Ok(ConnectionState::Alive)
+                self.handle_clone(connection.flags, flags, object);
+                Ok(HandleRequestResult {
+                    connection_state: ConnectionState::Alive,
+                    added_new_connection: true,
+                })
             }
             FileRequest::Close { responder } => {
                 self.handle_close(connection, responder)?;
-                Ok(ConnectionState::Closed)
+                Ok(HandleRequestResult {
+                    connection_state: ConnectionState::Closed,
+                    added_new_connection: false,
+                })
             }
             _ => {
                 connection.handle_request(req)?;
-                Ok(ConnectionState::Alive)
+                Ok(HandleRequestResult {
+                    connection_state: ConnectionState::Alive,
+                    added_new_connection: false,
+                })
             }
         }
+    }
+
+    fn handle_clone(&mut self, parent_flags: u32, flags: u32, server_end: ServerEnd<NodeMarker>) {
+        let flags = match inherit_rights_for_clone(parent_flags, flags) {
+            Ok(updated) => updated,
+            Err(status) => {
+                send_on_open_with_error(flags, server_end, status);
+                return;
+            }
+        };
+
+        self.add_connection(flags, 0, server_end);
     }
 
     fn handle_close(
@@ -378,7 +400,7 @@ where
             return;
         }
 
-        self.add_connection(!0, flags, mode, server_end);
+        self.add_connection(flags, mode, server_end);
     }
 
     fn entry_info(&self) -> EntryInfo {
@@ -426,21 +448,27 @@ where
     type Output = Void;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // we go through all of our lists of futures, exausting all possible work that can be done
-        // immediately. also, according to the docs of FuturesUnordered, we need to call poll_next
-        // when new futures are added in order to begin recieving wakeup calls for them, and also to
-        // exhaust any work we can do immediately.
+        // NOTE See `crate::directory::Simple::poll` for the discussion on why we need a loop here,
+        // as well as on the ordering.
         //
-        // all operations except one will either 1. push a future onto the next set of futures to
-        // execute, 2. put it back on it's own set of futures to execute, or 3. drop the future
-        // altogether. the only operation that doesn't follow that order is `clone`, which may place
-        // a future into `connection_futures` while we are executing futures in `connections`. if we
-        // might have done that, we need to do another iteration to make sure that we have finished
-        // possible new work in connection_futures, and properly registered the wakeup, in order for
-        // everything to work correctly. otherwise we might get stuck waiting for a connection
-        // future to execute that can never tell us it's done.
-        let mut might_have_cloned = false;
+        // We go through all of our lists of futures, exausting all possible work that can be done
+        // immediately. Also, according to the docs of FuturesUnordered, we need to call
+        // `poll_next` when new futures are added in order to begin recieving wakeup calls for
+        // them, and also to exhaust any work we can do immediately.
+        //
+        // Among 3 nested loops, for operations in each loop, all operations except one will
+        // either:
+        //   1. Push a future onto the next set of futures to execute.
+        //   2. Put it back on it's own set of futures to execute.
+        //   3. Drop the future altogether.
+        //
+        // The only operation that doesn't follow that order is `Clone`, which may place a future
+        // into `connection_futures` list, while we are executing futures in `connections` list.
+        // `handle_request` will let us know if that have happened, and we need to run the whole
+        // loop again.
         loop {
+            let mut rerun_connections = false;
+
             loop {
                 match self.connection_futures.poll_next_unpin(cx) {
                     Poll::Ready(Some(Some(conn))) => self.connections.push(conn),
@@ -454,8 +482,11 @@ where
                     Poll::Ready(Some((maybe_request, mut connection))) => {
                         if let Some(Ok(request)) = maybe_request {
                             match self.handle_request(request, &mut connection) {
-                                Ok(ConnectionState::Alive) => {
-                                    might_have_cloned = true;
+                                Ok(HandleRequestResult {
+                                    connection_state: ConnectionState::Alive,
+                                    added_new_connection,
+                                }) => {
+                                    rerun_connections |= added_new_connection;
                                     self.connections.push(connection.into_future())
                                 }
                                 _ => (),
@@ -473,10 +504,8 @@ where
                 }
             }
 
-            if !might_have_cloned {
+            if !rerun_connections {
                 break;
-            } else {
-                might_have_cloned = false;
             }
         }
 

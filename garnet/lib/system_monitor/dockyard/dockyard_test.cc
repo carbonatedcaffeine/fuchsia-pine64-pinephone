@@ -4,11 +4,13 @@
 
 #include "garnet/lib/system_monitor/dockyard/dockyard.h"
 
+#include <climits>
+
+#include "garnet/lib/system_monitor/dockyard/dockyard_service_impl.h"
 #include "garnet/lib/system_monitor/dockyard/test_sample_generator.h"
 #include "gtest/gtest.h"
 
 namespace dockyard {
-namespace {
 
 class SystemMonitorDockyardTest : public ::testing::Test {
  public:
@@ -61,6 +63,11 @@ class SystemMonitorDockyardTest : public ::testing::Test {
                                                            {195ULL, 148ULL}});
   }
 
+  // Returns whether the gRPC server is listening for Harvester connections.
+  bool IsGrpcServerActive() {
+    return !!dockyard_.grpc_server_ && dockyard_.server_thread_.joinable();
+  }
+
   void TestPathsCallback(const std::vector<PathInfo>& add,
                          const std::vector<uint32_t>& remove) {
     ++name_call_count_;
@@ -68,7 +75,7 @@ class SystemMonitorDockyardTest : public ::testing::Test {
 
   void TestStreamSetsCallback(const StreamSetsResponse& response) {
     ++sets_call_count_;
-    response_ = response;
+    response_ = std::move(response);
   }
 
   int32_t name_call_count_;
@@ -76,6 +83,8 @@ class SystemMonitorDockyardTest : public ::testing::Test {
   Dockyard dockyard_;
   StreamSetsResponse response_;
 };
+
+namespace {
 
 TEST_F(SystemMonitorDockyardTest, NameCallback) {
   EXPECT_EQ(100, name_call_count_);
@@ -582,6 +591,34 @@ TEST_F(SystemMonitorDockyardTest, NegativeSlope) {
   EXPECT_EQ(900000ULL, response_.data_sets[0][5]);
 }
 
+TEST_F(SystemMonitorDockyardTest, RecentDataSetsCpus12) {
+  constexpr uint64_t SAMPLE_COUNT = 1;
+  // Add pending request.
+  StreamSetsRequest request;
+  request.start_time_ns = 0;
+  request.end_time_ns = ULLONG_MAX;
+  request.sample_count = SAMPLE_COUNT;
+  request.render_style = StreamSetsRequest::RECENT;
+  request.dockyard_ids.push_back(dockyard_.GetDockyardId("cpu1"));
+  request.dockyard_ids.push_back(dockyard_.GetDockyardId("cpu2"));
+  dockyard_.GetStreamSets(&request);
+
+  // Kick a process call.
+  dockyard_.ProcessRequests();
+  EXPECT_EQ(100, name_call_count_);
+  EXPECT_EQ(201, sets_call_count_);
+  EXPECT_EQ(3ULL, response_.lowest_value);
+  EXPECT_EQ(100ULL, response_.highest_value);
+  ASSERT_EQ(2UL, response_.data_sets.size());
+  ASSERT_EQ(SAMPLE_COUNT, response_.data_sets[0].size());
+  ASSERT_EQ(SAMPLE_COUNT, response_.data_sets[1].size());
+  // Check the samples themselves.
+  // CPU 1.
+  EXPECT_EQ(50ULL, response_.data_sets[0][0]);
+  // CPU 2.
+  EXPECT_EQ(50ULL, response_.data_sets[1][0]);
+}
+
 TEST_F(SystemMonitorDockyardTest, DockyardStringToId) {
   DockyardId apple_id = dockyard_.GetDockyardId("apple");
   DockyardId banana_id = dockyard_.GetDockyardId("banana");
@@ -625,6 +662,42 @@ TEST_F(SystemMonitorDockyardTest, DockyardIdToString) {
   EXPECT_EQ("dog", test);
   EXPECT_TRUE(dockyard_.GetDockyardPath(elephant_id, &test));
   EXPECT_EQ("elephant", test);
+}
+
+TEST_F(SystemMonitorDockyardTest, ServerListening) {
+  // Test for: https://bugs.chromium.org/p/fuchsia/issues/detail?id=72
+  EXPECT_FALSE(IsGrpcServerActive());
+  dockyard_.StartCollectingFrom("apple.banana.carrot.dog");
+  EXPECT_TRUE(IsGrpcServerActive());
+  dockyard_.StopCollectingFromDevice();
+  EXPECT_FALSE(IsGrpcServerActive());
+}
+
+TEST_F(SystemMonitorDockyardTest, StreamRef) {
+  SampleStreamMap stream_map;
+  EXPECT_EQ(stream_map.size(), 0ULL);
+  {
+    SampleStream& ref1 = stream_map.StreamRef(11);
+    SampleStream& ref2 = stream_map.StreamRef(22);
+    // The streams should be empty.
+    EXPECT_TRUE(ref1.empty());
+    EXPECT_TRUE(ref2.empty());
+    ref1.emplace(0, 100ULL);
+    ref2.emplace(0, 200ULL);
+  }
+  // Requesting the stream ref caused the stream to be created.
+  EXPECT_EQ(stream_map.size(), 2ULL);
+  {
+    SampleStream& ref1 = stream_map.StreamRef(11);
+    SampleStream& ref2 = stream_map.StreamRef(22);
+    // The streams should not be empty, they should have the values above.
+    EXPECT_FALSE(ref1.empty());
+    EXPECT_FALSE(ref2.empty());
+    EXPECT_EQ(ref1[0], 100ULL);
+    EXPECT_EQ(ref2[0], 200ULL);
+  }
+  // Requesting the same streams reuse the existing streams.
+  EXPECT_EQ(stream_map.size(), 2ULL);
 }
 
 }  // namespace

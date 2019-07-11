@@ -131,7 +131,7 @@ struct planeN {
 struct plane2 : public planeN<vec2> {
   using planeN::planeN;
 
-  // Project a 3D plane onto the Z=0 plane, as described abover.
+  // Project a 3D plane onto the Z=0 plane, as described above.
   plane2(const planeN<vec3>& plane) {
     vec3 direction = plane.dir();
     float_t distance = plane.dist();
@@ -153,8 +153,7 @@ struct plane2 : public planeN<vec2> {
 
 struct plane3 : public planeN<vec3> {
   using planeN::planeN;
-  explicit plane3(const planeN<vec2>& p)
-      : planeN<vec3>(vec3(p.dir(), 0.f), p.dist()) {}
+  explicit plane3(const planeN<vec2>& p) : planeN<vec3>(vec3(p.dir(), 0.f), p.dist()) {}
 };
 
 ESCHER_DEBUG_PRINTABLE(plane2);

@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_TARGET_SYMBOLS_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_TARGET_SYMBOLS_H_
 
 #include <set>
 
@@ -69,8 +70,8 @@ class TargetSymbols {
   // Since the modules aren't loaded, there are no load addresses. As a result,
   // all output addresses will be 0. This function's purpose is to expand
   // file/line information for symbols.
-  std::vector<Location> ResolveInputLocation(
-      const InputLocation& input_location, const ResolveOptions& options) const;
+  std::vector<Location> ResolveInputLocation(const InputLocation& input_location,
+                                             const ResolveOptions& options) const;
 
   // Gets file matches across all known modules. See
   // ModuleSymbols::FindFileMatches().
@@ -103,3 +104,5 @@ class TargetSymbols {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_TARGET_SYMBOLS_H_

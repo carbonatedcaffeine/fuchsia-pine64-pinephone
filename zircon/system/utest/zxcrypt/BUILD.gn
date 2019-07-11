@@ -5,9 +5,9 @@
 test("zxcrypt") {
   sources = [
     "main.c",
-    "test-device.cpp",
-    "volume.cpp",
-    "zxcrypt.cpp",
+    "test-device.cc",
+    "volume.cc",
+    "zxcrypt.cc",
   ]
 
   # This code does #include "crypto/test/foo.h" to reuse headers from
@@ -20,12 +20,14 @@ test("zxcrypt") {
     "$zx/system/ulib/block-client",
     "$zx/system/ulib/crypto",
     "$zx/system/ulib/ddk",
+    "$zx/system/ulib/devmgr-integration-test",
     "$zx/system/ulib/digest",
     "$zx/system/ulib/fbl",
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/fs",
     "$zx/system/ulib/fs-management",
     "$zx/system/ulib/fvm",
+    "$zx/system/ulib/fzl",
     "$zx/system/ulib/gpt",
     "$zx/system/ulib/kms-stateless",
     "$zx/system/ulib/pretty",

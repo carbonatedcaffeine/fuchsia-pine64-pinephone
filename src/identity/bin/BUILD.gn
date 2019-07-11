@@ -14,18 +14,19 @@ group("bin") {
 
 group("tests") {
   testonly = true
-  data_deps = [
+  deps = [
     ":identity_bin_unittests",
   ]
 }
 
 test_package("identity_bin_unittests") {
   deps = [
-    "account_handler:bin",
-    "account_manager:bin",
-    "dev_auth_provider:bin",
-    "dev_auth_provider_iotid:bin",
+    "account_handler:bin_test",
+    "account_manager:bin_test",
+    "dev_auth_provider:bin_test",
+    "dev_auth_provider_iotid:bin_test",
     "google_auth_provider:google_auth_provider_unittests",
+    "google_auth_provider_rust:bin_test",
   ]
 
   tests = [
@@ -49,5 +50,19 @@ test_package("identity_bin_unittests") {
       name = "google_auth_provider_unittests"
       environments = basic_envs
     },
+    {
+      name = "google_auth_provider_rust_bin_test"
+      environments = basic_envs
+    },
+  ]
+}
+
+# Core is the group that is included into the core product definition.
+group("core") {
+  public_deps = [
+    "account_handler",
+    "account_manager",
+    "google_auth_provider",
+    "token_manager_factory",
   ]
 }

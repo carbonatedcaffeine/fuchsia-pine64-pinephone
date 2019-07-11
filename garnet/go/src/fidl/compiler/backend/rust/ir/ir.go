@@ -152,8 +152,8 @@ type Interface struct {
 
 type Method struct {
 	types.Attributes
-	Ordinal     types.Ordinal
-	GenOrdinal  types.Ordinal
+	Ordinal     uint64
+	GenOrdinal  uint64
 	OrdinalName string
 	Name        string
 	CamelName   string
@@ -301,6 +301,7 @@ var reservedWords = map[string]bool{
 	//"union":	true,
 
 	// Things that are not keywords, but for which collisions would be very unpleasant
+	"Result":  true,
 	"Ok":      true,
 	"Err":     true,
 	"Vec":     true,
@@ -368,6 +369,7 @@ var primitiveTypes = map[types.PrimitiveSubtype]string{
 
 var handleSubtypes = map[types.HandleSubtype]string{
 	types.Handle:    "Handle",
+	types.Exception: "Exception",
 	types.Process:   "Process",
 	types.Thread:    "Thread",
 	types.Vmo:       "Vmo",
@@ -384,6 +386,8 @@ var handleSubtypes = map[types.HandleSubtype]string{
 	types.Fifo:      "Fifo",
 	types.Guest:     "Guest",
 	types.Time:      "Timer",
+	types.Bti:       "Bti",
+	types.Profile:   "Profile",
 }
 
 type compiler struct {

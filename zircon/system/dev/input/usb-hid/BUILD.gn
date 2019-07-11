@@ -18,3 +18,24 @@ driver("usb-hid") {
     "$zx/system/ulib/zircon",
   ]
 }
+
+driver("usb-hid-fake-usb") {
+  sources = [
+    "usb-hid-function.cc",
+  ]
+  deps = [
+    "$zx/system/banjo/ddk.protocol.usb",
+    "$zx/system/banjo/ddk.protocol.usb.function",
+    "$zx/system/banjo/ddk.protocol.usb.request",
+    "$zx/system/dev/lib/usb",
+    "$zx/system/ulib/ddk",
+    "$zx/system/ulib/ddktl",
+    "$zx/system/ulib/fbl",
+    "$zx/system/ulib/hid",
+    "$zx/system/ulib/sync",
+    "$zx/system/ulib/zircon",
+  ]
+
+  # TODO(ZX-2863): This driver violates the allowed shlib deps policy.
+  deprecated_inhibit_driver_shlib_allowlist = true
+}

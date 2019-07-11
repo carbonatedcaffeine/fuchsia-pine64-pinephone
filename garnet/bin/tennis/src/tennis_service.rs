@@ -5,7 +5,7 @@
 use crate::game::{Game, PlayerState};
 use failure::ResultExt;
 use fidl_fuchsia_game_tennis as fidl_tennis;
-use fuchsia_async as fasync;
+use fuchsia_async::{self as fasync, DurationExt};
 use fuchsia_syslog::{fx_log_err, fx_log_info};
 use fuchsia_zircon::DurationNum;
 use futures::prelude::*;
@@ -56,7 +56,7 @@ impl TennisService {
         let TennisService(game_arc) = self.clone();
         let mut game = game_arc.lock();
         let paddle_proxy = paddle.into_proxy().unwrap();
-        let mut stream = paddle_proxy.take_event_stream(); // TODO(lard): remove unwrap
+        let mut stream = paddle_proxy.take_event_stream();
         let player_state = game.register_new_paddle(player_name.clone(), paddle_proxy);
         fasync::spawn(
             async move {

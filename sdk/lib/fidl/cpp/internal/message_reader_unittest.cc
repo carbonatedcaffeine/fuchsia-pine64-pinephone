@@ -2,10 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "lib/fidl/cpp/internal/message_reader.h"
+
+#include <fidl/test/misc/cpp/fidl.h>
 #include <lib/zx/channel.h>
 
 #include "gtest/gtest.h"
-#include "lib/fidl/cpp/internal/message_reader.h"
+#include "lib/fidl/cpp/binding.h"
 #include "lib/fidl/cpp/test/async_loop_for_test.h"
 
 namespace fidl {
@@ -24,8 +27,7 @@ class CopyingMessageHandler : public MessageHandler {
     auto& bytes = message.bytes();
     bytes_ = std::vector<uint8_t>(bytes.data(), bytes.data() + bytes.actual());
     auto& handles = message.handles();
-    handles_ = std::vector<zx_handle_t>(handles.data(),
-                                        handles.data() + handles.actual());
+    handles_ = std::vector<zx_handle_t>(handles.data(), handles.data() + handles.actual());
     return ZX_OK;
   }
 
@@ -43,9 +45,7 @@ class CallbackMessageHandler : public MessageHandler {
  public:
   fit::function<zx_status_t(Message)> callback;
 
-  zx_status_t OnMessage(Message message) override {
-    return callback(std::move(message));
-  }
+  zx_status_t OnMessage(Message message) override { return callback(std::move(message)); }
 };
 
 class DestructionCounter {
@@ -67,6 +67,19 @@ class DestructionCounter {
 
  private:
   int* counter_ = nullptr;
+};
+
+class EchoServer : public fidl::test::misc::Echo {
+ public:
+  explicit EchoServer(fidl::InterfaceRequest<fidl::test::misc::Echo> request)
+      : binding_(this, std::move(request)) {}
+
+  void EchoString(fidl::StringPtr value, EchoStringCallback callback) override { callback(value); }
+
+  void Close() { binding_.Close(10); }
+
+ private:
+  fidl::Binding<fidl::test::misc::Echo> binding_;
 };
 
 TEST(MessageReader, Trivial) { MessageReader reader; }
@@ -213,8 +226,7 @@ TEST(MessageReader, WaitAndDispatchOneMessageUntilErrors) {
   });
 
   EXPECT_EQ(0, error_count);
-  EXPECT_EQ(ZX_ERR_BAD_STATE,
-            reader.WaitAndDispatchOneMessageUntil(zx::time()));
+  EXPECT_EQ(ZX_ERR_BAD_STATE, reader.WaitAndDispatchOneMessageUntil(zx::time()));
   EXPECT_EQ(0, error_count);
 
   fidl::test::AsyncLoopForTest loop;
@@ -230,8 +242,7 @@ TEST(MessageReader, WaitAndDispatchOneMessageUntilErrors) {
   EXPECT_EQ(ZX_OK, reader.Bind(std::move(h1)));
   EXPECT_EQ(0, error_count);
   EXPECT_TRUE(reader.is_bound());
-  EXPECT_EQ(ZX_ERR_TIMED_OUT,
-            reader.WaitAndDispatchOneMessageUntil(zx::time()));
+  EXPECT_EQ(ZX_ERR_TIMED_OUT, reader.WaitAndDispatchOneMessageUntil(zx::time()));
   EXPECT_EQ(0, error_count);
   EXPECT_TRUE(reader.is_bound());
 
@@ -239,8 +250,7 @@ TEST(MessageReader, WaitAndDispatchOneMessageUntilErrors) {
 
   EXPECT_EQ(0, error_count);
   EXPECT_TRUE(reader.is_bound());
-  EXPECT_EQ(ZX_ERR_PEER_CLOSED,
-            reader.WaitAndDispatchOneMessageUntil(zx::time()));
+  EXPECT_EQ(ZX_ERR_PEER_CLOSED, reader.WaitAndDispatchOneMessageUntil(zx::time()));
   EXPECT_EQ(1, error_count);
   EXPECT_FALSE(reader.is_bound());
 }
@@ -308,10 +318,9 @@ TEST(MessageReader, ShouldWaitFromRead) {
   handler.callback = [&message_count, &reader](Message message) {
     ++message_count;
     uint32_t actual_bytes, actual_handles;
-    EXPECT_EQ(
-        ZX_ERR_BUFFER_TOO_SMALL,
-        reader.channel().read(ZX_CHANNEL_READ_MAY_DISCARD, nullptr, nullptr,
-                              0, 0, &actual_bytes, &actual_handles));
+    EXPECT_EQ(ZX_ERR_BUFFER_TOO_SMALL,
+              reader.channel().read(ZX_CHANNEL_READ_MAY_DISCARD, nullptr, nullptr, 0, 0,
+                                    &actual_bytes, &actual_handles));
     return ZX_OK;
   };
 
@@ -362,10 +371,9 @@ TEST(MessageReader, ShouldWaitFromReadWithUnbind) {
   handler.callback = [&message_count, &reader](Message message) {
     ++message_count;
     uint32_t actual_bytes, actual_handles;
-    EXPECT_EQ(
-        ZX_ERR_BUFFER_TOO_SMALL,
-        reader.channel().read(ZX_CHANNEL_READ_MAY_DISCARD, nullptr, nullptr,
-                              0, 0, &actual_bytes, &actual_handles));
+    EXPECT_EQ(ZX_ERR_BUFFER_TOO_SMALL,
+              reader.channel().read(ZX_CHANNEL_READ_MAY_DISCARD, nullptr, nullptr, 0, 0,
+                                    &actual_bytes, &actual_handles));
     reader.Unbind();
     return ZX_OK;
   };
@@ -427,8 +435,7 @@ TEST(MessageReader, Reset) {
 
   int destruction_count = 0;
   DestructionCounter counter(&destruction_count);
-  reader.set_error_handler(
-      [counter = std::move(counter)](zx_status_t status) {});
+  reader.set_error_handler([counter = std::move(counter)](zx_status_t status) {});
 
   zx::channel h1, h2;
   EXPECT_EQ(ZX_OK, zx::channel::create(0, &h1, &h2));
@@ -605,6 +612,22 @@ TEST(MessageReader, DoubleReentrantUnbind) {
   EXPECT_EQ(2, read_count);
   EXPECT_EQ(ZX_ERR_PEER_CLOSED, h2.write(0, "\n", 1, nullptr, 0));
 }
+
+TEST(MessageReader, ReentrantErrorHandler) {
+  fidl::test::AsyncLoopForTest loop;
+
+  fidl::test::misc::EchoPtr echo_ptr;
+  EchoServer server(echo_ptr.NewRequest());
+
+  echo_ptr.set_error_handler([](zx_status_t status) {});
+
+  auto* echo_ptr_ptr = echo_ptr.get();
+  echo_ptr_ptr->EchoString("Some string",
+                           [echo_ptr = std::move(echo_ptr)](fidl::StringPtr echoed_value) {});
+  server.Close();
+  loop.RunUntilIdle();
+}
+
 }  // namespace
 }  // namespace internal
 }  // namespace fidl

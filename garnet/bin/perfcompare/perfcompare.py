@@ -11,6 +11,7 @@ import json
 import math
 import os
 import sys
+import tarfile
 
 import scipy.stats
 
@@ -96,18 +97,75 @@ def ReadJsonFile(filename):
         return json.load(fh)
 
 
-def ResultsFromDir(dir_path):
+def IsResultsFilename(name):
+    return name.endswith('.json') and name != 'summary.json'
+
+
+# Read the raw perf test results from a directory or a tar file.  Returns a
+# sequence (iterator) of JSON trees.
+#
+# Accepting tar files here is a convenience for when doing local testing of
+# the statistics.  The Swarming system used for the bots produces "out.tar"
+# files as results.
+#
+# The directory (or tar file) is expected to contain files with names
+# of the following forms:
+#
+#   <name-of-test-executable>_process<number>.json - results that are read here
+#   <name-of-test-executable>_process<number>.catapult_json - ignored here
+#   summary.json - ignored here
+#
+# Each *.json file (except for summary.json) contains results from a
+# separate launch of a performance test process.
+def RawResultsFromDir(filename):
+    # Note that sorting the filename listing (from os.listdir() or from
+    # tarfile) is not essential, but it helps to make any later processing
+    # more deterministic.
+    if os.path.isfile(filename):
+        # Read from tar file.
+        with tarfile.open(filename) as tar:
+            for member in sorted(tar.getmembers(),
+                                 key=lambda member: member.name):
+                if IsResultsFilename(member.name):
+                    yield json.load(tar.extractfile(member))
+    else:
+        # Read from directory.
+        for name in sorted(os.listdir(filename)):
+            if IsResultsFilename(name):
+                yield ReadJsonFile(os.path.join(filename, name))
+
+
+# This function accepts data in two possible formats:
+#
+#  #1 A directory (or tar file), in the format read by RawResultsFromDir(),
+#     containing perf test results from a single boot of Fuchsia.
+#
+#  #2 A directory representing perf test results from multiple boots of
+#     Fuchsia.  It contains a "by_boot" subdir, which contains directories
+#     (or tar files) of the format read by RawResultsFromDir().
+#
+# TODO(PT-202): Currently the fuchsia_perfcompare.py recipe invokes this
+# tool with data of format #1, but it will switch to using format #2.
+#
+# This returns a dict mapping test names to Stats objects.
+def ResultsFromDir(filename):
+    assert os.path.exists(filename)
+    by_boot_dir = os.path.join(filename, 'by_boot')
+    if os.path.exists(by_boot_dir):
+        filenames = [os.path.join(by_boot_dir, name)
+                     for name in sorted(os.listdir(by_boot_dir))]
+    else:
+        filenames = [filename]
+
     results_map = {}
-    # Sorting the result of os.listdir() is not essential, but it makes any
-    # later behaviour more deterministic.
-    for filename in sorted(os.listdir(dir_path)):
-        if filename == 'summary.json':
-            continue
-        if filename.endswith('.json'):
-            file_path = os.path.join(dir_path, filename)
-            for data in ReadJsonFile(file_path):
-                new_value = Mean(data['values'])
-                results_map.setdefault(data['label'], []).append(new_value)
+    # TODO(PT-202): Currently the processing we do here erases the
+    # distinction between cross-boot variation and cross-process variation,
+    # but we should distinguish between the two.
+    for boot_results_path in filenames:
+        for process_run_results in RawResultsFromDir(boot_results_path):
+            for test_case in process_run_results:
+                new_value = Mean(test_case['values'])
+                results_map.setdefault(test_case['label'], []).append(new_value)
     return {name: Stats(values) for name, values in results_map.iteritems()}
 
 
@@ -174,6 +232,47 @@ def ComparePerf(args, out_fh):
     FormatTable(rows, out_fh)
 
 
+def IntervalsIntersect(interval1, interval2):
+    return not (interval2[0] >= interval1[1] or
+                interval2[1] <= interval1[0])
+
+
+# Calculate the rate at which two intervals drawn (without replacement)
+# from the given set of intervals will be non-intersecting.
+def MismatchRate(intervals):
+    mismatch_count = sum(int(not IntervalsIntersect(intervals[i], intervals[j]))
+                         for i in xrange(len(intervals))
+                         for j in xrange(i))
+    comparisons_count = len(intervals) * (len(intervals) - 1) / 2
+    return float(mismatch_count) / comparisons_count
+
+
+def ValidatePerfCompare(args, out_fh):
+    results_maps = [ResultsFromDir(filename) for filename in args.results_dirs]
+
+    # Group by test name (label).
+    by_test = {}
+    for results_map in results_maps:
+        for label, stats in results_map.iteritems():
+            by_test.setdefault(label, []).append(stats)
+
+    out_fh.write('Rate of mismatches (non-intersections) '
+                 'of confidence intervals for each test:\n')
+    mismatch_rates = []
+    for label, stats_list in sorted(by_test.iteritems()):
+        mismatch_rate = MismatchRate([stats.interval for stats in stats_list])
+        out_fh.write('%f %s\n' % (mismatch_rate, label))
+        mismatch_rates.append(mismatch_rate)
+
+    out_fh.write('\n')
+    mean_val = Mean(mismatch_rates)
+    out_fh.write('Mean mismatch rate: %f\n' % mean_val)
+    out_fh.write('Number of test cases: %d\n' % len(mismatch_rates))
+    out_fh.write('Number of result sets: %d\n' % len(results_maps))
+    out_fh.write('Expected number of test cases with mismatches: %f\n'
+                 % (mean_val * len(mismatch_rates)))
+
+
 def TotalSize(snapshot_file):
     with open(snapshot_file) as fh:
         data = json.load(fh)
@@ -201,6 +300,17 @@ def Main(argv, out_fh):
     parser_compare_perf.add_argument('results_dir_after')
     parser_compare_perf.set_defaults(
         func=lambda args: ComparePerf(args, out_fh))
+
+    parser_validate_perfcompare = subparsers.add_parser(
+        'validate_perfcompare',
+        help='Outputs statistics given multiple sets of perf test results'
+        ' that come from the same build.  This is for validating the'
+        ' statistics used by the perfcompare tool.  It can be used to check'
+        ' the rate at which the tool will falsely indicate that performance'
+        ' of a test case has regressed or improved.')
+    parser_validate_perfcompare.add_argument('results_dirs', nargs='+')
+    parser_validate_perfcompare.set_defaults(
+        func=lambda args: ValidatePerfCompare(args, out_fh))
 
     parser_compare_sizes = subparsers.add_parser(
         'compare_sizes',

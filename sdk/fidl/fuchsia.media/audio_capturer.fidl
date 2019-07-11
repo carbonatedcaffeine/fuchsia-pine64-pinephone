@@ -166,7 +166,7 @@ using fuchsia.media.audio;
 // packets have no data in them, but FIDL demands that all pending
 // method-return-value callbacks be executed.  Because of this, the regions will
 // be returned to the user, but their timestamps will be set to
-// kNoTimestamp, and their payload sizes will be set to zero.  Any
+// NO_TIMESTAMP, and their payload sizes will be set to zero.  Any
 // partially filled payload will have a valid timestamp, but a payload size
 // smaller than originally requested.  The final discarded payload (if there
 // were any to discard) will be followed by an OnEndOfStream event.
@@ -286,6 +286,11 @@ protocol AudioCapturer {
 
     // Binds to the gain control for this AudioCapturer.
     BindGainControl(request<fuchsia.media.audio.GainControl> gain_control_request);
+
+    // Sets the usage of the capture stream.  This may be changed on the fly, but
+    // packets in flight may be affected by the new usage.  By default the
+    // Capturer is created with the FOREGROUND usage.
+    SetUsage(AudioCaptureUsage usage);
 
     // ////////////////////////////////////////////////////////////////////////
     // StreamBufferSet methods

@@ -24,6 +24,6 @@
 #define DDK_TRACE_EVENT_H_
 
 // For now userspace and DDK tracing share the same API and implementation.
-#include <trace/internal/event_common.h>
+#include <lib/trace/internal/event_common.h>
 
 #endif // DDK_TRACE_EVENT_H_

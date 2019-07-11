@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_BIN_DEBUG_AGENT_DEBUGGED_THREAD_H_
-#define GARNET_BIN_DEBUG_AGENT_DEBUGGED_THREAD_H_
+#ifndef SRC_DEVELOPER_DEBUG_DEBUG_AGENT_DEBUGGED_THREAD_H_
+#define SRC_DEVELOPER_DEBUG_DEBUG_AGENT_DEBUGGED_THREAD_H_
 
+#include <lib/zx/exception.h>
 #include <lib/zx/thread.h>
+#include <zircon/syscalls/exception.h>
 
 #include "src/developer/debug/ipc/protocol.h"
 #include "src/lib/fxl/macros.h"
@@ -32,29 +34,22 @@ enum class ThreadCreationOption {
 
 class DebuggedThread {
  public:
-  // The SuspendReason indicates why the thread was suspended from our
-  // perspective. This doesn't take into account other things on the system
-  // that may have suspended a thread. If somebody does this, the thread will
-  // be suspended but our state will be kNone (meaning resuming it is not
-  // something we can do).
-  enum class SuspendReason {
-    // Not suspended.
-    kNone,
-
-    // Exception from the program.
-    kException,
-
-    // Anything else.
-    kOther
+  // Represents the state the client thinks this thread is in. Certain
+  // operations can suspend all the threads of a process and the debugger needs
+  // to know which threads should remain suspended after that operation is done.
+  enum class ClientState {
+    kRunning,
+    kPaused,
   };
-  const char* SuspendReasonToString(SuspendReason);
+  const char* ClientStateToString(ClientState);
 
   // When a thread is first created and we get a notification about it, it
   // will be suspended, but when we attach to a process with existing threads
   // it won't in in this state. The |starting| flag indicates that this is
   // a thread discovered via a debug notification.
   DebuggedThread(DebuggedProcess* process, zx::thread thread,
-                 zx_koid_t thread_koid, ThreadCreationOption option);
+                 zx_koid_t thread_koid, zx::exception exception,
+                 ThreadCreationOption option);
   virtual ~DebuggedThread();
 
   const DebuggedProcess* process() const { return process_; }
@@ -62,33 +57,46 @@ class DebuggedThread {
   const zx::thread& thread() const { return thread_; }
   zx_koid_t koid() const { return koid_; }
 
-  void OnException(uint32_t type);
+  void OnException(zx::exception exception_token,
+                   zx_exception_info_t exception_info);
 
   // Resumes execution of the thread. The thread should currently be in a
   // stopped state. If it's not stopped, this will be ignored.
   void Resume(const debug_ipc::ResumeRequest& request);
 
-  // Pauses execution of the thread. Returns true if the pause was successful.
-  // Pausing happens asynchronously so the thread will not necessarily have
-  // stopped when this returns. Set the |synchronous| flag for blocking on the
-  // suspended signal and make this call synchronous.
+  // Resumes the thread according to the current run mode.
+  void ResumeForRunMode();
+
+  // Resume the thread from an exception.
+  // If |exception_token_| is not valid, this will no-op.
+  virtual void ResumeException();
+
+  // Resume the thread from a suspension.
+  // if |suspend_token_| is not valid, this will no-op.
+  virtual void ResumeSuspension();
+
+  // Pauses execution of the thread. Pausing happens asynchronously so the
+  // thread will not necessarily have stopped when this returns. Set the
+  // |synchronous| flag for blocking on the suspended signal and make this call
+  // block until the thread is suspended.
   //
-  // The return type determines the state the thread was in *before* the suspend
-  // operation. That means that if |kRunning| is returned, means that the thread
-  // was running and now is suspended.
-  enum class SuspendResult {
-    kWasRunning,   // Thread is now suspended.
-    kSuspended,    // Thread remains suspended.
-    kOnException,  // Thread is in exception, *not* suspended (ZX-3772).
-    kError,        // An error ocurred suspending or waiting for the signal.
-  };
-  SuspendResult Suspend(bool synchronous = false);
+  // |new_state| represents what the new state of the client should be. If no
+  // change is wanted, you can use the overload that doesn't receives that.
+  //
+  // Returns true if the thread was running at the moment of this call being
+  // made. Returns false if it was on a suspension condition (suspended or on an
+  // exception).
+  //
+  // A nullopt means an error ocurred while suspending.
+  virtual bool Suspend(bool synchronous = false);
 
   // The typical suspend deadline users should use when suspending.
   static zx::time DefaultSuspendDeadline();
 
   // Waits on a suspension token.
-  SuspendResult WaitForSuspension(zx::time deadline);
+  // Returns true if we could find a valid suspension condition (either
+  // suspended or on an exception). False if timeout or error.
+  virtual bool WaitForSuspension(zx::time deadline = DefaultSuspendDeadline());
 
   // Fills the thread status record. If full_stack is set, a full backtrace
   // will be generated, otherwise a minimal one will be generated.
@@ -112,7 +120,16 @@ class DebuggedThread {
   // Notification that a ProcessBreakpoint is about to be deleted.
   void WillDeleteProcessBreakpoint(ProcessBreakpoint* bp);
 
-  SuspendReason suspend_reason() const { return suspend_reason_; }
+  ClientState client_state() const { return client_state_; }
+  void set_client_state(ClientState cs) { client_state_ = cs; }
+
+  bool running() const { return !IsSuspended() && !IsInException(); }
+
+  virtual bool IsSuspended() const { return suspend_token_.is_valid(); }
+  virtual bool IsInException() const { return exception_token_.is_valid(); }
+
+  bool stepping_over_breakpoint() const { return stepping_over_breakpoint_;  }
+  void set_stepping_over_breakpoint(bool so) { stepping_over_breakpoint_ = so; }
 
  private:
   enum class OnStop {
@@ -172,9 +189,6 @@ class DebuggedThread {
       ProcessWatchpoint*, zx_thread_state_general_regs* regs,
       std::vector<debug_ipc::BreakpointStats>* hit_breakpoints);
 
-  // Resumes the thread according to the current run mode.
-  void ResumeForRunMode();
-
   // Sets or clears the single step bit on the thread.
   void SetSingleStep(bool single_step);
 
@@ -192,11 +206,18 @@ class DebuggedThread {
   uint64_t step_in_range_begin_ = 0;
   uint64_t step_in_range_end_ = 0;
 
-  // This is the reason for the thread suspend. This controls how the thread
-  // will be resumed. SuspendReason::kOther implies the suspend_token_ is
-  // valid.
-  SuspendReason suspend_reason_ = SuspendReason::kNone;
+  // This is the state the client is considering this thread to be. This is used
+  // for internal suspension the agent can do.
+  ClientState client_state_ = ClientState::kRunning;
+
+  // Active if the thread is suspended (by the debugger).
   zx::suspend_token suspend_token_;
+
+  // Active if the thread is currently on an exception.
+  zx::exception exception_token_;
+
+  // Whether this thread is currently stepping over.
+  bool stepping_over_breakpoint_ = false;
 
   // This can be set in two cases:
   // - When suspended after hitting a breakpoint, this will be the breakpoint
@@ -210,4 +231,4 @@ class DebuggedThread {
 
 }  // namespace debug_agent
 
-#endif  // GARNET_BIN_DEBUG_AGENT_DEBUGGED_THREAD_H_
+#endif  // SRC_DEVELOPER_DEBUG_DEBUG_AGENT_DEBUGGED_THREAD_H_

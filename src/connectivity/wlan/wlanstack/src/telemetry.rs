@@ -240,16 +240,14 @@ pub fn report_connection_delay(
     conn_started_time: zx::Time,
     conn_finished_time: zx::Time,
     result: &ConnectResult,
-    failure: &Option<ConnectFailure>,
 ) {
     use wlan_metrics_registry::ConnectionDelayMetricDimensionConnectionResult::{Fail, Success};
 
     let delay_micros = (conn_finished_time - conn_started_time).into_micros();
-    let connection_result_cobalt = match (result, failure) {
-        (ConnectResult::Success, None) => Some(Success),
-        (ConnectResult::Success, Some(_)) => None,
-        (_, Some(failure)) => convert_connect_failure(failure),
-        (_, None) => Some(Fail),
+    let connection_result_cobalt = match result {
+        ConnectResult::Success => Some(Success),
+        ConnectResult::Canceled => Some(Fail),
+        ConnectResult::Failed(failure) => convert_connect_failure(&failure),
     };
 
     if let Some(connection_result_cobalt) = connection_result_cobalt {
@@ -380,6 +378,7 @@ fn convert_connect_failure(
             AssociateResultCodes::RefusedTemporarily => AssociationRefusedTemporarily,
         },
         ConnectFailure::RsnaTimeout => RsnaTimeout,
+        ConnectFailure::SelectNetwork | ConnectFailure::EstablishRsna => Fail,
     };
 
     Some(result)
@@ -564,6 +563,7 @@ mod tests {
         let mlme_query = MlmeQueryProxy::new(proxy);
         let device_info = fake_device_info();
         let iface_device = IfaceDevice {
+            phy_ownership: device::DirectMlmeChannel::NotSupported,
             sme_server: device::SmeServer::Client(sme_sender),
             stats_sched,
             device: None,

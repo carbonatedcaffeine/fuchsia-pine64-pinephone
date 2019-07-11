@@ -6,7 +6,7 @@
 
 #include <audio-proto/audio-proto.h>
 
-#include <ddktl/pdev.h>
+#include <lib/device-protocol/pdev.h>
 
 #include <dispatcher-pool/dispatcher-timer.h>
 
@@ -25,6 +25,8 @@ namespace audio {
 namespace sherlock {
 
 class SherlockAudioStreamIn : public SimpleAudioStream {
+public:
+    static zx_status_t Create(void* ctx, zx_device_t* parent);
 
 protected:
     zx_status_t Init() __TA_REQUIRES(domain_->token()) override;

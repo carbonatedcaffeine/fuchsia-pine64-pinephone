@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_CLOUD_STORAGE_SYMBOL_SERVER_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_CLOUD_STORAGE_SYMBOL_SERVER_H_
 
 #include <map>
 
@@ -13,8 +14,7 @@ namespace zxdb {
 
 class CloudStorageSymbolServer : public SymbolServer {
  public:
-  static std::unique_ptr<CloudStorageSymbolServer> Impl(Session* session,
-                                                        const std::string& url);
+  static std::unique_ptr<CloudStorageSymbolServer> Impl(Session* session, const std::string& url);
 
   // Construct a new cloud storage symbol server. Expects a url of the format
   // gs://<bucket name>
@@ -22,8 +22,7 @@ class CloudStorageSymbolServer : public SymbolServer {
 
   // Implementation of SymbolServer
   std::string AuthInfo() const override;
-  void Authenticate(const std::string& data,
-                    std::function<void(const Err&)> cb) override;
+  void Authenticate(const std::string& data, std::function<void(const Err&)> cb) override;
 
  protected:
   virtual void DoAuthenticate(const std::map<std::string, std::string>& data,
@@ -39,8 +38,8 @@ class CloudStorageSymbolServer : public SymbolServer {
 
   // General dispatch from the result of a Curl transaction. Handles the error
   // cases and then returns true if no error occurred.
-  bool HandleRequestResult(Curl::Error result, long response_code,
-                           size_t previous_ready_count, Err* out_err);
+  bool HandleRequestResult(Curl::Error result, long response_code, size_t previous_ready_count,
+                           Err* out_err);
 
   // Use the refresh token to get a new access token.
   void AuthRefresh();
@@ -59,21 +58,21 @@ class MockCloudStorageSymbolServer : public CloudStorageSymbolServer {
       : CloudStorageSymbolServer(session, url) {}
 
   // Finishes constructing the object. This is manual for the mock class so we
-  // can get our instrumentation in place before we do the heaveir parts of the
+  // can get our instrumentation in place before we do the heavier parts of the
   // initialization.
   void InitForTest() { DoInit(); }
 
   // The big IO methods are proxied to callbacks for the mock so tests can just
   // intercept them.
-  std::function<void(const std::string&, DebugSymbolFileType,
-                     SymbolServer::FetchCallback)>
+  std::function<void(const std::string&, DebugSymbolFileType, SymbolServer::FetchCallback)>
       on_fetch = {};
-  std::function<void(const std::string&, DebugSymbolFileType,
-                     SymbolServer::CheckFetchCallback)>
+  std::function<void(const std::string&, DebugSymbolFileType, SymbolServer::CheckFetchCallback)>
       on_check_fetch = {};
-  std::function<void(const std::map<std::string, std::string>&,
-                     std::function<void(const Err&)>)>
+  std::function<void(const std::map<std::string, std::string>&, std::function<void(const Err&)>)>
       on_do_authenticate = {};
+
+  // Force the symbol server into the ready state.
+  void ForceReady() { ChangeState(SymbolServer::State::kReady); }
 
   // Implementation of Symbol server.
   void Fetch(const std::string& build_id, DebugSymbolFileType file_type,
@@ -93,3 +92,5 @@ class MockCloudStorageSymbolServer : public CloudStorageSymbolServer {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_CLOUD_STORAGE_SYMBOL_SERVER_H_

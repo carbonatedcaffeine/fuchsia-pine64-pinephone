@@ -8,11 +8,14 @@ static_library("expr") {
     "builtin_types.h",
     "cast.cc",
     "cast.h",
+    "eval_context.h",
+    "eval_context_impl.cc",
+    "eval_context_impl.h",
     "eval_operators.cc",
     "eval_operators.h",
     "expr.cc",
     "expr.h",
-    "expr_eval_context.h",
+    "expr_language.h",
     "expr_node.cc",
     "expr_node.h",
     "expr_parser.cc",
@@ -27,7 +30,11 @@ static_library("expr") {
     "expr_value_source.h",
     "find_name.cc",
     "find_name.h",
+    "format.cc",
+    "format.h",
     "format_expr_value_options.h",
+    "format_node.cc",
+    "format_node.h",
     "found_member.cc",
     "found_member.h",
     "found_name.cc",
@@ -36,16 +43,16 @@ static_library("expr") {
     "index_walker.h",
     "number_parser.cc",
     "number_parser.h",
+    "parsed_identifier.cc",
+    "parsed_identifier.h",
     "resolve_array.cc",
     "resolve_array.h",
     "resolve_collection.cc",
     "resolve_collection.h",
     "resolve_ptr_ref.cc",
     "resolve_ptr_ref.h",
-    "symbol_eval_context.cc",
-    "symbol_eval_context.h",
-    "symbol_variable_resolver.cc",
-    "symbol_variable_resolver.h",
+    "resolve_variant.cc",
+    "resolve_variant.h",
     "template_type_extractor.cc",
     "template_type_extractor.h",
   ]
@@ -54,6 +61,21 @@ static_library("expr") {
     "//src/developer/debug/zxdb/common",
     "//src/developer/debug/zxdb/symbols",
     "//src/lib/fxl",
+    "//zircon/public/lib/fit",
+  ]
+}
+
+source_set("test_support") {
+  testonly = true
+
+  sources = [
+    "mock_eval_context.cc",
+    "mock_eval_context.h",
+  ]
+
+  public_deps = [
+    ":expr",
+    "//src/developer/debug/zxdb/symbols:test_support",
   ]
 }
 
@@ -63,6 +85,7 @@ source_set("tests") {
   sources = [
     "builtin_types_unittest.cc",
     "cast_unittest.cc",
+    "eval_context_impl_unittest.cc",
     "eval_operators_unittest.cc",
     "eval_test_support.cc",
     "eval_test_support.h",
@@ -70,22 +93,22 @@ source_set("tests") {
     "expr_parser_unittest.cc",
     "expr_tokenizer_unittest.cc",
     "find_name_unittest.cc",
+    "format_unittest.cc",
     "index_walker_unittest.cc",
-    "mock_expr_eval_context.cc",
-    "mock_expr_eval_context.h",
     "mock_expr_node.cc",
     "mock_expr_node.h",
     "number_parser_unittest.cc",
+    "parsed_identifier_unittest.cc",
     "resolve_array_unittest.cc",
     "resolve_collection_unittest.cc",
     "resolve_ptr_ref_unittest.cc",
-    "symbol_eval_context_unittest.cc",
-    "symbol_variable_resolver_unittest.cc",
+    "resolve_variant_unittest.cc",
     "template_type_extractor_unittest.cc",
   ]
 
   deps = [
     ":expr",
+    ":test_support",
     "//garnet/third_party/llvm:LLVMBinaryFormat",
     "//src/developer/debug/zxdb/common:test_support",
     "//src/developer/debug/zxdb/symbols:test_support",

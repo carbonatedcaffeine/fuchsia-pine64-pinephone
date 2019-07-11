@@ -26,7 +26,6 @@ test_packages = [
   "cmd/pm/genkey",
   "cmd/pm/publish",
   "cmd/pm/serve",
-  "keys",
   "repo",
 ]
 
@@ -70,6 +69,13 @@ package("pm") {
     {
       name = "pm"
       shell = true
+    },
+  ]
+
+  meta = [
+    {
+      path = rebase_path("meta/pm.cmx")
+      dest = "pm.cmx"
     },
   ]
 }

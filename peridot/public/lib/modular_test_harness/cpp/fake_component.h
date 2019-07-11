@@ -5,8 +5,9 @@
 #ifndef LIB_MODULAR_TEST_HARNESS_CPP_FAKE_COMPONENT_H_
 #define LIB_MODULAR_TEST_HARNESS_CPP_FAKE_COMPONENT_H_
 
+#include <lib/fidl/cpp/binding_set.h>
+#include <lib/modular/testing/cpp/test_harness_builder.h>
 #include <lib/sys/cpp/component_context.h>
-#include <lib/modular_test_harness/cpp/test_harness_fixture.h>
 
 namespace modular {
 namespace testing {
@@ -20,7 +21,7 @@ namespace testing {
 //
 // Usage: pass ComponentBase.GetOnCreateHandler() to TestHarnessBuilder's
 // Intercept*() methods.
-class FakeComponent {
+class FakeComponent : public fuchsia::modular::Lifecycle {
  public:
   virtual ~FakeComponent();
 
@@ -60,8 +61,13 @@ class FakeComponent {
   virtual void OnDestroy() {}
 
  private:
+  // |fuchsia::modular::Lifecycle|
+  void Terminate() override;
+
   fuchsia::modular::testing::InterceptedComponentPtr intercepted_component_ptr_;
   std::unique_ptr<sys::ComponentContext> component_context_;
+
+  fidl::BindingSet<fuchsia::modular::Lifecycle> lifecycle_bindings_;
 };
 
 }  // namespace testing

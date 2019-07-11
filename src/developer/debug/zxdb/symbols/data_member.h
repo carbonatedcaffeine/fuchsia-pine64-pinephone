@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DATA_MEMBER_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DATA_MEMBER_H_
 
 #include "src/developer/debug/zxdb/symbols/value.h"
 
@@ -28,9 +29,12 @@ class DataMember final : public Value {
   FRIEND_MAKE_REF_COUNTED(DataMember);
 
   DataMember();
+  DataMember(const std::string& assigned_name, LazySymbol type, uint32_t member_loc);
   ~DataMember();
 
   uint32_t member_location_ = 0;
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DATA_MEMBER_H_

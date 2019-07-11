@@ -13,6 +13,7 @@
 #include <lib/fsl/syslogger/init.h>
 #include <lib/zx/channel.h>
 #include <stdlib.h>
+#include <trace-provider/provider.h>
 #include <zircon/boot/image.h>
 
 #include <chrono>
@@ -26,7 +27,8 @@
 #include "src/cobalt/bin/app/cobalt_app.h"
 #include "src/lib/fxl/command_line.h"
 #include "src/lib/fxl/log_settings_command_line.h"
-#include "src/lib/fxl/logging.h"
+#include "src/lib/fxl/strings/join_strings.h"
+#include "src/lib/fxl/strings/split_string.h"
 #include "third_party/cobalt/encoder/file_observation_store.h"
 #include "third_party/cobalt/encoder/memory_observation_store.h"
 #include "third_party/cobalt/util/posix_file_system.h"
@@ -80,6 +82,14 @@ const size_t kEventAggregatorBackfillDaysDefault(2);
 // EventAggregator.
 constexpr bool kStartEventAggregatorWorkerDefault(true);
 
+// This is a set of channel names that are known to have DEBUG semantics.
+//
+// - devhost is the channel for development devices.
+// - fishfood-release is the main fishfood channel.
+// - qa-daily is a daily QA release.
+const std::vector<std::string> kDebugChannels({"devhost", "fishfood-release",
+                                               "qa-daily"});
+
 // ReadBoardName returns the board name of the currently running device.
 //
 // At the time of this writing, this will either be 'pc' for x86 devices, or an
@@ -128,17 +138,10 @@ std::string ReadBuildInfo(std::string value) {
 }
 
 int main(int argc, const char** argv) {
-  setenv("GRPC_DEFAULT_SSL_ROOTS_FILE_PATH", "/config/ssl/cert.pem", 1);
-
   // Parse the flags.
   const auto command_line = fxl::CommandLineFromArgcArgv(argc, argv);
   fxl::SetLogSettingsFromCommandLine(command_line);
-  fsl::InitLoggerFromCommandLine(command_line, {"cobalt"});
-
-  if (fxl::GetVlogVerbosity() >= 10) {
-    setenv("GRPC_VERBOSITY", "DEBUG", 1);
-    setenv("GRPC_TRACE", "all,-timer,-timer_check", 1);
-  }
+  fsl::InitLoggerFromCommandLine(command_line, {"cobalt", "fidl_service"});
 
   // Parse the schedule_interval_seconds flag.
   std::chrono::seconds schedule_interval =
@@ -216,7 +219,7 @@ int main(int argc, const char** argv) {
     }
   }
 
-  FXL_LOG(INFO) << "Cobalt is starting with the following parameters: "
+  FX_LOGS(INFO) << "Cobalt is starting with the following parameters: "
                 << "schedule_interval=" << schedule_interval.count()
                 << " seconds, min_interval=" << min_interval.count()
                 << " seconds, initial_interval=" << initial_interval.count()
@@ -228,11 +231,14 @@ int main(int argc, const char** argv) {
                 << start_event_aggregator_worker << ".";
 
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
+  trace::TraceProviderWithFdio trace_provider(loop.dispatcher(),
+                                              "cobalt_fidl_provider");
   cobalt::CobaltApp app(
       loop.dispatcher(), schedule_interval, min_interval, initial_interval,
       event_aggregator_backfill_days, start_event_aggregator_worker,
       use_memory_observation_store, max_bytes_per_observation_store,
-      ReadBuildInfo("product"), ReadBoardName(), ReadBuildInfo("version"));
+      ReadBuildInfo("product"), ReadBoardName(), ReadBuildInfo("version"),
+      kDebugChannels);
   loop.Run();
   return 0;
 }

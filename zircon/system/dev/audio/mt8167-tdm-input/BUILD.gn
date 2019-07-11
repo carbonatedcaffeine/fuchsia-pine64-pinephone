@@ -4,8 +4,8 @@
 
 driver("mt8167-tdm-input") {
   sources = [
-    "audio-stream-in.cpp",
-    "tlv320adc.cpp",
+    "audio-stream-in.cc",
+    "tlv320adc.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.composite",
@@ -13,6 +13,9 @@ driver("mt8167-tdm-input") {
     "$zx/system/banjo/ddk.protocol.i2c",
     "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/dev/audio/lib/simple-audio-stream",
+    "$zx/system/dev/lib/device-protocol-i2c",
+    "$zx/system/dev/lib/device-protocol-i2c-channel",
+    "$zx/system/dev/lib/device-protocol-pdev",
     "$zx/system/dev/lib/mmio",
     "$zx/system/dev/lib/mt8167",
     "$zx/system/dev/lib/mt8167",

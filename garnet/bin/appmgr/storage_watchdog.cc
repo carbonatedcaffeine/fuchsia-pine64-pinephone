@@ -109,15 +109,25 @@ size_t StorageWatchdog::GetStorageUsage() {
   zx_status_t io_status = fuchsia_io_DirectoryAdminQueryFilesystem(
       caller.borrow_channel(), &status, &info);
   if (io_status != ZX_OK || status != ZX_OK) {
-    FXL_LOG(WARNING) << "storage_watchdog: cannot query filesysten: "
+    FXL_LOG(WARNING) << "storage_watchdog: cannot query filesystem: "
                      << io_status << " OR " << status;
     return 0;
   }
   info.name[fuchsia_io_MAX_FS_NAME_BUFFER - 1] = '\0';
 
-  size_t bytes_total = info.total_bytes;
-  size_t bytes_used = info.used_bytes;
-  size_t use_percentage = bytes_used * 100 / bytes_total;
+  // The number of bytes which may be allocated plus the number of bytes which
+  // have been allocated
+  size_t free_plus_allocated = info.free_shared_pool_bytes + info.total_bytes;
+
+  if (free_plus_allocated == 0) {
+    FXL_LOG(WARNING) << "storage_watchdog: unable to determine storage "
+                     << "pressure";
+    return 0;
+  }
+
+  // The number of used bytes (*100, because we want a percent) over the number
+  // of bytes which may be used
+  size_t use_percentage = info.used_bytes * 100 / free_plus_allocated;
 
   return use_percentage;
 }
@@ -127,7 +137,8 @@ void StorageWatchdog::CheckStorage(async_dispatcher_t* dispatcher) {
 
   if (use_percentage >= 95) {
     FXL_LOG(INFO)
-        << "storage usage has reached 95%% capacity, purging the cache now";
+        << "storage usage has reached " << use_percentage
+        << "%% capacity, purging the cache now";
     this->PurgeCache();
   }
   async::PostDelayedTask(
@@ -146,8 +157,16 @@ void StorageWatchdog::PurgeCache() {
   // Walk the directory tree from `path_to_clean_`.
   int dir_fd = open(path_to_clean_.c_str(), O_DIRECTORY);
   if (dir_fd == -1) {
-    FXL_LOG(ERROR) << "error opening directory: " << errno;
+    if (errno == ENOENT) {
+      FXL_LOG(INFO) << "nothing in cache to purge";
+    } else {
+      FXL_LOG(ERROR) << "error opening directory: " << errno;
+    }
     return;
   }
   PurgeCacheIn(dir_fd);
+  size_t use_percentage = this->GetStorageUsage();
+  FXL_LOG(INFO)
+    << "cache purge is complete, new storage usage is at "
+    << use_percentage << "%% capacity";
 }

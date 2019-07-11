@@ -337,6 +337,7 @@ TEST_F(PuppetMasterTest, CreateStoryWithStoryInfoExtra) {
 
   // The story, and its StoryData, does not exist until the story is created,
   // which is after the commands are executed.
+  done = false;
   storage_->GetStoryData(story_name)
       ->Then([&](fuchsia::modular::internal::StoryDataPtr data) {
         EXPECT_EQ(nullptr, data);
@@ -356,6 +357,7 @@ TEST_F(PuppetMasterTest, CreateStoryWithStoryInfoExtra) {
   done = false;
   storage_->GetStoryData(story_name)
       ->Then([&](fuchsia::modular::internal::StoryDataPtr data) {
+        ASSERT_NE(nullptr, data);
         ASSERT_FALSE(data->story_info().extra.is_null());
         auto extra_info = data->story_info().extra.get();
         ASSERT_EQ(extra_info.size(), extra_info_size);

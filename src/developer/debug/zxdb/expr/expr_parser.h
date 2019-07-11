@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_PARSER_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_PARSER_H_
 
 #include <memory>
 #include <vector>
@@ -21,17 +22,17 @@ class ExprParser {
   // symbol context. This means that we can't disambiguate some cases like how
   // to parse "Foo < 1 > bar". In this mode, we'll assume that "<" after a
   // name always mean a template rather than a comparison operation.
-  ExprParser(std::vector<ExprToken> tokens,
-             NameLookupCallback name_lookup = NameLookupCallback());
+  ExprParser(std::vector<ExprToken> tokens, NameLookupCallback name_lookup = NameLookupCallback());
 
   // Returns the root expression node on successful parsing. On error, returns
   // an empty pointer in which case the error message can be read from err()
   // ad error_token()
   fxl::RefPtr<ExprNode> Parse();
 
-  // Attempts to parse the given string as an identifier. Returns either a
-  // set Err or the resulting Identifier when the Err is not set.
-  static std::pair<Err, Identifier> ParseIdentifier(const std::string& input);
+  // Attempts to parse the given string as an identifier. The returned err
+  // indicates whether the output identifier is valid.
+  static Err ParseIdentifier(const std::string& input, Identifier* output);
+  static Err ParseIdentifier(const std::string& input, ParsedIdentifier* output);
 
   // The result of parsing. Since this does not have access to the initial
   // string, it will not indicate context for the error. That can be generated
@@ -69,7 +70,7 @@ class ExprParser {
     ParseNameResult() = default;
 
     // On success, always contains the identifier name.
-    Identifier ident;
+    ParsedIdentifier ident;
 
     // When the result is a type, this will contain the resolved type. When
     // null, the result is a non-type or an error.
@@ -97,24 +98,17 @@ class ExprParser {
 
   // Parses comma-separated lists of expressions. Runs until the given ending
   // token is found (normally a ')' for a function call).
-  std::vector<fxl::RefPtr<ExprNode>> ParseExpressionList(
-      ExprTokenType stop_before);
+  std::vector<fxl::RefPtr<ExprNode>> ParseExpressionList(ExprTokenType stop_before);
 
   fxl::RefPtr<ExprNode> AmpersandPrefix(const ExprToken& token);
-  fxl::RefPtr<ExprNode> BinaryOpInfix(fxl::RefPtr<ExprNode> left,
-                                      const ExprToken& token);
-  fxl::RefPtr<ExprNode> DotOrArrowInfix(fxl::RefPtr<ExprNode> left,
-                                        const ExprToken& token);
+  fxl::RefPtr<ExprNode> BinaryOpInfix(fxl::RefPtr<ExprNode> left, const ExprToken& token);
+  fxl::RefPtr<ExprNode> DotOrArrowInfix(fxl::RefPtr<ExprNode> left, const ExprToken& token);
   fxl::RefPtr<ExprNode> LeftParenPrefix(const ExprToken& token);
-  fxl::RefPtr<ExprNode> LeftParenInfix(fxl::RefPtr<ExprNode> left,
-                                       const ExprToken& token);
-  fxl::RefPtr<ExprNode> LeftSquareInfix(fxl::RefPtr<ExprNode> left,
-                                        const ExprToken& token);
-  fxl::RefPtr<ExprNode> LessInfix(fxl::RefPtr<ExprNode> left,
-                                  const ExprToken& token);
+  fxl::RefPtr<ExprNode> LeftParenInfix(fxl::RefPtr<ExprNode> left, const ExprToken& token);
+  fxl::RefPtr<ExprNode> LeftSquareInfix(fxl::RefPtr<ExprNode> left, const ExprToken& token);
+  fxl::RefPtr<ExprNode> LessInfix(fxl::RefPtr<ExprNode> left, const ExprToken& token);
   fxl::RefPtr<ExprNode> LiteralPrefix(const ExprToken& token);
-  fxl::RefPtr<ExprNode> GreaterInfix(fxl::RefPtr<ExprNode> left,
-                                     const ExprToken& token);
+  fxl::RefPtr<ExprNode> GreaterInfix(fxl::RefPtr<ExprNode> left, const ExprToken& token);
   fxl::RefPtr<ExprNode> MinusPrefix(const ExprToken& token);
   fxl::RefPtr<ExprNode> NamePrefix(const ExprToken& token);
   fxl::RefPtr<ExprNode> StarPrefix(const ExprToken& token);
@@ -149,8 +143,7 @@ class ExprParser {
 
   // Applies the given type modifier tags to the given input in order and
   // returns the newly qualified type.
-  fxl::RefPtr<Type> ApplyQualifiers(fxl::RefPtr<Type> input,
-                                    const std::vector<DwarfTag>& qual);
+  fxl::RefPtr<Type> ApplyQualifiers(fxl::RefPtr<Type> input, const std::vector<DwarfTag>& qual);
 
   void SetError(const ExprToken& token, std::string msg);
 
@@ -179,3 +172,5 @@ class ExprParser {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_PARSER_H_

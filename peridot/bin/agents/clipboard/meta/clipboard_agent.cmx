@@ -9,9 +9,8 @@
             "fuchsia.modular.ModuleContext",
             "fuchsia.modular.AgentContext",
             "fuchsia.net.oldhttp.HttpService",
-            "fuchsia.netconnector.NetConnector",
             "fuchsia.sys.Launcher",
-            "fuchsia.tracelink.Registry"
+            "fuchsia.tracing.provider.Registry"
         ]
     }
 }

@@ -6,21 +6,22 @@
 
 //! Utilities for Bluetooth development.
 
+pub mod constants;
+
 /// Lists of Bluetooth SIG assigned numbers and conversion functions
 pub mod assigned_numbers;
 /// Bluetooth Error type
 pub mod error;
 /// Tools for writing asynchronous expectations in tests
 pub mod expectation;
-/// Fake bt-hci device API
-pub mod fake_hci;
-/// Bluetooth HCI device utilities.
-pub mod hci;
+/// Utility for interacting with the bt-hci-emulator driver
+pub mod hci_emulator;
 /// Bluetooth host API
 pub mod host;
-/// Bluetooth LowEnergy types
-pub mod le;
 /// Common Bluetooth type extensions
 pub mod types;
-/// Frequent Used Functions
+/// Frequently Used Functions
 pub mod util;
+
+/// Convenience wrappers around VFS watcher.
+pub mod device_watcher;

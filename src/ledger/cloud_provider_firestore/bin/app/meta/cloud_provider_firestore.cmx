@@ -7,9 +7,11 @@
             "root-ssl-certificates"
         ],
         "services": [
-            "fuchsia.tracelink.Registry",
+            "fuchsia.cobalt.LoggerFactory",
+            "fuchsia.net.NameLookup",
+            "fuchsia.posix.socket.Provider",
             "fuchsia.net.SocketProvider",
-            "fuchsia.cobalt.LoggerFactory"
+            "fuchsia.tracing.provider.Registry"
         ]
     }
 }

@@ -4,8 +4,8 @@
 
 #include "garnet/bin/iquery/options.h"
 
-#include <lib/inspect/query/json_formatter.h>
-#include <lib/inspect/query/text_formatter.h>
+#include <lib/inspect_deprecated/query/json_formatter.h>
+#include <lib/inspect_deprecated/query/text_formatter.h>
 #include <src/lib/files/path.h>
 #include <src/lib/fxl/strings/concatenate.h>
 #include <src/lib/fxl/strings/substitute.h>
@@ -14,7 +14,7 @@
 #include <set>
 #include <string>
 
-#include "lib/inspect/query/formatter.h"
+#include "lib/inspect_deprecated/query/formatter.h"
 
 namespace iquery {
 
@@ -23,7 +23,7 @@ namespace {
 std::set<std::string> kKnownOptions = {
     "cat",  "absolute_paths", "find",    "format", "full_paths", "help",
     "ls",   "recursive",      "verbose", "quiet",  "log-file",   "dir",
-    "sort",
+    "sort", "report",         "health",
 };
 
 // Validate whether the option is within the defined ones.
@@ -47,17 +47,16 @@ Options::FormatterType GetFormatterType(const fxl::CommandLine& cmd_line) {
   }
 }
 
-std::unique_ptr<inspect::Formatter> CreateFormatter(
-    Options::FormatterType type,
-    const inspect::Formatter::PathFormat& path_format) {
+std::unique_ptr<inspect_deprecated::Formatter> CreateFormatter(
+    Options::FormatterType type, const inspect_deprecated::Formatter::PathFormat& path_format) {
   switch (type) {
     case Options::FormatterType::TEXT: {
-      inspect::TextFormatter::Options options;
-      return std::make_unique<inspect::TextFormatter>(options, path_format);
+      inspect_deprecated::TextFormatter::Options options;
+      return std::make_unique<inspect_deprecated::TextFormatter>(options, path_format);
     }
     case Options::FormatterType::JSON: {
-      inspect::JsonFormatter::Options options;
-      return std::make_unique<inspect::JsonFormatter>(options, path_format);
+      inspect_deprecated::JsonFormatter::Options options;
+      return std::make_unique<inspect_deprecated::JsonFormatter>(options, path_format);
     }
     case Options::FormatterType::UNSET:
       return nullptr;
@@ -76,28 +75,45 @@ Options::Options(const fxl::CommandLine& command_line) {
 
   command_line.GetOptionValue("dir", &chdir);
 
-  if (command_line.HasOption("cat") && !SetMode(command_line, Mode::CAT))
-    return;
-  else if (command_line.HasOption("find") && !SetMode(command_line, Mode::FIND))
-    return;
-  else if (command_line.HasOption("ls") && !SetMode(command_line, Mode::LS))
-    return;
-  else if (mode == Mode::UNSET)
-    SetMode(command_line, Mode::CAT);
+  bool is_recursive_set = command_line.HasOption("recursive");
 
-  // Path formatting options.
-  path_format = inspect::Formatter::PathFormat::NONE;
-  if (command_line.HasOption("full_paths")) {
-    path_format = inspect::Formatter::PathFormat::FULL;
-  }
-  if (command_line.HasOption("absolute_paths")) {
-    path_format = inspect::Formatter::PathFormat::ABSOLUTE;
-  }
+  if (command_line.HasOption("health")) {
+    health = true;
+    depth_ = is_recursive_set ? -1 : 1;
+    mode = iquery::Options::Mode::HEALTH;
+  } else if (command_line.HasOption("report")) {
+    report = true;
+    path_format = inspect_deprecated::Formatter::PathFormat::ABSOLUTE;
+    depth_ = -1;
+    sort = true;
+    mode = iquery::Options::Mode::CAT;
+    paths = {};
+  } else {
+    if (command_line.HasOption("cat") && !SetMode(command_line, Mode::CAT))
+      return;
+    else if (command_line.HasOption("find") && !SetMode(command_line, Mode::FIND))
+      return;
+    else if (command_line.HasOption("ls") && !SetMode(command_line, Mode::LS))
+      return;
+    else if (mode == Mode::UNSET)
+      SetMode(command_line, Mode::CAT);
 
-  // Find has a special case, where none path formatting is not really useful.
-  if (path_format == inspect::Formatter::PathFormat::NONE &&
-      mode == Mode::FIND) {
-    path_format = inspect::Formatter::PathFormat::FULL;
+    // Path formatting options.
+    path_format = inspect_deprecated::Formatter::PathFormat::NONE;
+    if (command_line.HasOption("full_paths")) {
+      path_format = inspect_deprecated::Formatter::PathFormat::FULL;
+    }
+    if (command_line.HasOption("absolute_paths")) {
+      path_format = inspect_deprecated::Formatter::PathFormat::ABSOLUTE;
+    }
+
+    // Find has a special case, where none path formatting is not really useful.
+    if (path_format == inspect_deprecated::Formatter::PathFormat::NONE && mode == Mode::FIND) {
+      path_format = inspect_deprecated::Formatter::PathFormat::FULL;
+    }
+
+    depth_ = is_recursive_set ? -1 : 0;
+    sort = command_line.HasOption("sort");
   }
 
   formatter_type = GetFormatterType(command_line);
@@ -105,11 +121,8 @@ Options::Options(const fxl::CommandLine& command_line) {
   if (!formatter)
     return;
 
-  recursive = command_line.HasOption("recursive");
-  sort = command_line.HasOption("sort");
-
-  std::copy(command_line.positional_args().begin(),
-            command_line.positional_args().end(), std::back_inserter(paths));
+  std::copy(command_line.positional_args().begin(), command_line.positional_args().end(),
+            std::back_inserter(paths));
 
   // If everything went well, we mark this options as valid.
   valid_ = true;
@@ -127,12 +140,16 @@ void Options::Usage(const std::string& argv0) {
   --dir:     Change directory to the given PATH before executing commands.
 
   Mode options:
-  --cat:  [DEFAULT] Print the data for the object(s) given by each PATH.
-          Specifying --recursive will also output the children for that object.
-  --find: find all objects under PATH. For each sub-path, will stop at finding
-          the first object. Specifying --recursive will search the whole tree.
-  --ls:   List the children of the object(s) given by PATH. Specifying
-          --recursive has no effect.
+  --cat:    [DEFAULT] Print the data for the object(s) given by each PATH.
+            Specifying --recursive will also output the children for that object.
+  --find:   find all objects under PATH. For each sub-path, will stop at finding
+            the first object. Specifying --recursive will search the whole tree.
+  --health: Output a report that scans the system looking for health nodes and
+            showing the status of them.
+  --ls:     List the children of the object(s) given by PATH. Specifying
+            --recursive has no effect.
+  --report: Output a default report for all components on the system. Ignores all
+            settings other than --format.
 
   --recursive: Whether iquery should continue inside an object. See each mode's
                description to see how it modifies their behaviors.

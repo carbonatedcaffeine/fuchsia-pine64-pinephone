@@ -4,29 +4,13 @@
 
 library("ddktl") {
   sdk = "static"
+  sdk_publishable = true
   sdk_headers = [
-    "ddktl/protocol/empty-protocol.h",
     "ddktl/device-internal.h",
     "ddktl/device.h",
-    "ddktl/i2c-channel.h",
-    "ddktl/pdev.h",
   ]
-  sources = [
-    "pdev.cpp",
-  ]
+  sources = []
   public_deps = [
-    # <ddktl/pdev.h> has #include <ddktl/protocol/clock.h>.
-    "$zx/system/banjo/ddk.protocol.clock",
-
-    # <ddktl/pdev.h> has #include <ddktl/protocol/gpio.h>.
-    "$zx/system/banjo/ddk.protocol.gpio",
-
-    # <ddktl/pdev.h> has #include <ddktl/protocol/power.h>.
-    "$zx/system/banjo/ddk.protocol.power",
-
-    # <ddktl/pdev.h> has #include <ddktl/protocol/platform/device.h>.
-    "$zx/system/banjo/ddk.protocol.platform.device",
-
     # <ddktl/device-internal.h> has #include <fbl/macros.h>.
     "$zx/system/ulib/fbl:headers",
 
@@ -35,9 +19,6 @@ library("ddktl") {
   ]
   configs += [ "$zx/public/gn/config:visibility_hidden" ]
   deps = [
-    "$zx/system/banjo/ddk.protocol.ethernet",
-    "$zx/system/banjo/ddk.protocol.gpio",
-    "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/fbl",
@@ -50,9 +31,9 @@ library("ddktl") {
 test_driver("ddktl-test") {
   sources = [
     "test/ddktl-test-binding.c",
-    "test/ddktl-test.cpp",
-    "test/device-tests.cpp",
-    "test/ethernet-tests.cpp",
+    "test/ddktl-test.cc",
+    "test/device-tests.cc",
+    "test/ethernet-tests.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.ethernet",
@@ -65,4 +46,7 @@ test_driver("ddktl-test") {
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",
   ]
+
+  # TODO(ZX-2863): This driver violates the allowed shlib deps policy.
+  deprecated_inhibit_driver_shlib_allowlist = true
 }

@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_MODULE_SYMBOLS_IMPL_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_MODULE_SYMBOLS_IMPL_H_
 
+#include "gtest/gtest_prod.h"
 #include "llvm/DebugInfo/DWARF/DWARFUnit.h"
 #include "src/developer/debug/zxdb/common/err.h"
+#include "src/developer/debug/zxdb/symbols/index.h"
 #include "src/developer/debug/zxdb/symbols/location.h"
-#include "src/developer/debug/zxdb/symbols/module_symbol_index.h"
 #include "src/developer/debug/zxdb/symbols/module_symbols.h"
 #include "src/lib/fxl/macros.h"
 #include "src/lib/fxl/memory/weak_ptr.h"
@@ -31,16 +33,14 @@ class Variable;
 
 // Represents the symbols for a module (executable or shared library).
 //
-// All addresses in and out of the API of this class are module-relative. This
-// way, the symbol information can be shared between multiple processes that
-// have mapped the same .so file (often at different addresses). This means
-// that callers have to offset addresses when calling into this class, and
-// offset them in the opposite way when they get the results.
+// All addresses in and out of the API of this class are module-relative. This way, the symbol
+// information can be shared between multiple processes that have mapped the same .so file (often at
+// different addresses). This means that callers have to offset addresses when calling into this
+// class, and offset them in the opposite way when they get the results.
 class ModuleSymbolsImpl : public ModuleSymbols {
  public:
   // You must call Load before using this class.
-  explicit ModuleSymbolsImpl(const std::string& name,
-                             const std::string& binary_name,
+  explicit ModuleSymbolsImpl(const std::string& name, const std::string& binary_name,
                              const std::string& build_id);
   ~ModuleSymbolsImpl();
 
@@ -59,44 +59,47 @@ class ModuleSymbolsImpl : public ModuleSymbols {
       const ResolveOptions& options = ResolveOptions()) const override;
   LineDetails LineDetailsForAddress(const SymbolContext& symbol_context,
                                     uint64_t absolute_address) const override;
-  std::vector<std::string> FindFileMatches(
-      std::string_view name) const override;
-  const ModuleSymbolIndex& GetIndex() const override;
-  LazySymbol IndexDieRefToSymbol(
-      const ModuleSymbolIndexNode::DieRef&) const override;
+  std::vector<std::string> FindFileMatches(std::string_view name) const override;
+  std::vector<fxl::RefPtr<Function>> GetMainFunctions() const override;
+  const Index& GetIndex() const override;
+  LazySymbol IndexDieRefToSymbol(const IndexNode::DieRef&) const override;
+  bool HasBinary() const override;
 
  private:
-  llvm::DWARFUnit* CompileUnitForRelativeAddress(
-      uint64_t relative_address) const;
+  FRIEND_TEST(ModuleSymbols, ResolveMainFunction);
+
+  llvm::DWARFUnit* CompileUnitForRelativeAddress(uint64_t relative_address) const;
 
   // Helpers for ResolveInputLocation() for the different types of inputs.
-  std::vector<Location> ResolveLineInputLocation(
-      const SymbolContext& symbol_context, const InputLocation& input_location,
-      const ResolveOptions& options) const;
-  std::vector<Location> ResolveSymbolInputLocation(
-      const SymbolContext& symbol_context, const InputLocation& input_location,
-      const ResolveOptions& options) const;
-  std::vector<Location> ResolveAddressInputLocation(
-      const SymbolContext& symbol_context, const InputLocation& input_location,
-      const ResolveOptions& options) const;
+  std::vector<Location> ResolveLineInputLocation(const SymbolContext& symbol_context,
+                                                 const InputLocation& input_location,
+                                                 const ResolveOptions& options) const;
+  std::vector<Location> ResolveSymbolInputLocation(const SymbolContext& symbol_context,
+                                                   const InputLocation& input_location,
+                                                   const ResolveOptions& options) const;
+  std::vector<Location> ResolveAddressInputLocation(const SymbolContext& symbol_context,
+                                                    const InputLocation& input_location,
+                                                    const ResolveOptions& options) const;
 
   // Symbolizes the given address if possible.
-  Location LocationForAddress(const SymbolContext& symbol_context,
-                              uint64_t absolute_address) const;
+  Location LocationForAddress(const SymbolContext& symbol_context, uint64_t absolute_address) const;
 
-  // Converts the given global or static variable to a Location. This doesn't
-  // work for local variables which are dynamic and based on the current CPU
-  // state and stack.
+  // Converts the given global or static variable to a Location. This doesn't work for local
+  // variables which are dynamic and based on the current CPU state and stack.
   Location LocationForVariable(const SymbolContext& symbol_context,
                                fxl::RefPtr<Variable> variable) const;
 
-  // Resolves the line number information for the given file, which must be an
-  // exact match. This is a helper function for ResolveLineInputLocation().
+  // Converts a Function object to a found location according to the options and adds it to the
+  // list. May append nothing if there is no code for the function.
+  void AppendLocationForFunction(const SymbolContext& symbol_context, const ResolveOptions& options,
+                                 const Function* func, std::vector<Location>* result) const;
+
+  // Resolves the line number information for the given file, which must be an exact match. This is
+  // a helper function for ResolveLineInputLocation().
   //
   // This appends to the given output.
   void ResolveLineInputLocationForFile(const SymbolContext& symbol_context,
-                                       const std::string& canonical_file,
-                                       int line_number,
+                                       const std::string& canonical_file, int line_number,
                                        const ResolveOptions& options,
                                        std::vector<Location>* output) const;
 
@@ -110,7 +113,7 @@ class ModuleSymbolsImpl : public ModuleSymbols {
 
   llvm::DWARFUnitVector compile_units_;
 
-  ModuleSymbolIndex index_;
+  Index index_;
 
   std::map<std::string, uint64_t> plt_locations_;
 
@@ -122,3 +125,5 @@ class ModuleSymbolsImpl : public ModuleSymbols {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_MODULE_SYMBOLS_IMPL_H_

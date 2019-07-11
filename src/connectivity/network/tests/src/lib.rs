@@ -71,11 +71,11 @@ fn create_netstack_environment(
     >()
     .context("failed to create managed environment proxy")?;
     let () = sandbox
-            .create_environment(
-                server,
-                fidl_fuchsia_netemul_environment::EnvironmentOptions {
-                    name: Some(name),
-                    services:  Some([
+        .create_environment(
+            server,
+            fidl_fuchsia_netemul_environment::EnvironmentOptions {
+                name: Some(name),
+                services:  Some([
                     <fidl_fuchsia_netstack::NetstackMarker as fidl::endpoints::ServiceMarker>::NAME,
                     <fidl_fuchsia_net::SocketProviderMarker as fidl::endpoints::ServiceMarker>::NAME,
                     <fidl_fuchsia_net_stack::StackMarker as fidl::endpoints::ServiceMarker>::NAME,
@@ -85,24 +85,34 @@ fn create_netstack_environment(
                     .iter()
                     .map(std::ops::Deref::deref)
                     .map(str::to_string)
-            .map(|name| fidl_fuchsia_netemul_environment::LaunchService {
-                name,
-                url: fuchsia_component::fuchsia_single_component_package_url!("netstack")
-                    .to_string(),
-                arguments: Some(vec!["--sniff".to_string()]),
-            })
-            .collect()),
-                    devices: None,
-                    inherit_parent_launch_services: None,
-                    logger_options: Some(fidl_fuchsia_netemul_environment::LoggerOptions {
-                        enabled: Some(true),
-                        klogs_enabled: None,
-                        filter_options: None,
-                        syslog_output: Some(true),
-                    }),
-                },
-            )
-            .context("failed to create environment")?;
+                    .map(|name| fidl_fuchsia_netemul_environment::LaunchService {
+                        name,
+                        url: fuchsia_component::fuchsia_single_component_package_url!("netstack")
+                            .to_string(),
+                        arguments: Some(
+                            [
+                                "--sniff",
+                                "--verbosity=debug",
+                            ]
+                                // TODO(tamird): use into_iter after
+                                // https://github.com/rust-lang/rust/issues/25725.
+                                .iter()
+                                .map(std::ops::Deref::deref)
+                                .map(str::to_string).collect()
+                        ),
+                    })
+                    .collect()),
+                devices: None,
+                inherit_parent_launch_services: None,
+                logger_options: Some(fidl_fuchsia_netemul_environment::LoggerOptions {
+                    enabled: Some(true),
+                    klogs_enabled: None,
+                    filter_options: None,
+                    syslog_output: Some(true),
+                }),
+            },
+        )
+        .context("failed to create environment")?;
     Ok(client)
 }
 
@@ -254,8 +264,8 @@ async fn add_del_interface_address() -> Result {
 }
 
 #[fuchsia_async::run_singlethreaded(test)]
-async fn add_interface_address_not_found() -> Result {
-    let name = stringify!(add_interface_address_not_found);
+async fn add_interface_address_errors() -> Result {
+    let name = stringify!(add_interface_address_errors);
 
     let sandbox = fuchsia_component::client::connect_to_service::<
         fidl_fuchsia_netemul_sandbox::SandboxMarker,
@@ -273,6 +283,8 @@ async fn add_interface_address_not_found() -> Result {
         }),
         prefix_len: 0,
     };
+
+    // NET-2234 (crash on interface not found).
     let error = await!(stack.add_interface_address(max_id + 1, &mut interface_address))
         .context("failed to call add interface address")?
         .ok_or(failure::err_msg("failed to get add interface address error"))?;
@@ -280,6 +292,17 @@ async fn add_interface_address_not_found() -> Result {
         error.as_ref(),
         &fidl_fuchsia_net_stack::Error { type_: fidl_fuchsia_net_stack::ErrorType::NotFound }
     );
+
+    // NET-2334 (crash on invalid prefix length).
+    interface_address.prefix_len = 43;
+    let error = await!(stack.add_interface_address(max_id, &mut interface_address))
+        .context("failed to call add interface address")?
+        .ok_or(failure::err_msg("failed to get add interface address error"))?;
+    assert_eq!(
+        error.as_ref(),
+        &fidl_fuchsia_net_stack::Error { type_: fidl_fuchsia_net_stack::ErrorType::BadState }
+    );
+
     Ok(())
 }
 
@@ -397,7 +420,7 @@ async fn acquire_dhcp() -> Result {
         let () = server_environment.get_launcher(server).context("failed to get launcher")?;
         client
     };
-    let dhcpd = fuchsia_component::client::launch(
+    let _dhcpd = fuchsia_component::client::launch(
         &launcher,
         fuchsia_component::fuchsia_single_component_package_url!("dhcpd").to_string(),
         None,
@@ -472,7 +495,7 @@ async fn acquire_dhcp() -> Result {
                                 if addr == std::net::Ipv4Addr::UNSPECIFIED.octets() {
                                     None
                                 } else {
-                                    Some(interface.addr)
+                                    Some((interface.addr, interface.netmask))
                                 }
                             }
                             fidl_fuchsia_net::IpAddress::Ipv6(fidl_fuchsia_net::Ipv6Address {
@@ -490,13 +513,24 @@ async fn acquire_dhcp() -> Result {
             // the race here and only starts after the first request from the DHCP client, which
             // results in a 3 second toll. This test typically takes ~4.5 seconds; we apply a large
             // multiple to be safe.
-            fuchsia_zircon::Time::after(fuchsia_zircon::Duration::from_seconds(60)),
+            fuchsia_async::Time::after(fuchsia_zircon::Duration::from_seconds(60)),
             || None,
         );
-        let _: fidl_fuchsia_net::IpAddress = await!(address_change)
+        let (addr, netmask) = await!(address_change)
             .ok_or(failure::err_msg("failed to observe DHCP acquisition"))?
             .context("failed to observe DHCP acquisition")?;
+        assert_eq!(
+            addr,
+            fidl_fuchsia_net::IpAddress::Ipv4(fidl_fuchsia_net::Ipv4Address {
+                addr: [192, 168, 0, 2]
+            })
+        );
+        assert_eq!(
+            netmask,
+            fidl_fuchsia_net::IpAddress::Ipv4(fidl_fuchsia_net::Ipv4Address {
+                addr: [255, 255, 255, 128]
+            })
+        );
     }
-    drop(dhcpd);
     Ok(())
 }

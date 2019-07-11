@@ -44,6 +44,10 @@ if (current_cpu == "x64") {
   zircon_cpu = current_cpu
 }
 
+# Shorthands.
+current_platform = "${current_os}-${current_cpu}"
+host_platform = "${host_os}-${host_cpu}"
+
 # Shorthand for `current_os == "fuchsia"`.
 is_fuchsia = current_os == "fuchsia"
 
@@ -227,6 +231,14 @@ template("shared_library") {
             }
           },
         ]
+
+        # Each shared_library() that's not on the allowlist gets a poison
+        # pill to flag it if it appears in the dependency graph from a
+        # driver() target.
+        if (!defined(driver_shlib_denylist)) {
+          driver_shlib_denylist =
+              [ get_label_info(":$target_name", "label_with_toolchain") ]
+        }
       }
     }
   } else {
@@ -293,6 +305,12 @@ template("shared_library") {
 #     $sdk_headers is required.
 #     Type: "static" or "shared" or "source"
 #
+#   sdk_publishable
+#     Optional: Indicates that this library can be added to SDKs in the legacy
+#     Fuchsia build.
+#     Type: bool
+#     Default: false
+#
 #   sdk_headers
 #     Optional: Required if $sdk is set.  This must list all the header files
 #     in the `include/` directory; names should be relative to `include/`.
@@ -341,19 +359,36 @@ template("library") {
     # meant to be very clean, just to do what works in the legacy build.
     sdk = invoker.sdk
     sdk_headers = invoker.sdk_headers
+    sdk_publishable =
+        defined(invoker.sdk_publishable) && invoker.sdk_publishable
     if (sdk != false) {
       assert(static || shared,
              "Public library(\"$_library_name\") must be static or shared")
     }
+    if (sdk == "shared") {
+      assert(
+          shared,
+          "library(\"$_library_name\") must set shared=true to use sdk=\"shared\"")
+    } else if (sdk == "static") {
+      assert(
+          static,
+          "library(\"$_library_name\") cannot set static=false sdk=\"static\"")
+    } else if (sdk == "source") {
+      assert(
+          static,
+          "library(\"$_library_name\") cannot set static=false sdk=\"source\"")
+    }
   } else {
     sdk = false
     sdk_headers = []
+    sdk_publishable = false
   }
   _library_params = [
     "kernel",
     "host",
     "sdk",
     "sdk_headers",
+    "sdk_publishable",
     "shared",
     "static",
   ]
@@ -372,8 +407,7 @@ template("library") {
 
   # TODO(BLD-353): temporary hacks
   if (sdk != false && toolchain.environment == "user" &&
-      current_toolchain == toolchain.shlib ==
-      (sdk == "shared" || (shared && sdk == "source"))) {
+      current_toolchain == toolchain.shlib) {
     sdk_deps = []
     if (defined(invoker.public_deps)) {
       foreach(label, invoker.public_deps) {
@@ -440,6 +474,7 @@ template("library") {
           dir = "//zircon/" + rebase_path("include", "//")
           include_dirs = [ "//zircon/" + rebase_path("include", "$zx/") ]
           headers = sdk_headers
+          publishable = sdk_publishable
           if (sdk == "source") {
             source_dir = "//zircon/" + rebase_path(".", "$zx/")
             sources = []
@@ -499,13 +534,6 @@ template("library") {
                 }
               }
             }
-          }
-          if (deps + public_deps + [ "//zircon/public/lib/zircon" ] -
-              [ "//zircon/public/lib/zircon" ] != deps + public_deps) {
-            lib_dirs = [ rebase_path(
-                    get_label_info("$zx/system/ulib/zircon(${toolchain.shlib})",
-                                   "target_out_dir"),
-                    root_build_dir) ]
           }
           install = install_files
           debug = debug_files
@@ -654,6 +682,19 @@ template("library") {
         }
 
         metadata = {
+          if (defined(invoker.metadata)) {
+            # The $metadata set on library() goes on the source_set().
+            # Generally that's fine, since it will be found via the deps
+            # from either static or shared library.  But shared_library()
+            # injects the driver_shlib_denylist data implicitly if it's not
+            # set explicitly, so make sure to propagate those keys to it.
+            forward_variables_from(invoker.metadata,
+                                   [
+                                     "driver_shlib_denylist",
+                                     "driver_shlib_denylist_barrier",
+                                   ])
+          }
+
           # An explicit `install_path = false` means this DSO is not installed.
           if (install_path != false) {
             manifest_inputs = [ "$target_out_dir/lib${output_name}.so" ]
@@ -1668,6 +1709,10 @@ template("loadable_module") {
 #
 # Parameters
 #
+#   deprecated_inhibit_driver_shlib_allowlist
+#     Optional: TODO(ZX-2863): If set (must be true), disable the
+#     shared library deps policy check for this driver.  Remove this ASAP!
+#
 #   install_path
 #     Optional: Where to install the driver in the BOOTFS.
 #     Default: "driver/${output_name}.so"
@@ -1686,6 +1731,9 @@ template("driver") {
                            [
                              "testonly",
                              "visibility",
+
+                             # TODO(ZX-2863): Remove this ASAP!
+                             "deprecated_inhibit_driver_shlib_allowlist",
                            ])
     forward_variables_from(invoker,
                            [
@@ -1705,6 +1753,63 @@ template("driver") {
     if (!defined(install_path)) {
       install_path = "driver/${output_name}.so"
     }
+
+    # Enforce the shared library allowlist.
+    deps += [ ":_driver.shlib-denylist-check.$target_name" ]
+  }
+
+  driver_label = get_label_info(":$target_name", "label_with_toolchain")
+  driver_target = target_name
+  check_target = "_driver.shlib-denylist-check.$target_name"
+  denylist_target = "_driver.shlib-denylist.$target_name"
+  denylist_file = "$target_gen_dir/$target_name.driver-shlib-denylist"
+
+  # It's an error to link against any shared library that's not on the
+  # allowlist.  Those libraries set `driver_shlib_denylist=[]` while others (by
+  # default, see shared_library() above) set `driver_shlib_denylist=[label]`.
+  # Hence the file generated here should be empty.
+  generated_file(denylist_target) {
+    forward_variables_from(invoker,
+                           [
+                             "deps",
+                             "public_deps",
+                             "testonly",
+                           ])
+
+    # TODO(ZX-2863): Remove this ASAP.
+    if (defined(invoker.deprecated_inhibit_driver_shlib_allowlist)) {
+      assert(invoker.deprecated_inhibit_driver_shlib_allowlist,
+             "omit deprecated_inhibit_driver_shlib_allowlist unless true")
+      deps = []
+      public_deps = []
+    }
+    visibility = [ ":$check_target" ]
+    data_keys = [ "driver_shlib_denylist" ]
+    walk_keys = [ "driver_shlib_denylist_barrier" ]
+    output_conversion = "list lines"
+    outputs = [
+      denylist_file,
+    ]
+  }
+
+  # GN doesn't provide a way to assert it was empty at gen time.
+  # So use a script to check it and give good diagnostics.
+  # TODO(mcgrathr): Give GN an assert_no_metadata feature for this.
+  # Maybe set `output_conversion="empty"` in generated_file().
+  action(check_target) {
+    forward_variables_from(invoker, [ "testonly" ])
+    visibility = [ ":${driver_target}._build($current_toolchain)" ]
+    script = "$zx/public/gn/driver-denylist-check.sh"
+    deps = [
+      ":$denylist_target",
+    ]
+    sources = [
+      denylist_file,
+    ]
+    outputs = [
+      "${denylist_file}.stamp",
+    ]
+    args = [ driver_label ] + rebase_path(sources + outputs, root_build_dir)
   }
 }
 

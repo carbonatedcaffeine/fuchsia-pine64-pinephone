@@ -8,12 +8,14 @@ import("//garnet/bin/appmgr/integration_tests/sandbox/sandbox_test_package.gni")
 group("shell") {
   testonly = true
   deps = [
-    ":has_shell",
+    ":has_deprecated_shell",
     ":no_shell",
   ]
 }
 
-sandbox_test_package("has_shell") {
+sandbox_test_package("has_deprecated_shell") {
+  deprecated_shell = "//build"
+
   sources = [
     "has_shell.cc",
   ]

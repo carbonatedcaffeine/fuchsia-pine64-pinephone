@@ -5,12 +5,13 @@
 #pragma once
 
 #include <atomic>
+#include <optional>
 #include <threads.h>
 
 #include <limits.h>
 
-#include <fuchsia/paver/c/fidl.h>
-#include <lib/fzl/owned-vmo-mapper.h>
+#include <fuchsia/paver/llcpp/fidl.h>
+#include <lib/fzl/resizeable-vmo-mapper.h>
 #include <lib/sync/completion.h>
 #include <lib/zx/channel.h>
 #include <lib/zx/time.h>
@@ -84,21 +85,20 @@ private:
     // Channel to svc.
     zx::channel svc_root_;
 
-    // Channel to paver service.
-    zx::channel paver_svc_;
+    std::optional<::llcpp::fuchsia::paver::Paver::SyncClient> paver_svc_;
 
     union {
         // Only valid when command == Command::kAsset.
         struct {
-            fuchsia_paver_Configuration configuration_;
-            fuchsia_paver_Asset asset_;
+            ::llcpp::fuchsia::paver::Configuration configuration_;
+            ::llcpp::fuchsia::paver::Asset asset_;
         };
         // Only valid when command == Command::kDataFile.
         char path_[PATH_MAX];
     };
 
     // Buffer used for stashing data from tftp until it can be written out to the paver.
-    fzl::OwnedVmoMapper buffer_mapper_;
+    fzl::ResizeableVmoMapper buffer_mapper_;
     // Buffer write offset.
     std::atomic<size_t> write_offset_ = 0;
     std::atomic<unsigned int> buf_refcount_ = 0;

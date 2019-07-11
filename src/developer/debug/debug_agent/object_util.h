@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
-
-#include <string>
-#include <vector>
+#ifndef SRC_DEVELOPER_DEBUG_DEBUG_AGENT_OBJECT_UTIL_H_
+#define SRC_DEVELOPER_DEBUG_DEBUG_AGENT_OBJECT_UTIL_H_
 
 #include <lib/zx/object.h>
 #include <zircon/types.h>
+
+#include <string>
+#include <vector>
 
 namespace zx {
 class job;
@@ -42,4 +43,9 @@ std::vector<zx::job> GetChildJobs(zx_handle_t job);
 std::vector<zx::process> GetChildProcesses(zx_handle_t job);
 std::vector<zx::thread> GetChildThreads(zx_handle_t process);
 
+zx::process GetProcessFromException(zx_handle_t exception_token);
+zx::thread GetThreadFromException(zx_handle_t exception_token);
+
 }  // namespace debug_agent
+
+#endif  // SRC_DEVELOPER_DEBUG_DEBUG_AGENT_OBJECT_UTIL_H_

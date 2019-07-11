@@ -10,7 +10,7 @@ Read the number of high-precision timer ticks since boot.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_ticks_t zx_ticks_get(void);
@@ -40,6 +40,7 @@ TODO(ZX-2399)
 ## NOTES
 
 The returned value may be highly variable. Factors that can affect it include:
+
 - Changes in processor frequency
 - Migration between processors
 - Reset of the processor cycle counter

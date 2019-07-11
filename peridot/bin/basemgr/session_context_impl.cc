@@ -31,6 +31,7 @@ SessionContextImpl::SessionContextImpl(
     fidl::InterfaceHandle<fuchsia::auth::TokenManager> agent_token_manager,
     fuchsia::modular::auth::AccountPtr account,
     fuchsia::ui::views::ViewToken view_token,
+    fuchsia::sys::ServiceListPtr additional_services,
     GetPresentationCallback get_presentation,
     OnSessionShutdownCallback on_session_shutdown)
     : session_context_binding_(this),
@@ -54,7 +55,7 @@ SessionContextImpl::SessionContextImpl(
   // 2. Launch Sessionmgr in the current environment.
   sessionmgr_app_ = std::make_unique<AppClient<fuchsia::modular::Lifecycle>>(
       launcher, std::move(sessionmgr_config), data_origin,
-      /* additional_services= */ nullptr, std::move(flat_namespace));
+      std::move(additional_services), std::move(flat_namespace));
 
   // 3. Initialize the Sessionmgr service.
   sessionmgr_app_->services().ConnectToService(sessionmgr_.NewRequest());
@@ -73,7 +74,7 @@ SessionContextImpl::SessionContextImpl(
     // Shutdown(), which expects a graceful shutdown of sessionmgr, does not
     // apply here because sessionmgr crashed. Just run |on_session_shutdown_|
     // directly.
-    on_session_shutdown_(/* logout_users= */ false);
+    on_session_shutdown_(ShutDownReason::CRASHED, /* logout_users= */ false);
   });
 }
 
@@ -114,8 +115,9 @@ void SessionContextImpl::Shutdown(bool logout_users,
     for (const auto& callback : shutdown_callbacks_) {
       callback();
     }
-
-    on_session_shutdown_(logout_users);
+    ShutDownReason shutdown_reason =
+        logout_users ? ShutDownReason::LOGGED_OUT : ShutDownReason::CRASHED;
+    on_session_shutdown_(shutdown_reason, logout_users);
   });
 }
 

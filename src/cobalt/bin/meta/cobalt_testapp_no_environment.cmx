@@ -6,6 +6,7 @@
             },
             "system-services": [
                 "fuchsia.net.Connectivity",
+                "fuchsia.posix.socket.Provider",
                 "fuchsia.net.SocketProvider",
                 "fuchsia.net.stack.Stack",
                 "fuchsia.netstack.Netstack"
@@ -13,15 +14,13 @@
         }
     },
     "program": {
-        "args": [
-            "--skip_environment_test",
-            "--verbose=10"
-        ],
-        "binary": "bin/cobalt_testapp"
+        "binary": "test/disabled/cobalt_testapp_no_environment"
     },
     "sandbox": {
         "services": [
             "fuchsia.logger.LogSink",
+            "fuchsia.net.NameLookup",
+            "fuchsia.posix.socket.Provider",
             "fuchsia.net.SocketProvider",
             "fuchsia.net.oldhttp",
             "fuchsia.sys.Launcher"

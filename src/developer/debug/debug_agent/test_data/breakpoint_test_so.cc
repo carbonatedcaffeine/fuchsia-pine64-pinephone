@@ -2,15 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/developer/debug/debug_agent/test_data/test_so_symbols.h"
+#include <stdio.h>
 
 #include <atomic>
 
-#include <stdio.h>
+#include "src/developer/debug/debug_agent/test_data/test_so_symbols.h"
 
 int gWatchpointVariable = 0;
 
-int InsertBreakpointFunction(int c) { return 10 * c; }
+int InsertBreakpointFunction(int c) {
+  printf("Should receive breakpoint!\n");
+  fflush(stdout);
+  return 10 * c;
+}
+
+int InsertBreakpointFunction2(int c) {
+  printf("Should also receive a breakpoint!\n");
+  fflush(stdout);
+  return 9000 * c * c;
+}
 
 void AnotherFunctionForKicks() {}
 

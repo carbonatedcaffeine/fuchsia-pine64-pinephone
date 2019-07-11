@@ -13,6 +13,7 @@ rustc_library("omaha_client") {
   with_unit_tests = true
 
   deps = [
+    "//third_party/rust_crates:chrono",
     "//third_party/rust_crates:failure",
     "//third_party/rust_crates:futures-preview",
     "//third_party/rust_crates:http",
@@ -29,7 +30,7 @@ rustc_library("omaha_client") {
 
 test_package("omaha_client_lib_tests") {
   deps = [
-    ":omaha_client",
+    ":omaha_client_test",
   ]
 
   tests = [

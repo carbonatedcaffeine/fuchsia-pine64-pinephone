@@ -5,6 +5,14 @@
 import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
 
+group("tests") {
+  testonly = true
+
+  deps = [
+    ":vmm_tests",
+  ]
+}
+
 source_set("lib") {
   visibility = [ ":*" ]
 
@@ -20,6 +28,8 @@ source_set("lib") {
     "controller/virtio_gpu.h",
     "controller/virtio_input.cc",
     "controller/virtio_input.h",
+    "controller/virtio_magma.cc",
+    "controller/virtio_magma.h",
     "controller/virtio_net.cc",
     "controller/virtio_net.h",
     "controller/virtio_rng.cc",
@@ -44,8 +54,6 @@ source_set("lib") {
     "vcpu.cc",
     "vcpu.h",
     "virtio_device.h",
-    "virtio_net_legacy.cc",
-    "virtio_net_legacy.h",
     "virtio_pci.cc",
     "virtio_pci.h",
     "virtio_queue_waiter.cc",
@@ -87,12 +95,10 @@ source_set("lib") {
     include_dirs = [ "//zircon/third_party/lib/acpica/source/include" ]
   }
 
-  defines = [
-    "_ALL_SOURCE=1",
-    "MAGMA_DEBUG_INTERNAL_USE_ONLY=1",
-  ]
+  defines = [ "_ALL_SOURCE=1" ]
 
   deps = [
+    "//garnet/lib/magma/include/virtio",
     "//garnet/public/lib/fsl",
     "//garnet/public/lib/ui/base_view/cpp",
     "//sdk/fidl/fuchsia.virtualization",
@@ -126,7 +132,7 @@ executable("bin") {
   deps = [
     ":lib",
     "//zircon/public/lib/async-loop-cpp",
-    "//zircon/public/lib/trace-provider",
+    "//zircon/public/lib/trace-provider-with-fdio",
   ]
 
   defines = [ "_ALL_SOURCE=1" ]
@@ -178,7 +184,6 @@ executable("vmm_unittests") {
     "pci_unittest.cc",
     "phys_mem_fake.h",
     "virtio_device_fake.h",
-    "virtio_net_legacy_unittest.cc",
     "virtio_queue_fake.cc",
     "virtio_queue_fake.h",
     "virtio_queue_unittest.cc",
@@ -196,7 +201,7 @@ executable("vmm_unittests") {
   deps = [
     ":lib",
     "//garnet/public/lib/gtest",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 }
 

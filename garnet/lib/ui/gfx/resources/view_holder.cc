@@ -8,17 +8,16 @@
 
 #include "garnet/lib/ui/gfx/engine/session.h"
 #include "src/lib/fxl/logging.h"
+#include "src/ui/lib/escher/geometry/bounding_box.h"
 
 namespace scenic_impl {
 namespace gfx {
 
-const ResourceTypeInfo ViewHolder::kTypeInfo = {
-    ResourceType::kNode | ResourceType::kViewHolder, "ViewHolder"};
+const ResourceTypeInfo ViewHolder::kTypeInfo = {ResourceType::kNode | ResourceType::kViewHolder,
+                                                "ViewHolder"};
 
-ViewHolder::ViewHolder(Session* session, ResourceId node_id,
-                               ViewLinker::ExportLink link)
-    : Node(session, node_id, ViewHolder::kTypeInfo),
-      link_(std::move(link)) {
+ViewHolder::ViewHolder(Session* session, ResourceId node_id, ViewLinker::ExportLink link)
+    : Node(session, node_id, ViewHolder::kTypeInfo), link_(std::move(link)) {
   FXL_DCHECK(link_.valid());
   FXL_DCHECK(!link_.initialized());
 }
@@ -65,10 +64,28 @@ void ViewHolder::LinkDisconnected() {
 void ViewHolder::SetViewProperties(fuchsia::ui::gfx::ViewProperties props) {
   if (!fidl::Equals(props, view_properties_)) {
     view_properties_ = std::move(props);
-    // TODO(SCN-1180) Set the BoundingBox bounds as ClipPlanes on this node.
-    if (view_) {
-      SendViewPropertiesChangedEvent();
-    }
+#if SCENIC_ENFORCE_VIEW_BOUND_CLIPPING
+    // This code transforms the bounding box given to the view holder
+    // into a set of clipping planes on the transform node that will
+    // then be applied to all children of this view holder. This is
+    // to ensure that all geometry gets clipped to the view bounds and
+    // does not extend past its allowed extent.
+
+    fuchsia::ui::gfx::BoundingBox bbox = view_properties_.bounding_box;
+    fuchsia::ui::gfx::vec3 min = bbox.min;
+    fuchsia::ui::gfx::vec3 max = bbox.max;
+
+    glm::vec3 glm_min(min.x, min.y, min.z);
+    glm::vec3 glm_max(max.x, max.y, max.z);
+
+    escher::BoundingBox e_bbox(glm_min, glm_max);
+
+    // TODO(SCN-1471) - Ensure that clipped meshes are not hit
+    // during hit tests.
+    SetClipPlanesFromBBox(e_bbox);
+#endif  // SCENIC_ENFORCE_VIEW_BOUND_CLIPPING
+
+    SendViewPropertiesChangedEvent();
   }
 }
 
@@ -116,18 +133,17 @@ void ViewHolder::ResetRenderEvent() {
   // Re-arm the wait.
   render_waiter_.set_object(render_event_.get());
   render_waiter_.set_trigger(ZX_EVENT_SIGNALED);
-  render_waiter_.set_handler([this](async_dispatcher_t*, async::Wait*,
-                                    zx_status_t status,
-                                    const zx_packet_signal_t*) {
-    ZX_ASSERT(status == ZX_OK || status == ZX_ERR_CANCELED);
-    if (status == ZX_OK) {
-      SetIsViewRendering(true);
-    }
+  render_waiter_.set_handler(
+      [this](async_dispatcher_t*, async::Wait*, zx_status_t status, const zx_packet_signal_t*) {
+        ZX_ASSERT(status == ZX_OK || status == ZX_ERR_CANCELED);
+        if (status == ZX_OK) {
+          SetIsViewRendering(true);
+        }
 
-    // The first frame has been signaled. Clear the event as it is not used
-    // for subsequent frames.
-    CloseRenderEvent();
-  });
+        // The first frame has been signaled. Clear the event as it is not used
+        // for subsequent frames.
+        CloseRenderEvent();
+      });
   status = render_waiter_.Begin(async_get_default_dispatcher());
   ZX_ASSERT(status == ZX_OK);
 
@@ -161,8 +177,7 @@ void ViewHolder::SendViewPropertiesChangedEvent() {
     return;
   }
   fuchsia::ui::gfx::Event event;
-  event.set_view_properties_changed(
-      {.view_id = view_->id(), .properties = view_properties_});
+  event.set_view_properties_changed({.view_id = view_->id(), .properties = view_properties_});
   view_->session()->EnqueueEvent(std::move(event));
 }
 
@@ -183,8 +198,7 @@ void ViewHolder::SendViewAttachedToSceneEvent() {
     return;
   }
   fuchsia::ui::gfx::Event event;
-  event.set_view_attached_to_scene(
-      {.view_id = view_->id(), .properties = view_properties_});
+  event.set_view_attached_to_scene({.view_id = view_->id(), .properties = view_properties_});
   view_->session()->EnqueueEvent(std::move(event));
 }
 

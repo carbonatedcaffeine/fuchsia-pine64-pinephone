@@ -5,22 +5,31 @@
 import("//products/core.gni")
 
 base_package_labels += [
-  "//garnet/packages/config:terminal",
-  "//garnet/packages/prod:scenic",
+  "//garnet/bin/terminal:tiles_with_terminal_config",
+  "//garnet/bin/sysmem_connector",
+  "//garnet/bin/ui:root_presenter",
+  "//garnet/bin/ui:scenic",
+  "//garnet/bin/vulkan_loader",
+  "//src/ui/bin/ime:ime_service",
 ]
 
 cache_package_labels += [
-  "//garnet/packages/prod:fonts",
-  "//garnet/packages/prod:terminal",
-  "//garnet/packages/prod:tiles",
+  "//garnet/bin/developer/tiles",
+  "//garnet/bin/fonts",
+  "//garnet/bin/terminal",
 ]
 
-universe_package_labels += [ "//bundles:tools" ]
-
-# TODO(IN-1097): Support a package server rather than building these
-#                into the image via preinstall+monolith.
-cache_package_labels += [ "//garnet/packages/tools:sl4f" ]
+# End to end (E2E) product test runtime dependencies. Must be added to cache,
+# not universe, so the test can run on bots where there is no package server.
+#
+# TODO(IN-1097): Support a package server on bots so this can be added to
+# universe like the tests.
+cache_package_labels += [ "//src/tests/end_to_end/bundles:end_to_end_deps" ]
 
 # E2E Product Tests. They don't produce fuchsia packages, but host executables,
 # and must just be included somewhere in the build configuration of the product.
-universe_package_labels += [ "//src/tests/screen_is_not_black:test" ]
+universe_package_labels += [
+  "//src/tests/end_to_end/screen_is_not_black:test",
+  "//src/tests/end_to_end/sl4f:test",
+  "//src/tests/end_to_end/audio_record:test",
+]

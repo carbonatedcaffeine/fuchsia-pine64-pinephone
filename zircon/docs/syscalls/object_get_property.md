@@ -10,7 +10,7 @@ Ask for various properties of various kernel objects.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_status_t zx_object_get_property(zx_handle_t handle,
@@ -200,5 +200,8 @@ In a future build this error will no longer occur.
 
 ## SEE ALSO
 
+ - [`zx_object_set_property()`]
 
-[object_set_property](object_set_property.md)
+<!-- References updated by update-docs-from-abigen, do not edit. -->
+
+[`zx_object_set_property()`]: object_set_property.md

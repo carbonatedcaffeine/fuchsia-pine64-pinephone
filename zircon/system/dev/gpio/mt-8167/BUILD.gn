@@ -4,14 +4,15 @@
 
 driver("mt-8167") {
   sources = [
-    "binding.cpp",
-    "mt8167-gpio.cpp",
+    "binding.cc",
+    "mt8167-gpio.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.gpio",
     "$zx/system/banjo/ddk.protocol.gpioimpl",
     "$zx/system/banjo/ddk.protocol.platform.bus",
     "$zx/system/banjo/ddk.protocol.platform.device",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/dev/lib/mt8167",
     "$zx/system/ulib/ddk",
@@ -26,14 +27,15 @@ driver("mt-8167") {
 
 test("mtk-gpio") {
   sources = [
-    "mt8167-gpio-test.cpp",
-    "mt8167-gpio.cpp",
+    "mt8167-gpio-test.cc",
+    "mt8167-gpio.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.gpio",
     "$zx/system/banjo/ddk.protocol.gpioimpl",
     "$zx/system/banjo/ddk.protocol.platform.bus",
     "$zx/system/banjo/ddk.protocol.platform.device",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/fake_ddk",
     "$zx/system/dev/lib/mock-mmio-reg",
     "$zx/system/dev/lib/mt8167",

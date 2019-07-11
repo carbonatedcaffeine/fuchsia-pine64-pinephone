@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/developer/debug/zxdb/console/verbs.h"
-
 #include "src/developer/debug/zxdb/client/session.h"
 #include "src/developer/debug/zxdb/console/command_utils.h"
 #include "src/developer/debug/zxdb/console/console.h"
 #include "src/developer/debug/zxdb/console/console_context.h"
+#include "src/developer/debug/zxdb/console/format_job.h"
+#include "src/developer/debug/zxdb/console/format_target.h"
+#include "src/developer/debug/zxdb/console/verbs.h"
 
 namespace zxdb {
 
@@ -71,21 +72,53 @@ Err DoNew(ConsoleContext* context, const Command& cmd) {
     JobContext* new_job_context =
         context->session()->system().CreateNewJobContext(cmd.job_context());
     context->SetActiveJobContext(new_job_context);
-    Console::get()->Output(DescribeJobContext(context, new_job_context));
+    Console::get()->Output(FormatJobContext(context, new_job_context));
   } else {
-    Target* new_target =
-        context->session()->system().CreateNewTarget(cmd.target());
+    Target* new_target = context->session()->system().CreateNewTarget(cmd.target());
     context->SetActiveTarget(new_target);
-    Console::get()->Output(DescribeTarget(context, new_target));
+    Console::get()->Output(FormatTarget(context, new_target));
   }
+  return Err();
+}
+
+// rm --------------------------------------------------------------------------
+
+const char kRmShortHelp[] = "rm: Remove a filter.";
+const char kRmHelp[] =
+    R"(rm
+
+  Removes a filter. You must specify the filter explicitly to delete it.
+
+  Filters can be added with the attach command.
+
+Hints
+
+  To see a list of available filters, type "filter".
+
+Example
+
+  filter 3 rm
+      Remove filter number 3.
+)";
+Err DoRm(ConsoleContext* context, const Command& cmd) {
+  Err err = cmd.ValidateNouns({Noun::kFilter});
+  if (err.has_error())
+    return err;
+
+  if (!cmd.HasNoun(Noun::kFilter) || cmd.GetNounIndex(Noun::kFilter) == Command::kNoIndex)
+    return Err("You must explicitly specify \"filter n rm\" to remove a filter.");
+
+  context->session()->system().DeleteFilter(cmd.filter());
+
   return Err();
 }
 
 }  // namespace
 
 void AppendSharedVerbs(std::map<Verb, VerbRecord>* verbs) {
-  (*verbs)[Verb::kNew] = VerbRecord(&DoNew, {"new"}, kNewShortHelp, kNewHelp,
-                                    CommandGroup::kGeneral);
+  (*verbs)[Verb::kNew] =
+      VerbRecord(&DoNew, {"new"}, kNewShortHelp, kNewHelp, CommandGroup::kGeneral);
+  (*verbs)[Verb::kRm] = VerbRecord(&DoRm, {"rm"}, kRmShortHelp, kRmHelp, CommandGroup::kGeneral);
 }
 
 }  // namespace zxdb

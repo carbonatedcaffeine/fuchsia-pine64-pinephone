@@ -2,39 +2,36 @@
 
 ## Overview
 
-The Fuchsia build system aims at building both boot images and installable
+The Fuchsia build system aims at building both boot images and updatable
 packages for various devices. To do so, it uses [GN][gn-main], a meta-build
 system that generates build files consumed by [Ninja][ninja-main], which
 executes the actual build. [Using GN build][gn-preso] is a good intro to GN.
 
 Note that Zircon uses a different build system, though still using GN and
-Ninja. The rest of the build relies on Zircon being built ahead of time.
+Ninja.
 
-## Products
+## Boards and Products
 
-The contents of the generated image are controlled by a set of top level
-products. Products define sets of packages that are included in boot and
-system update images, preinstalled in paver images, and installable using the
-update system. [products](products.md) documents the structure and usage of
-fields in product definitions.
-
-## Packages
-
-The contents of products are packages, which may aggregate or reference other
-packages and GN labels that are to be built. See [packages](packages.md)
-for more information.
+The contents of the generated image are controlled by a combination of a
+board and a product that are the minimal starting configuration of a Fuchsia
+build. Boards and products define dependency sets that define the packages
+that are included in images, updates, and package repositories.
+[boards and products](boards_and_products.md) documents the structure and
+usage of these build configurations.
 
 ## Bundles
 
 A bundle is a grouping of related packages within a part of the source tree,
-such as all tools or all tests. A set of top-level bundles are defined in
+such as all tools or all tests. An overview of bundles is provided in
+[bundles](bundles.md). A set of top-level bundles are defined in
 [`//bundles`](/bundles/README.md).
 
 ## Build targets
 
 Build targets are defined in `BUILD.gn` files scattered all over the source
 tree. These files use a Python-like syntax to declare buildable objects:
-``` py
+
+```py
 import("//build/some/template.gni")
 
 my_template("foo") {
@@ -46,13 +43,14 @@ my_template("foo") {
   ]
 }
 ```
+
 Available commands (invoked using gn cli tool) and constructs (built-in target
 declaration types) are defined in the [GN reference][gn-reference]. There are
 also a handful of custom templates in `.gni` files in the
 [`//build` project][build-project].
 
 These custom templates mostly define custom target declaration types, such as
-the [package declaration type][packages-source].
+the package declaration type.
 
 > TODO(pylaligand): list available templates
 
@@ -62,74 +60,47 @@ The simplest way to this is through the `fx` tool, as described in
 [Getting Started](/docs/getting_started.md#Setup-Build-Environment). Read on to see
 what `fx` does under the hood.
 
-### A
+### Gen step
 
-The first step is to build Zircon which uses its own build system:
+First configure the primary build artifacts by choosing the board and product
+to build:
+
 ```bash
-$ scripts/build-zircon.sh
-```
-
-This is what gets run under the hood by `fx build-zircon`, which is run by `fx
-build`.
-
-For a list of all options, run `build-zircon.sh -h`. See Zircon's
-[Getting started][zircon-getting-started] and
-[GN options][zircon-gn-options] for details.
-
-### B
-
-Then configure the content of the generated image by choosing the top level
-product to build:
-```
 $ buildtools/gn gen out/default --args='import("//boards/x64.gni") import("//products/core.gni")'
 ```
 
 This will create an `out/default` directory containing Ninja files.
 
 The equivalent fx set command is:
-```
+
+```bash
 $ scripts/fx set core.x64
 ```
 
 For a list of all GN build arguments, run `buildtools/gn args out/default --list`.
 For documentation on the `select_variant` argument, see [Variants](variants.md).
 
-### C
+### Build step
 
-The final step is to run the actual build with Ninja:
-```
-$ buildtools/ninja -C out/<arch> -j 64
+The next step is to run the actual build with Ninja:
+
+```bash
+$ buildtools/ninja -C out/default.zircon
+$ buildtools/ninja -C out/default
 ```
 
 This is what gets run under the hood by `fx build`.
 
 ## Rebuilding
 
-### After modifying non-Zircon files
-
-In order to rebuild the tree after modifying some sources, just rerun step
-**C**. This holds true even if you modify `BUILD.gn` files as GN adds Ninja
-targets to update Ninja targets if build files are changed! The same holds true
-for package files used to configure the build.
-
-### After modifying Zircon files
-
-You will want to rerun **A** and **C**.
-
-### After syncing sources
-
-You’ll most likely need to run **A** once if anything in the Zircon tree was
-changed. After that, run **C** again.
-
+In order to rebuild the tree after modifying some sources, just rerun 
+**Build step**. This holds true even if you modify `BUILD.gn` files as GN adds
+Ninja targets to update Ninja targets if build files are changed! The same
+holds true for other files used to configure the build. Any change of source
+that requires a manual re-invocation of the **Gen step** is a build bug and
+should be reported.
 
 ## Tips and tricks
-
-### Visualizing the hierarchy of build packages
-
-```bash
-$ scripts/visualize_module_tree.py > tree.dot
-$ dot -Tpng tree.dot -o tree.png
-```
 
 ### Inspecting the content of a GN target
 
@@ -149,11 +120,14 @@ Various host tools (some used in the build itself) need to be built along with
 the final image.
 
 To reference a build target for the host toolchain from a module file:
+
 ```
 //path/to/target(//build/toolchain:host_x64)
 ```
+
 To reference a build target for the host toolchain from within a `BUILD.gn`
 file:
+
 ```
 //path/to/target($host_toolchain)
 ```
@@ -162,24 +136,34 @@ file:
 
 If a target is defined in a GN build file as `//foo/bar/blah:dash`, that target
 (and its dependencies) can be built with:
+
 ```bash
 $ buildtools/ninja -C out/default -j64 foo/bar/blah:dash
 ```
+
 Note that this only works for targets in the default toolchain.
+
+Note: Building package targets does not result in an updated package
+repository, because the package repository is updated by the `updates` group
+target. In order for updated package changes to be made available via `fx
+serve`, users must build the `updates` group.
 
 ### Exploring Ninja targets
 
 GN extensively documents which Ninja targets it generates. The documentation is
 accessible with:
+
 ```bash
 $ buildtools/gn help ninja_rules
 ```
 
 You can also browse the set of Ninja targets currently defined in your output
 directory with:
+
 ```bash
 $ buildtools/ninja -C out/default -t browse
 ```
+
 Note that the presence of a Ninja target does not mean it will be built - for
 that it needs to depend on the “default” target.
 
@@ -208,16 +192,16 @@ visualizations of the build process:
 Make sure it rolls up to a label defined in a module file, otherwise the build
 system will ignore it.
 
-### GN complains about a missing `sysroot`.
+### GN complains about missing `sysroot`.
 
-You likely forgot to run **A** before running **B**.
+You likely forgot to run both commands of **Build step**.
 
 > TODO(pylaligand): command showing path to default target
 
 
 ### Internal GN setup
 
-> TODO(pylaligand): .gn, default target, mkbootfs, GN labels insertion
+> TODO(pylaligand): .gn, default target, GN labels insertion
 
 [gn-main]: https://gn.googlesource.com/gn/
 [gn-preso]: https://docs.google.com/presentation/d/15Zwb53JcncHfEwHpnG_PoIbbzQ3GQi_cpujYwbpcbZo/
@@ -225,4 +209,3 @@ You likely forgot to run **A** before running **B**.
 [gn-reference]: https://gn.googlesource.com/gn/+/master/docs/reference.md
 [build-project]: /build/
 [zircon-getting-started]: /zircon/docs/getting_started.md
-[zircon-gn-options]: /zircon/docs/gn/zircon_gn.md

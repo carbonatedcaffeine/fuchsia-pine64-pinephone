@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_BIN_MEDIA_SIGNAL_GENERATOR_SIGNAL_GENERATOR_H_
-#define GARNET_BIN_MEDIA_SIGNAL_GENERATOR_SIGNAL_GENERATOR_H_
+#ifndef SRC_MEDIA_AUDIO_TOOLS_SIGNAL_GENERATOR_SIGNAL_GENERATOR_H_
+#define SRC_MEDIA_AUDIO_TOOLS_SIGNAL_GENERATOR_SIGNAL_GENERATOR_H_
 
 #include <fuchsia/media/cpp/fidl.h>
 #include <lib/fit/function.h>
@@ -32,9 +32,7 @@ class MediaApp {
   void set_int16_format(bool use_int16) { use_int16_ = use_int16; }
   void set_int24_format(bool use_int24) { use_int24_ = use_int24; }
 
-  void set_output_type(OutputSignalType output_type) {
-    output_signal_type_ = output_type;
-  }
+  void set_output_type(OutputSignalType output_type) { output_signal_type_ = output_type; }
   void set_frequency(double frequency) { frequency_ = frequency; }
   void set_amplitude(float amplitude) { amplitude_ = amplitude; }
 
@@ -43,6 +41,15 @@ class MediaApp {
 
   void set_frames_per_payload(uint32_t frames_per_payload) {
     frames_per_payload_ = frames_per_payload;
+  }
+  void set_num_payload_buffers(uint32_t num_payload_buffers) {
+    num_payload_buffers_ = num_payload_buffers;
+  }
+
+  void set_use_pts(bool use_pts) { use_pts_ = use_pts; }
+  void set_pts_continuity_threshold(float pts_continuity_threshold) {
+    set_continuity_threshold_ = true;
+    pts_continuity_threshold_secs_ = pts_continuity_threshold;
   }
 
   void set_save_to_file(bool save_to_file) { save_to_file_ = save_to_file; }
@@ -58,12 +65,8 @@ class MediaApp {
   }
 
   void set_will_ramp_stream_gain() { ramp_stream_gain_ = true; }
-  void set_ramp_duration_nsec(zx_duration_t duration_nsec) {
-    ramp_duration_nsec_ = duration_nsec;
-  }
-  void set_ramp_target_gain_db(float gain_db) {
-    ramp_target_gain_db_ = gain_db;
-  }
+  void set_ramp_duration_nsec(zx_duration_t duration_nsec) { ramp_duration_nsec_ = duration_nsec; }
+  void set_ramp_target_gain_db(float gain_db) { ramp_target_gain_db_ = gain_db; }
 
   void set_system_gain(float gain_db) {
     set_system_gain_ = true;
@@ -90,21 +93,21 @@ class MediaApp {
   bool ParameterRangeChecks();
   void SetupPayloadCoefficients();
   void DisplayConfigurationSettings();
-  zx_status_t AcquireAudioRenderer(sys::ComponentContext* app_context);
+  void AcquireAudioRenderer(sys::ComponentContext* app_context);
   void SetStreamType();
 
   zx_status_t CreateMemoryMapping();
 
-  fuchsia::media::StreamPacket CreateAudioPacket(uint64_t packet_num);
-  void GenerateAudioForPacket(fuchsia::media::StreamPacket packet,
-                              uint64_t payload_num);
+  struct AudioPacket {
+    fuchsia::media::StreamPacket stream_packet;
+    fzl::VmoMapper* vmo;
+  };
+  AudioPacket CreateAudioPacket(uint64_t packet_num);
+  void GenerateAudioForPacket(const AudioPacket& packet, uint64_t payload_num);
   template <typename SampleType>
-  static void WriteAudioIntoBuffer(SampleType* audio_buffer,
-                                   uint32_t num_frames,
-                                   uint64_t frames_since_start,
-                                   OutputSignalType signal_type,
-                                   uint32_t num_chans, double frames_per_period,
-                                   double amp_scalar);
+  static void WriteAudioIntoBuffer(SampleType* audio_buffer, uint32_t num_frames,
+                                   uint64_t frames_since_start, OutputSignalType signal_type,
+                                   uint32_t num_chans, double frames_per_period, double amp_scalar);
 
   void SendPacket(uint64_t payload_num);
   void OnSendPacketComplete();
@@ -116,7 +119,7 @@ class MediaApp {
   fuchsia::media::AudioRendererPtr audio_renderer_;
   fuchsia::media::audio::GainControlPtr gain_control_;
 
-  fzl::VmoMapper payload_buffer_;
+  std::vector<fzl::VmoMapper> payload_buffers_;
 
   uint32_t num_channels_;
   uint32_t frame_rate_;
@@ -135,10 +138,16 @@ class MediaApp {
 
   double duration_secs_;
   uint32_t frames_per_payload_;
+  uint32_t num_payload_buffers_;
 
-  uint32_t total_mapping_size_;
+  bool use_pts_ = false;
+  bool set_continuity_threshold_ = false;
+  float pts_continuity_threshold_secs_;
+
+  uint32_t payload_mapping_size_;
   uint32_t payload_size_;
-  uint32_t payloads_per_total_mapping_;
+  uint32_t payloads_per_mapping_;
+  uint32_t total_num_mapped_payloads_;
 
   uint64_t total_frames_to_send_;
   uint64_t num_packets_to_send_;
@@ -173,4 +182,4 @@ class MediaApp {
 
 }  // namespace media::tools
 
-#endif  // GARNET_BIN_MEDIA_SIGNAL_GENERATOR_SIGNAL_GENERATOR_H_
+#endif  // SRC_MEDIA_AUDIO_TOOLS_SIGNAL_GENERATOR_SIGNAL_GENERATOR_H_

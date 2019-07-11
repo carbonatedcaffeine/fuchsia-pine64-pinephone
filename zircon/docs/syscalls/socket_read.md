@@ -10,7 +10,7 @@ Read data from a socket.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_status_t zx_socket_read(zx_handle_t handle,
@@ -57,9 +57,10 @@ field of the resulting `zx_info_socket_t`, which you can obtain using the
 
 **ZX_ERR_BAD_HANDLE**  *handle* is not a valid handle.
 
-**ZX_ERR_BAD_STATE** Either (a) *options* includes **ZX_SOCKET_CONTROL** and the
-socket was not created with **ZX_SOCKET_HAS_CONTROL**, or (b) reading has been
-disabled for this socket endpoint.
+**ZX_ERR_BAD_STATE** Either:
+1. *options* includes **ZX_SOCKET_CONTROL** and the socket was not created
+   with **ZX_SOCKET_HAS_CONTROL**, or
+2. reading has been disabled for this socket endpoint via [`zx_socket_shutdown()`].
 
 **ZX_ERR_WRONG_TYPE**  *handle* is not a socket handle.
 

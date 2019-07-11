@@ -1,5 +1,15 @@
 {
     "program": {
         "binary": "test/bluetooth-crate-unittests"
+    },
+    "sandbox": {
+        "dev": [
+            "class/bt-emulator",
+            "class/bt-hci",
+            "test/test"
+        ],
+        "system": [
+            "driver/bt-hci-emulator.so"
+        ]
     }
 }

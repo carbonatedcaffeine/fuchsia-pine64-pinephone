@@ -4,9 +4,30 @@
 
 use serde_derive::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+pub type File = String;
+
+pub type FidlLibraryName = String;
+
+pub type CcLibraryName = String;
+
+#[derive(Serialize, Deserialize, Debug, Hash, Clone, PartialOrd, Ord, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TargetArchitecture {
     Arm64,
     X64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum ElementType {
+    BanjoLibrary,
+    CcPrebuiltLibrary,
+    CcSourceLibrary,
+    DartLibrary,
+    DeviceProfile,
+    Documentation,
+    FidlLibrary,
+    HostTool,
+    LoadableModule,
+    Sysroot,
 }

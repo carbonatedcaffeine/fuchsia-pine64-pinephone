@@ -6,7 +6,7 @@
 
 **Current value (from the default):** `""`
 
-From //build/images/BUILD.gn:45
+From //build/images/BUILD.gn:46
 
 ### add_qemu_to_build_archives
 Whether to include images necessary to run Fuchsia in QEMU in build
@@ -14,30 +14,31 @@ archives.
 
 **Current value (from the default):** `false`
 
-From //build/images/BUILD.gn:51
+From //build/images/BUILD.gn:52
 
-### allow_layer_guesswork
-Does nothing.
+### additional_bootserver_arguments
+Additional bootserver args to add to pave.sh. New uses of this should be
+added with caution, and ideally discussion. The present use case is to
+enable throttling of netboot when specific network adapters are combined
+with specific boards, due to driver and hardware challenges.
 
-Will be removed after 30 April 2019.
+**Current value (from the default):** `""`
 
-**Current value (from the default):** `false`
-
-From //BUILD.gn:39
+From //build/images/BUILD.gn:58
 
 ### always_zedboot
 Build boot images that prefer Zedboot over local boot (only for EFI).
 
 **Current value (from the default):** `false`
 
-From //build/images/BUILD.gn:809
+From //build/images/BUILD.gn:830
 
 ### auto_login_to_guest
 Whether basemgr should automatically login as a persistent guest user.
 
 **Current value (from the default):** `false`
 
-From //peridot/bin/basemgr/BUILD.gn:13
+From //peridot/bin/basemgr/BUILD.gn:14
 
 ### auto_update_packages
 Whether the component loader should automatically update packages.
@@ -53,21 +54,21 @@ of an OTA. These pacakages are updated as an atomic unit during an OTA
 process and are immutable and are a superset of the TCB (Trusted Computing
 Base) for a product. These packages are never evicted by the system.
 
-**Current value for `target_cpu = "arm64"`:** `["//garnet/packages/config:kernel_crash_checker", "//garnet/packages/prod:crashpad_agent", "//garnet/packages/prod:feedback_agent", "//garnet/packages/prod:kernel_crash_checker", "//garnet/packages/products:base", "//src/recovery/factory_reset", "//bundles:kitchen_sink"]`
+**Current value for `target_cpu = "arm64"`:** `["//build/info:build-info", "//garnet/bin/appmgr", "//garnet/bin/appmgr:appmgr_scheme_config", "//garnet/bin/device_settings:device_settings_manager", "//garnet/bin/http", "//garnet/bin/log_listener:log_listener", "//garnet/bin/log_listener:log_listener_shell", "//garnet/bin/logger", "//garnet/bin/netcfg", "//garnet/bin/netcfg:config", "//garnet/bin/network_time_service", "//garnet/bin/pkg_cache", "//garnet/bin/pkg_resolver", "//garnet/bin/scpi", "//garnet/bin/setui:setui_service", "//garnet/bin/sshd-host", "//garnet/bin/stash:stash", "//garnet/bin/stash_ctl:stash_ctl", "//garnet/bin/sysmgr", "//garnet/bin/sysmgr:network_config", "//garnet/bin/sysmgr:services_config", "//garnet/bin/thermd", "//garnet/bin/thermd:config", "//garnet/bin/timezone", "//garnet/go/src/amber", "//garnet/go/src/amber:amber_tools", "//garnet/go/src/amber:config", "//garnet/go/src/amber:pkgfs", "//garnet/lib/root_ssl_certificates", "//src/cobalt/bin/app:cobalt", "//src/cobalt/bin/system-metrics:cobalt_system_metrics", "//src/connectivity/bluetooth:core", "//src/connectivity/network/mdns/bundles:config", "//src/connectivity/network/mdns/bundles:services", "//src/connectivity/network/netstack", "//src/connectivity/wlan:service", "//src/developer/bugreport", "//src/developer/crashpad_agent", "//src/developer/feedback_agent", "//src/developer/kernel_crash_checker", "//src/developer/kernel_crash_checker:config", "//src/identity/bin:core", "//src/recovery/factory_reset", "//src/sys/netclock", "//third_party/openssh-portable/fuchsia/developer-keys:ssh_config", "//bundles:kitchen_sink"]`
 
 From //root_build_dir/args.gn:3
 
 **Overridden from the default:** `[]`
 
-From //BUILD.gn:14
+From //BUILD.gn:16
 
-**Current value for `target_cpu = "x64"`:** `["//garnet/packages/config:kernel_crash_checker", "//garnet/packages/prod:crashpad_agent", "//garnet/packages/prod:feedback_agent", "//garnet/packages/prod:kernel_crash_checker", "//garnet/packages/products:base", "//src/recovery/factory_reset", "//bundles:kitchen_sink"]`
+**Current value for `target_cpu = "x64"`:** `["//build/info:build-info", "//garnet/bin/appmgr", "//garnet/bin/appmgr:appmgr_scheme_config", "//garnet/bin/device_settings:device_settings_manager", "//garnet/bin/http", "//garnet/bin/log_listener:log_listener", "//garnet/bin/log_listener:log_listener_shell", "//garnet/bin/logger", "//garnet/bin/netcfg", "//garnet/bin/netcfg:config", "//garnet/bin/network_time_service", "//garnet/bin/pkg_cache", "//garnet/bin/pkg_resolver", "//garnet/bin/scpi", "//garnet/bin/setui:setui_service", "//garnet/bin/sshd-host", "//garnet/bin/stash:stash", "//garnet/bin/stash_ctl:stash_ctl", "//garnet/bin/sysmgr", "//garnet/bin/sysmgr:network_config", "//garnet/bin/sysmgr:services_config", "//garnet/bin/thermd", "//garnet/bin/thermd:config", "//garnet/bin/timezone", "//garnet/go/src/amber", "//garnet/go/src/amber:amber_tools", "//garnet/go/src/amber:config", "//garnet/go/src/amber:pkgfs", "//garnet/lib/root_ssl_certificates", "//src/cobalt/bin/app:cobalt", "//src/cobalt/bin/system-metrics:cobalt_system_metrics", "//src/connectivity/bluetooth:core", "//src/connectivity/network/mdns/bundles:config", "//src/connectivity/network/mdns/bundles:services", "//src/connectivity/network/netstack", "//src/connectivity/wlan:service", "//src/developer/bugreport", "//src/developer/crashpad_agent", "//src/developer/feedback_agent", "//src/developer/kernel_crash_checker", "//src/developer/kernel_crash_checker:config", "//src/identity/bin:core", "//src/recovery/factory_reset", "//src/sys/netclock", "//third_party/openssh-portable/fuchsia/developer-keys:ssh_config", "//bundles:kitchen_sink"]`
 
 From //root_build_dir/args.gn:3
 
 **Overridden from the default:** `[]`
 
-From //BUILD.gn:14
+From //BUILD.gn:16
 
 ### blobfs_maximum_bytes
 In addition to reserving space for inodes and data, fs needs additional
@@ -103,6 +104,22 @@ required for the filesystem.
 
 From //build/images/fvm.gni:28
 
+### board_has_libvulkan_arm_mali
+Board files can set this to true if they have a package with a mali libvulkan VCD.
+
+**Current value (from the default):** `false`
+
+From //garnet/lib/magma/gnbuild/magma.gni:50
+
+### board_kernel_cmdline_args
+List of kernel command line this board to bake into the boot image that are
+required by this board. See also kernel_cmdline_args in
+//build/images/BUILD.gn
+
+**Current value (from the default):** `[]`
+
+From //build/board.gni:16
+
 ### board_name
 Board name used for paving and amber updates.
 
@@ -112,7 +129,7 @@ From //boards/arm64.gni:7
 
 **Overridden from the default:** `""`
 
-From //build/package.gni:21
+From //build/board.gni:7
 
 **Current value for `target_cpu = "x64"`:** `"pc"`
 
@@ -120,7 +137,7 @@ From //boards/x64.gni:7
 
 **Overridden from the default:** `""`
 
-From //build/package.gni:21
+From //build/board.gni:7
 
 ### board_package_labels
 A list of package labels to include in the 'base' package set. Used by the
@@ -128,37 +145,19 @@ board definition rather than the product definition.
 
 **Current value for `target_cpu = "arm64"`:** `["//garnet/packages/prod:drivers", "//garnet/packages/prod:sysmem-assistant"]`
 
-From //boards/arm64.gni:11
-
-**Overridden from the default:** `[]`
-
-From //BUILD.gn:34
-
-**Current value for `target_cpu = "x64"`:** `["//garnet/packages/prod:drivers"]`
-
-From //boards/x64.gni:13
-
-**Overridden from the default:** `[]`
-
-From //BUILD.gn:34
-
-### board_packages
-
-**Current value for `target_cpu = "arm64"`:** `[]`
-
 From //boards/arm64.gni:9
 
 **Overridden from the default:** `[]`
 
-From //BUILD.gn:40
+From //build/board.gni:11
 
-**Current value for `target_cpu = "x64"`:** `[]`
+**Current value for `target_cpu = "x64"`:** `["//garnet/packages/prod:drivers"]`
 
 From //boards/x64.gni:9
 
 **Overridden from the default:** `[]`
 
-From //BUILD.gn:40
+From //build/board.gni:11
 
 ### bootfs_extra
 List of extra manifest entries for files to add to the BOOTFS.
@@ -168,21 +167,41 @@ with `sources` and `outputs` in the style of a copy() target:
 
 **Current value (from the default):** `[]`
 
-From //build/images/BUILD.gn:492
+From //build/images/BUILD.gn:490
+
+### bootfs_only
+Put the "system image" package in the BOOTFS.  Hence what would
+otherwise be /system/... at runtime is /boot/... instead.
+
+**Current value for `target_cpu = "arm64"`:** `false`
+
+From //products/core.gni:7
+
+**Overridden from the default:** `false`
+
+From //build/images/boot.gni:15
+
+**Current value for `target_cpu = "x64"`:** `false`
+
+From //products/core.gni:7
+
+**Overridden from the default:** `false`
+
+From //build/images/boot.gni:15
 
 ### build_info_board
 Board configuration of the current build
 
 **Current value (from the default):** `"qemu-arm64"`
 
-From //garnet/BUILD.gn:24
+From //build/info/info.gni:12
 
 ### build_info_product
 Product configuration of the current build
 
 **Current value (from the default):** `""`
 
-From //garnet/BUILD.gn:21
+From //build/info/info.gni:9
 
 ### build_info_version
 Logical version of the current build. If not set, defaults to the timestamp
@@ -190,7 +209,7 @@ of the most recent update.
 
 **Current value (from the default):** `""`
 
-From //garnet/BUILD.gn:28
+From //build/info/info.gni:16
 
 ### build_libvulkan_arm_mali
 Targets that will be built as mali vulkan ICDS.
@@ -198,6 +217,13 @@ Targets that will be built as mali vulkan ICDS.
 **Current value (from the default):** `[]`
 
 From //garnet/lib/magma/gnbuild/magma.gni:38
+
+### build_libvulkan_goldfish
+This is a list of targets that will be built as goldfish vulkan ICDs.
+
+**Current value (from the default):** `[]`
+
+From //garnet/lib/goldfish-vulkan/gnbuild/BUILD.gn:15
 
 ### build_libvulkan_img_rgx
 Targets that will be built as IMG vulkan ICDS.
@@ -225,7 +251,7 @@ Whether to build SDK tarballs.
 
 **Current value (from the default):** `false`
 
-From //build/sdk/sdk.gni:13
+From //build/sdk/config.gni:7
 
 ### cache_package_labels
 If you add package labels to this variable, the packages will be included
@@ -237,32 +263,32 @@ pressure arises or other policies indicate.
 
 **Current value for `target_cpu = "arm64"`:** `[]`
 
-From //products/core.gni:26
+From //products/core.gni:65
 
 **Overridden from the default:** `[]`
 
-From //BUILD.gn:22
+From //BUILD.gn:24
 
 **Current value for `target_cpu = "x64"`:** `[]`
 
-From //products/core.gni:26
+From //products/core.gni:65
 
 **Overridden from the default:** `[]`
 
-From //BUILD.gn:22
+From //BUILD.gn:24
 
 ### clang_lib_dir
 Path to Clang lib directory.
 
-**Current value (from the default):** `"../build/buildtools/linux-x64/clang/lib"`
+**Current value (from the default):** `"../build/prebuilt/third_party/clang/linux-x64/lib"`
 
 From //build/images/manifest.gni:19
 
 ### clang_prefix
-The default clang toolchain provided by the buildtools. This variable is
+The default clang toolchain provided by the prebuilt. This variable is
 additionally consumed by the Go toolchain.
 
-**Current value (from the default):** `"../buildtools/linux-x64/clang/bin"`
+**Current value (from the default):** `"../prebuilt/third_party/clang/linux-x64/bin"`
 
 From //build/config/clang/clang.gni:11
 
@@ -324,7 +350,7 @@ From //build/config/BUILD.gn:9
 
 **Current value (from the default):** `"fuchsia"`
 
-From [//third_party/crashpad/build/crashpad_buildconfig.gni:22](https://chromium.googlesource.com/crashpad/crashpad/+/d221b7cadab5f00c6999f060a5bcb0896e25c7b7/build/crashpad_buildconfig.gni#22)
+From [//third_party/crashpad/build/crashpad_buildconfig.gni:22](https://chromium.googlesource.com/crashpad/crashpad/+/1bd77324acfccfe6d319a8926ab63e04e806248a/build/crashpad_buildconfig.gni#22)
 
 ### crashpad_use_boringssl_for_http_transport_socket
 TODO(scottmg): https://crbug.com/crashpad/266 fuchsia:DX-690: BoringSSL
@@ -333,7 +359,7 @@ a BoringSSL lib again.
 
 **Current value (from the default):** `true`
 
-From [//third_party/crashpad/util/net/tls.gni:21](https://chromium.googlesource.com/crashpad/crashpad/+/d221b7cadab5f00c6999f060a5bcb0896e25c7b7/util/net/tls.gni#21)
+From [//third_party/crashpad/util/net/tls.gni:21](https://chromium.googlesource.com/crashpad/crashpad/+/1bd77324acfccfe6d319a8926ab63e04e806248a/util/net/tls.gni#21)
 
 ### create_kernel_service_snapshot
 
@@ -364,7 +390,7 @@ module_suggester is not AOT compiled in debug builds
 
 **Current value (from the default):** `""`
 
-From [//topaz/runtime/dart/dart_component.gni:51](https://fuchsia.googlesource.com/topaz/+/488f56c1d73f4134a611c9f0506dcd5853f9d128/runtime/dart/dart_component.gni#51)
+From [//topaz/runtime/dart/dart_component.gni:51](https://fuchsia.googlesource.com/topaz/+/288eec1fd475a71f4985571f55bd0cbef5fa68cc/runtime/dart/dart_component.gni#51)
 
 ### dart_component_kind
 Allow for deduping the VM between standalone, flutter_runner and dart_runner.
@@ -423,7 +449,7 @@ This defaults to JIT, use `fx set <ARCH> --args
 
 **Current value (from the default):** `"dart_jit_app"`
 
-From [//topaz/runtime/dart/dart_component.gni:19](https://fuchsia.googlesource.com/topaz/+/488f56c1d73f4134a611c9f0506dcd5853f9d128/runtime/dart/dart_component.gni#19)
+From [//topaz/runtime/dart/dart_component.gni:19](https://fuchsia.googlesource.com/topaz/+/288eec1fd475a71f4985571f55bd0cbef5fa68cc/runtime/dart/dart_component.gni#19)
 
 ### dart_force_product
 Forces all Dart and Flutter apps to build in a specific configuration that
@@ -431,7 +457,7 @@ we use to build products.
 
 **Current value (from the default):** `false`
 
-From [//topaz/runtime/dart/config.gni:10](https://fuchsia.googlesource.com/topaz/+/488f56c1d73f4134a611c9f0506dcd5853f9d128/runtime/dart/config.gni#10)
+From [//topaz/runtime/dart/config.gni:10](https://fuchsia.googlesource.com/topaz/+/288eec1fd475a71f4985571f55bd0cbef5fa68cc/runtime/dart/config.gni#10)
 
 ### dart_lib_export_symbols
 Whether libdart should export the symbols of the Dart API.
@@ -481,7 +507,7 @@ Whether experimental space dart mode is enabled for Dart applications.
 
 **Current value (from the default):** `false`
 
-From [//topaz/runtime/dart/dart_component.gni:41](https://fuchsia.googlesource.com/topaz/+/488f56c1d73f4134a611c9f0506dcd5853f9d128/runtime/dart/dart_component.gni#41)
+From [//topaz/runtime/dart/dart_component.gni:41](https://fuchsia.googlesource.com/topaz/+/288eec1fd475a71f4985571f55bd0cbef5fa68cc/runtime/dart/dart_component.gni#41)
 
 ### dart_target_arch
 Explicitly set the target architecture to use a simulator.
@@ -542,7 +568,7 @@ partition.
 
 **Current value (from the default):** `""`
 
-From //build/images/BUILD.gn:28
+From //build/images/BUILD.gn:29
 
 ### debian_guest_earlycon
 
@@ -563,7 +589,7 @@ These come after synthesized arguments to configure blobfs and pkgfs.
 
 **Current value (from the default):** `[]`
 
-From //build/images/BUILD.gn:475
+From //build/images/BUILD.gn:473
 
 ### embedder_for_target
 By default, the dynamic library target exposing the embedder API is only
@@ -601,13 +627,13 @@ From //build/config/BUILD.gn:19
 
 **Current value (from the default):** `true`
 
-From //garnet/bin/ui/scenic/BUILD.gn:12
+From //garnet/bin/ui/scenic/BUILD.gn:11
 
 ### enable_input_subsystem
 
 **Current value (from the default):** `true`
 
-From //garnet/bin/ui/scenic/BUILD.gn:14
+From //garnet/bin/ui/scenic/BUILD.gn:12
 
 ### enable_mdns_trace
 Enables the tracing feature of mdns, which can be turned on using
@@ -622,33 +648,9 @@ Whether to build the netboot zbi by default.
 
 You can still build //build/images:netboot explicitly even if enable_netboot is false.
 
-**Current value for `target_cpu = "arm64"`:** `false`
-
-From //products/core.gni:7
-
-**Overridden from the default:** `false`
-
-From //build/images/BUILD.gn:33
-
-**Current value for `target_cpu = "x64"`:** `false`
-
-From //products/core.gni:7
-
-**Overridden from the default:** `false`
-
-From //build/images/BUILD.gn:33
-
-### enable_sketchy_subsystem
-
 **Current value (from the default):** `false`
 
-From //garnet/bin/ui/scenic/BUILD.gn:13
-
-### enable_value_subsystem
-
-**Current value (from the default):** `false`
-
-From //garnet/bin/ui/scenic/BUILD.gn:11
+From //build/images/BUILD.gn:34
 
 ### engine_version
 
@@ -666,7 +668,7 @@ unit tests which don't require Vulkan.
 
 **Current value (from the default):** `true`
 
-From //src/ui/lib/escher/BUILD.gn:16
+From //src/ui/lib/escher/BUILD.gn:17
 
 ### exclude_kernel_service
 Whether the VM includes the kernel service in all modes (debug, release,
@@ -692,21 +694,6 @@ This argument is temporary until Rust MLME is ready to be used.
 
 From //src/connectivity/wlan/lib/mlme/cpp/BUILD.gn:10
 
-### export_x64_sdk_images
-
-**Current value (from the default):** `false`
-
-From //sdk/BUILD.gn:13
-
-### extra_authorized_keys_file
-Additional SSH authorized_keys file to include in the build.
-For example:
-  extra_authorized_keys_file=\"$HOME/.ssh/id_rsa.pub\"
-
-**Current value (from the default):** `""`
-
-From [//third_party/openssh-portable/fuchsia/developer-keys/BUILD.gn:11](https://fuchsia.googlesource.com/third_party/openssh-portable/+/62f4ca0d82fa50a3405703837031a15c36dccdd4/fuchsia/developer-keys/BUILD.gn#11)
-
 ### extra_manifest_args
 Extra args to globally apply to the manifest generation script.
 
@@ -720,13 +707,13 @@ This is just added to [`known_variants`](#known_variants).
 
 **Current value (from the default):** `[]`
 
-From //build/config/BUILDCONFIG.gn:404
+From //build/config/BUILDCONFIG.gn:409
 
 ### fastboot_product
 
 **Current value (from the default):** `""`
 
-From //build/images/BUILD.gn:47
+From //build/images/BUILD.gn:48
 
 ### flutter_aot_sharing_basis
 When AOT compiling, an app will reference objects in the sharing basis's
@@ -736,22 +723,22 @@ package and deduplicated by blobfs.
 
 **Current value (from the default):** `""`
 
-From [//topaz/runtime/dart/dart_component.gni:27](https://fuchsia.googlesource.com/topaz/+/488f56c1d73f4134a611c9f0506dcd5853f9d128/runtime/dart/dart_component.gni#27)
+From [//topaz/runtime/dart/dart_component.gni:27](https://fuchsia.googlesource.com/topaz/+/288eec1fd475a71f4985571f55bd0cbef5fa68cc/runtime/dart/dart_component.gni#27)
 
 ### flutter_default_app
 
 **Current value (from the default):** `"flutter_jit_app"`
 
-From [//topaz/runtime/dart/dart_component.gni:12](https://fuchsia.googlesource.com/topaz/+/488f56c1d73f4134a611c9f0506dcd5853f9d128/runtime/dart/dart_component.gni#12)
+From [//topaz/runtime/dart/dart_component.gni:12](https://fuchsia.googlesource.com/topaz/+/288eec1fd475a71f4985571f55bd0cbef5fa68cc/runtime/dart/dart_component.gni#12)
 
 ### flutter_profile
 
 **Current value (from the default):** `true`
 
-From [//topaz/runtime/dart/dart_component.gni:32](https://fuchsia.googlesource.com/topaz/+/488f56c1d73f4134a611c9f0506dcd5853f9d128/runtime/dart/dart_component.gni#32)
+From [//topaz/runtime/dart/dart_component.gni:32](https://fuchsia.googlesource.com/topaz/+/288eec1fd475a71f4985571f55bd0cbef5fa68cc/runtime/dart/dart_component.gni#32)
 
 ### flutter_runtime_mode
-The runtime mode ("debug", "profile", "release", "dynamic_profile", or "dynamic_release")
+The runtime mode ("debug", "profile", or "release")
 
 **Current value (from the default):** `"debug"`
 
@@ -762,7 +749,7 @@ Whether experimental space dart mode is enabled for Flutter applications.
 
 **Current value (from the default):** `false`
 
-From [//topaz/runtime/dart/dart_component.gni:38](https://fuchsia.googlesource.com/topaz/+/488f56c1d73f4134a611c9f0506dcd5853f9d128/runtime/dart/dart_component.gni#38)
+From [//topaz/runtime/dart/dart_component.gni:38](https://fuchsia.googlesource.com/topaz/+/288eec1fd475a71f4985571f55bd0cbef5fa68cc/runtime/dart/dart_component.gni#38)
 
 ### flutter_use_fontconfig
 
@@ -774,7 +761,7 @@ From //third_party/flutter/third_party/txt/BUILD.gn:16
 
 **Current value (from the default):** `["collection", "flutter", "meta", "typed_data", "vector_math"]`
 
-From [//topaz/runtime/flutter_runner/prebuilt_framework.gni:8](https://fuchsia.googlesource.com/topaz/+/488f56c1d73f4134a611c9f0506dcd5853f9d128/runtime/flutter_runner/prebuilt_framework.gni#8)
+From [//topaz/runtime/flutter_runner/prebuilt_framework.gni:8](https://fuchsia.googlesource.com/topaz/+/288eec1fd475a71f4985571f55bd0cbef5fa68cc/runtime/flutter_runner/prebuilt_framework.gni#8)
 
 ### fuchsia_sdk_root
 Consumers of the Fuchsia SDK instantiate templates for various SDK parts at
@@ -850,24 +837,40 @@ From //build/go/go_build.gni:20
     will have build and test results cached, and is safe to be written to
     concurrently. If overridden, this directory must be a full path.
 
-**Current value (from the default):** `"/b/s/w/ir/k/root_build_dir/.gocache"`
+**Current value (from the default):** `"/b/s/w/ir/k/root_build_dir/host_x64/.gocache"`
 
 From //build/go/go_build.gni:16
 
 ### goma_dir
-Absolute directory containing the Goma source code.
+Directory containing the Goma source code.  This can be a GN
+source-absolute path ("//...") or a system absolute path.
 
 **Current value (from the default):** `"/home/swarming/goma"`
 
-From //build/toolchain/goma.gni:12
+From //build/toolchain/goma.gni:13
 
-### have_secmem_ta
-The secmem TA must be obtained elsewhere and put into the firmware
-directory.
+### graphics_compute_generate_debug_shaders
+Set to true in your args.gn file to generate pre-processed and
+auto-formatted shaders under the "debug" sub-directory of hotsort and spinel
+target generation output directories.
 
-**Current value (from the default):** `false`
+These are never used, but can be reviewed manually to verify the impact of
+configuration parameters, or when modifying hotsort.
 
-From //garnet/bin/sysmem-assistant/BUILD.gn:44
+Example results:
+
+  out/default/
+    gen/src/graphics/lib/compute/
+       hotsort/targets/hs_amd_gcn3_u64/
+          comp/
+            hs_transpose.comp   -> normal shader.
+          debug/
+            hs_transpose.comp   -> same, but much easier to read!
+
+
+**Current value (from the default):** `true`
+
+From //src/graphics/lib/compute/gn/glsl_shader_rules.gni:27
 
 ### host_byteorder
 
@@ -909,23 +912,35 @@ true or false in similar circumstances.
 
 **Current value (from the default):** `true`
 
-From [//third_party/icu/config.gni:15](https://fuchsia.googlesource.com/third_party/icu/+/65e4aa3b8cc6b41cf31136b9474a9c97bdc27739/config.gni#15)
+From [//third_party/icu/config.gni:15](https://fuchsia.googlesource.com/third_party/icu/+/1aa5008165095c7651f500f77e04336cd2748660/config.gni#15)
 
 ### is_debug
 Debug build.
 
 **Current value (from the default):** `true`
 
-From //build/config/BUILDCONFIG.gn:11
+From //build/config/BUILDCONFIG.gn:15
 
 ### kernel_cmdline_args
 List of kernel command line arguments to bake into the boot image.
 See also //zircon/docs/kernel_cmdline.md and
 [`devmgr_config`](#devmgr_config).
 
-**Current value (from the default):** `[]`
+**Current value for `target_cpu = "arm64"`:** `["bootsvc.next=bin/component_manager,fuchsia-boot:///boot#meta/root.cm,--use-builtin-process-launcher"]`
 
-From //build/images/BUILD.gn:480
+From //products/bringup.gni:13
+
+**Overridden from the default:** `[]`
+
+From //build/images/BUILD.gn:478
+
+**Current value for `target_cpu = "x64"`:** `["bootsvc.next=bin/component_manager,fuchsia-boot:///boot#meta/root.cm,--use-builtin-process-launcher"]`
+
+From //products/bringup.gni:13
+
+**Overridden from the default:** `[]`
+
+From //build/images/BUILD.gn:478
 
 ### kernel_cmdline_files
 Files containing additional kernel command line arguments to bake into
@@ -935,7 +950,7 @@ These can be GN `//` source pathnames or absolute system pathnames.
 
 **Current value (from the default):** `[]`
 
-From //build/images/BUILD.gn:486
+From //build/images/BUILD.gn:484
 
 ### known_variants
 List of variants that will form the basis for variant toolchains.
@@ -1049,7 +1064,7 @@ Each element of the list is one variant, which is a scope defining:
 }]
 ```
 
-From //build/config/BUILDCONFIG.gn:339
+From //build/config/BUILDCONFIG.gn:344
 
 ### ledger_sync_credentials_file
 
@@ -1061,7 +1076,7 @@ From //src/ledger/bin/testing/sync_params.gni:6
 
 **Current value (from the default):** `""`
 
-From //src/virtualization/packages/linux_guest/BUILD.gn:13
+From //src/virtualization/packages/linux_guest/BUILD.gn:12
 
 ### linux_runner_extras
 If `true`, the extras.img will be built and mounted inside the container
@@ -1098,6 +1113,15 @@ From //src/virtualization/packages/biscotti_guest/linux_runner/BUILD.gn:17
 
 From //src/virtualization/packages/biscotti_guest/linux_runner/BUILD.gn:19
 
+### local_bench
+Used to enable local benchmarking/fine-tuning when running benchmarks
+in `fx shell`. Pass `--args=local_bench='true'` to `fx set` in order to
+enable it.
+
+**Current value (from the default):** `false`
+
+From //src/developer/fuchsia-criterion/BUILD.gn:14
+
 ### log_startup_sleep
 
 **Current value (from the default):** `"30000"`
@@ -1131,6 +1155,46 @@ From //garnet/lib/magma/gnbuild/magma.gni:17
 
 From //garnet/lib/magma/gnbuild/magma.gni:14
 
+### max_blob_contents_size
+Maximum allowable contents for the /blob in a release mode build.
+Zero means no limit.
+contents_size refers to contents stored within the filesystem (regardless
+of how they are stored).
+
+**Current value (from the default):** `"0"`
+
+From //build/images/filesystem_limits.gni:10
+
+### max_blob_image_size
+Maximum allowable image_size for /blob in a release mode build.
+Zero means no limit.
+image_size refers to the total image size, including both contents and
+metadata.
+
+**Current value (from the default):** `"0"`
+
+From //build/images/filesystem_limits.gni:16
+
+### max_data_contents_size
+Maximum allowable contents_size for /data in a release mode build.
+Zero means no limit.
+contents_size refers to contents stored within the filesystem (regardless
+of how they are stored).
+
+**Current value (from the default):** `"0"`
+
+From //build/images/filesystem_limits.gni:22
+
+### max_data_image_size
+Maximum allowable image_size for /data in a release mode build.
+Zero means no limit.
+image_size refers to the total image size, including both contents and
+metadata.
+
+**Current value (from the default):** `"0"`
+
+From //build/images/filesystem_limits.gni:28
+
 ### max_fvm_size
 Maximum allowable size for the FVM in a release mode build
 Zero means no limit
@@ -1156,7 +1220,7 @@ From //products/core.gni:12
 
 **Overridden from the default:** `[]`
 
-From //build/images/BUILD.gn:36
+From //build/images/BUILD.gn:37
 
 **Current value for `target_cpu = "x64"`:** `["//build/images:config-data", "//build/images:shell-commands", "//src/sys/component_index:component_index"]`
 
@@ -1164,7 +1228,7 @@ From //products/core.gni:12
 
 **Overridden from the default:** `[]`
 
-From //build/images/BUILD.gn:36
+From //build/images/BUILD.gn:37
 
 ### minfs_maximum_bytes
 
@@ -1230,7 +1294,7 @@ Directory containing prebuilt Dart SDK.
 This must have in its `bin/` subdirectory `gen_snapshot.OS-CPU` binaries.
 Set to empty for a local build.
 
-**Current value (from the default):** `"//topaz/tools/prebuilt-dart-sdk/linux-x64"`
+**Current value (from the default):** `"//prebuilt/third_party/dart/linux-x64"`
 
 From //build/dart/dart.gni:9
 
@@ -1238,13 +1302,13 @@ From //build/dart/dart.gni:9
 
 **Current value (from the default):** `""`
 
-From [//topaz/runtime/flutter_runner/prebuilt_framework.gni:7](https://fuchsia.googlesource.com/topaz/+/488f56c1d73f4134a611c9f0506dcd5853f9d128/runtime/flutter_runner/prebuilt_framework.gni#7)
+From [//topaz/runtime/flutter_runner/prebuilt_framework.gni:7](https://fuchsia.googlesource.com/topaz/+/288eec1fd475a71f4985571f55bd0cbef5fa68cc/runtime/flutter_runner/prebuilt_framework.gni#7)
 
 ### prebuilt_framework_path
 
 **Current value (from the default):** `""`
 
-From [//topaz/runtime/flutter_runner/prebuilt_framework.gni:6](https://fuchsia.googlesource.com/topaz/+/488f56c1d73f4134a611c9f0506dcd5853f9d128/runtime/flutter_runner/prebuilt_framework.gni#6)
+From [//topaz/runtime/flutter_runner/prebuilt_framework.gni:6](https://fuchsia.googlesource.com/topaz/+/288eec1fd475a71f4985571f55bd0cbef5fa68cc/runtime/flutter_runner/prebuilt_framework.gni#6)
 
 ### prebuilt_libvulkan_arm_path
 
@@ -1252,12 +1316,36 @@ From [//topaz/runtime/flutter_runner/prebuilt_framework.gni:6](https://fuchsia.g
 
 From //garnet/lib/magma/gnbuild/magma.gni:23
 
+### prebuilt_libvulkan_goldfish_path
+
+**Current value (from the default):** `"//prebuilt/third_party/libvulkan_goldfish/arm64"`
+
+From //garnet/lib/goldfish-vulkan/gnbuild/BUILD.gn:10
+
 ### rust_lto
 Sets the default LTO type for rustc bulids.
 
-**Current value (from the default):** `"unset"`
+**Current value (from the default):** `""`
 
 From //build/rust/config.gni:20
+
+### rust_override_lto
+Overrides the LTO setting for all Rust builds, regardless of
+debug/release flags or the `with_lto` arg to the rustc_ templates.
+Valid values are "none", "thin", and "fat".
+
+**Current value (from the default):** `""`
+
+From //build/rust/config.gni:37
+
+### rust_override_opt
+Overrides the optimization level for all Rust builds, regardless of
+debug/release flags or the `force_opt` arg to the rustc_ templates.
+Valid values are 0-3, o, and z.
+
+**Current value (from the default):** `""`
+
+From //build/rust/config.gni:32
 
 ### rust_toolchain_triple_suffix
 Sets the fuchsia toolchain target triple suffix (after arch)
@@ -1278,16 +1366,30 @@ From //build/rust/config.gni:27
 Sets a custom base directory for `rustc` and `cargo`.
 This can be used to test custom Rust toolchains.
 
-**Current value (from the default):** `"//buildtools/linux-x64/rust/bin"`
+**Current value (from the default):** `"//prebuilt/third_party/rust/linux-x64/bin"`
 
 From //build/rust/config.gni:17
+
+### scenic_display_frame_number
+Draws the current frame number in the top-left corner.
+
+**Current value (from the default):** `false`
+
+From //garnet/lib/ui/gfx/BUILD.gn:11
 
 ### scenic_enable_vulkan_validation
 Include the vulkan validation layers in scenic.
 
 **Current value (from the default):** `true`
 
-From //garnet/bin/ui/BUILD.gn:40
+From //garnet/bin/ui/BUILD.gn:38
+
+### scenic_enforce_view_bound_clipping
+Turns on view bound clipping for all of Scenic.
+
+**Current value (from the default):** `false`
+
+From //garnet/lib/ui/gfx/BUILD.gn:14
 
 ### scenic_ignore_vsync
 
@@ -1399,7 +1501,7 @@ is satisfied if any of the strings matches against the candidate string.
 
 **Current value (from the default):** `[]`
 
-From //build/config/BUILDCONFIG.gn:627
+From //build/config/BUILDCONFIG.gn:614
 
 ### select_variant_canonical
 *This should never be set as a build argument.*
@@ -1408,7 +1510,7 @@ See //build/toolchain/clang_toolchain.gni for details.
 
 **Current value (from the default):** `[]`
 
-From //build/config/BUILDCONFIG.gn:632
+From //build/config/BUILDCONFIG.gn:619
 
 ### select_variant_shortcuts
 List of short names for commonly-used variant selectors.  Normally this
@@ -1429,19 +1531,10 @@ a list that can be spliced into [`select_variant`](#select_variant).
   host = true
   variant = "asan"
 }]
-}, {
-  name = "asan"
-  select_variant = [{
-  target_type = ["driver_module"]
-  variant = false
-}, {
-  host = false
-  variant = "asan"
-}]
 }]
 ```
 
-From //build/config/BUILDCONFIG.gn:450
+From //build/config/BUILDCONFIG.gn:455
 
 ### shell_enable_metal
 
@@ -1459,37 +1552,37 @@ From //third_party/flutter/shell/config.gni:6
 
 **Current value (from the default):** `false`
 
-From //build/images/BUILD.gn:46
+From //build/images/BUILD.gn:47
 
 ### skia_android_serial
 
 **Current value (from the default):** `""`
 
-From //third_party/skia/BUILD.gn:42
+From //third_party/skia/BUILD.gn:43
 
 ### skia_compile_processors
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:51
+From //third_party/skia/BUILD.gn:53
 
 ### skia_enable_atlas_text
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:65
+From //third_party/skia/BUILD.gn:67
 
 ### skia_enable_ccpr
 
 **Current value (from the default):** `true`
 
-From //third_party/skia/BUILD.gn:43
+From //third_party/skia/BUILD.gn:44
 
 ### skia_enable_discrete_gpu
 
 **Current value (from the default):** `true`
 
-From //third_party/skia/BUILD.gn:45
+From //third_party/skia/BUILD.gn:46
 
 ### skia_enable_flutter_defines
 
@@ -1513,43 +1606,43 @@ From //third_party/skia/BUILD.gn:17
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:70
+From //third_party/skia/BUILD.gn:72
 
 ### skia_enable_fontmgr_custom
 
-**Current value (from the default):** `false`
+**Current value (from the default):** `true`
 
-From //third_party/skia/BUILD.gn:68
+From //third_party/skia/BUILD.gn:70
 
 ### skia_enable_fontmgr_custom_empty
 
-**Current value (from the default):** `true`
+**Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:69
+From //third_party/skia/BUILD.gn:71
 
 ### skia_enable_fontmgr_empty
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:66
+From //third_party/skia/BUILD.gn:68
 
 ### skia_enable_fontmgr_fuchsia
 
-**Current value (from the default):** `true`
+**Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:71
+From //third_party/skia/BUILD.gn:73
 
 ### skia_enable_fontmgr_win
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:72
+From //third_party/skia/BUILD.gn:74
 
 ### skia_enable_fontmgr_win_gdi
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:73
+From //third_party/skia/BUILD.gn:75
 
 ### skia_enable_gpu
 
@@ -1561,7 +1654,7 @@ From //third_party/skia/gn/skia.gni:11
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:44
+From //third_party/skia/BUILD.gn:45
 
 ### skia_enable_particles
 
@@ -1577,7 +1670,7 @@ From //.gn:25
 
 **Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:46
+From //third_party/skia/BUILD.gn:47
 
 **Current value for `target_cpu = "x64"`:** `false`
 
@@ -1585,7 +1678,7 @@ From //.gn:25
 
 **Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:46
+From //third_party/skia/BUILD.gn:47
 
 ### skia_enable_skottie
 
@@ -1597,7 +1690,7 @@ From //third_party/skia/modules/skottie/BUILD.gn:9
 
 **Current value (from the default):** `true`
 
-From //third_party/skia/BUILD.gn:48
+From //third_party/skia/BUILD.gn:49
 
 ### skia_enable_skshaper
 
@@ -1605,11 +1698,17 @@ From //third_party/skia/BUILD.gn:48
 
 From //third_party/skia/modules/skshaper/BUILD.gn:9
 
+### skia_enable_skvm_jit
+
+**Current value (from the default):** `false`
+
+From //third_party/skia/BUILD.gn:50
+
 ### skia_enable_spirv_validation
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:47
+From //third_party/skia/BUILD.gn:48
 
 ### skia_enable_tools
 
@@ -1621,37 +1720,37 @@ From //third_party/skia/gn/skia.gni:12
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:49
+From //third_party/skia/BUILD.gn:51
 
 ### skia_generate_workarounds
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:52
+From //third_party/skia/BUILD.gn:54
 
 ### skia_gl_standard
 
 **Current value (from the default):** `""`
 
-From //third_party/skia/BUILD.gn:80
+From //third_party/skia/BUILD.gn:82
 
 ### skia_lex
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:53
+From //third_party/skia/BUILD.gn:55
 
 ### skia_llvm_lib
 
 **Current value (from the default):** `"LLVM"`
 
-From //third_party/skia/BUILD.gn:58
+From //third_party/skia/BUILD.gn:60
 
 ### skia_llvm_path
 
 **Current value (from the default):** `""`
 
-From //third_party/skia/BUILD.gn:57
+From //third_party/skia/BUILD.gn:59
 
 ### skia_pdf_subset_harfbuzz
 TODO: set skia_pdf_subset_harfbuzz to skia_use_harfbuzz.
@@ -1664,19 +1763,19 @@ From //third_party/skia/gn/skia.gni:18
 
 **Current value (from the default):** `""`
 
-From //third_party/skia/BUILD.gn:50
+From //third_party/skia/BUILD.gn:52
 
 ### skia_skqp_global_error_tolerance
 
 **Current value (from the default):** `0`
 
-From //third_party/skia/BUILD.gn:55
+From //third_party/skia/BUILD.gn:57
 
 ### skia_tools_require_resources
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:60
+From //third_party/skia/BUILD.gn:62
 
 ### skia_use_angle
 
@@ -1690,9 +1789,9 @@ From //third_party/skia/BUILD.gn:21
 
 From //.gn:26
 
-**Overridden from the default:** `false`
+**Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:63
+From //third_party/skia/BUILD.gn:65
 
 **Current value for `target_cpu = "x64"`:** `false`
 
@@ -1700,7 +1799,7 @@ From //.gn:26
 
 **Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:63
+From //third_party/skia/BUILD.gn:65
 
 ### skia_use_egl
 
@@ -1726,17 +1825,23 @@ From //.gn:27
 
 From //third_party/skia/BUILD.gn:23
 
-### skia_use_ffmpeg
+### skia_use_experimental_xform
 
 **Current value (from the default):** `false`
 
 From //third_party/skia/BUILD.gn:24
 
+### skia_use_ffmpeg
+
+**Current value (from the default):** `false`
+
+From //third_party/skia/BUILD.gn:25
+
 ### skia_use_fixed_gamma_text
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:28
+From //third_party/skia/BUILD.gn:29
 
 ### skia_use_fontconfig
 
@@ -1744,9 +1849,9 @@ From //third_party/skia/BUILD.gn:28
 
 From //.gn:28
 
-**Overridden from the default:** `false`
+**Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:25
+From //third_party/skia/BUILD.gn:26
 
 **Current value for `target_cpu = "x64"`:** `false`
 
@@ -1754,19 +1859,19 @@ From //.gn:28
 
 **Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:25
+From //third_party/skia/BUILD.gn:26
 
 ### skia_use_fonthost_mac
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:26
+From //third_party/skia/BUILD.gn:27
 
 ### skia_use_freetype
 
 **Current value (from the default):** `true`
 
-From //third_party/skia/BUILD.gn:27
+From //third_party/skia/BUILD.gn:28
 
 ### skia_use_harfbuzz
 
@@ -1776,7 +1881,7 @@ From //third_party/skia/gn/skia.gni:14
 
 ### skia_use_icu
 
-**Current value (from the default):** `false`
+**Current value (from the default):** `true`
 
 From //third_party/skia/gn/skia.gni:13
 
@@ -1784,19 +1889,19 @@ From //third_party/skia/gn/skia.gni:13
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:38
+From //third_party/skia/BUILD.gn:39
 
 ### skia_use_libjpeg_turbo
 
 **Current value (from the default):** `true`
 
-From //third_party/skia/BUILD.gn:29
+From //third_party/skia/BUILD.gn:30
 
 ### skia_use_libpng
 
 **Current value (from the default):** `true`
 
-From //third_party/skia/BUILD.gn:30
+From //third_party/skia/BUILD.gn:31
 
 ### skia_use_libwebp
 
@@ -1804,9 +1909,9 @@ From //third_party/skia/BUILD.gn:30
 
 From //.gn:29
 
-**Overridden from the default:** `false`
+**Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:31
+From //third_party/skia/BUILD.gn:32
 
 **Current value for `target_cpu = "x64"`:** `false`
 
@@ -1814,31 +1919,31 @@ From //.gn:29
 
 **Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:31
+From //third_party/skia/BUILD.gn:32
 
 ### skia_use_lua
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:32
+From //third_party/skia/BUILD.gn:33
 
 ### skia_use_metal
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:37
+From //third_party/skia/BUILD.gn:38
 
 ### skia_use_opencl
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:33
+From //third_party/skia/BUILD.gn:34
 
 ### skia_use_piex
 
 **Current value (from the default):** `true`
 
-From //third_party/skia/BUILD.gn:34
+From //third_party/skia/BUILD.gn:35
 
 ### skia_use_sfntly
 
@@ -1846,9 +1951,9 @@ From //third_party/skia/BUILD.gn:34
 
 From //.gn:30
 
-**Overridden from the default:** `false`
+**Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:64
+From //third_party/skia/BUILD.gn:66
 
 **Current value for `target_cpu = "x64"`:** `false`
 
@@ -1856,19 +1961,19 @@ From //.gn:30
 
 **Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:64
+From //third_party/skia/BUILD.gn:66
 
 ### skia_use_vulkan
 
-**Current value (from the default):** `true`
+**Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:86
+From //third_party/skia/BUILD.gn:90
 
 ### skia_use_wuffs
 
 **Current value (from the default):** `false`
 
-From //third_party/skia/BUILD.gn:35
+From //third_party/skia/BUILD.gn:36
 
 ### skia_use_x11
 
@@ -1876,9 +1981,9 @@ From //third_party/skia/BUILD.gn:35
 
 From //.gn:31
 
-**Overridden from the default:** `false`
+**Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:39
+From //third_party/skia/BUILD.gn:40
 
 **Current value for `target_cpu = "x64"`:** `false`
 
@@ -1886,36 +1991,25 @@ From //.gn:31
 
 **Overridden from the default:** `true`
 
-From //third_party/skia/BUILD.gn:39
+From //third_party/skia/BUILD.gn:40
 
 ### skia_use_xps
 
 **Current value (from the default):** `true`
 
-From //third_party/skia/BUILD.gn:40
+From //third_party/skia/BUILD.gn:41
 
 ### skia_use_zlib
 
 **Current value (from the default):** `true`
 
-From //third_party/skia/BUILD.gn:36
+From //third_party/skia/BUILD.gn:37
 
 ### skia_version
 
 **Current value (from the default):** `""`
 
 From //third_party/flutter/shell/version/version.gni:8
-
-### support_insecure_wep
-Enable WEP support.
-Use temporarily for testing driver WEP support.
-This build flag will be replaced by providing
-dedicated WEP specific WLAN targets which products
-can depend on.
-
-**Current value (from the default):** `false`
-
-From //src/connectivity/wlan/lib/wep_deprecated/BUILD.gn:15
 
 ### symbol_level
 How many symbols to include in the build. This affects the performance of
@@ -1929,16 +2023,6 @@ appear when using this level.
 **Current value (from the default):** `2`
 
 From //build/config/compiler.gni:13
-
-### system_package_key
-The package key to use for signing Fuchsia packages made by the
-`package()` template (and the `system_image` package).  If this
-doesn't exist yet when it's needed, it will be generated.  New
-keys can be generated with the `pm -k FILE genkey` host command.
-
-**Current value (from the default):** `"//build/development.key"`
-
-From //build/package.gni:18
 
 ### target_cpu
 
@@ -1968,7 +2052,7 @@ From //build/config/sysroot.gni:7
 ### thinlto_cache_dir
 ThinLTO cache directory path.
 
-**Current value (from the default):** `"linux_x64/thinlto-cache"`
+**Current value (from the default):** `"dartlang/thinlto-cache"`
 
 From //build/config/lto/config.gni:16
 
@@ -1983,7 +2067,7 @@ From //build/config/lto/config.gni:13
 Manifest files describing target libraries from toolchains.
 Can be either // source paths or absolute system paths.
 
-**Current value (from the default):** `["/b/s/w/ir/k/buildtools/linux-x64/clang/lib/aarch64-fuchsia.manifest"]`
+**Current value (from the default):** `["/b/s/w/ir/k/prebuilt/third_party/clang/linux-x64/lib/aarch64-fuchsia.manifest"]`
 
 From //build/images/manifest.gni:11
 
@@ -2021,7 +2105,7 @@ The other fields are the variant's effects as defined in
 }
 ```
 
-From //build/config/BUILDCONFIG.gn:74
+From //build/config/BUILDCONFIG.gn:78
 
 ### universal_variants
 
@@ -2036,7 +2120,7 @@ From //build/config/BUILDCONFIG.gn:74
 }]
 ```
 
-From //build/config/BUILDCONFIG.gn:424
+From //build/config/BUILDCONFIG.gn:429
 
 ### universe_package_labels
 If you add package labels to this variable, the packages will be included
@@ -2046,21 +2130,21 @@ the build. The build system ensures that the universe package set includes
 the base and cache package sets, which means you do not need to redundantly
 include those labels in this variable.
 
-**Current value for `target_cpu = "arm64"`:** `["//garnet/packages/prod:vboot_reference", "//bundles:tools"]`
+**Current value for `target_cpu = "arm64"`:** `["//garnet/tools/vboot_reference:cgpt_host", "//garnet/tools/vboot_reference:futility_host", "//bundles:tools"]`
 
-From //products/core.gni:28
-
-**Overridden from the default:** `[]`
-
-From //BUILD.gn:30
-
-**Current value for `target_cpu = "x64"`:** `["//garnet/packages/prod:vboot_reference", "//bundles:tools"]`
-
-From //products/core.gni:28
+From //products/core.gni:67
 
 **Overridden from the default:** `[]`
 
-From //BUILD.gn:30
+From //BUILD.gn:32
+
+**Current value for `target_cpu = "x64"`:** `["//garnet/tools/vboot_reference:cgpt_host", "//garnet/tools/vboot_reference:futility_host", "//bundles:tools"]`
+
+From //products/core.gni:67
+
+**Overridden from the default:** `[]`
+
+From //BUILD.gn:32
 
 ### update_kernels
 (deprecated) List of kernel images to include in the update (OTA) package.
@@ -2070,7 +2154,7 @@ package.
 
 **Current value (from the default):** `[]`
 
-From //build/images/BUILD.gn:498
+From //build/images/BUILD.gn:496
 
 ### use_ccache
 Set to true to enable compiling with ccache
@@ -2097,7 +2181,7 @@ From //build/config/lto/config.gni:7
 
 **Current value (from the default):** `false`
 
-From [//third_party/mesa/src/intel/vulkan/BUILD.gn:25](https://fuchsia.googlesource.com/third_party/mesa/+/e19a1967bdd8e9d6f7608210516183d30ca4f7a2/src/intel/vulkan/BUILD.gn#25)
+From [//third_party/mesa/src/intel/vulkan/BUILD.gn:25](https://fuchsia.googlesource.com/third_party/mesa/+/5c31c7b86a0658a1acf4cd0f17d981836e8f9d84/src/intel/vulkan/BUILD.gn#25)
 
 ### use_prebuilt_dart_sdk
 Whether to use the prebuilt Dart SDK for everything.
@@ -2177,25 +2261,38 @@ From //build/fuchsia/sdk.gni:8
 
 **Current value (from the default):** `""`
 
-From //build/images/BUILD.gn:42
+From //build/images/BUILD.gn:43
 
 ### vbmeta_b_partition
 
 **Current value (from the default):** `""`
 
-From //build/images/BUILD.gn:43
+From //build/images/BUILD.gn:44
 
 ### vbmeta_r_partition
 
 **Current value (from the default):** `""`
 
-From //build/images/BUILD.gn:44
+From //build/images/BUILD.gn:45
+
+### virtmagma_debug
+Enable verbose logging in virtmagma-related code
+
+**Current value (from the default):** `false`
+
+From //garnet/lib/magma/include/virtio/virtmagma_debug.gni:7
 
 ### vk_loader_debug
 
 **Current value (from the default):** `"warn,error"`
 
-From [//third_party/vulkan_loader_and_validation_layers/loader/BUILD.gn:26](https://fuchsia.googlesource.com/third_party/vulkan_loader_and_validation_layers/+/5aa2763f1d0a436644207f3ab56f40cfbf9bb760/loader/BUILD.gn#26)
+From [//third_party/vulkan_loader_and_validation_layers/loader/BUILD.gn:26](https://fuchsia.googlesource.com/third_party/vulkan_loader_and_validation_layers/+/716d56719979e88e94384cc471ca5c23c9df5879/loader/BUILD.gn#26)
+
+### vulkan_sdk
+
+**Current value (from the default):** `""`
+
+From //garnet/lib/vulkan/tests/vkprimer/BUILD.gn:8
 
 ### warn_on_sdk_changes
 Whether to only warn when an SDK has been modified.
@@ -2203,7 +2300,7 @@ If false, any unacknowledged SDK change will cause a build failure.
 
 **Current value (from the default):** `false`
 
-From //build/sdk/config.gni:8
+From //build/sdk/config.gni:11
 
 ### wlancfg_config_type
 Selects the wlan configuration type to use. Choices:
@@ -2246,7 +2343,7 @@ arguments to fx flash script
 
 **Current value (from the default):** `""`
 
-From //build/images/BUILD.gn:39
+From //build/images/BUILD.gn:40
 
 ### zircon_args
 [Zircon GN build arguments](../../../zircon/docs/gen/build_arguments.md).
@@ -2271,19 +2368,19 @@ silently clobber the default value shown here.
 }
 ```
 
-From //build/config/fuchsia/zircon.gni:46
+From //BUILD.gn:81
 
 ### zircon_asserts
 
 **Current value (from the default):** `true`
 
-From //build/config/fuchsia/BUILD.gn:205
+From //build/config/fuchsia/BUILD.gn:206
 
 ### zircon_b_partition
 
 **Current value (from the default):** `""`
 
-From //build/images/BUILD.gn:40
+From //build/images/BUILD.gn:41
 
 ### zircon_build_root
 
@@ -2301,7 +2398,7 @@ From //products/core.gni:9
 
 **Overridden from the default:** `false`
 
-From //build/config/fuchsia/zircon.gni:32
+From //BUILD.gn:53
 
 **Current value for `target_cpu = "x64"`:** `false`
 
@@ -2309,7 +2406,7 @@ From //products/core.gni:9
 
 **Overridden from the default:** `false`
 
-From //build/config/fuchsia/zircon.gni:32
+From //BUILD.gn:53
 
 ### zircon_enable_netsvc_debugging_features
 
@@ -2319,7 +2416,7 @@ From //products/core.gni:10
 
 **Overridden from the default:** `false`
 
-From //build/config/fuchsia/zircon.gni:33
+From //BUILD.gn:54
 
 **Current value for `target_cpu = "x64"`:** `false`
 
@@ -2327,7 +2424,7 @@ From //products/core.gni:10
 
 **Overridden from the default:** `false`
 
-From //build/config/fuchsia/zircon.gni:33
+From //BUILD.gn:54
 
 ### zircon_extra_args
 [Zircon GN build arguments](../../../zircon/docs/gen/build_arguments.md).
@@ -2344,13 +2441,28 @@ to explicitly set Zircon's `variants` here.
 
 **Current value (from the default):** `{ }`
 
-From //build/config/fuchsia/zircon.gni:27
+From //BUILD.gn:45
+
+### zircon_extra_ninja_targets
+Additional targets to pass to the Zircon Ninja build.
+
+**Current value (from the default):** `[]`
+
+From //BUILD.gn:49
 
 ### zircon_r_partition
 
 **Current value (from the default):** `""`
 
-From //build/images/BUILD.gn:41
+From //build/images/BUILD.gn:42
+
+### zircon_tracelog
+Where to emit a tracelog from Zircon's GN run. No trace will be produced if
+given the empty string. Path can be source-absolute or system-absolute.
+
+**Current value (from the default):** `""`
+
+From //BUILD.gn:58
 
 ### zxcrypt_key_source
 This argument specifies from where the system should obtain the zxcrypt

@@ -1,6 +1,5 @@
 // Copyright 2018 The Fuchsia Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 #include <fcntl.h>
 #include <fuchsia/crash/cpp/fidl.h>
@@ -22,9 +21,7 @@
 
 class CrashAnalyzer {
  public:
-  CrashAnalyzer() : context_(sys::ComponentContext::Create()) {
-    FXL_DCHECK(context_);
-  }
+  CrashAnalyzer() : context_(sys::ComponentContext::Create()) { FXL_DCHECK(context_); }
 
   void ProcessCrashlog(fuchsia::mem::Buffer crashlog) {
     fuchsia::crash::AnalyzerSyncPtr analyzer;
@@ -32,15 +29,11 @@ class CrashAnalyzer {
     FXL_DCHECK(analyzer);
 
     fuchsia::crash::Analyzer_OnKernelPanicCrashLog_Result out_result;
-    const zx_status_t status =
-        analyzer->OnKernelPanicCrashLog(std::move(crashlog), &out_result);
+    const zx_status_t status = analyzer->OnKernelPanicCrashLog(std::move(crashlog), &out_result);
     if (status != ZX_OK) {
-      FX_LOGS(ERROR) << "failed to connect to crash analyzer: " << status
-                     << " (" << zx_status_get_string(status) << ")";
+      FX_PLOGS(ERROR, status) << "failed to connect to crash analyzer";
     } else if (out_result.is_err()) {
-      FX_LOGS(ERROR) << "failed to process kernel panic crash log: "
-                     << out_result.err() << " ("
-                     << zx_status_get_string(out_result.err()) << ")";
+      FX_PLOGS(ERROR, out_result.err()) << "failed to process kernel panic crash log";
     }
   }
 
@@ -73,9 +66,7 @@ int main(int argc, char** argv) {
 
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
   fuchsia::net::ConnectivityPtr connectivity =
-      sys::ComponentContext::Create()
-          ->svc()
-          ->Connect<fuchsia::net::Connectivity>();
+      sys::ComponentContext::Create()->svc()->Connect<fuchsia::net::Connectivity>();
   connectivity.events().OnNetworkReachable = [&crashlog_vmo](bool reachable) {
     if (!reachable) {
       return;

@@ -8,16 +8,16 @@
 #include <fuchsia/tracing/controller/cpp/fidl.h>
 #include <lib/fit/function.h>
 #include <lib/sys/cpp/component_context.h>
+#include <src/lib/fxl/command_line.h>
 
 #include <iosfwd>
 #include <map>
 #include <memory>
 #include <string>
 
-#include "src/lib/fxl/command_line.h"
-#include "src/lib/fxl/macros.h"
-
 namespace tracing {
+
+namespace controller = ::fuchsia::tracing::controller;
 
 class Command {
  public:
@@ -57,21 +57,27 @@ class Command {
   OnDoneCallback on_done_;
   int32_t return_code_ = -1;
 
-  FXL_DISALLOW_COPY_AND_ASSIGN(Command);
+  Command(const Command&) = delete;
+  Command(Command&&) = delete;
+  Command& operator=(const Command&) = delete;
+  Command& operator=(Command&&) = delete;
 };
 
 class CommandWithController : public Command {
  protected:
   explicit CommandWithController(sys::ComponentContext* context);
 
-  fuchsia::tracing::controller::ControllerPtr& trace_controller();
-  const fuchsia::tracing::controller::ControllerPtr& trace_controller() const;
+  controller::ControllerPtr& controller() { return controller_; }
+  const controller::ControllerPtr& controller() const { return controller_; }
 
  private:
   std::unique_ptr<sys::ComponentContext> context_;
-  fuchsia::tracing::controller::ControllerPtr trace_controller_;
+  controller::ControllerPtr controller_;
 
-  FXL_DISALLOW_COPY_AND_ASSIGN(CommandWithController);
+  CommandWithController(const CommandWithController&) = delete;
+  CommandWithController(CommandWithController&&) = delete;
+  CommandWithController& operator=(const CommandWithController&) = delete;
+  CommandWithController& operator=(CommandWithController&&) = delete;
 };
 
 }  // namespace tracing

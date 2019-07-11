@@ -10,7 +10,7 @@ Soft reboot the system with a new kernel and bootimage.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_status_t zx_system_mexec(zx_handle_t resource,
@@ -49,5 +49,8 @@ to the new kernel.
 
 ## SEE ALSO
 
+ - [`zx_system_mexec_payload_get()`]
 
-[system_mexec_payload_get](system_mexec_payload_get.md).
+<!-- References updated by update-docs-from-abigen, do not edit. -->
+
+[`zx_system_mexec_payload_get()`]: system_mexec_payload_get.md

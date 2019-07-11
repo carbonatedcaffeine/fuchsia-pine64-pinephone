@@ -2,13 +2,35 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/fidl/fidl.gni")
 import("//build/test/test_package.gni")
 
 group("tests") {
   testonly = true
   deps = [
     ":modular_integration_tests",
-    "//peridot/packages/tests:modular_test_harness",
+
+    # modular_test_harness is a dep for any test that uses test_harness_fixture
+    # (all of the tests below). Add it here so that an fx set --with
+    # //src/modular/tests includes it.
+    "//peridot/packages/testing:modular_test_harness",
+  ]
+}
+
+executable("agent_services_test") {
+  testonly = true
+
+  output_name = "agent_services_test"
+
+  sources = [
+    "agent_services_test.cc",
+  ]
+
+  deps = [
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//third_party/googletest:gtest_main",
   ]
 }
 
@@ -25,9 +47,27 @@ executable("last_focus_time_test") {
     "//peridot/lib/testing:session_shell_impl",
     "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
     "//sdk/fidl/fuchsia.modular.testing",
-    "//sdk/fidl/fuchsia.sys",
-    "//sdk/fidl/fuchsia.ui.views",
-    "//sdk/lib/sys/cpp",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//third_party/googletest:gmock",
+    "//third_party/googletest:gtest_main",
+  ]
+}
+
+executable("queue_persistence_test") {
+  testonly = true
+
+  output_name = "queue_persistence_test"
+
+  sources = [
+    "queue_persistence_test.cc",
+  ]
+
+  deps = [
+    ":queue_persistence_test_service",
+    "//garnet/public/lib/svc/cpp",
+    "//peridot/public/lib/message_queue/cpp",
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.modular.testing",
     "//sdk/lib/sys/cpp/testing:integration",
     "//third_party/googletest:gtest_main",
   ]
@@ -41,12 +81,8 @@ executable("session_shell_test") {
   ]
 
   deps = [
-    "//garnet/public/lib/fsl",
-    "//peridot/lib/testing:session_shell_base",
     "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
     "//sdk/fidl/fuchsia.modular.testing",
-    "//sdk/fidl/fuchsia.sys",
-    "//sdk/lib/sys/cpp",
     "//sdk/lib/sys/cpp/testing:integration",
     "//third_party/googletest:gmock",
     "//third_party/googletest:gtest_main",
@@ -61,26 +97,221 @@ executable("intents_test") {
   ]
 
   deps = [
-    "//garnet/public/lib/callback",
-    "//peridot/lib/testing:session_shell_impl",
-    "//peridot/public/lib/app_driver/cpp:module_driver",
-    "//peridot/public/lib/async/cpp:future",
     "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
-    "//sdk/fidl/fuchsia.modular",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//third_party/googletest:gtest_main",
+  ]
+}
+
+executable("intl_property_provider_test") {
+  testonly = true
+  sources = [
+    "intl_property_provider_test.cc",
+  ]
+  deps = [
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.intl",
     "//sdk/fidl/fuchsia.modular.testing",
     "//sdk/fidl/fuchsia.sys",
+    "//sdk/fidl/fuchsia.ui.app",
     "//sdk/lib/sys/cpp",
     "//sdk/lib/sys/cpp/testing:integration",
-    "//src/lib/fxl",
+    "//third_party/googletest:gtest_main",
+  ]
+}
+
+executable("module_context_test") {
+  testonly = true
+
+  output_name = "module_context_test"
+
+  sources = [
+    "module_context_test.cc",
+  ]
+
+  deps = [
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//third_party/googletest:gmock",
+    "//third_party/googletest:gtest_main",
+  ]
+}
+
+executable("module_output_test") {
+  testonly = true
+
+  sources = [
+    "module_output_test.cc",
+  ]
+
+  deps = [
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.app.discover",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//third_party/googletest:gtest_main",
+  ]
+}
+
+executable("sessionmgr_integration_test") {
+  testonly = true
+
+  sources = [
+    "sessionmgr_integration_test.cc",
+  ]
+
+  deps = [
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//third_party/googletest:gtest_main",
+    "//zircon/public/fidl/fuchsia-device-manager",
+  ]
+}
+
+executable("story_shell_factory_test") {
+  testonly = true
+
+  output_name = "story_shell_factory_test"
+
+  sources = [
+    "story_shell_factory_test.cc",
+  ]
+
+  deps = [
+    "//peridot/lib/testing:session_shell_impl",
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/lib/sys/cpp/testing:integration",
     "//third_party/googletest:gtest_main",
     "//zircon/public/lib/async-loop-cpp",
+  ]
+}
+
+executable("story_shell_test") {
+  testonly = true
+
+  output_name = "story_shell_test"
+
+  sources = [
+    "story_shell_test.cc",
+  ]
+
+  deps = [
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//third_party/googletest:gmock",
+    "//third_party/googletest:gtest_main",
+  ]
+}
+
+executable("story_shell_embedded_mod_test") {
+  testonly = true
+
+  sources = [
+    "story_shell_embedded_mod_test.cc",
+  ]
+
+  deps = [
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//sdk/lib/ui/scenic/cpp",
+    "//third_party/googletest:gtest_main",
+  ]
+}
+
+executable("trigger_test") {
+  testonly = true
+
+  sources = [
+    "trigger_test.cc",
+  ]
+
+  deps = [
+    "//peridot/public/lib/message_queue/cpp",
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//third_party/googletest:gtest_main",
+    "//zircon/public/lib/fs",
+  ]
+}
+
+executable("clipboard_test") {
+  testonly = true
+
+  sources = [
+    "clipboard_test.cc",
+  ]
+
+  deps = [
+    "//peridot/bin/agents/clipboard:clipboard_sources",
+    "//peridot/bin/basemgr:lib",
+    "//peridot/lib/ledger_client:page_client",
+    "//peridot/lib/testing:ledger_repository_for_testing",
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//third_party/googletest:gtest_main",
+  ]
+}
+
+executable("login_override_test") {
+  testonly = true
+
+  output_name = "login_override_test"
+
+  sources = [
+    "login_override_test.cc",
+  ]
+
+  deps = [
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.auth.account",
+    "//sdk/fidl/fuchsia.devicesettings",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/fidl/fuchsia.setui",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//third_party/googletest:gtest_main",
+  ]
+}
+
+executable("component_context_test") {
+  testonly = true
+
+  sources = [
+    "component_context_test.cc",
+  ]
+
+  deps = [
+    "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture",
+    "//sdk/fidl/fuchsia.modular.testing",
+    "//sdk/lib/sys/cpp/testing:integration",
+    "//third_party/googletest:gtest_main",
+    "//zircon/public/lib/fs",
   ]
 }
 
 test_package("modular_integration_tests") {
   tests = [
     {
+      name = "agent_services_test"
+      environments = basic_envs
+    },
+    {
+      name = "sessionmgr_integration_test"
+      environments = basic_envs
+    },
+    {
       name = "last_focus_time_test"
+      environments = basic_envs
+    },
+    {
+      name = "queue_persistence_test"
       environments = basic_envs
     },
     {
@@ -91,16 +322,71 @@ test_package("modular_integration_tests") {
       name = "intents_test"
       environments = basic_envs
     },
+    {
+      name = "intl_property_provider_test"
+      environments = basic_envs
+    },
+    {
+      name = "module_context_test"
+      environments = basic_envs
+    },
+    {
+      name = "module_output_test"
+      environments = basic_envs
+    },
+    {
+      name = "story_shell_factory_test"
+      environments = basic_envs
+    },
+    {
+      name = "story_shell_test"
+      environments = basic_envs
+    },
+    {
+      name = "story_shell_embedded_mod_test"
+      environments = basic_envs
+    },
+    {
+      name = "trigger_test"
+      environments = basic_envs
+    },
+    {
+      name = "clipboard_test"
+      environments = basic_envs
+    },
+    {
+      name = "login_override_test"
+      environments = basic_envs
+    },
+    {
+      name = "component_context_test"
+      environments = basic_envs
+    },
   ]
 
   deps = [
+    ":agent_services_test",
+    ":clipboard_test",
+    ":component_context_test",
     ":intents_test",
+    ":intl_property_provider_test",
     ":last_focus_time_test",
+    ":login_override_test",
+    ":module_context_test",
+    ":module_output_test",
+    ":queue_persistence_test",
     ":session_shell_test",
-    "//garnet/public/lib/callback",
-    "//peridot/public/lib/app_driver/cpp",
-    "//sdk/fidl/fuchsia.modular",
-    "//src/lib/fxl",
-    "//zircon/public/lib/async-loop-cpp",
+    ":sessionmgr_integration_test",
+    ":story_shell_embedded_mod_test",
+    ":story_shell_factory_test",
+    ":story_shell_test",
+    ":trigger_test",
+  ]
+}
+
+fidl("queue_persistence_test_service") {
+  name = "test.modular.queuepersistence"
+  sources = [
+    "queue_persistence_test_service.test.fidl",
   ]
 }

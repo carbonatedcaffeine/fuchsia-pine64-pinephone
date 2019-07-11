@@ -15,6 +15,8 @@
 #include "src/ledger/bin/encryption/fake/fake_encryption_service.h"
 #include "src/ledger/bin/environment/environment.h"
 #include "src/ledger/bin/storage/fake/fake_journal_delegate.h"
+#include "src/ledger/bin/storage/fake/fake_object.h"
+#include "src/ledger/bin/storage/public/object.h"
 #include "src/ledger/bin/storage/public/page_storage.h"
 #include "src/ledger/bin/storage/public/types.h"
 #include "src/ledger/bin/storage/testing/page_storage_empty_impl.h"
@@ -35,39 +37,31 @@ class FakePageStorage : public PageStorageEmptyImpl {
 
   // PageStorage:
   PageId GetId() override;
-  Status GetHeadCommits(
-      std::vector<std::unique_ptr<const Commit>>* head_commits) override;
-  void GetMergeCommitIds(
-      CommitIdView parent1_id, CommitIdView parent2_id,
-      fit::function<void(Status, std::vector<CommitId>)> callback) override;
+  Status GetHeadCommits(std::vector<std::unique_ptr<const Commit>>* head_commits) override;
+  void GetMergeCommitIds(CommitIdView parent1_id, CommitIdView parent2_id,
+                         fit::function<void(Status, std::vector<CommitId>)> callback) override;
   void GetCommit(CommitIdView commit_id,
-                 fit::function<void(Status, std::unique_ptr<const Commit>)>
-                     callback) override;
-  std::unique_ptr<Journal> StartCommit(
-      std::unique_ptr<const Commit> commit) override;
-  std::unique_ptr<Journal> StartMergeCommit(
-      std::unique_ptr<const Commit> left,
-      std::unique_ptr<const Commit> right) override;
+                 fit::function<void(Status, std::unique_ptr<const Commit>)> callback) override;
+  std::unique_ptr<Journal> StartCommit(std::unique_ptr<const Commit> commit) override;
+  std::unique_ptr<Journal> StartMergeCommit(std::unique_ptr<const Commit> left,
+                                            std::unique_ptr<const Commit> right) override;
   void CommitJournal(
       std::unique_ptr<Journal> journal,
-      fit::function<void(Status, std::unique_ptr<const storage::Commit>)>
-          callback) override;
+      fit::function<void(Status, std::unique_ptr<const storage::Commit>)> callback) override;
   void AddCommitWatcher(CommitWatcher* watcher) override;
   void RemoveCommitWatcher(CommitWatcher* watcher) override;
   void IsSynced(fit::function<void(Status, bool)> callback) override;
-  void AddObjectFromLocal(
-      ObjectType object_type, std::unique_ptr<DataSource> data_source,
-      ObjectReferencesAndPriority tree_references,
-      fit::function<void(Status, ObjectIdentifier)> callback) override;
-  void GetObjectPart(
-      ObjectIdentifier object_identifier, int64_t offset, int64_t max_size,
-      Location location,
-      fit::function<void(Status, fsl::SizedVmo)> callback) override;
+  void AddObjectFromLocal(ObjectType object_type, std::unique_ptr<DataSource> data_source,
+                          ObjectReferencesAndPriority tree_references,
+                          fit::function<void(Status, ObjectIdentifier)> callback) override;
+  void GetObjectPart(ObjectIdentifier object_identifier, int64_t offset, int64_t max_size,
+                     Location location,
+                     fit::function<void(Status, fsl::SizedVmo)> callback) override;
   void GetObject(ObjectIdentifier object_identifier, Location location,
-                 fit::function<void(Status, std::unique_ptr<const Object>)>
-                     callback) override;
+                 fit::function<void(Status, std::unique_ptr<const Object>)> callback) override;
   void GetPiece(ObjectIdentifier object_identifier,
-                fit::function<void(Status, std::unique_ptr<const Piece>)>
+                fit::function<void(Status, std::unique_ptr<const Piece>,
+                                   std::unique_ptr<const PieceToken> token)>
                     callback) override;
   void GetCommitContents(const Commit& commit, std::string min_key,
                          fit::function<bool(Entry)> on_next,
@@ -79,12 +73,16 @@ class FakePageStorage : public PageStorageEmptyImpl {
   void set_autocommit(bool autocommit) { autocommit_ = autocommit; }
   void set_synced(bool is_synced) { is_synced_ = is_synced; }
 
-  const std::map<std::string, std::unique_ptr<FakeJournalDelegate>>&
-  GetJournals() const;
+  const std::map<std::string, std::unique_ptr<FakeJournalDelegate>>& GetJournals() const;
 
   const std::map<ObjectIdentifier, std::string>& GetObjects() const;
-  const std::map<ObjectDigest, ObjectReferencesAndPriority>& GetReferences()
-      const;
+  const std::map<ObjectDigest, ObjectReferencesAndPriority>& GetReferences() const;
+
+  // Returns true if |object_identifier| is still tracked by at least one live token.
+  bool HasLiveTokens(const ObjectIdentifier& identifier) const;
+
+  // Returns true if |token| has been issued by this fake storage.
+  bool HasIssuedToken(const std::unique_ptr<const PieceToken>& token) const;
 
   // Deletes this object from the fake local storage, but keeps it in its
   // "network" storage.
@@ -105,6 +103,8 @@ class FakePageStorage : public PageStorageEmptyImpl {
 
  private:
   void SendNextObject();
+  // Returns a fake piece token and tracks it in tokens_.
+  std::unique_ptr<PieceToken> MakeFakeToken(ObjectIdentifier identifier);
 
   bool autocommit_ = true;
   bool drop_commit_notifications_ = false;
@@ -113,6 +113,7 @@ class FakePageStorage : public PageStorageEmptyImpl {
   ledger::Environment* const environment_;
   std::map<std::string, std::unique_ptr<FakeJournalDelegate>> journals_;
   std::map<ObjectIdentifier, std::string> objects_;
+  std::multimap<ObjectIdentifier, fake::FakeTokenChecker> tokens_;
   std::map<ObjectDigest, ObjectReferencesAndPriority> references_;
   std::map<CommitId, zx::time_utc> heads_;
   std::map<std::pair<CommitId, CommitId>, std::vector<CommitId>> merges_;

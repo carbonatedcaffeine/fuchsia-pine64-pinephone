@@ -6,6 +6,8 @@ import("//build/package.gni")
 import("//build/package/component.gni")
 
 package("feedback_agent") {
+  deprecated_shell = "//build"
+
   deps = [
     ":data_provider",
     ":main",
@@ -47,7 +49,6 @@ executable("main") {
     "//sdk/fidl/fuchsia.feedback",
     "//sdk/lib/fidl/cpp",
     "//sdk/lib/sys/cpp",
-    "//src/lib/fxl",
     "//zircon/public/lib/async-loop-cpp",
     "//zircon/public/lib/zx",
   ]
@@ -64,7 +65,6 @@ executable("data_provider") {
     "//sdk/fidl/fuchsia.feedback",
     "//sdk/lib/fidl/cpp",
     "//sdk/lib/sys/cpp",
-    "//src/lib/fxl",
     "//zircon/public/lib/async-loop-cpp",
     "//zircon/public/lib/zx",
   ]
@@ -82,10 +82,12 @@ source_set("src") {
     "data_provider.h",
     "image_conversion.cc",
     "image_conversion.h",
-    "inspect.cc",
-    "inspect.h",
-    "log_listener.cc",
-    "log_listener.h",
+    "inspect_ptr.cc",
+    "inspect_ptr.h",
+    "log_listener_ptr.cc",
+    "log_listener_ptr.h",
+    "scenic_ptr.cc",
+    "scenic_ptr.h",
   ]
 
   public_deps = [

@@ -3,14 +3,14 @@
 // found in the LICENSE file.
 
 use crate::{
+    clock,
     common::{App, CheckOptions, ProtocolState, UpdateCheckSchedule},
     installer::Plan,
     policy::{CheckDecision, Policy, PolicyData, PolicyEngine, UpdateDecision},
     request_builder::RequestParams,
 };
-use futures::future::FutureObj;
+use futures::future::BoxFuture;
 use futures::prelude::*;
-use std::time::SystemTime;
 
 /// A stub policy implementation that allows everything immediately.
 pub struct StubPolicy;
@@ -52,6 +52,7 @@ impl Policy for StubPolicy {
 
 /// A stub PolicyEngine that just gathers the current time and hands it off to the StubPolicy as the
 /// PolicyData.
+#[derive(Debug)]
 pub struct StubPolicyEngine;
 
 impl PolicyEngine for StubPolicyEngine {
@@ -60,14 +61,14 @@ impl PolicyEngine for StubPolicyEngine {
         apps: &[App],
         scheduling: &UpdateCheckSchedule,
         protocol_state: &ProtocolState,
-    ) -> FutureObj<UpdateCheckSchedule> {
+    ) -> BoxFuture<UpdateCheckSchedule> {
         let schedule = StubPolicy::compute_next_update_time(
-            &PolicyData { current_time: SystemTime::now() },
+            &PolicyData { current_time: clock::now() },
             apps,
             scheduling,
             protocol_state,
         );
-        FutureObj::new(future::ready(schedule).boxed())
+        future::ready(schedule).boxed()
     }
 
     fn update_check_allowed(
@@ -76,23 +77,23 @@ impl PolicyEngine for StubPolicyEngine {
         scheduling: &UpdateCheckSchedule,
         protocol_state: &ProtocolState,
         check_options: &CheckOptions,
-    ) -> FutureObj<CheckDecision> {
+    ) -> BoxFuture<CheckDecision> {
         let decision = StubPolicy::update_check_allowed(
-            &PolicyData { current_time: SystemTime::now() },
+            &PolicyData { current_time: clock::now() },
             apps,
             scheduling,
             protocol_state,
             check_options,
         );
-        FutureObj::new(future::ready(decision).boxed())
+        future::ready(decision).boxed()
     }
 
-    fn update_can_start(&mut self, proposed_install_plan: &impl Plan) -> FutureObj<UpdateDecision> {
+    fn update_can_start(&mut self, proposed_install_plan: &impl Plan) -> BoxFuture<UpdateDecision> {
         let decision = StubPolicy::update_can_start(
-            &PolicyData { current_time: SystemTime::now() },
+            &PolicyData { current_time: clock::now() },
             proposed_install_plan,
         );
-        FutureObj::new(future::ready(decision).boxed())
+        future::ready(decision).boxed()
     }
 }
 
@@ -110,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_compute_next_update_time() {
-        let now = SystemTime::now();
+        let now = clock::now();
         let policy_data = PolicyData { current_time: now };
         let result = StubPolicy::compute_next_update_time(
             &policy_data,
@@ -128,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_update_check_allowed_on_demand() {
-        let policy_data = PolicyData { current_time: SystemTime::now() };
+        let policy_data = PolicyData { current_time: clock::now() };
         let check_options = CheckOptions { source: InstallSource::OnDemand };
         let result = StubPolicy::update_check_allowed(
             &policy_data,
@@ -146,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_update_check_allowed_scheduled_task() {
-        let policy_data = PolicyData { current_time: SystemTime::now() };
+        let policy_data = PolicyData { current_time: clock::now() };
         let check_options = CheckOptions { source: InstallSource::ScheduledTask };
         let result = StubPolicy::update_check_allowed(
             &policy_data,
@@ -164,7 +165,7 @@ mod tests {
 
     #[test]
     fn test_update_can_start() {
-        let policy_data = PolicyData { current_time: SystemTime::now() };
+        let policy_data = PolicyData { current_time: clock::now() };
         let result = StubPolicy::update_can_start(&policy_data, &StubPlan);
         assert_eq!(result, UpdateDecision::Ok);
     }

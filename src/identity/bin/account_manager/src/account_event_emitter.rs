@@ -8,9 +8,12 @@
 
 use account_common::{AccountAuthState, FidlAccountAuthState, LocalAccountId};
 use fidl_fuchsia_auth_account::{AccountListenerOptions, AccountListenerProxy};
+use fuchsia_inspect::{Node, NumericProperty, Property};
 use futures::future::*;
 use futures::lock::Mutex;
 use std::pin::Pin;
+
+use crate::inspect;
 
 /// Events emitted on account listeners
 pub enum AccountEvent {
@@ -76,15 +79,20 @@ impl Client {
     }
 }
 
-/// Collection of account listener emitters.
+/// A type to maintain the set of account listener clients and distribute events to them.
 pub struct AccountEventEmitter {
+    /// Collection of account listener clients.
     clients: Mutex<Vec<Client>>,
+
+    /// Helper for outputting listener information via fuchsia_inspect.
+    inspect: inspect::Listeners,
 }
 
 impl AccountEventEmitter {
     /// Create a new emitter with no clients.
-    pub fn new() -> AccountEventEmitter {
-        Self { clients: Mutex::new(Vec::new()) }
+    pub fn new(parent: &Node) -> Self {
+        let inspect = inspect::Listeners::new(parent);
+        Self { clients: Mutex::new(Vec::new()), inspect }
     }
 
     /// Send an event to all active listeners filtered by their respective options. Awaits until
@@ -99,6 +107,7 @@ impl AccountEventEmitter {
         let all_futures = join_all(futures);
         std::mem::drop(clients_lock);
         await!(all_futures);
+        self.inspect.events.add(1);
     }
 
     /// Add a new listener to the collection.
@@ -119,6 +128,7 @@ impl AccountEventEmitter {
             FutureObj::new(Box::pin(ok(())))
         };
         clients_lock.push(Client::new(listener, options));
+        self.inspect.active.set(clients_lock.len() as u64);
         std::mem::drop(clients_lock);
         await!(future)
     }
@@ -130,6 +140,7 @@ mod tests {
     use fidl::endpoints::*;
     use fidl_fuchsia_auth::AuthChangeGranularity;
     use fidl_fuchsia_auth_account::{AccountListenerMarker, AccountListenerRequest};
+    use fuchsia_inspect::Inspector;
     use futures::prelude::*;
     use lazy_static::lazy_static;
 
@@ -144,6 +155,12 @@ mod tests {
         static ref AUTH_STATE: AccountAuthState =
             AccountAuthState { account_id: LocalAccountId::new(6) };
         static ref AUTH_STATES: Vec<AccountAuthState> = vec![AUTH_STATE.clone()];
+    }
+
+    /// Creates a new AccountEventEmitter whose inspect interface is not exported
+    fn create_account_event_emitter() -> AccountEventEmitter {
+        let inspector = Inspector::new();
+        AccountEventEmitter::new(inspector.root())
     }
 
     #[fuchsia_async::run_until_stalled(test)]
@@ -244,7 +261,7 @@ mod tests {
             create_request_stream::<AccountListenerMarker>().unwrap();
         let listener_1 = client_end_1.into_proxy().unwrap();
         let listener_2 = client_end_2.into_proxy().unwrap();
-        let account_event_emitter = AccountEventEmitter::new();
+        let account_event_emitter = create_account_event_emitter();
 
         let serve_fut_1 = async move {
             let request = await!(stream_1.try_next()).unwrap();
@@ -285,20 +302,27 @@ mod tests {
         };
 
         let request_fut = async move {
+            assert_eq!(account_event_emitter.inspect.active.get().unwrap(), 0);
             assert!(await!(account_event_emitter.add_listener(
                 listener_1,
                 options_1,
                 &AUTH_STATES
             ))
             .is_ok());
+            assert_eq!(account_event_emitter.inspect.active.get().unwrap(), 1);
             assert!(await!(account_event_emitter.add_listener(
                 listener_2,
                 options_2,
                 &AUTH_STATES
             ))
             .is_ok());
+            assert_eq!(account_event_emitter.inspect.active.get().unwrap(), 2);
+
+            assert_eq!(account_event_emitter.inspect.events.get().unwrap(), 0);
             await!(account_event_emitter.publish(&EVENT_ADDED));
+            assert_eq!(account_event_emitter.inspect.events.get().unwrap(), 1);
             await!(account_event_emitter.publish(&EVENT_REMOVED));
+            assert_eq!(account_event_emitter.inspect.events.get().unwrap(), 2);
         };
         await!(join3(serve_fut_1, serve_fut_2, request_fut));
     }
@@ -314,7 +338,7 @@ mod tests {
         };
         let (client_end, mut stream) = create_request_stream::<AccountListenerMarker>().unwrap();
         let listener = client_end.into_proxy().unwrap();
-        let account_event_emitter = AccountEventEmitter::new();
+        let account_event_emitter = create_account_event_emitter();
         assert!(await!(account_event_emitter.add_listener(listener, options, &AUTH_STATES)).is_ok());
 
         let serve_fut = async move {
@@ -326,6 +350,7 @@ mod tests {
                 panic!("Unexpected message received");
             };
         };
+
         let request_fut = async move {
             await!(account_event_emitter.publish(&EVENT_ADDED)); // Normal event
             {

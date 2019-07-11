@@ -27,26 +27,32 @@ mod macros;
 
 #[cfg(all(test, feature = "benchmark"))]
 mod benchmarks;
+mod data_structures;
 mod device;
 mod error;
 mod ip;
 #[cfg(test)]
 mod testutil;
 mod transport;
+mod types;
 mod wire;
 
+pub use crate::data_structures::{IdMapCollection, IdMapCollectionKey};
 pub use crate::device::{
     ethernet::Mac, get_ip_addr_subnet, receive_frame, DeviceId, DeviceLayerEventDispatcher,
 };
 pub use crate::error::NetstackError;
 pub use crate::ip::{
-    AddrSubnet, AddrSubnetEither, EntryDest, EntryEither, IpStateBuilder, Subnet, SubnetEither,
+    icmp, AddrSubnet, AddrSubnetEither, EntryDest, EntryDestEither, EntryEither, IpAddr,
+    IpLayerEventDispatcher, IpStateBuilder, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr, Subnet, SubnetEither,
 };
 pub use crate::transport::udp::UdpEventDispatcher;
 pub use crate::transport::TransportLayerEventDispatcher;
 
+use std::time;
+
 use crate::device::{DeviceLayerState, DeviceLayerTimerId};
-use crate::ip::IpLayerState;
+use crate::ip::{IpLayerState, IpLayerTimerId};
 use crate::transport::{TransportLayerState, TransportLayerTimerId};
 
 /// Map an expression over either version of an address.
@@ -106,7 +112,7 @@ impl StackStateBuilder {
 /// The state associated with the network stack.
 pub struct StackState<D: EventDispatcher> {
     transport: TransportLayerState<D>,
-    ip: IpLayerState,
+    ip: IpLayerState<D>,
     device: DeviceLayerState,
     #[cfg(test)]
     test_counters: testutil::TestCounters,
@@ -157,8 +163,13 @@ impl<D: EventDispatcher> Context<D> {
         &mut self.state
     }
 
-    /// Get the dispatcher.
-    pub fn dispatcher(&mut self) -> &mut D {
+    /// Get the dispatcher immutably.
+    pub fn dispatcher(&self) -> &D {
+        &self.dispatcher
+    }
+
+    /// Get the dispatcher mutably.
+    pub fn dispatcher_mut(&mut self) -> &mut D {
         &mut self.dispatcher
     }
 
@@ -180,15 +191,17 @@ impl<D: EventDispatcher + Default> Context<D> {
 }
 
 /// The identifier for any timer event.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub struct TimerId(TimerIdInner);
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 enum TimerIdInner {
     /// A timer event in the device layer.
     DeviceLayer(DeviceLayerTimerId),
     /// A timer event in the transport layer.
     TransportLayer(TransportLayerTimerId),
+    /// A timer event in the IP layer.
+    IpLayer(IpLayerTimerId),
     /// A no-op timer event (used for tests)
     #[cfg(test)]
     Nop(usize),
@@ -203,10 +216,51 @@ pub fn handle_timeout<D: EventDispatcher>(ctx: &mut Context<D>, id: TimerId) {
         TimerId(TimerIdInner::TransportLayer(x)) => {
             transport::handle_timeout(ctx, x);
         }
+        TimerId(TimerIdInner::IpLayer(x)) => {
+            ip::handle_timeout(ctx, x);
+        }
         #[cfg(test)]
         TimerId(TimerIdInner::Nop(_)) => {
             increment_counter!(ctx, "timer::nop");
         }
+    }
+}
+
+/// A type representing an instant in time.
+///
+/// `Instant` can be implemented by any type which represents an instant in
+/// time. This can include any sort of real-world clock time (e.g.,
+/// [`std::time::Instant`]) or fake time such as in testing.
+pub trait Instant: Sized + Ord + Copy + Clone {
+    /// Returns the amount of time elapsed from another instant to this one.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `earlier` is later than `self`.
+    fn duration_since(&self, earlier: Self) -> time::Duration;
+
+    /// Returns `Some(t)` where `t` is the time `self + duration` if `t` can be
+    /// represented as `Instant` (which means it's inside the bounds of the
+    /// underlying data structure), `None` otherwise.
+    fn checked_add(&self, duration: time::Duration) -> Option<Self>;
+
+    /// Returns `Some(t)` where `t` is the time `self - duration` if `t` can be
+    /// represented as `Instant` (which means it's inside the bounds of the
+    /// underlying data structure), `None` otherwise.
+    fn checked_sub(&self, duration: time::Duration) -> Option<Self>;
+}
+
+impl Instant for time::Instant {
+    fn duration_since(&self, earlier: time::Instant) -> time::Duration {
+        time::Instant::duration_since(self, earlier)
+    }
+
+    fn checked_add(&self, duration: time::Duration) -> Option<Self> {
+        time::Instant::checked_add(self, duration)
+    }
+
+    fn checked_sub(&self, duration: time::Duration) -> Option<Self> {
+        time::Instant::checked_sub(self, duration)
     }
 }
 
@@ -217,38 +271,56 @@ pub fn handle_timeout<D: EventDispatcher>(ctx: &mut Context<D>, id: TimerId) {
 /// provides its own event dispatcher trait which specifies the types of actions
 /// that must be supported in order to support that layer of the stack. The
 /// `EventDispatcher` trait is a sub-trait of all of these traits.
-pub trait EventDispatcher: DeviceLayerEventDispatcher + TransportLayerEventDispatcher {
+pub trait EventDispatcher:
+    DeviceLayerEventDispatcher + IpLayerEventDispatcher + TransportLayerEventDispatcher
+{
+    /// The type of an instant in time.
+    ///
+    /// All time is measured using `Instant`s, including scheduling timeouts.
+    /// This type may represent some sort of real-world time (e.g.,
+    /// [`std::time::Instant`]), or may be mocked in testing using a fake clock.
+    type Instant: Instant;
+
+    /// Returns the current instant.
+    ///
+    /// `now` guarantees that two subsequent calls to `now` will return monotonically
+    /// non-decreasing values.
+    fn now(&self) -> Self::Instant;
+
     /// Schedule a callback to be invoked after a timeout.
     ///
-    /// `schedule_timeout` schedules `f` to be invoked after `duration` has elapsed, overwriting any
-    /// previous timeout with the same ID.
+    /// `schedule_timeout` schedules `f` to be invoked after `duration` has
+    /// elapsed, overwriting any previous timeout with the same ID.
     ///
-    /// If there was previously a timer with that ID, return the time at which is was scheduled to
-    /// fire.
-    fn schedule_timeout(
-        &mut self,
-        duration: std::time::Duration,
-        id: TimerId,
-    ) -> Option<std::time::Instant>;
+    /// If there was previously a timer with that ID, return the time at which
+    /// is was scheduled to fire.
+    ///
+    /// # Panics
+    ///
+    /// `schedule_timeout` may panic if `duration` is large enough that
+    /// `self.now() + duration` overflows.
+    fn schedule_timeout(&mut self, duration: time::Duration, id: TimerId) -> Option<Self::Instant> {
+        self.schedule_timeout_instant(self.now().checked_add(duration).unwrap(), id)
+    }
 
     /// Schedule a callback to be invoked at a specific time.
     ///
-    /// `schedule_timeout_instant` schedules `f` to be invoked at `time`, overwriting any previous
-    /// timeout with the same ID.
+    /// `schedule_timeout_instant` schedules `f` to be invoked at `time`,
+    /// overwriting any previous timeout with the same ID.
     ///
-    /// If there was previously a timer with that ID, return the time at which is was scheduled to
-    /// fire.
+    /// If there was previously a timer with that ID, return the time at which
+    /// is was scheduled to fire.
     fn schedule_timeout_instant(
         &mut self,
-        time: std::time::Instant,
+        time: Self::Instant,
         id: TimerId,
-    ) -> Option<std::time::Instant>;
+    ) -> Option<Self::Instant>;
 
     /// Cancel a timeout.
     ///
     /// Returns true if the timeout was cancelled, false if there was no timeout
     /// for the given ID.
-    fn cancel_timeout(&mut self, id: TimerId) -> Option<std::time::Instant>;
+    fn cancel_timeout(&mut self, id: TimerId) -> Option<Self::Instant>;
 }
 
 /// Set the IP address and subnet for a device.

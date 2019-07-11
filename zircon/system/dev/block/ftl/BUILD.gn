@@ -4,7 +4,7 @@
 
 driver("ftl") {
   sources = [
-    "bind.cpp",
+    "bind.cc",
   ]
   deps = [
     ":common",
@@ -12,16 +12,19 @@ driver("ftl") {
     "$zx/system/ulib/ddktl",
     "$zx/system/ulib/fbl",
   ]
+
+  # TODO(ZX-2863): This driver violates the allowed shlib deps policy.
+  deprecated_inhibit_driver_shlib_allowlist = true
 }
 
 # Also used by ftl-test.
 source_set("common") {
   visibility = [ "./*" ]
   sources = [
-    "block_device.cpp",
-    "nand_driver.cpp",
-    "nand_operation.cpp",
-    "oob_doubler.cpp",
+    "block_device.cc",
+    "nand_driver.cc",
+    "nand_operation.cc",
+    "oob_doubler.cc",
   ]
   public_deps = [
     "$zx/system/banjo/ddk.protocol.badblock",

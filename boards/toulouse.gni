@@ -4,8 +4,6 @@
 
 target_cpu = "x64"
 
-board_packages = []
-
 board_package_labels = [
   # Include all drivers for now.
   "//garnet/packages/prod:drivers",
@@ -20,5 +18,5 @@ _toulouse_cmdline_args = [
   "kernel.serial=legacy",
   "netsvc.interface=/dev/sys/pci/00:1f.6/e1000/ethernet",
 ]
-kernel_cmdline_args = _toulouse_cmdline_args
+board_kernel_cmdline_args = _toulouse_cmdline_args
 zedboot_cmdline_args = _toulouse_cmdline_args

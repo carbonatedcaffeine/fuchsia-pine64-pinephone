@@ -404,17 +404,16 @@ type Method struct {
 	types.Attributes
 
 	// Ordinal is the ordinal for this method.
-	Ordinal types.Ordinal
+	Ordinal uint64
 
 	// OrdinalName is the name of the ordinal for this method, including the interface
 	// name as a prefix.
 	OrdinalName string
 
-	// GenOrdinal is the generated ordinal for this method.
-	GenOrdinal types.Ordinal
+	// TODO(FIDL-524): Remove.
+	GenOrdinal uint64
 
-	// GenOrdinalName is the name of the generated ordinal for this method,
-	// including the interface name as a prefix.
+	// TODO(FIDL-524): Remove.
 	GenOrdinalName string
 
 	// Name is the name of the Method, including the interface name as a prefix.
@@ -642,13 +641,14 @@ func (c *compiler) compileCompoundIdentifier(eci types.EncodedCompoundIdentifier
 
 func (_ *compiler) compileLiteral(val types.Literal) string {
 	switch val.Kind {
-	// TODO(mknyszek): Support string and default literals.
 	case types.NumericLiteral:
 		return val.Value
 	case types.TrueLiteral:
 		return "true"
 	case types.FalseLiteral:
 		return "false"
+	case types.StringLiteral:
+		return strconv.Quote(val.Value)
 	default:
 		log.Fatal("Unknown literal kind: ", val.Kind)
 		return ""

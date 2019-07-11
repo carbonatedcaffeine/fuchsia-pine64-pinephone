@@ -44,15 +44,8 @@ extern "C" const fidl_type_t {{ .ResponseTypeName }};
   {{- end }}
 
   {{- /* Trailing line feed after encoding tables. */}}
-  {{- range .Methods }}
-    {{- if and .HasRequest .Request -}}
+  {{- if MethodsHaveReqOrResp .Methods }}
 {{ "" }}
-{{ break }}
-    {{- end }}
-    {{- if and .HasResponse .Response -}}
-{{ "" }}
-{{ break }}
-    {{- end }}
   {{- end }}
   {{- /* End trailing line feed after encoding tables. */}}
 
@@ -61,6 +54,9 @@ extern "C" const fidl_type_t {{ .ResponseTypeName }};
 {{- end }}
 class {{ .Name }} final {
  public:
+{{- if .ServiceName }}
+  static constexpr char Name_[] = {{ .ServiceName }};
+{{- end }}
 {{ "" }}
   {{- range .Methods }}
 
@@ -115,8 +111,7 @@ class {{ .Name }} final {
   {{- if .HasEvents }}
 {{ "" }}
   struct EventHandlers {
-    {{- range .Methods }}
-      {{- if .HasRequest -}} {{ continue }} {{- end }}
+    {{- range FilterMethodsWithReqs .Methods -}}
       {{- range .DocComments }}
     //{{ . }}
       {{- end }}
@@ -133,11 +128,18 @@ class {{ .Name }} final {
    public:
     SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
 
+    SyncClient(SyncClient&&) = default;
+
+    SyncClient& operator=(SyncClient&&) = default;
+
     ~SyncClient() {}
+
+    const ::zx::channel& channel() const { return channel_; }
+
+    ::zx::channel* mutable_channel() { return &channel_; }
 {{ "" }}
-    {{- range .Methods }}
-      {{- /* Client-calling functions do not apply to events. */}}
-      {{- if not .HasRequest -}} {{ continue }} {{- end -}}
+    {{- /* Client-calling functions do not apply to events. */}}
+    {{- range FilterMethodsWithoutReqs .Methods -}}
       {{- if .LLProps.CBindingCompatible }}
         {{- range .DocComments }}
     //{{ . }}
@@ -184,9 +186,8 @@ class {{ .Name }} final {
   class Call final {
    public:
 {{ "" }}
-    {{- range .Methods }}
-      {{- /* Client-calling functions do not apply to events. */}}
-      {{- if not .HasRequest -}} {{ continue }} {{- end -}}
+    {{- /* Client-calling functions do not apply to events. */}}
+    {{- range FilterMethodsWithoutReqs .Methods -}}
       {{- if .LLProps.CBindingCompatible }}
         {{- range .DocComments }}
     //{{ . }}
@@ -287,10 +288,8 @@ class {{ .Name }} final {
   {{- /* Events */}}
   {{- if .Methods }}
 {{ "" }}
-    {{- range .Methods }}
-      {{- /* Events have no "request" part of the call; they are unsolicited. */}}
-      {{- if .HasRequest -}} {{ continue }} {{- end }}
-      {{- if not .HasResponse -}} {{ continue }} {{- end -}}
+    {{- /* Events have no "request" part of the call; they are unsolicited. */}}
+    {{- range FilterMethodsWithReqs .Methods | FilterMethodsWithoutResps -}}
 {{ "" }}
       {{- range .DocComments }}
   //{{ . }}
@@ -374,7 +373,7 @@ namespace {
 
 {{- range .Methods }}
 [[maybe_unused]]
-constexpr uint32_t {{ .OrdinalName }} = {{ .Ordinal }}u;
+constexpr uint64_t {{ .OrdinalName }} = {{ .Ordinal }}lu << 32;
   {{- if .LLProps.EncodeRequest }}
 extern "C" const fidl_type_t {{ .RequestTypeName }};
   {{- end }}
@@ -385,9 +384,8 @@ extern "C" const fidl_type_t {{ .ResponseTypeName }};
 
 }  // namespace
 
-{{- range .Methods }}
-  {{- /* Client-calling functions do not apply to events. */}}
-  {{- if not .HasRequest -}} {{ continue }} {{- end }}
+{{- /* Client-calling functions do not apply to events. */}}
+{{- range FilterMethodsWithoutReqs .Methods -}}
   {{- if .LLProps.CBindingCompatible }}
 {{ "" }}
     {{- template "SyncRequestCFlavorMethodDefinition" . }}
@@ -423,8 +421,7 @@ extern "C" const fidl_type_t {{ .ResponseTypeName }};
 
 {{- if .Methods }}
 {{ "" }}
-  {{- range .Methods }}
-    {{- if not .HasResponse -}} {{ continue }} {{- end }}
+  {{- range FilterMethodsWithoutResps .Methods -}}
     {{- if not .HasRequest }}
 {{ "" }}
       {{- template "SendEventCFlavorMethodDefinition" . }}

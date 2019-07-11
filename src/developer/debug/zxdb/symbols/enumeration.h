@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_ENUMERATION_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_ENUMERATION_H_
 
 #include <stdint.h>
 
@@ -44,8 +45,8 @@ class Enumeration final : public Type {
 
   // The name can be empty for anonymous enums. The type can be empty for
   // untyped enums. The byte size must always be nonzero.
-  Enumeration(const std::string& name, LazySymbol type, uint32_t byte_size,
-              bool is_signed, Map map);
+  Enumeration(const std::string& name, LazySymbol type, uint32_t byte_size, bool is_signed,
+              Map map);
   virtual ~Enumeration();
 
   LazySymbol underlying_type_;
@@ -55,3 +56,5 @@ class Enumeration final : public Type {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_ENUMERATION_H_

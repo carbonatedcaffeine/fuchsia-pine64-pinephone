@@ -34,8 +34,7 @@ class Object {
   // Adds tree-level references from this object to other objects into
   // |references|. Does not clear |references|. Does not add piece-level
   // references (use |Piece::AppendReferences| instead).
-  virtual Status AppendReferences(
-      ObjectReferencesAndPriority* references) const = 0;
+  virtual Status AppendReferences(ObjectReferencesAndPriority* references) const = 0;
 
  private:
   FXL_DISALLOW_COPY_AND_ASSIGN(Object);
@@ -59,10 +58,22 @@ class Piece {
   // Adds piece-level references from this piece to other pieces into
   // |references|. Does not clear |references|. Does not add tree-level
   // references (use |Object::AppendReferences| instead).
-  virtual Status AppendReferences(
-      ObjectReferencesAndPriority* references) const = 0;
+  virtual Status AppendReferences(ObjectReferencesAndPriority* references) const = 0;
 
   FXL_DISALLOW_COPY_AND_ASSIGN(Piece);
+};
+
+// An token that ensures that the associated object remains available as long as
+// the token object is alive.
+class PieceToken {
+ public:
+  PieceToken() {}
+  virtual ~PieceToken() {}
+  // Tokens must not be copied to ensure correct tracking.
+  PieceToken(const PieceToken&) = delete;
+  PieceToken& operator=(const PieceToken&) = delete;
+
+  virtual const ObjectIdentifier& GetIdentifier() const = 0;
 };
 
 }  // namespace storage

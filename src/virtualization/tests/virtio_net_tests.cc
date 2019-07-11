@@ -10,11 +10,12 @@
 #include <gtest/gtest.h>
 #include <src/lib/fxl/strings/string_printf.h>
 #include <sys/socket.h>
+
 #include <future>
-#include "src/lib/files/unique_fd.h"
 
 #include "enclosed_guest.h"
 #include "guest_test.h"
+#include "src/lib/files/unique_fd.h"
 
 using ::testing::Each;
 using ::testing::HasSubstr;
@@ -26,38 +27,31 @@ static constexpr size_t kTestPacketSize = 1000;
 // Includes ethernet + IPv4 + UDP headers.
 static constexpr size_t kHeadersSize = 42;
 
-template <class T>
-T* GuestTest<T>::enclosed_guest_ = nullptr;
-
 class VirtioNetZirconGuest : public ZirconEnclosedGuest {
  public:
-  zx_status_t LaunchInfo(
-      fuchsia::virtualization::LaunchInfo* launch_info) override {
+  zx_status_t LaunchInfo(fuchsia::virtualization::LaunchInfo* launch_info) override {
     launch_info->url = kZirconGuestUrl;
     launch_info->args.push_back("--virtio-gpu=false");
     launch_info->args.push_back("--virtio-net=true");
     launch_info->args.push_back("--cmdline-add=kernel.serial=none");
     // Disable netsvc to avoid spamming the net device with logs.
     launch_info->args.push_back("--cmdline-add=netsvc.disable=true");
-    launch_info->args.push_back("--legacy-net=false");
     return ZX_OK;
   }
 };
 
 class VirtioNetDebianGuest : public DebianEnclosedGuest {
  public:
-  zx_status_t LaunchInfo(
-      fuchsia::virtualization::LaunchInfo* launch_info) override {
+  zx_status_t LaunchInfo(fuchsia::virtualization::LaunchInfo* launch_info) override {
     launch_info->url = kDebianGuestUrl;
     launch_info->args.push_back("--virtio-gpu=false");
     launch_info->args.push_back("--virtio-net=true");
-    launch_info->args.push_back("--legacy-net=false");
     return ZX_OK;
   }
 };
 
-static void TestThread(const MockNetstack& netstack, uint8_t receive_byte,
-                       uint8_t send_byte, bool use_raw_packets) {
+static void TestThread(const MockNetstack& netstack, uint8_t receive_byte, uint8_t send_byte,
+                       bool use_raw_packets) {
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
 
   // This thread will loop indefinitely until it receives the correct packet.
@@ -103,10 +97,15 @@ TEST_F(VirtioNetZirconGuestTest, ReceiveAndSend) {
     TestThread(*netstack, 0xab, 0xba, true /* use_raw_packets */);
   });
 
-  std::string args =
-      fxl::StringPrintf("%u %u %zu", 0xab, 0xba, kTestPacketSize);
   std::string result;
-  EXPECT_EQ(this->RunUtil(kVirtioNetUtil, args, &result), ZX_OK);
+  EXPECT_EQ(this->RunUtil(kVirtioNetUtil,
+                          {
+                              fxl::StringPrintf("%u", 0xab),
+                              fxl::StringPrintf("%u", 0xba),
+                              fxl::StringPrintf("%zu", kTestPacketSize),
+                          },
+                          &result),
+            ZX_OK);
   EXPECT_THAT(result, HasSubstr("PASS"));
 
   handle.wait();
@@ -121,15 +120,20 @@ TEST_F(VirtioNetDebianGuestTest, ReceiveAndSend) {
   });
 
   // Configure the guest IPv4 address.
-  EXPECT_EQ(this->Execute("ifconfig enp0s5 192.168.0.10"), ZX_OK);
+  EXPECT_EQ(this->Execute({"ifconfig", "enp0s5", "192.168.0.10"}), ZX_OK);
 
   // Manually add a route to the host.
-  EXPECT_EQ(this->Execute("arp -s 192.168.0.1 02:1a:11:00:00:00"), ZX_OK);
+  EXPECT_EQ(this->Execute({"arp", "-s", "192.168.0.1", "02:1a:11:00:00:00"}), ZX_OK);
 
-  std::string args =
-      fxl::StringPrintf("%u %u %zu", 0xab, 0xba, kTestPacketSize);
   std::string result;
-  EXPECT_EQ(this->RunUtil(kVirtioNetUtil, args, &result), ZX_OK);
+  EXPECT_EQ(this->RunUtil(kVirtioNetUtil,
+                          {
+                              fxl::StringPrintf("%u", 0xab),
+                              fxl::StringPrintf("%u", 0xba),
+                              fxl::StringPrintf("%zu", kTestPacketSize),
+                          },
+                          &result),
+            ZX_OK);
   EXPECT_THAT(result, HasSubstr("PASS"));
 
   handle.wait();

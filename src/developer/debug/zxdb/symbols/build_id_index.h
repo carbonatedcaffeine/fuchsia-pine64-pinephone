@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_BUILD_ID_INDEX_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_BUILD_ID_INDEX_H_
 
 #include <filesystem>
 #include <functional>
@@ -22,7 +23,11 @@ namespace zxdb {
 // files and index.
 class BuildIDIndex {
  public:
-  using IDMap = std::map<std::string, std::string>;
+  struct MapEntry {
+    std::string debug_info;
+    std::string binary;
+  };
+  using IDMap = std::map<std::string, MapEntry>;
 
   // Lists symbol sources and the number of ELF files indexed at that location.
   using StatusList = std::vector<std::pair<std::string, int>>;
@@ -40,12 +45,11 @@ class BuildIDIndex {
   // Returns the local file name for the given build ID, or the empty string
   // if there is no match. The file type specifies whether we need the debug
   // info, or the actual binary.
-  std::string FileForBuildID(const std::string& build_id,
-                             DebugSymbolFileType file_type);
+  std::string FileForBuildID(const std::string& build_id, DebugSymbolFileType file_type);
 
-  // Manually inserts a mapping of
-  void AddBuildIDMapping(const std::string& build_id,
-                         const std::string& file_name);
+  // Manually inserts a mapping of a build ID to a file name.
+  void AddBuildIDMapping(const std::string& build_id, const std::string& file_name,
+                         DebugSymbolFileType file_type);
 
   // Adds an "ids.txt" file that maps build ID to file paths.
   // Will verify that the path is already there and ignore it if so.
@@ -75,19 +79,16 @@ class BuildIDIndex {
   // Parses a build ID mapping file (ids.txt). This is a separate static
   // function for testing purposes. The results are added to the output.
   // Returns the number of items loaded.
-  static int ParseIDs(const std::string& input,
-                      const std::filesystem::path& containing_dir,
+  static int ParseIDs(const std::string& input, const std::filesystem::path& containing_dir,
                       IDMap* output);
 
-  const std::vector<std::string>& build_id_files() const {
-    return build_id_files_;
-  }
+  const std::vector<std::string>& build_id_files() const { return build_id_files_; }
   const std::vector<std::string>& sources() const { return sources_; }
 
-  const IDMap& build_id_to_file() const { return build_id_to_file_; }
+  const IDMap& build_id_to_files() const { return build_id_to_files_; }
 
  private:
-  // Updates the build_id_to_file_ cache if necessary.
+  // Updates the build_id_to_files_ cache if necessary.
   void EnsureCacheClean();
 
   // Logs an informational message.
@@ -104,8 +105,7 @@ class BuildIDIndex {
   bool IndexOneSourceFile(const std::string& file_path);
 
   // Search the repo sources.
-  std::string SearchRepoSources(const std::string& build_id,
-                                DebugSymbolFileType file_type);
+  std::string SearchRepoSources(const std::string& build_id, DebugSymbolFileType file_type);
 
   // Function to output informational messages. May be null. Use LogMessage().
   std::function<void(const std::string&)> information_callback_;
@@ -121,7 +121,7 @@ class BuildIDIndex {
   // Maintains the logs of how many symbols were indexed for each location.
   StatusList status_;
 
-  // Indicates if build_id_to_file_ is up-to-date. This is necessary to
+  // Indicates if build_id_to_files_ is up-to-date. This is necessary to
   // disambiguate whether an empty cache means "not scanned" or "nothing found".
   bool cache_dirty_ = true;
 
@@ -130,7 +130,9 @@ class BuildIDIndex {
   IDMap manual_mappings_;
 
   // Index of build IDs to local file paths.
-  IDMap build_id_to_file_;
+  IDMap build_id_to_files_;
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_BUILD_ID_INDEX_H_

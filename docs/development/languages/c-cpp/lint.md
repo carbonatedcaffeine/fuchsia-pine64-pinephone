@@ -5,25 +5,49 @@ The linter is configured in the [.clang-tidy](/.clang-tidy) file.
 
 ## How to lint
 
-In order to run a specific GN target through the linter, run:
+`fx lint` is a Fuchsia script that wraps language-specific linters in a common
+command line interface. It gathers a list of files, based on the options you
+specify, separates them by matching linter, and executes each required linter.
+`clang-tidy` is used for C and C++ files.
+
+Without any other arguments, `fx lint` lints the files in your
+most recent git commit, and passes them through the linter:
 
 ```
-fx clang-tidy --target=<target>
+fx lint
+```
+
+To restrict linting to C++, add a double-dash (--) followed by the
+file pattern(s) to match, such as:
+
+```
+fx lint -- '*.cc' '*.cpp'
+```
+
+To run a specific GN target through the linter, use:
+
+```
+fx lint --target=<target>
+```
+
+In order to lint all files under the current working directory, add `--all`.
+Running `fx lint --all` from the top-level `fuchsia` directory is generally not
+recommended, and will likely take several hours to complete. Be certain you
+`cd` to the best top level directory for your analysis requirements. For example:
+
+```
+(cd <your/subdir>; fx lint --all -- '*.cc')
 ```
 
 You can also add `--fix` in order to automatically generate fixes for some (but
 not all) of the warnings.
 
-Alternatively, you can run the following to run the current patch through the
-linter:
+Additional options and examples are documented in the tool itself. For the most up
+to date documentation on `fx lint`, including examples, run:
 
 ```
-../scripts/git-file-tidy [--out-dir out/debug-x64]
+fx lint --help
 ```
-
-In order to run the entire repository through the linter, add `--all`. You can
-also add `--fix` in order to automatically generate fixes for some (but not all)
-of the warnings.
 
 ## Suppressing warnings
 
@@ -40,7 +64,6 @@ is as follows:
 
  - `bugprone-*`
  - `clang-diagnostic-*`
- - `clang-analyzer-*`
  - `google-*`
  - `misc-*`
  - `modernize-`
@@ -49,10 +72,6 @@ is as follows:
 
 This list tracks the reasons for which we disabled in particular [checks]:
 
- - `clang-analyzer-core.NullDereference`, `clang-analyzer-unix.Malloc` - these
-    checks are triggering memory access warnings at rapidjson callsites (despite
-    the header filter regex) and we didn't find a more granular way to disable
-    them
  - `clang-diagnostic-unused-command-line-argument` - ninja-generated compilation
     database contains the linker argument which ends up unused and triggers this
     warning for every file
@@ -63,14 +82,14 @@ This list tracks the reasons for which we disabled in particular [checks]:
  - `modernize-return-braced-init-list` - concerns about readability of returning
     braced initialization list for constructor arguments, prefer to use a
     constructor explicitly
- - `modernize-use-auto` - not all flagged callsites seemed worth converting to
-    `auto`
  - `modernize-use-equals-delete` - flagging all gtest TEST_F
- - `modernize-use-equals-default` - Fuchsia chose not to impose a preference for
-   "= default"
- - `performance-unnecessary-value-param` - it was flagging view classes
-   which we prefer to pass by value
+ - `modernize-use-trailing-return-type` - Fuchsia C++ code typically uses the
+   `int foo()` style of defining functions, and not the `auto foo() -> int`
+   style as recommended by this check.
  - `readability-implicit-bool-conversion` - Fuchsia C++ code commonly uses implicit
    bool cast of pointers and numbers
+ - `readability-isolate-declaration` - Zircon code commonly uses paired declarations.
+ - `readability-uppercase-literal-suffix` - Fuchsia C++ code chooses not to impose
+   a style on this.
 
 [checks]: https://clang.llvm.org/extra/clang-tidy/checks/list.html

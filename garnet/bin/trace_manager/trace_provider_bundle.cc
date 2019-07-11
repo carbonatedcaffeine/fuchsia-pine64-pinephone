@@ -8,6 +8,12 @@
 
 namespace tracing {
 
+TraceProviderBundle::TraceProviderBundle(
+    fuchsia::tracing::provider::ProviderPtr provider,
+    uint32_t id, zx_koid_t pid, const std::string& name)
+  : provider(std::move(provider)), id(id), pid(pid), name(name) {
+}
+
 std::ostream& operator<<(std::ostream& out, const TraceProviderBundle& bundle) {
   // The pid and name should be present, so we don't try to get fancy with
   // the formatting if it turns out they're not.

@@ -29,6 +29,7 @@ source_set("cobalt_logger") {
   ]
 
   public_deps = [
+    "//garnet/public/lib/syslog/cpp",
     "//sdk/lib/sys/cpp",
     "//src/lib/fxl",
     "//zircon/public/fidl/fuchsia-cobalt",
@@ -64,7 +65,7 @@ source_set("unittests") {
     ":test_metrics_registry_cc",
     "//sdk/lib/sys/cpp/testing:unit",
     "//third_party/googletest:gtest",
-    "//zircon/public/lib/async-testutils",
+    "//zircon/public/lib/async-testing",
   ]
 }
 

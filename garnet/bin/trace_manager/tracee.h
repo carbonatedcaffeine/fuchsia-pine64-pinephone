@@ -6,22 +6,23 @@
 #define GARNET_BIN_TRACE_MANAGER_TRACEE_H_
 
 #include <lib/async/cpp/wait.h>
+#include <lib/fidl/cpp/string.h>
+#include <lib/fidl/cpp/vector.h>
 #include <lib/fit/function.h>
 #include <lib/zx/fifo.h>
 #include <lib/zx/socket.h>
 #include <lib/zx/vmo.h>
+#include <src/lib/fxl/memory/weak_ptr.h>
 #include <trace-reader/reader_internal.h>
 
 #include <iosfwd>
 
 #include "garnet/bin/trace_manager/trace_provider_bundle.h"
 #include "garnet/bin/trace_manager/util.h"
-#include "lib/fidl/cpp/string.h"
-#include "lib/fidl/cpp/vector.h"
-#include "src/lib/fxl/macros.h"
-#include "src/lib/fxl/memory/weak_ptr.h"
 
 namespace tracing {
+
+namespace provider = ::fuchsia::tracing::provider;
 
 class TraceSession;
 
@@ -49,7 +50,7 @@ class Tracee {
 
   bool operator==(TraceProviderBundle* bundle) const;
   bool Start(fidl::VectorPtr<std::string> categories, size_t buffer_size,
-             fuchsia::tracelink::BufferingMode buffering_mode,
+             provider::BufferingMode buffering_mode,
              fit::closure started_callback, fit::closure stopped_callback);
   void Stop();
 
@@ -81,7 +82,7 @@ class Tracee {
   }
 
   // TODO(dje): Until fidl prints names.
-  static const char* ModeName(fuchsia::tracelink::BufferingMode mode);
+  static const char* ModeName(provider::BufferingMode mode);
 
   void TransitionToState(State new_state);
   void OnHandleReady(async_dispatcher_t* dispatcher, async::WaitBase* wait,
@@ -132,7 +133,7 @@ class Tracee {
   const TraceSession* const session_;
   const TraceProviderBundle* const bundle_;
   State state_ = State::kReady;
-  fuchsia::tracelink::BufferingMode buffering_mode_;
+  provider::BufferingMode buffering_mode_;
   zx::vmo buffer_vmo_;
   size_t buffer_vmo_size_ = 0u;
   zx::fifo fifo_;
@@ -145,7 +146,11 @@ class Tracee {
   mutable bool provider_info_record_written_ = false;
 
   fxl::WeakPtrFactory<Tracee> weak_ptr_factory_;
-  FXL_DISALLOW_COPY_AND_ASSIGN(Tracee);
+
+  Tracee(const Tracee&) = delete;
+  Tracee(Tracee&&) = delete;
+  Tracee& operator=(const Tracee&) = delete;
+  Tracee& operator=(Tracee&&) = delete;
 };
 
 std::ostream& operator<<(std::ostream& out, Tracee::State state);

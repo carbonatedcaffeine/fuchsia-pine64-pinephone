@@ -54,6 +54,8 @@ enum {
 
 // These must match the fuchsia.sysmem format modifier values.
 enum {
+    MAGMA_FORMAT_MODIFIER_LINEAR = 0x0000000000000000,
+
     MAGMA_FORMAT_MODIFIER_INTEL_X_TILED = 0x0100000000000001,
     MAGMA_FORMAT_MODIFIER_INTEL_Y_TILED = 0x0100000000000002,
     MAGMA_FORMAT_MODIFIER_INTEL_YF_TILED = 0x0100000000000003,
@@ -113,10 +115,18 @@ struct magma_system_command_buffer {
     uint32_t signal_semaphore_count;
 };
 
+// TODO(MA-580): remove (deprecated)
 struct magma_system_inline_command_buffer {
     void* data;
     uint64_t size;
     magma_semaphore_t* semaphores;
+    uint32_t semaphore_count;
+};
+
+struct magma_inline_command_buffer {
+    void* data;
+    uint64_t size;
+    uint64_t* semaphore_ids;
     uint32_t semaphore_count;
 };
 

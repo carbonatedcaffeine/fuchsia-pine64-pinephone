@@ -3,9 +3,8 @@
 // found in the LICENSE file.
 
 use super::suite_selector;
-use super::Error;
-use bytes::Bytes;
-use failure::{self, ensure};
+use crate::ie::rsn::suite_selector::OUI;
+use crate::organization::Oui;
 use std::fmt;
 
 macro_rules! return_none_if_unknown_usage {
@@ -33,13 +32,19 @@ pub const BIP_GMAC_256: u8 = 12;
 pub const BIP_CMAC_256: u8 = 13;
 // 14-255 - Reserved.
 
-#[derive(PartialOrd, PartialEq, Clone)]
+#[derive(PartialOrd, PartialEq, Eq, Clone, Hash)]
 pub struct Cipher {
-    pub oui: Bytes,
+    pub oui: Oui,
     pub suite_type: u8,
 }
 
 impl Cipher {
+    /// Creates a new AKM instance for 802.11 specified AKMs.
+    /// See IEEE Std 802.11-2016, 9.4.2.25.2, Table 9-131
+    pub fn new_dot11(suite_type: u8) -> Self {
+        Cipher { oui: OUI, suite_type }
+    }
+
     /// Reserved and vendor specific cipher suites have no known usage and require special
     /// treatments.
     pub fn has_known_usage(&self) -> bool {
@@ -48,7 +53,7 @@ impl Cipher {
 
     pub fn is_vendor_specific(&self) -> bool {
         // IEEE 802.11-2016, 9.4.2.25.2, Table 9-131
-        !&self.oui[..].eq(&suite_selector::OUI)
+        !self.oui.eq(&OUI)
     }
 
     pub fn is_reserved(&self) -> bool {
@@ -134,14 +139,27 @@ impl Cipher {
 impl suite_selector::Factory for Cipher {
     type Suite = Cipher;
 
-    fn new(oui: Bytes, suite_type: u8) -> Result<Self::Suite, failure::Error> {
-        ensure!(oui.len() == 3, Error::InvalidOuiLength(oui.len()));
-        Ok(Cipher { oui, suite_type })
+    fn new(oui: Oui, suite_type: u8) -> Self::Suite {
+        Cipher { oui, suite_type }
     }
 }
 
 impl fmt::Debug for Cipher {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:02X}-{:02X}-{:02X}:{}", self.oui[0], self.oui[1], self.oui[2], self.suite_type)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_dot11() {
+        let ccmp = Cipher::new_dot11(CCMP_128);
+        assert!(!ccmp.is_vendor_specific());
+        assert!(ccmp.has_known_usage());
+        assert!(ccmp.is_enhanced());
+        assert!(!ccmp.is_reserved());
     }
 }

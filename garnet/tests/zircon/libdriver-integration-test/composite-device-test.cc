@@ -84,12 +84,12 @@ TEST_F(CompositeDeviceTest, CreateTest) {
     RunPromise(std::move(promise));
 }
 
-// This test is disabled due to flakiness: FLK-247
-#if 0
+// TODO(FLK-344): Re-enable once flake is fixed.
+//
 // This test creates the well-known composite, and force binds a test driver
 // stack to the composite.  It then forces one of the components to unbind.
 // It verifies that the composite mock-device's unbind hook is called.
-TEST_F(CompositeDeviceTest, UnbindComponent) {
+TEST_F(CompositeDeviceTest, DISABLED_UnbindComponent) {
     std::unique_ptr<RootMockDevice> root_device, composite_mock;
     std::unique_ptr<MockDevice> child_device1, child_device2, composite_child_device;
     fidl::InterfacePtr<fuchsia::io::Node> client;
@@ -99,26 +99,8 @@ TEST_F(CompositeDeviceTest, UnbindComponent) {
     auto promise = CreateComponentDevices(&root_device, &child_device1, &child_device2
     ).and_then(DoWaitForPath("composite")
     ).and_then([&]() -> Promise<void> {
-        return DoOpen("composite", &client);
+        return DoWaitForPath("composite/test");
     }).and_then([&]() -> Promise<void> {
-        // Bind test.so to the composite
-        zx_status_t status = composite.Bind(client.Unbind().TakeChannel(), loop_.dispatcher());
-        PROMISE_ASSERT(ASSERT_EQ(status, ZX_OK));
-
-        fit::bridge<void, Error> bridge;
-        composite->Bind("/boot/driver/test.so", [completer=std::move(bridge.completer)](
-                zx_status_t status) mutable {
-            if (status == ZX_OK) {
-                completer.complete_ok();
-            } else {
-                completer.complete_error("failed to bind test.so to composite");
-            }
-        });
-        return bridge.consumer.promise_or(::fit::error("Bind abandoned"));
-    }).and_then([&]() -> Promise<void> {
-        composite.Unbind();
-        // Connect to the added test device (no wait necessary since Bind
-        // completed).
         return DoOpen("composite/test", &client);
     }).and_then([&]() -> Promise<void> {
         composite_test.Bind(client.Unbind().TakeChannel());
@@ -209,7 +191,5 @@ TEST_F(CompositeDeviceTest, UnbindComponent) {
 
     RunPromise(std::move(promise));
 }
-
-#endif
 
 } // namespace libdriver_integration_test

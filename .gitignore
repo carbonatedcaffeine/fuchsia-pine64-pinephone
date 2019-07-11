@@ -6,7 +6,10 @@
 .checkstyle
 .classpath
 .config
+.envrc
 .fx-build-dir
+.fx-metrics-config
+.fx-multi-list
 .cproject
 .DS_Store
 .gdb_history
@@ -21,6 +24,7 @@
 *.iml
 *.orig
 *.pyc
+*.code-workspace
 *.sublime-project
 *.sublime-workspace
 Cargo.lock
@@ -41,6 +45,7 @@ topaz/
 vendor/
 !/third_party/rust_crates/vendor
 tmp/
+json_generator_tests_*.txt
 
 ### Specific files
 /garnet/tools/cipd.gni

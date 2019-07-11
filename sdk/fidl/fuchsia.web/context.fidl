@@ -6,6 +6,11 @@ library fuchsia.web;
 
 using fuchsia.io;
 
+enum ContextError : int32 {
+    /// The remote debugging service was not opened.
+    REMOTE_DEBUGGING_PORT_NOT_OPENED = 1;
+};
+
 /// The top-level service interface which allows for the creation of
 /// Context resources.
 // TODO(WEB-29): Remove ContextProvider in favor of launching Context
@@ -15,7 +20,7 @@ protocol ContextProvider {
     /// Creates a new browser Context whose state is wholly independent and
     /// isolated from other Contexts.
     ///
-    /// |context|: An interface request which will receive a bound Context
+    /// `context`: An interface request which will receive a bound Context
     ///            service.
     Create(CreateContextParams params, request<Context> context);
 };
@@ -28,10 +33,24 @@ table CreateContextParams {
     /// Handle to the directory that will contain the Context's
     /// persistent data. If it is left unset, then the created Context will be
     /// stateless, with all of its data discarded upon Context destruction.
-    /// If set, |data_directory| must not be shared with any other Context.
+    /// If set, `data_directory` must not be shared with any other Context.
     // TODO(WEB-28): Provide an API to inform the caller when the
-    // |data_directory| can be safely removed.
+    // `data_directory` can be safely removed.
     2: fuchsia.io.Directory data_directory;
+
+    /// Optional suffix to append to the UserAgent string, to describe the
+    /// embedder's product & version. See the User-Agent HTTP header
+    /// specification at https://tools.ietf.org/html/rfc7231#section-5.5.3
+    3: string user_agent_product;
+    4: string user_agent_version;
+
+    /// Port to be used for remote debugging for connection via the DevTools
+    /// protocol. Setting this to 0 will make the Context use an ephemeral
+    /// port, which can be then queried via the
+    /// Context.GetRemoteDebuggingPort() API.
+    /// This is only for testing purposes and should not be set in production
+    /// code.
+    5: uint16 remote_debugging_port;
 };
 
 /// Manages browsing state (e.g. LocalStorage, cookies, etc) associated with
@@ -42,6 +61,17 @@ protocol Context {
     /// transferred to another component but cannot be shared across multiple
     /// components.
     ///
-    /// |frame|: An interface request that will be bound to the created Frame.
+    /// `frame`: An interface request that will be bound to the created Frame.
     CreateFrame(request<Frame> frame);
+
+    /// Used to observe cookies for sites hosted under this Context.
+    [Transitional]
+    GetCookieManager(request<CookieManager> manager);
+
+    /// Returns the port used for remote debugging.
+    /// The ContextError will be set to REMOTE_DEBUGGING_PORT_NOT_OPENED if
+    /// |remote_debugging_port| was not set in CreateContextParams or the
+    /// remote debugging service failed to start.
+    [Transitional]
+    GetRemoteDebuggingPort() -> (uint16 port) error ContextError;
 };

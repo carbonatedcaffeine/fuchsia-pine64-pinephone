@@ -9,23 +9,24 @@
 #include <list>
 #include <vector>
 
-#include <fuchsia/tracelink/cpp/fidl.h>
+#include <fuchsia/tracing/provider/cpp/fidl.h>
 #include <lib/async/cpp/task.h>
+#include <lib/fidl/cpp/string.h>
+#include <lib/fidl/cpp/vector.h>
 #include <lib/fit/function.h>
 #include <lib/zx/socket.h>
 #include <lib/zx/time.h>
 #include <lib/zx/vmo.h>
+#include <src/lib/fxl/memory/ref_counted.h>
+#include <src/lib/fxl/memory/ref_ptr.h>
+#include <src/lib/fxl/memory/weak_ptr.h>
 
 #include "garnet/bin/trace_manager/trace_provider_bundle.h"
 #include "garnet/bin/trace_manager/tracee.h"
-#include "lib/fidl/cpp/string.h"
-#include "lib/fidl/cpp/vector.h"
-#include "src/lib/fxl/macros.h"
-#include "src/lib/fxl/memory/ref_counted.h"
-#include "src/lib/fxl/memory/ref_ptr.h"
-#include "src/lib/fxl/memory/weak_ptr.h"
 
 namespace tracing {
+
+namespace provider = ::fuchsia::tracing::provider;
 
 // TraceSession keeps track of all TraceProvider instances that
 // are active for a tracing session.
@@ -41,7 +42,7 @@ class TraceSession : public fxl::RefCountedThreadSafe<TraceSession> {
   explicit TraceSession(zx::socket destination,
                         std::vector<std::string> categories,
                         size_t trace_buffer_size_megabytes,
-                        fuchsia::tracelink::BufferingMode buffering_mode,
+                        provider::BufferingMode buffering_mode,
                         TraceProviderSpecMap&& provider_specs,
                         fit::closure abort_handler);
   // Frees all allocated resources and closes the outgoing
@@ -93,7 +94,7 @@ class TraceSession : public fxl::RefCountedThreadSafe<TraceSession> {
   zx::socket destination_;
   fidl::VectorPtr<std::string> categories_;
   size_t trace_buffer_size_megabytes_;
-  fuchsia::tracelink::BufferingMode buffering_mode_;
+  provider::BufferingMode buffering_mode_;
   TraceProviderSpecMap provider_specs_;
   std::list<std::unique_ptr<Tracee>> tracees_;
   async::TaskMethod<TraceSession, &TraceSession::SessionStartTimeout>
@@ -105,7 +106,11 @@ class TraceSession : public fxl::RefCountedThreadSafe<TraceSession> {
   fit::closure abort_handler_;
 
   fxl::WeakPtrFactory<TraceSession> weak_ptr_factory_;
-  FXL_DISALLOW_COPY_AND_ASSIGN(TraceSession);
+
+  TraceSession(const TraceSession&) = delete;
+  TraceSession(TraceSession&&) = delete;
+  TraceSession& operator=(const TraceSession&) = delete;
+  TraceSession& operator=(TraceSession&&) = delete;
 };
 
 std::ostream& operator<<(std::ostream& out, TraceSession::State state);

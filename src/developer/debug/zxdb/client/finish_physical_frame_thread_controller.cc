@@ -8,13 +8,13 @@
 #include "src/developer/debug/zxdb/client/thread.h"
 #include "src/developer/debug/zxdb/client/until_thread_controller.h"
 #include "src/developer/debug/zxdb/common/err.h"
-#include "src/lib/fxl/logging.h"
 #include "src/developer/debug/zxdb/symbols/function.h"
+#include "src/lib/fxl/logging.h"
 
 namespace zxdb {
 
-FinishPhysicalFrameThreadController::FinishPhysicalFrameThreadController(
-    Stack& stack, size_t frame_to_finish)
+FinishPhysicalFrameThreadController::FinishPhysicalFrameThreadController(Stack& stack,
+                                                                         size_t frame_to_finish)
     : frame_to_finish_(frame_to_finish), weak_factory_(this) {
   FXL_DCHECK(frame_to_finish < stack.size());
   FXL_DCHECK(!stack[frame_to_finish]->IsInline());
@@ -25,16 +25,13 @@ FinishPhysicalFrameThreadController::FinishPhysicalFrameThreadController(
 #endif
 }
 
-FinishPhysicalFrameThreadController::~FinishPhysicalFrameThreadController() =
-    default;
+FinishPhysicalFrameThreadController::~FinishPhysicalFrameThreadController() = default;
 
-FinishPhysicalFrameThreadController::StopOp
-FinishPhysicalFrameThreadController::OnThreadStop(
+FinishPhysicalFrameThreadController::StopOp FinishPhysicalFrameThreadController::OnThreadStop(
     debug_ipc::NotifyException::Type stop_type,
     const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) {
   if (until_controller_) {
-    if (auto op = until_controller_->OnThreadStop(stop_type, hit_breakpoints);
-        op != kStopDone)
+    if (auto op = until_controller_->OnThreadStop(stop_type, hit_breakpoints); op != kStopDone)
       return op;
 
     // The until controller said to stop. The CPU is now at the address
@@ -53,8 +50,7 @@ FinishPhysicalFrameThreadController::OnThreadStop(
     // call, we know any inline functions that start immediately after the
     // call weren't in the stack of the original call.
     Stack& stack = thread()->GetStack();
-    stack.SetHideAmbiguousInlineFrameCount(
-        stack.GetAmbiguousInlineFrameCount());
+    stack.SetHideAmbiguousInlineFrameCount(stack.GetAmbiguousInlineFrameCount());
     return kStopDone;
   }
 
@@ -64,8 +60,8 @@ FinishPhysicalFrameThreadController::OnThreadStop(
   return kContinue;
 }
 
-void FinishPhysicalFrameThreadController::InitWithThread(
-    Thread* thread, std::function<void(const Err&)> cb) {
+void FinishPhysicalFrameThreadController::InitWithThread(Thread* thread,
+                                                         std::function<void(const Err&)> cb) {
   set_thread(thread);
 
   Stack& stack = thread->GetStack();
@@ -81,31 +77,18 @@ void FinishPhysicalFrameThreadController::InitWithThread(
 #endif
 
 #ifdef DEBUG_THREAD_CONTROLLERS
-  auto function =
-      stack[frame_to_finish_]->GetLocation().symbol().Get()->AsFunction();
+  auto function = stack[frame_to_finish_]->GetLocation().symbol().Get()->AsFunction();
   if (function)
     Log("Finishing %s", function->GetFullName().c_str());
   else
     Log("Finshing unsymbolized function");
 #endif
 
-  auto found_fingerprint = stack.GetFrameFingerprint(frame_to_finish_);
-  if (!found_fingerprint) {
-    // This can happen if the creator of this class requested that we finish
-    // the bottom-most stack frame available, without having all stack frames
-    // available. That's not allowed and any code doing that should be fixed.
-    FXL_NOTREACHED();
-    cb(
-        Err("Trying to step out of a frame with insufficient context.\n"
-            "Please file a bug with a repro."));
-    return;
-  }
-  InitWithFingerprint(*found_fingerprint);
+  InitWithFingerprint(stack.GetFrameFingerprint(frame_to_finish_));
   cb(Err());
 }
 
-ThreadController::ContinueOp
-FinishPhysicalFrameThreadController::GetContinueOp() {
+ThreadController::ContinueOp FinishPhysicalFrameThreadController::GetContinueOp() {
   // Once this thread starts running, the frame index is invalid.
   frame_to_finish_ = static_cast<size_t>(-1);
 
@@ -117,8 +100,7 @@ FinishPhysicalFrameThreadController::GetContinueOp() {
   return ContinueOp::Continue();
 }
 
-void FinishPhysicalFrameThreadController::InitWithFingerprint(
-    FrameFingerprint fingerprint) {
+void FinishPhysicalFrameThreadController::InitWithFingerprint(FrameFingerprint fingerprint) {
   if (frame_to_finish_ >= thread()->GetStack().size() - 1) {
     // Finishing the last frame. There is no return address so there's no
     // setup necessary to step, just continue.
@@ -131,8 +113,7 @@ void FinishPhysicalFrameThreadController::InitWithFingerprint(
     return;  // Previous stack frame is null, just continue.
 
   until_controller_ = std::make_unique<UntilThreadController>(
-      InputLocation(to_addr), fingerprint,
-      UntilThreadController::kRunUntilOlderFrame);
+      InputLocation(to_addr), fingerprint, UntilThreadController::kRunUntilOlderFrame);
 
   // Give the "until" controller a dummy callback and execute the callback
   // ASAP. The until controller executes the callback once it knows that the

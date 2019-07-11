@@ -7,25 +7,32 @@
 
 #include <lib/fidl/cpp/message.h>
 
-#include "library_loader.h"
+#include <cstdint>
+
+#include "tools/fidlcat/lib/library_loader.h"
+#include "tools/fidlcat/lib/wire_types.h"
 
 namespace fidlcat {
 
 // Given a wire-formatted |message| and a schema for that message represented by
-// |method|, populates |request| with JSON representing that request.
+// |method|, populates |decoded_object| with an object representing that
+// request.
 //
 // Returns false if it cannot decode the message using the metadata associated
 // with the method.
-bool RequestToJSON(const InterfaceMethod* method, const fidl::Message& message,
-                   rapidjson::Document& request);
+bool DecodeRequest(const InterfaceMethod* method, const uint8_t* bytes, uint32_t num_bytes,
+                   const zx_handle_t* handles, uint32_t num_handles,
+                   std::unique_ptr<Object>* decoded_object);
 
 // Given a wire-formatted |message| and a schema for that message represented by
-// |method|, populates |response| with JSON representing that response.
+// |method|,  populates |decoded_object| with an object representing that
+// response.
 //
 // Returns false if it cannot decode the message using the metadata associated
 // with the method.
-bool ResponseToJSON(const InterfaceMethod* method, const fidl::Message& message,
-                    rapidjson::Document& response);
+bool DecodeResponse(const InterfaceMethod* method, const uint8_t* bytes, uint32_t num_bytes,
+                    const zx_handle_t* handles, uint32_t num_handles,
+                    std::unique_ptr<Object>* decoded_object);
 
 }  // namespace fidlcat
 

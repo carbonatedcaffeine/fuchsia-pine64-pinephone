@@ -1,0 +1,20 @@
+# Copyright 2019 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/clang/clang.gni")
+
+# TODO(SPN-35): Move these to a build_overrides/ file to support the
+# standalone build as well.
+
+# Top-level directory of the graphics compute source repository.
+graphics_compute_dir = "//src/graphics/lib/compute"
+
+# A GN target used in compiled_action() targets to invoke the glslangValidator
+# host tool at build time.
+graphics_compute_glslangValidator_tool_target =
+    "//third_party/shaderc/third_party/glslang:glslangValidator"
+
+# Path to the 'clang-format' host tool. Only used to generate debug shaders.
+# Should be either an absolute path, or a path relative to |root_out_dir|.
+graphics_compute_clang_format_host_tool = "$clang_prefix/clang-format"

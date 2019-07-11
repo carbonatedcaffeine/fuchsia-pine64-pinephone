@@ -124,9 +124,6 @@ typedef uint32_t zx_signals_t;
 #define ZX_SOCKET_READ_THRESHOLD      __ZX_OBJECT_SIGNAL_10
 #define ZX_SOCKET_WRITE_THRESHOLD     __ZX_OBJECT_SIGNAL_11
 
-// Deprecated
-#define ZX_SOCKET_READ_DISABLED       ZX_SOCKET_PEER_WRITE_DISABLED
-
 // Fifo
 #define ZX_FIFO_READABLE            __ZX_OBJECT_READABLE
 #define ZX_FIFO_WRITABLE            __ZX_OBJECT_WRITABLE
@@ -180,7 +177,6 @@ typedef struct zx_wait_item {
 } zx_wait_item_t;
 
 // VM Object creation options
-#define ZX_VMO_NON_RESIZABLE             ((uint32_t)1u << 0)
 #define ZX_VMO_RESIZABLE                 ((uint32_t)1u << 1)
 
 // VM Object opcodes
@@ -197,13 +193,12 @@ typedef struct zx_wait_item {
 // VM Object clone flags
 #define ZX_VMO_CLONE_COPY_ON_WRITE        ((uint32_t)1u << 0)
 #define ZX_VMO_CHILD_COPY_ON_WRITE        ((uint32_t)1u << 0)
-#define ZX_VMO_CLONE_NON_RESIZEABLE       ((uint32_t)1u << 1)
-#define ZX_VMO_CHILD_NON_RESIZEABLE       ((uint32_t)1u << 1)
 #define ZX_VMO_CHILD_RESIZABLE            ((uint32_t)1u << 2)
 // TODO(stevensd): COW2 is bidirectional. Once things are ready to
 // move away from unidirectional COW, remove this alternate flag
 // and change the semantics of ZX_VMO_CHILD_COPY_ON_WRITE
 #define ZX_VMO_CHILD_COPY_ON_WRITE2       ((uint32_t)1u << 3)
+#define ZX_VMO_CHILD_SLICE                ((uint32_t)1u << 4)
 
 typedef uint32_t zx_vm_option_t;
 // Mapping flags to vmar routines
@@ -219,6 +214,7 @@ typedef uint32_t zx_vm_option_t;
 #define ZX_VM_CAN_MAP_EXECUTE       ((zx_vm_option_t)(1u << 9))
 #define ZX_VM_MAP_RANGE             ((zx_vm_option_t)(1u << 10))
 #define ZX_VM_REQUIRE_NON_RESIZABLE ((zx_vm_option_t)(1u << 11))
+#define ZX_VM_ALLOW_FAULTS          ((zx_vm_option_t)(1u << 12))
 
 #define ZX_VM_ALIGN_BASE            24
 #define ZX_VM_ALIGN_1KB             ((zx_vm_option_t)(10u << ZX_VM_ALIGN_BASE))
@@ -368,6 +364,9 @@ typedef uint32_t zx_obj_type_t;
 // depends on having an upper bound for the number of object types.
 #define ZX_OBJ_TYPE_UPPER_BOUND     ((zx_obj_type_t)64u)
 
+typedef uint32_t zx_system_event_type_t;
+#define ZX_SYSTEM_EVENT_LOW_MEMORY  ((zx_system_event_type_t)1u)
+
 // Used in channel_read_etc.
 typedef struct zx_handle_info {
     zx_handle_t handle;
@@ -435,6 +434,7 @@ typedef int zx_futex_t;
 typedef atomic_int zx_futex_t;
 #endif
 #endif
+typedef int zx_futex_storage_t;
 
 __END_CDECLS
 

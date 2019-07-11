@@ -1,0 +1,11 @@
+{
+    "program": {
+        "binary": "test/a11y_manager_apptests"
+    },
+    "sandbox": {
+        "services": [
+            "fuchsia.logger.LogSink",
+            "fuchsia.tracing.provider.Registry"
+        ]
+    }
+}

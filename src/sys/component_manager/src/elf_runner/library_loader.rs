@@ -5,13 +5,13 @@
 use {
     failure::{format_err, Error},
     fidl::endpoints::RequestStream,
-    fidl_fuchsia_io::{DirectoryProxy, VMO_FLAG_READ},
+    fidl_fuchsia_io::{DirectoryProxy, CLONE_FLAG_SAME_RIGHTS, VMO_FLAG_READ},
     fidl_fuchsia_ldsvc::{LoaderRequest, LoaderRequestStream},
     fuchsia_async as fasync, fuchsia_zircon as zx,
     futures::{TryFutureExt, TryStreamExt},
     io_util,
     log::*,
-    std::path::PathBuf,
+    std::path::Path,
 };
 
 /// start will expose the `fuchsia.ldsvc.Loader` service over the given channel, providing VMO
@@ -19,10 +19,12 @@ use {
 pub fn start(lib_proxy: DirectoryProxy, chan: zx::Channel) {
     fasync::spawn(
         async move {
+            let mut search_dirs =
+                vec![io_util::clone_directory(&lib_proxy, CLONE_FLAG_SAME_RIGHTS)?];
             // Wait for requests
             let mut stream =
                 LoaderRequestStream::from_channel(fasync::Channel::from_channel(chan)?);
-            while let Some(req) = await!(stream.try_next())? {
+            'request_loop: while let Some(req) = await!(stream.try_next())? {
                 match req {
                     LoaderRequest::Done { control_handle } => {
                         control_handle.shutdown();
@@ -31,24 +33,38 @@ pub fn start(lib_proxy: DirectoryProxy, chan: zx::Channel) {
                         // TODO(ZX-3392): The name provided by the client here has a null byte at
                         // the end, which doesn't work from here on out (io.fidl doesn't like it).
                         let object_name = object_name.trim_matches(char::from(0)).to_string();
-                        match await!(load_vmo(&lib_proxy, object_name)) {
-                            Ok(b) => responder.send(zx::sys::ZX_OK, Some(b))?,
-                            Err(e) => {
-                                warn!("failed to load object: {}", e);
-                                responder.send(zx::sys::ZX_ERR_NOT_FOUND, None)?;
+                        let mut errors = vec![];
+                        for dir_proxy in &search_dirs {
+                            match await!(load_vmo(dir_proxy, &object_name)) {
+                                Ok(b) => {
+                                    responder.send(zx::sys::ZX_OK, Some(b))?;
+                                    continue 'request_loop;
+                                }
+                                Err(e) => errors.push(e),
                             }
                         }
+                        warn!("failed to load object: {:?}", errors);
+                        responder.send(zx::sys::ZX_ERR_NOT_FOUND, None)?;
                     }
                     LoaderRequest::LoadScriptInterpreter { interpreter_name: _, responder } => {
                         // Unimplemented
                         responder.control_handle().shutdown();
                     }
-                    LoaderRequest::Config { config: _, responder } => {
-                        // Unimplemented
-                        responder.control_handle().shutdown();
+                    LoaderRequest::Config { config, responder } => {
+                        match parse_config_string(&lib_proxy, &config) {
+                            Ok(new_search_path) => {
+                                search_dirs = new_search_path;
+                                responder.send(zx::sys::ZX_OK)?;
+                            }
+                            Err(e) => {
+                                warn!("failed to parse config: {}", e);
+                                responder.send(zx::sys::ZX_ERR_INVALID_ARGS)?;
+                            }
+                        }
                     }
                     LoaderRequest::Clone { loader, responder } => {
-                        let new_lib_proxy = io_util::clone_directory(&lib_proxy)?;
+                        let new_lib_proxy =
+                            io_util::clone_directory(&lib_proxy, CLONE_FLAG_SAME_RIGHTS)?;
                         start(new_lib_proxy, loader.into_channel());
                         responder.send(zx::sys::ZX_OK)?;
                     }
@@ -68,10 +84,14 @@ pub fn start(lib_proxy: DirectoryProxy, chan: zx::Channel) {
     );
 }
 
-/// load_vmo will attempt to open the provided name in `lib_proxy` and return an executable VMO
+/// load_vmo will attempt to open the provided name in `dir_proxy` and return an executable VMO
 /// with the contents.
-pub async fn load_vmo(lib_proxy: &DirectoryProxy, object_name: String) -> Result<zx::Vmo, Error> {
-    let file_proxy = io_util::open_file(lib_proxy, &PathBuf::from(&object_name))?;
+pub async fn load_vmo<'a>(
+    dir_proxy: &'a DirectoryProxy,
+    object_name: &'a str,
+) -> Result<zx::Vmo, Error> {
+    let file_proxy =
+        io_util::open_file(dir_proxy, &Path::new(object_name), io_util::OPEN_RIGHT_READABLE)?;
     let (status, fidlbuf) = await!(file_proxy.get_buffer(VMO_FLAG_READ))
         .map_err(|e| format_err!("reading object at {:?} failed: {}", object_name, e))?;
     let status = zx::Status::from_raw(status);
@@ -85,13 +105,47 @@ pub async fn load_vmo(lib_proxy: &DirectoryProxy, object_name: String) -> Result
         .map_err(|status| format_err!("failed to replace VMO as executable: {}", status))
 }
 
+/// parses a config string from the `fuchsia.ldsvc.Loader` service. See
+/// `//zircon/docs/program_loading.md` for a description of the format. Returns the set of
+/// directories which should be searched for objects.
+fn parse_config_string(
+    dir_proxy: &DirectoryProxy,
+    config: &str,
+) -> Result<Vec<DirectoryProxy>, Error> {
+    if config.contains("/") {
+        return Err(format_err!("'/' chacter found in loader service config string"));
+    }
+    if Some('!') == config.chars().last() {
+        let sub_dir_proxy = io_util::open_directory(
+            dir_proxy,
+            &Path::new(&config[..config.len() - 1]),
+            io_util::OPEN_RIGHT_READABLE,
+        )?;
+        Ok(vec![sub_dir_proxy])
+    } else {
+        let dir_proxy_clone = io_util::clone_directory(dir_proxy, CLONE_FLAG_SAME_RIGHTS)?;
+        let sub_dir_proxy =
+            io_util::open_directory(dir_proxy, &Path::new(config), io_util::OPEN_RIGHT_READABLE)?;
+        Ok(vec![sub_dir_proxy, dir_proxy_clone])
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use {super::*, fidl::endpoints::Proxy, fidl_fuchsia_ldsvc::LoaderProxy};
+    use {
+        super::*,
+        fidl::endpoints::{Proxy, ServerEnd},
+        fidl_fuchsia_io::{DirectoryMarker, MODE_TYPE_DIRECTORY, OPEN_RIGHT_READABLE},
+        fidl_fuchsia_ldsvc::{LoaderMarker, LoaderProxy},
+        fuchsia_vfs_pseudo_fs::{
+            directory::entry::DirectoryEntry, file::simple::read_only, pseudo_directory,
+        },
+        std::iter,
+    };
 
     #[fasync::run_singlethreaded(test)]
     async fn load_objects_test() -> Result<(), Error> {
-        let pkg_lib = io_util::open_directory_in_namespace("/pkg/lib")?;
+        let pkg_lib = io_util::open_directory_in_namespace("/pkg/lib", OPEN_RIGHT_READABLE)?;
         let (client_chan, service_chan) = zx::Channel::create()?;
         start(pkg_lib, service_chan);
 
@@ -119,6 +173,68 @@ mod tests {
             if should_succeed {
                 assert_eq!(zx::sys::ZX_OK, res);
                 assert!(o_vmo.is_some());
+            } else {
+                assert_ne!(zx::sys::ZX_OK, res);
+                assert!(o_vmo.is_none());
+            }
+        }
+        Ok(())
+    }
+
+    #[fasync::run_singlethreaded(test)]
+    async fn config_test() -> Result<(), Error> {
+        let mut example_dir = pseudo_directory! {
+            "foo" => read_only(|| Ok(b"hippos".to_vec())),
+            "bar" => pseudo_directory! {
+                "baz" => read_only(|| Ok(b"rule".to_vec())),
+            },
+        };
+
+        let (example_dir_proxy, example_dir_service) =
+            fidl::endpoints::create_proxy::<DirectoryMarker>()?;
+        example_dir.open(
+            OPEN_RIGHT_READABLE,
+            MODE_TYPE_DIRECTORY,
+            &mut iter::empty(),
+            ServerEnd::new(example_dir_service.into_channel()),
+        );
+        fasync::spawn(async move {
+            let _ = await!(example_dir);
+        });
+
+        // Attempt to access things with different configurations
+        for (obj_name, config, expected_result) in vec![
+            // Should be able to load foo
+            ("foo", None, Some("hippos")),
+            // Should not be able to load bar (it's a directory)
+            ("bar", None, None),
+            // Should not be able to load baz (it's in a sub directory)
+            ("baz", None, None),
+            // Should be able to load baz with config "bar!" (only look in sub directory bar)
+            ("baz", Some("bar!"), Some("rule")),
+            // Should not be able to load foo with config "bar!" (only look in sub directory bar)
+            ("foo", Some("bar!"), None),
+            // Should be able to load foo with config "bar" (also look in sub directory bar)
+            ("foo", Some("bar"), Some("hippos")),
+            // Should be able to load baz with config "bar" (also look in sub directory bar)
+            ("baz", Some("bar"), Some("rule")),
+        ] {
+            let example_dir_proxy_clone =
+                io_util::clone_directory(&example_dir_proxy, CLONE_FLAG_SAME_RIGHTS)?;
+
+            let (loader_proxy, loader_service) = fidl::endpoints::create_proxy::<LoaderMarker>()?;
+            start(example_dir_proxy_clone, loader_service.into_channel());
+
+            if let Some(config) = config {
+                assert_eq!(zx::sys::ZX_OK, await!(loader_proxy.config(config))?);
+            }
+
+            let (res, o_vmo) = await!(loader_proxy.load_object(obj_name))?;
+            if let Some(expected_result) = expected_result {
+                assert_eq!(zx::sys::ZX_OK, res);
+                let mut buf = vec![0; expected_result.len()];
+                o_vmo.ok_or(format_err!("missing vmo"))?.read(&mut buf, 0)?;
+                assert_eq!(expected_result.as_bytes(), buf.as_slice());
             } else {
                 assert_ne!(zx::sys::ZX_OK, res);
                 assert!(o_vmo.is_none());

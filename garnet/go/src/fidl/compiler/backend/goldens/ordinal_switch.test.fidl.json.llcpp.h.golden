@@ -13,6 +13,8 @@
 #include <lib/zx/channel.h>
 #include <zircon/fidl.h>
 
+namespace llcpp {
+
 namespace test {
 namespace name {
 
@@ -42,7 +44,15 @@ class SwitchingOrdinals final {
    public:
     SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
 
+    SyncClient(SyncClient&&) = default;
+
+    SyncClient& operator=(SyncClient&&) = default;
+
     ~SyncClient() {}
+
+    const ::zx::channel& channel() const { return channel_; }
+
+    ::zx::channel* mutable_channel() { return &channel_; }
 
     zx_status_t OrdinalFive();
 
@@ -116,6 +126,7 @@ class SwitchingOrdinals final {
 
 }  // namespace name
 }  // namespace test
+}  // namespace llcpp
 
 namespace fidl {
 

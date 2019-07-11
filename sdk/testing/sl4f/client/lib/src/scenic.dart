@@ -4,7 +4,7 @@
 
 import 'dart:convert' show base64Decode;
 
-import 'package:image/image.dart' show encodePng, Image;
+import 'package:image/image.dart';
 import 'package:pedantic/pedantic.dart';
 
 import 'dump.dart';
@@ -15,18 +15,7 @@ class Scenic {
   final Dump _dump;
 
   /// Constructs a [Scenic] object.
-  ///
-  /// It can optionally take an [Sl4f] object, if not passed, one will be
-  /// created using the environment variables to connect to the device.
-  Scenic([Sl4f sl4f, Dump dump])
-      : _sl4f = sl4f ?? Sl4f.fromEnvironment(),
-        _dump = dump ?? Dump();
-
-  /// Closes the underlying HTTP client. This need not be called if the
-  /// Sl4f client is closed instead.
-  void close() {
-    _sl4f.close();
-  }
+  Scenic(this._sl4f, [Dump dump]) : _dump = dump ?? Dump();
 
   /// Captures the screen of the device.
   ///
@@ -40,7 +29,8 @@ class Scenic {
     assert(info['pixel_format'], 'Bgra8');
 
     final image = Image.fromBytes(
-        info['width'], info['height'], base64Decode(response['data']));
+        info['width'], info['height'], base64Decode(response['data']),
+        format: Format.bgra);
 
     if (dumpName != null) {
       unawaited(_dump.writeAsBytes(dumpName, 'png', encodePng(image)));

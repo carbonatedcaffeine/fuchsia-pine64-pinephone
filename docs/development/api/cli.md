@@ -47,6 +47,7 @@ determine if the tool is a good fit for Fuchsia or the Fuchsia SDK.
 
 Tools may be used for different development tasks. On a large team these roles
 may be separate people. Some categories are:
+
 - Component development (mods/agents)
 - Driver development (DDK)
 - Fuchsia development (SDK)
@@ -89,6 +90,7 @@ making a tool that accomplishes one small step of a task; instead make a tool
 that will perform a complete task.
 
 For example, when:
+
 - developing a C++ application: run the preprocessor, run the compiler, run the
 linker, start the built executable.
 - working on a unit test: build the tests and run the tests being worked on
@@ -124,6 +126,36 @@ needed.
 Here is some guidance for the nuts and bolts of creating a tool. We'll cover
 which language to write the tool in, what style to use in that language, and so
 on.
+
+### Naming
+
+The following applies to names of binaries, tools, sub-commands, and long
+parameter flags.
+
+Use well-known US English terms or nouns for names. Well-known nouns includes
+those in common use for the subject matter, or the names of whole subsystems.
+If a name does not appear in documentation, it is likely not well-known. If
+it does not appear in any implementation, it is definitely not well-known.
+
+Only use lower-case characters in the US-ASCII character set and hyphens.
+A single hyphen (`-`) is used to separate words in a name. A Platform
+required extension is an exception (such as `.exe`).
+
+Name CLI tools with more than three characters. Keep the short file names
+available for user shortcuts (aliases). If you believe a tool should have
+a very short name, request approval from the Fuchsia API Council.
+
+Keeping the points above in mind:
+
+- Prefer whole words rather than abbreviations.
+- Prefer shorter names where a user is expected type the name frequently. For
+  less frequently typed names bias to more explicit names.
+- Prefer a single word to multiple words
+- Prefer subcommands to multiple tools that are hyphenated (e.g. avoid
+  `foo-start`, `foo-stop`, `foo-reset`; instead have `foo` that accepts
+  commands `start|stop|reset`).
+- Prefer symmetry (particularly in verbs) with other similar commands or
+  sub-systems, unless that introduces a broken metaphor.
 
 ### Programming Languages
 
@@ -178,6 +210,7 @@ This section is for the convenience of the reader. This document is not
 authoritative on which platforms are supported.
 
 We currently support
+
 - Linux
 - macOS
 
@@ -187,6 +220,7 @@ to keep the platforms listed below in mind.
 
 Tools should be built in a way that makes them easy to port to the following
 platforms:
+
 - Fuchsia (self-hosted)
 - Windows
 
@@ -201,6 +235,7 @@ insensitivity since some platforms are case sensitive.
 ### Development Hosts Using a Non-English Locale
 
 There are several aspects to consider for non-English developers:
+
 - Whether the tool itself can be localized
 - Whether the documentation for the tool can be localized
 - Whether the tool can work with path names and data that include non-ASCII
@@ -237,6 +272,7 @@ whether the tool needs to be called at all.
 ### Command Line Arguments
 
 There are three types of command line arguments:
+
 - exact text
 - arguments
 - options (i.e. switches and keys)
@@ -309,9 +345,9 @@ without its key) or optional values (where the key appears without its
 value). It's clearer to consider the key/value pair optional, but inseparable.
 I.e. if the key is present a value is required and vice versa. Consider making
 an argument instead of a keyed option with an optional key. E.g. rather than
-"`do_something [--config [<config_file>]]`" where not passing `[<config_file>]`
+"`do-something [--config [<config_file>]]`" where not passing `[<config_file>]`
 means don't use a config file; instead do
-"`do_something [--config <config_file>|--no-config]`" where passing
+"`do-something [--config <config_file>|--no-config]`" where passing
 `--no-config` means don't load a config file.
 
 ##### Mutually Exclusive Options
@@ -321,6 +357,7 @@ exclusive.
 
 Passing mutually exclusive options is considered a user error. When this occurs
 the tool will do one of the following:
+
 - Write an error message explaining the issue and exit with a non-zero result
   code; doing no work (i.e. there was no data changed as a result of the call).
   This is the expected handling, so no further documentation or notes are
@@ -393,6 +430,7 @@ argument is handled by the `build` subcommand.
 ### Common Features
 
 Command line tools are expected to support some common switches:
+
 - `--help`
 - `--quiet`
 - `--verbose`
@@ -538,6 +576,7 @@ inputs, missing dependencies, or bugs within the tool. Make error reports
 comprehensible and actionable.
 
 If the error came from bad inputs
+
 1. If the user gave the tool bad data, give context about the error and guide
    the user toward fixing the input, e.g. print which input file (and line
    number if that's appropriate for the input) where the input error occurred.
@@ -552,6 +591,7 @@ If the error came from bad inputs
    tool to get more help).
 
 If the error came from missing dependencies
+
 1. Be clear that the error is from missing dependencies, i.e. don't leave the
    user trying to debug their input data if that is not the issue.
 2. Provide instruction on how to satisfy the dependencies. This can be an
@@ -559,6 +599,7 @@ If the error came from missing dependencies
    instructions (e.g. "`see: http:example.com/how-to-install-foo`").
 
 If the error came from an unexpected state (i.e. a bug) in the tool
+
 1. Apologize. Explain that the tool got into an unexpected state. Don't leave
    the user trying to guess whether their input data was bad or they were
    missing dependencies.
@@ -621,6 +662,7 @@ receiver is a program.
 #### ANSI Color
 
 Use of color is allowed with the following caveats
+
 - Enabling/disabling color output based on terminal information (i.e. whether it
   supports color) is encouraged, but that's not always possible (so it's not
   required)

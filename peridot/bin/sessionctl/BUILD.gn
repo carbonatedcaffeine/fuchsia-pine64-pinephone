@@ -25,6 +25,8 @@ executable("sessionctl_bin") {
 }
 
 package("sessionctl") {
+  deprecated_shell = "//build"
+
   deps = [
     ":sessionctl_bin",
   ]
@@ -75,11 +77,11 @@ executable("sessionctl_unittest") {
     "//peridot/lib/testing:test_story_command_executor",
     "//peridot/lib/testing:test_with_session_storage",
     "//sdk/fidl/fuchsia.modular",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 }
 
-tests_package("sessionctl_unittests") {
+hermetic_tests_package("sessionctl_unittests") {
   deps = [
     ":sessionctl_unittest",
   ]

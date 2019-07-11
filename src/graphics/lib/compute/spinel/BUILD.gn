@@ -2,16 +2,21 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("../gn/build_rules.gni")
+
+config("spinel_public_config") {
+  # The sources and clients use 'spinel_xxx.h' to include the headers.
+  include_dirs = [ "." ]
+}
+
 source_set("spinel") {
   public = [
     "spinel.h",
-    "spinel_types.h",
-    "spinel_result.h",
     "spinel_assert.h",
+    "spinel_result.h",
+    "spinel_types.h",
   ]
-  friend = [
-    "platforms/vk"
-  ]
+  friend = [ "platforms/vk" ]
   sources = [
     "allocator_host.c",
     "allocator_host.h",
@@ -24,7 +29,6 @@ source_set("spinel") {
     "handle.h",
     "path_builder.c",
     "path_builder.h",
-    "platforms",
     "raster_builder.c",
     "raster_builder.h",
     "spinel.h",
@@ -40,10 +44,28 @@ source_set("spinel") {
     "weakref.c",
     "weakref.h",
   ]
-  include_dirs = [
-    "//src/graphics/lib/compute",
-  ]
   deps = [
-    "//src/graphics/lib/compute/common",
+    "${graphics_compute_dir}/common",
+  ]
+  public_configs = [ ":spinel_public_config" ]
+}
+
+# This group provides a target that tests can link against.
+# It provides the Vulkan-based Spinel API, and the vk_find_targets
+# loader library that simply links all target files into the library
+# itself for easier deployments.
+
+group("spinel_vk_for_tests") {
+  public_deps = [
+    ":spinel",
+    "platforms/vk:vk",
+    "platforms/vk:vk_find_target",
+  ]
+}
+
+group("tests") {
+  testonly = true
+  public_deps = [
+    "platforms/vk/tests",
   ]
 }

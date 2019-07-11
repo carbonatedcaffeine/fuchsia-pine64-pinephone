@@ -7,15 +7,15 @@
 ///
 /// Typically applications would call this method early in their main function
 /// to enable them to be eligible to produce traces.
-pub fn trace_provider_create() {
+pub fn trace_provider_create_with_fdio() {
     unsafe {
-        sys::trace_provider_create_rust();
+        sys::trace_provider_create_with_fdio_rust();
     }
 }
 
 mod sys {
     #[link(name = "rust-trace-provider")]
     extern "C" {
-        pub fn trace_provider_create_rust();
+        pub fn trace_provider_create_with_fdio_rust();
     }
 }

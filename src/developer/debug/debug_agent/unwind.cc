@@ -66,21 +66,49 @@ zx_status_t UnwindStackAndroid(const zx::process& process,
 
   auto memory = std::make_shared<unwindstack::MemoryFuchsia>(process.get());
 
-  unwindstack::Unwinder unwinder(max_depth, &maps, &unwind_regs,
-                                 std::move(memory));
+  // Always ask for one more frame than requested so we can get the canonical
+  // frame address for the frames we do return (the CFA is the previous frame's
+  // stack pointer at the time of the call).
+  unwindstack::Unwinder unwinder(max_depth + 1, &maps, &unwind_regs,
+                                 std::move(memory), true);
+  // We don't need names from the unwinder since those are computed in the client. This will
+  // generally fail anyway since the target binaries don't usually have symbols, so turning off
+  // makes it a little more efficient.
+  unwinder.SetResolveNames(false);
+
   unwinder.Unwind();
 
-  stack->resize(unwinder.NumFrames());
+  stack->reserve(unwinder.NumFrames());
   for (size_t i = 0; i < unwinder.NumFrames(); i++) {
     const auto& src = unwinder.frames()[i];
-    debug_ipc::StackFrame* dest = &(*stack)[i];
+
+    if (i > 0) {
+      // The next frame's canonical frame address is our stack pointer.
+      debug_ipc::StackFrame* next_frame = &(*stack)[i - 1];
+      next_frame->cfa = src.sp;
+    }
+
+    // This termination condition is in the middle here because we don't know
+    // for sure if the unwinder was able to return the number of frames we
+    // requested, and we always want to fill in the CFA (above) for the
+    // returned frames if possible.
+    if (i == max_depth)
+      break;
+
+    debug_ipc::StackFrame* dest = &stack->emplace_back();
     dest->ip = src.pc;
     dest->sp = src.sp;
+    if (src.regs) {
+      src.regs->IterateRegisters([&dest](const char* name, uint64_t val) {
+        // TODO(sadmac): It'd be nice to be using some sort of ID constant
+        // instead of a converted string here.
+        auto id = debug_ipc::StringToRegisterID(name);
+        if (id != debug_ipc::RegisterID::kUnknown) {
+          dest->regs.emplace_back(id, val);
+        }
+      });
+    }
   }
-
-  // Add all registers to the top stack frame.
-  arch::ArchProvider::Get().SaveGeneralRegs(
-      regs, arch::ArchProvider::SaveGeneralWhat::kNoIPSP, &(*stack)[0].regs);
 
   return 0;
 }
@@ -136,17 +164,24 @@ zx_status_t UnwindStackNgUnwind(const zx::process& process,
   if (unw_init_remote(&cursor, remote_aspace, fuchsia) < 0)
     return ZX_ERR_INTERNAL;
 
+  // Compute the register IDs for this platform's IP/SP.
+  debug_ipc::Arch arch = arch::ArchProvider::Get().GetArch();
+  debug_ipc::RegisterID ip_reg_id =
+      GetSpecialRegisterID(arch, debug_ipc::SpecialRegisterType::kIP);
+  debug_ipc::RegisterID sp_reg_id =
+      GetSpecialRegisterID(arch, debug_ipc::SpecialRegisterType::kSP);
+
   // Top stack frame.
   debug_ipc::StackFrame frame;
   frame.ip = *arch::ArchProvider::Get().IPInRegs(
       const_cast<zx_thread_state_general_regs*>(&regs));
   frame.sp = *arch::ArchProvider::Get().SPInRegs(
       const_cast<zx_thread_state_general_regs*>(&regs));
-  arch::ArchProvider::Get().SaveGeneralRegs(
-      regs, arch::ArchProvider::SaveGeneralWhat::kNoIPSP, &frame.regs);
+  frame.cfa = 0;
+  arch::ArchProvider::Get().SaveGeneralRegs(regs, &frame.regs);
   stack->push_back(std::move(frame));
 
-  while (frame.sp >= 0x1000000 && stack->size() < max_depth) {
+  while (frame.sp >= 0x1000000 && stack->size() < max_depth + 1) {
     int ret = unw_step(&cursor);
     if (ret <= 0)
       break;
@@ -156,9 +191,15 @@ zx_status_t UnwindStackNgUnwind(const zx::process& process,
     if (val == 0)
       break;  // Null code address means we're done.
     frame.ip = val;
+    frame.regs.emplace_back(ip_reg_id, val);
 
     unw_get_reg(&cursor, UNW_REG_SP, &val);
     frame.sp = val;
+    frame.regs.emplace_back(sp_reg_id, val);
+
+    // Previous frame's CFA is our SP.
+    if (!stack->empty())
+      stack->back().cfa = val;
 
     // Note that libunwind may theoretically be able to give us all
     // callee-saved register values for a given frame. Currently asking for any
@@ -169,7 +210,10 @@ zx_status_t UnwindStackNgUnwind(const zx::process& process,
     // re-evaluated. We may be able to attach a vector of Register structs on
     // each frame for the values we know about.
 
-    stack->push_back(frame);
+    // This "if" statement prevents adding more than the max number of stack
+    // entries since we requested one more from libunwind to get the CFA.
+    if (stack->size() < max_depth)
+      stack->push_back(frame);
   }
 
   // The last stack entry will typically have a 0 IP address. We want to send

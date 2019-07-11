@@ -28,13 +28,13 @@ executable("fx_bin") {
   output_name = "fx"
 
   sources = [
-    "fx.cpp",
+    "fx.cc",
   ]
 
   deps = [
     "//garnet/public/lib/fsl",
-    "//garnet/public/lib/media/timeline",
     "//sdk/fidl/fuchsia.media",
+    "//sdk/lib/media/cpp",
     "//sdk/lib/sys/cpp",
     "//src/media/audio/lib/wav_writer:wav_writer",
     "//zircon/public/fidl/fuchsia-scheduler",

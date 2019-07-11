@@ -44,7 +44,7 @@ const auto kReadScanEnable = CreateStaticByteBuffer(
 );
 
 #define READ_SCAN_ENABLE_RSP(scan_enable)                                    \
-  CreateStaticByteBuffer(hci::kCommandCompleteEventCode, 0x05, 0xF0, \
+  CreateStaticByteBuffer(hci::kCommandCompleteEventCode, 0x05, 0xF0,         \
                                  LowerBits(hci::kReadScanEnable),            \
                                  UpperBits(hci::kReadScanEnable),            \
                                  hci::kSuccess, (scan_enable))
@@ -57,7 +57,7 @@ const auto kReadScanEnableRspBoth = READ_SCAN_ENABLE_RSP(0x03);
 #undef READ_SCAN_ENABLE_RSP
 
 #define WRITE_SCAN_ENABLE_CMD(scan_enable)                               \
-  CreateStaticByteBuffer(LowerBits(hci::kWriteScanEnable),       \
+  CreateStaticByteBuffer(LowerBits(hci::kWriteScanEnable),               \
                                  UpperBits(hci::kWriteScanEnable), 0x01, \
                                  (scan_enable))
 
@@ -69,7 +69,7 @@ const auto kWriteScanEnableBoth = WRITE_SCAN_ENABLE_CMD(0x03);
 #undef WRITE_SCAN_ENABLE_CMD
 
 #define COMMAND_COMPLETE_RSP(opcode)                                         \
-  CreateStaticByteBuffer(hci::kCommandCompleteEventCode, 0x04, 0xF0, \
+  CreateStaticByteBuffer(hci::kCommandCompleteEventCode, 0x04, 0xF0,         \
                                  LowerBits((opcode)), UpperBits((opcode)),   \
                                  hci::kSuccess);
 
@@ -97,7 +97,7 @@ const auto kWritePageScanTypeRsp =
 
 
 #define COMMAND_STATUS_RSP(opcode, statuscode)                       \
-  CreateStaticByteBuffer(hci::kCommandStatusEventCode, 0x04, \
+  CreateStaticByteBuffer(hci::kCommandStatusEventCode, 0x04,         \
                                  (statuscode), 0xF0,                 \
                                  LowerBits((opcode)), UpperBits((opcode)));
 // clang-format on
@@ -344,6 +344,7 @@ class BrEdrConnectionManagerTest : public TestingBase {
 
  protected:
   static constexpr const int kIncomingConnTransactions = 6;
+  static constexpr const int kDisconnectionTransactions = 1;
 
   BrEdrConnectionManager* connmgr() const { return connection_manager_.get(); }
   void SetConnectionManager(std::unique_ptr<BrEdrConnectionManager> mgr) {
@@ -381,7 +382,7 @@ class BrEdrConnectionManagerTest : public TestingBase {
     const DynamicByteBuffer remote_version_complete_packet =
         testing::ReadRemoteVersionInfoCompletePacket(conn);
     const DynamicByteBuffer remote_supported_complete_packet =
-        testing::ReadRemoteSupportedFeaturesCompletePacket(conn);
+        testing::ReadRemoteSupportedFeaturesCompletePacket(conn, true);
     const DynamicByteBuffer remote_extended1_complete_packet =
         testing::ReadRemoteExtended1CompletePacket(conn);
     const DynamicByteBuffer remote_extended2_complete_packet =
@@ -549,9 +550,9 @@ TEST_F(GAP_BrEdrConnectionManagerTest, IncomingConnectionSuccess) {
 
   RunLoopUntilIdle();
 
-  auto* dev = peer_cache()->FindByAddress(kTestDevAddr);
-  ASSERT_TRUE(dev);
-  EXPECT_EQ(dev->identifier(), connmgr()->GetPeerId(kConnectionHandle));
+  auto* peer = peer_cache()->FindByAddress(kTestDevAddr);
+  ASSERT_TRUE(peer);
+  EXPECT_EQ(peer->identifier(), connmgr()->GetPeerId(kConnectionHandle));
   EXPECT_EQ(kIncomingConnTransactions, transaction_count());
 
   // When we deallocate the connection manager next, we should disconnect.
@@ -577,9 +578,9 @@ TEST_F(GAP_BrEdrConnectionManagerTest,
        IncomingConnectionUpgradesKnownLowEnergyPeerToDualMode) {
   const DeviceAddress le_alias_addr(DeviceAddress::Type::kLEPublic,
                                     kTestDevAddr.value());
-  Peer* const dev = peer_cache()->NewPeer(le_alias_addr, true);
-  ASSERT_TRUE(dev);
-  ASSERT_EQ(TechnologyType::kLowEnergy, dev->technology());
+  Peer* const peer = peer_cache()->NewPeer(le_alias_addr, true);
+  ASSERT_TRUE(peer);
+  ASSERT_EQ(TechnologyType::kLowEnergy, peer->technology());
 
   QueueSuccessfulIncomingConn();
 
@@ -587,9 +588,9 @@ TEST_F(GAP_BrEdrConnectionManagerTest,
 
   RunLoopUntilIdle();
 
-  ASSERT_EQ(dev, peer_cache()->FindByAddress(kTestDevAddr));
-  EXPECT_EQ(dev->identifier(), connmgr()->GetPeerId(kConnectionHandle));
-  EXPECT_EQ(TechnologyType::kDualMode, dev->technology());
+  ASSERT_EQ(peer, peer_cache()->FindByAddress(kTestDevAddr));
+  EXPECT_EQ(peer->identifier(), connmgr()->GetPeerId(kConnectionHandle));
+  EXPECT_EQ(TechnologyType::kDualMode, peer->technology());
 
   // Prepare for disconnection upon teardown.
   QueueDisconnection(kConnectionHandle);
@@ -824,8 +825,8 @@ const auto kLinkKeyRequestReplyRsp = CreateStaticByteBuffer(
 
 // Test: replies to Link Key Requests for bonded peer
 TEST_F(GAP_BrEdrConnectionManagerTest, RecallLinkKeyForBondedPeer) {
-  ASSERT_TRUE(
-      peer_cache()->AddBondedPeer(PeerId(999), kTestDevAddr, {}, kLinkKey));
+  ASSERT_TRUE(peer_cache()->AddBondedPeer(
+      BondingData{PeerId(999), kTestDevAddr, {}, {}, kLinkKey}));
   auto* peer = peer_cache()->FindByAddress(kTestDevAddr);
   ASSERT_TRUE(peer);
   ASSERT_FALSE(peer->connected());
@@ -1147,6 +1148,332 @@ TEST_F(GAP_BrEdrConnectionManagerTest, ServiceSearch) {
   QueueDisconnection(kConnectionHandle);
 }
 
+TEST_F(GAP_BrEdrConnectionManagerTest, SearchOnReconnect) {
+  size_t search_cb_count = 0;
+  auto search_cb = [&](auto id, const auto& attributes) {
+    auto* peer = peer_cache()->FindByAddress(kTestDevAddr);
+    ASSERT_TRUE(peer);
+    ASSERT_EQ(id, peer->identifier());
+    ASSERT_EQ(1u, attributes.count(sdp::kServiceId));
+    search_cb_count++;
+  };
+
+  connmgr()->AddServiceSearch(sdp::profile::kAudioSink, {sdp::kServiceId},
+                              search_cb);
+
+  fbl::RefPtr<l2cap::testing::FakeChannel> sdp_chan;
+  std::optional<uint32_t> sdp_request_tid;
+
+  data_domain()->set_channel_callback(
+      [&sdp_chan, &sdp_request_tid](auto new_chan) {
+        new_chan->SetSendCallback(
+            [&sdp_request_tid](auto packet) {
+              const auto kSearchExpectedParams = CreateStaticByteBuffer(
+                  // ServiceSearchPattern
+                  0x35, 0x03,        // Sequence uint8 3 bytes
+                  0x19, 0x11, 0x0B,  // UUID (kAudioSink)
+                  0xFF, 0xFF,        // MaxAttributeByteCount (no max)
+                  // Attribute ID list
+                  0x35, 0x03,        // Sequence uint8 3 bytes
+                  0x09, 0x00, 0x03,  // uint16_t (kServiceId)
+                  0x00               // No continuation state
+              );
+              // First byte should be type.
+              ASSERT_LE(3u, packet->size());
+              ASSERT_EQ(sdp::kServiceSearchAttributeRequest, (*packet)[0]);
+              ASSERT_EQ(kSearchExpectedParams, packet->view(5));
+              sdp_request_tid = (*packet)[1] << 8 || (*packet)[2];
+            },
+            async_get_default_dispatcher());
+        sdp_chan = std::move(new_chan);
+      });
+
+  // This test uses a modified peer and interrogation which doesn't use
+  // extended pages.
+  test_device()->QueueCommandTransaction(
+      CommandTransaction(kAcceptConnectionRequest,
+                         {&kAcceptConnectionRequestRsp, &kConnectionComplete}));
+  const DynamicByteBuffer remote_name_complete_packet =
+      testing::RemoteNameRequestCompletePacket(kTestDevAddr);
+  const DynamicByteBuffer remote_version_complete_packet =
+      testing::ReadRemoteVersionInfoCompletePacket(kConnectionHandle);
+  const DynamicByteBuffer remote_supported_complete_packet =
+      testing::ReadRemoteSupportedFeaturesCompletePacket(kConnectionHandle,
+                                                         false);
+
+  test_device()->QueueCommandTransaction(CommandTransaction(
+      testing::RemoteNameRequestPacket(kTestDevAddr),
+      {&kRemoteNameRequestRsp, &remote_name_complete_packet}));
+  test_device()->QueueCommandTransaction(CommandTransaction(
+      testing::ReadRemoteVersionInfoPacket(kConnectionHandle),
+      {&kReadRemoteVersionInfoRsp, &remote_version_complete_packet}));
+  test_device()->QueueCommandTransaction(CommandTransaction(
+      testing::ReadRemoteSupportedFeaturesPacket(kConnectionHandle),
+      {&kReadRemoteSupportedFeaturesRsp, &remote_supported_complete_packet}));
+
+  data_domain()->ExpectOutboundL2capChannel(kConnectionHandle, l2cap::kSDP,
+                                            0x40, 0x41);
+
+  test_device()->SendCommandChannelPacket(kConnectionRequest);
+
+  RunLoopUntilIdle();
+
+  ASSERT_TRUE(sdp_chan);
+  ASSERT_TRUE(sdp_request_tid);
+  ASSERT_EQ(0u, search_cb_count);
+
+  sdp::ServiceSearchAttributeResponse rsp;
+  rsp.SetAttribute(0, sdp::kServiceId, sdp::DataElement(UUID()));
+  auto rsp_ptr = rsp.GetPDU(0xFFFF /* max attribute bytes */, *sdp_request_tid,
+                            BufferView());
+
+  sdp_chan->Receive(*rsp_ptr);
+
+  RunLoopUntilIdle();
+
+  ASSERT_EQ(1u, search_cb_count);
+
+  // Remote end disconnects.
+  test_device()->SendCommandChannelPacket(kDisconnectionComplete);
+
+  RunLoopUntilIdle();
+
+  sdp_request_tid.reset();
+  sdp_chan = nullptr;
+
+  // Second connection is shortened because we have already interrogated.
+  // We still search for SDP services.
+  test_device()->QueueCommandTransaction(
+      CommandTransaction(kAcceptConnectionRequest,
+                         {&kAcceptConnectionRequestRsp, &kConnectionComplete}));
+  // We don't send any interrogation packets, because there is none to be done.
+
+  data_domain()->ExpectOutboundL2capChannel(kConnectionHandle, l2cap::kSDP,
+                                            0x40, 0x41);
+
+  test_device()->SendCommandChannelPacket(kConnectionRequest);
+  RunLoopUntilIdle();
+
+  // We should have searched again.
+  ASSERT_TRUE(sdp_chan);
+  ASSERT_TRUE(sdp_request_tid);
+  ASSERT_EQ(1u, search_cb_count);
+
+  rsp_ptr = rsp.GetPDU(0xFFFF /* max attribute bytes */, *sdp_request_tid,
+                       BufferView());
+
+  sdp_chan->Receive(*rsp_ptr);
+
+  RunLoopUntilIdle();
+
+  ASSERT_EQ(2u, search_cb_count);
+
+  QueueDisconnection(kConnectionHandle);
+}
+
+const auto kAuthenticationRequest =
+    CreateStaticByteBuffer(LowerBits(hci::kAuthenticationRequested),
+                           UpperBits(hci::kAuthenticationRequested),
+                           0x02,       // parameter_total_size (2 bytes)
+                           0xAA, 0x0B  // Connection_Handle
+    );
+
+const auto kAuthenticationStatus = COMMAND_STATUS_RSP(
+    hci::kAuthenticationRequested, hci::StatusCode::kSuccess);
+
+const auto kAuthenticationComplete =
+    CreateStaticByteBuffer(hci::kAuthenticationCompleteEventCode,
+                           0x03,  // parameter_total_size (3 bytes)
+                           hci::StatusCode::kSuccess,  // status
+                           0xAA, 0x0B                  // connection_handle
+    );
+
+const auto kAuthenticationCompleteFailed =
+    CreateStaticByteBuffer(hci::kAuthenticationCompleteEventCode,
+                           0x03,  // parameter_total_size (3 bytes)
+                           hci::StatusCode::kPairingNotAllowed,  // status
+                           0xAA, 0x0B  // connection_handle
+    );
+
+TEST_F(GAP_BrEdrConnectionManagerTest, OpenL2capAuthentication) {
+  QueueSuccessfulIncomingConn();
+
+  test_device()->SendCommandChannelPacket(kConnectionRequest);
+
+  RunLoopUntilIdle();
+
+  EXPECT_EQ(kIncomingConnTransactions, transaction_count());
+  auto* const peer = peer_cache()->FindByAddress(kTestDevAddr);
+  ASSERT_TRUE(peer);
+  ASSERT_TRUE(peer->bredr()->connected());
+
+  std::optional<zx::socket> connected_socket;
+
+  auto socket_cb = [&](zx::socket socket) {
+    connected_socket = std::move(socket);
+  };
+
+  // Initial connection request
+
+  // Note: this skips some parts of the pairing flow, because the link key being
+  // received is the important part of this.
+  test_device()->QueueCommandTransaction(CommandTransaction(
+      kAuthenticationRequest, {&kAuthenticationStatus, &kLinkKeyNotification}));
+
+  connmgr()->OpenL2capChannel(peer->identifier(), l2cap::kAVDTP, socket_cb,
+                              async_get_default_dispatcher());
+
+  RunLoopUntilIdle();
+
+  // The L2CAP shouldn't have been called
+  // We should not have a socket, and the callback shouldn't have been called,
+  // but the LTK should be stored since the link key got received.
+  ASSERT_FALSE(connected_socket);
+
+  test_device()->SendCommandChannelPacket(kAuthenticationComplete);
+
+  data_domain()->ExpectOutboundL2capChannel(kConnectionHandle, l2cap::kAVDTP,
+                                            0x40, 0x41);
+
+  RunLoopUntilIdle();
+
+  // The socket should be returned.
+  ASSERT_TRUE(connected_socket);
+
+  connected_socket.reset();
+
+  data_domain()->ExpectOutboundL2capChannel(kConnectionHandle, l2cap::kAVDTP,
+                                            0x40, 0x41);
+
+  // A second connection request should not require another authentication.
+  connmgr()->OpenL2capChannel(peer->identifier(), l2cap::kAVDTP, socket_cb,
+                              async_get_default_dispatcher());
+
+  RunLoopUntilIdle();
+
+  ASSERT_TRUE(connected_socket);
+
+  QueueDisconnection(kConnectionHandle);
+}
+
+// Test: when the device is already bonded, the link key gets stored when it is
+// provided to the connection.
+TEST_F(GAP_BrEdrConnectionManagerTest, OpenL2capAuthenticationBonded) {
+  ASSERT_TRUE(peer_cache()->AddBondedPeer(
+      BondingData{PeerId(999), kTestDevAddr, {}, {}, kLinkKey}));
+  auto* const peer = peer_cache()->FindByAddress(kTestDevAddr);
+  ASSERT_TRUE(peer);
+  ASSERT_FALSE(peer->connected());
+  ASSERT_TRUE(peer->bonded());
+
+  QueueSuccessfulIncomingConn();
+
+  test_device()->SendCommandChannelPacket(kConnectionRequest);
+
+  RunLoopUntilIdle();
+
+  EXPECT_EQ(kIncomingConnTransactions, transaction_count());
+  ASSERT_TRUE(peer->bredr()->connected());
+
+  std::optional<zx::socket> connected_socket;
+
+  auto socket_cb = [&](zx::socket socket) {
+    connected_socket = std::move(socket);
+  };
+
+  // Initial connection request
+
+  // Note: this skips some parts of the pairing flow, because the link key being
+  // received is the important part of this. The key is not received when the
+  // authentication fails.
+  test_device()->QueueCommandTransaction(
+      CommandTransaction(kAuthenticationRequest, {&kAuthenticationStatus}));
+
+  connmgr()->OpenL2capChannel(peer->identifier(), l2cap::kAVDTP, socket_cb,
+                              async_get_default_dispatcher());
+
+  RunLoopUntilIdle();
+
+  // L2CAP connect shouldn't have been called, and callback shouldn't be called.
+  // We should not have a socket.
+  ASSERT_FALSE(connected_socket);
+
+  // The authentication flow will request the existing link key, which should be
+  // returned and stored, and then the authentication is complete.
+  test_device()->QueueCommandTransaction(kLinkKeyRequestReply,
+                                         {&kLinkKeyRequestReplyRsp});
+
+  test_device()->SendCommandChannelPacket(kLinkKeyRequest);
+
+  RunLoopUntilIdle();
+
+  // No socket until the authentication is signaled complete.
+  ASSERT_FALSE(connected_socket);
+
+  test_device()->SendCommandChannelPacket(kAuthenticationComplete);
+
+  data_domain()->ExpectOutboundL2capChannel(kConnectionHandle, l2cap::kAVDTP,
+                                            0x40, 0x41);
+
+  RunLoopUntilIdle();
+
+  // The socket should be connected.
+  ASSERT_TRUE(connected_socket);
+
+  QueueDisconnection(kConnectionHandle);
+}
+
+TEST_F(GAP_BrEdrConnectionManagerTest, OpenL2capAuthenticationFailed) {
+  QueueSuccessfulIncomingConn();
+
+  test_device()->SendCommandChannelPacket(kConnectionRequest);
+
+  RunLoopUntilIdle();
+
+  EXPECT_EQ(kIncomingConnTransactions, transaction_count());
+  auto* const peer = peer_cache()->FindByAddress(kTestDevAddr);
+  ASSERT_TRUE(peer);
+  ASSERT_TRUE(peer->bredr()->connected());
+
+  std::optional<zx::socket> connected_socket;
+
+  auto socket_cb = [&](zx::socket socket) {
+    connected_socket = std::move(socket);
+  };
+
+  // Initial connection request
+
+  // Note: this skips some parts of the pairing flow, because the link key being
+  // received is the important part of this. The key is not received when the
+  // authentication fails.
+  test_device()->QueueCommandTransaction(
+      CommandTransaction(kAuthenticationRequest, {&kAuthenticationStatus}));
+
+  connmgr()->OpenL2capChannel(peer->identifier(), l2cap::kAVDTP, socket_cb,
+                              async_get_default_dispatcher());
+
+  RunLoopUntilIdle();
+
+  // The L2CAP shouldn't have been called
+  // We should not have a socket, and the callback shouldn't have been called.
+  ASSERT_FALSE(connected_socket);
+
+  test_device()->SendCommandChannelPacket(kAuthenticationCompleteFailed);
+
+  int count = transaction_count();
+
+  // We disconnect the peer when authentication fails.
+  QueueDisconnection(kConnectionHandle);
+
+  RunLoopUntilIdle();
+
+  // An invalid socket should have been sent because the connection failed.
+  ASSERT_TRUE(connected_socket);
+  ASSERT_EQ(ZX_HANDLE_INVALID, *connected_socket);
+
+  ASSERT_EQ(count + kDisconnectionTransactions, transaction_count());
+}
+
 TEST_F(GAP_BrEdrConnectionManagerTest, ConnectUnknownPeer) {
   EXPECT_FALSE(connmgr()->Connect(PeerId(456), {}));
 }
@@ -1156,16 +1483,19 @@ TEST_F(GAP_BrEdrConnectionManagerTest, ConnectLowEnergyPeer) {
   EXPECT_FALSE(connmgr()->Connect(peer->identifier(), {}));
 }
 
+TEST_F(GAP_BrEdrConnectionManagerTest, DisconnectUnknownPeerDoesNothing) {
+  EXPECT_TRUE(connmgr()->Disconnect(PeerId(999)));
+
+  RunLoopUntilIdle();
+
+  EXPECT_EQ(0, transaction_count());
+}
+
 // Test: user-initiated disconnection
 TEST_F(GAP_BrEdrConnectionManagerTest, DisconnectClosesHciConnection) {
   QueueSuccessfulIncomingConn();
 
   test_device()->SendCommandChannelPacket(kConnectionRequest);
-
-  RunLoopUntilIdle();
-
-  // Disconnecting an unknown peer should do nothing.
-  EXPECT_FALSE(connmgr()->Disconnect(PeerId(999)));
 
   RunLoopUntilIdle();
 
@@ -1177,14 +1507,69 @@ TEST_F(GAP_BrEdrConnectionManagerTest, DisconnectClosesHciConnection) {
   QueueDisconnection(kConnectionHandle);
 
   EXPECT_TRUE(connmgr()->Disconnect(peer->identifier()));
+  EXPECT_FALSE(peer->bredr()->connected());
+
+  RunLoopUntilIdle();
+
+  EXPECT_EQ(kIncomingConnTransactions + 1, transaction_count());
+  EXPECT_FALSE(peer->bredr()->connected());
+}
+
+TEST_F(GAP_BrEdrConnectionManagerTest, DisconnectSamePeerIsIdempotent) {
+  QueueSuccessfulIncomingConn();
+
+  test_device()->SendCommandChannelPacket(kConnectionRequest);
+
+  RunLoopUntilIdle();
+
+  auto* const peer = peer_cache()->FindByAddress(kTestDevAddr);
+  ASSERT_TRUE(peer);
+  ASSERT_TRUE(peer->bredr()->connected());
+
+  QueueDisconnection(kConnectionHandle);
+
+  EXPECT_TRUE(connmgr()->Disconnect(peer->identifier()));
+  EXPECT_FALSE(peer->bredr()->connected());
+
+  // Try to disconnect again while the first disconnect is in progress (HCI
+  // Disconnection Complete not yet received).
+  EXPECT_TRUE(connmgr()->Disconnect(peer->identifier()));
 
   RunLoopUntilIdle();
 
   EXPECT_EQ(kIncomingConnTransactions + 1, transaction_count());
   EXPECT_FALSE(peer->bredr()->connected());
 
-  // Disconnecting a closed connection returns false.
-  EXPECT_FALSE(connmgr()->Disconnect(peer->identifier()));
+  // Try to disconnect once more, now that the link is gone.
+  EXPECT_TRUE(connmgr()->Disconnect(peer->identifier()));
+}
+
+TEST_F(GAP_BrEdrConnectionManagerTest,
+       RemovePeerFromPeerCacheDuringDisconnection) {
+  QueueSuccessfulIncomingConn();
+
+  test_device()->SendCommandChannelPacket(kConnectionRequest);
+
+  RunLoopUntilIdle();
+
+  auto* const peer = peer_cache()->FindByAddress(kTestDevAddr);
+  ASSERT_TRUE(peer);
+  ASSERT_TRUE(peer->bredr()->connected());
+
+  QueueDisconnection(kConnectionHandle);
+
+  const PeerId id = peer->identifier();
+  EXPECT_TRUE(connmgr()->Disconnect(id));
+  ASSERT_FALSE(peer->bredr()->connected());
+
+  // Remove the peer from PeerCache before receving HCI Disconnection Complete.
+  EXPECT_TRUE(peer_cache()->RemoveDisconnectedPeer(id));
+
+  RunLoopUntilIdle();
+
+  EXPECT_EQ(kIncomingConnTransactions + 1, transaction_count());
+  EXPECT_FALSE(peer_cache()->FindById(id));
+  EXPECT_FALSE(peer_cache()->FindByAddress(kTestDevAddr));
 }
 
 TEST_F(GAP_BrEdrConnectionManagerTest, AddServiceSearchAll) {
@@ -1569,6 +1954,35 @@ TEST_F(GAP_BrEdrConnectionManagerTest, ConnectSecondPeerFirstTimesOut) {
   EXPECT_TRUE(HasConnectionTo(peer_b, connection));
   EXPECT_TRUE(NotConnected(peer_a));
   EXPECT_TRUE(IsConnected(peer_b));
+}
+
+TEST_F(GAP_BrEdrConnectionManagerTest, DisconnectPendingConnections) {
+  auto* peer_a = peer_cache()->NewPeer(kTestDevAddr, true);
+  auto* peer_b = peer_cache()->NewPeer(kTestDevAddr2, true);
+
+  // Enqueue first connection request (which will await Connection Complete)
+  test_device()->QueueCommandTransaction(
+      CommandTransaction(kCreateConnection, {&kCreateConnectionRsp}));
+  test_device()->QueueCommandTransaction(CommandTransaction(
+      kCreateConnectionCancel,
+      {&kCreateConnectionCancelRsp, &kConnectionCompleteCanceled}));
+
+  // No-op connection callbacks
+  auto callback_a = [](auto, auto) {};
+  auto callback_b = [](auto, auto) {};
+
+  // Launch both requests (second one is queued. Neither completes.)
+  EXPECT_TRUE(connmgr()->Connect(peer_a->identifier(), callback_a));
+  EXPECT_TRUE(connmgr()->Connect(peer_b->identifier(), callback_b));
+
+  // Put the first connection into flight.
+  RETURN_IF_FATAL(RunLoopUntilIdle());
+
+  ASSERT_TRUE(IsInitializing(peer_a));
+  ASSERT_TRUE(IsInitializing(peer_b));
+
+  EXPECT_FALSE(connmgr()->Disconnect(peer_a->identifier()));
+  EXPECT_FALSE(connmgr()->Disconnect(peer_b->identifier()));
 }
 
 // TODO(BT-819) Connecting a peer that's being interrogated

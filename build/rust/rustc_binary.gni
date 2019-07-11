@@ -24,12 +24,16 @@ import("//build/rust/rustc_artifact.gni")
 #     Third party crates can be included through paths like
 #     "//third_party/rust_crates:<cratename>",
 #
+#   test_deps (optional)
+#     List of rust_library GN targets on which this crate's tests depend.
+#
 #   non_rust_deps (optional)
 #     List of non-rust_library GN targets on which this crate depends.
 #
 #   with_unit_tests (optional)
 #     Builds unit tests associated with the binary. This will create a
-#     `<name>_bin_test` test file in the output directory.
+#     `<name>_bin_test` test file in the output directory. Equivalent to adding
+#     a `rustc_test` target with that name and the same source_root.
 #
 #   test_environments (optional)
 #     What environments unit tests, if provided, should target. Only used here
@@ -53,6 +57,11 @@ import("//build/rust/rustc_artifact.gni")
 #     Force LTO to be enabled/disabled for the binary. Values are "none", "thin" and
 #     "fat". This value takes precedence over GN args or the default value for the
 #     type of build (debug or release).
+#
+#   force_opt (optional)
+#     Force a particular optimization level for this target (even when building in debug mode).
+#     Values include 0-3, s, or z. This does not change the optimization level of dependencies,
+#     so consider combining with LTO for best results.
 #
 #   features (optional)
 #     A list of conditional compilation flags to enable. This can be used to set features for crates
@@ -78,12 +87,14 @@ template("rustc_binary") {
                              "version",
                              "edition",
                              "deps",
+                             "test_deps",
                              "non_rust_deps",
                              "with_unit_tests",
                              "test_environments",
                              "source_root",
                              "testonly",
                              "with_lto",
+                             "force_opt",
                              "sdk_category",
                              "features",
                              "visibility",

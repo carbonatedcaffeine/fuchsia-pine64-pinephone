@@ -13,12 +13,12 @@
 #include <fuchsia/ui/policy/cpp/fidl.h>
 #include <fuchsia/ui/views/cpp/fidl.h>
 #include <lib/async/cpp/future.h>
-#include <lib/component/cpp/startup_context.h>
 #include <lib/fidl/cpp/binding.h>
 #include <lib/fidl/cpp/interface_handle.h>
 #include <lib/fidl/cpp/interface_ptr_set.h>
 #include <lib/fidl/cpp/interface_request.h>
 #include <lib/fit/function.h>
+#include <lib/sys/cpp/component_context.h>
 #include <src/lib/fxl/macros.h>
 
 #include "peridot/lib/fidl/app_client.h"
@@ -32,11 +32,19 @@ namespace modular {
 // owner (BasemgrImpl) to delete it.
 class SessionContextImpl : fuchsia::modular::internal::SessionContext {
  public:
-  // Called after perfoming shutdown of the session, to signal our completion
+  enum class ShutDownReason {
+    // normal mode of shutdown
+    LOGGED_OUT,
+    // sessionmgr or session_shell crashed.
+    CRASHED
+  };
+
+  // Called after performing shutdown of the session, to signal our completion
   // (and deletion of our instance) to our owner, this is done using a callback
   // supplied in the constructor. (The alternative is to take in a
   // SessionProvider*, which seems a little specific and overscoped).
-  using OnSessionShutdownCallback = fit::function<void(bool logout_users)>;
+  using OnSessionShutdownCallback =
+      fit::function<void(ShutDownReason shutdown_reason, bool logout_users)>;
 
   // Called when sessionmgr requests to acquire the presentation.
   using GetPresentationCallback = fit::function<void(
@@ -46,6 +54,10 @@ class SessionContextImpl : fuchsia::modular::internal::SessionContext {
   // must ensure its uniqueness. sessionmgr creates an Environment namespace
   // with the given |session_id|, and this will crash if it tries to create an
   // environment with a pre-existing name.
+  //
+  // |additional_services| are services that will be installed into the
+  // Sessionmgr's namespace, including an implementation of
+  // `fuchsia.intl.PropertyProvider`.
   SessionContextImpl(
       fuchsia::sys::Launcher* const launcher, std::string session_id,
       fuchsia::modular::AppConfig sessionmgr_config,
@@ -56,6 +68,7 @@ class SessionContextImpl : fuchsia::modular::internal::SessionContext {
       fidl::InterfaceHandle<fuchsia::auth::TokenManager> agent_token_manager,
       fuchsia::modular::auth::AccountPtr account,
       fuchsia::ui::views::ViewToken view_token,
+      fuchsia::sys::ServiceListPtr additional_services,
       GetPresentationCallback get_presentation,
       OnSessionShutdownCallback on_session_shutdown);
 

@@ -10,10 +10,12 @@ group("display") {
     "dsi-dw",
     "dsi-mt",
     "dummy",
+    "goldfish-display",
     "hikey-display",
     "led2472g",
     "mt8167s-display",
     "simple",
+    "ssd1306",
     "vim-display",
   ]
   if (current_cpu == "x64") {

@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("$zx/public/gn/config/product_parameters.gni")
 import("$zx/public/gn/config/standard.gni")
 import("$zx/public/gn/toolchain/c_utils.gni")
 import("$zx/public/gn/toolchain/environment.gni")
@@ -41,6 +42,9 @@ if (current_toolchain == default_toolchain) {
         # <kernel/thread.h> has #include <vm/kstack.h>.
         "vm:headers.config",
 
+        # <vm/vm_object.h> has #include <lib/user_copy/user_ptr.h>.
+        "$zx/kernel/lib/user_copy:headers.config",
+
         # <lib/ktrace.h> has #include <lib/zircon-internal/ktrace.h>.
         "$zx/system/ulib/zircon-internal:headers.config",
 
@@ -52,9 +56,6 @@ if (current_toolchain == default_toolchain) {
 
         # <dev/iommu.h> has #include <fbl/name.h>
         "lib/fbl:headers.config",
-
-        # <lib/mtrace.h> has #include <lib/user_copy/user_ptr.h>
-        "lib/user_copy:headers.config",
       ]
       configs += common_configs
 
@@ -98,6 +99,10 @@ if (current_toolchain == default_toolchain) {
       defines += [ "WITH_KERNEL_PCIE" ]
     }
 
+    if (enable_kernel_debugging_features) {
+      defines += [ "ENABLE_KERNEL_DEBUGGING_FEATURES" ]
+    }
+
     cflags = [ "-fpie" ]
   }
 
@@ -105,6 +110,19 @@ if (current_toolchain == default_toolchain) {
     include_dirs = [
       "include",
       "lib/libc/include",
+    ]
+
+    # lib/libc/include is before toolchain headers because it needs to be
+    # able to override some libc++ headers that won't work in the kernel
+    # context.  However, lib/libc/include/limits.h punts to the toolchain
+    # via #include_next <limits.h> and the toolchain's limits.h does the
+    # same to get the "system" libc <limits.h>, so we need another include
+    # directory after the toolchain headers that has a limits.h for that to
+    # find, even though in the kernel there is nothing to add to the
+    # toolchain's <limits.h> content.
+    cflags = [
+      "-idirafter",
+      rebase_path("lib/libc/limits-dummy", root_build_dir),
     ]
   }
 
@@ -253,7 +271,7 @@ if (current_toolchain == default_toolchain) {
     #TODO: testonly = true
     visibility = [ ":*" ]
     deps = [
-      "lib/debugcommands",
+      "debugcommands",
       "tests",
     ]
   }
@@ -342,6 +360,7 @@ if (current_toolchain == default_toolchain) {
     ]
     deps = [
       ":fixups",
+      ":gdb_extension",
       ":kernel_image.h",
       ":raw",
       ":zircon",
@@ -360,6 +379,23 @@ if (current_toolchain == default_toolchain) {
     inputs = [
       "image.ld",
       zircon_elf_rspfile,
+    ]
+  }
+
+  # Link gdb extension script file needed for kernel debugging.
+  action("gdb_extension") {
+    visibility = [ ":*" ]
+    sources = [
+      "scripts/zircon.elf-gdb.py",
+    ]
+    outputs = [
+      "$target_out_dir/zircon.elf-gdb.py",
+    ]
+    script = "/bin/ln"
+    args = [
+      "-sf",
+      rebase_path("scripts/zircon.elf-gdb.py", target_out_dir),
+      rebase_path(target_out_dir, root_build_dir),
     ]
   }
 
@@ -390,6 +426,7 @@ if (current_toolchain == default_toolchain) {
         {
           label = get_label_info(":$target_name", "label_with_toolchain")
           name = "kernel"
+          tags = [ "incomplete" ]
           type = "zbi"
           path = output_path
           cpu = current_cpu

@@ -19,7 +19,7 @@ protocol Controller {
 
     // The Cobalt FIDL service will block, not processing any further FIDL
     // requests or responses, on either this interface or the Logger interface,
-    // until either |max_wait_seconds| have elapsed or the Cobalt service's
+    // until either `max_wait_seconds` have elapsed or the Cobalt service's
     // worker thread has successfully sent all previously added Observations to
     // the Shuffler. The response will be returned after the blocking period has
     // ended. Note that this method does not request an expedited send and so it
@@ -32,6 +32,7 @@ protocol Controller {
     // may possibly prove useful in production also.
     GetNumSendAttempts() -> (uint32 num);
     GetFailedSendAttempts() -> (uint32 num);
+    GetNumObservationsAdded() -> (uint32 num);
 
     // Triggers Cobalt to generate Observations based on locally aggregated
     // event data and write them to the local ObservationStore. In a non-test
@@ -40,7 +41,7 @@ protocol Controller {
     // instance of the Cobalt FIDL service that was passed the flag
     // --start_event_aggregator_worker=false.
     //
-    // |day_index| The index of the day for which locally aggregated
+    // `day_index` The index of the day for which locally aggregated
     //             Observations should be generated.
     //
     // Returns the number of Observations which were generated.

@@ -4,13 +4,12 @@
 
 #include "src/media/audio/audio_core/audio_renderer_format_info.h"
 
-#include "src/media/audio/audio_core/audio_renderer_impl.h"
+#include "src/lib/fxl/logging.h"
 #include "src/media/audio/audio_core/mixer/constants.h"
 
 namespace media::audio {
 
-AudioRendererFormatInfo::AudioRendererFormatInfo(
-    fuchsia::media::AudioStreamType format)
+AudioRendererFormatInfo::AudioRendererFormatInfo(fuchsia::media::AudioStreamType format)
     : format_(format) {
   // Precompute some useful timing/format stuff.
   //

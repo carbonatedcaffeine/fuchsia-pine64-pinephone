@@ -23,22 +23,19 @@ namespace media::audio {
 
 namespace {
 constexpr size_t kMaxSettingFileSize = (64 << 10);
-constexpr uint32_t kAllSetGainFlags =
-    ::fuchsia::media::SetAudioGainFlag_GainValid |
-    ::fuchsia::media::SetAudioGainFlag_MuteValid |
-    ::fuchsia::media::SetAudioGainFlag_AgcValid;
+constexpr uint32_t kAllSetGainFlags = fuchsia::media::SetAudioGainFlag_GainValid |
+                                      fuchsia::media::SetAudioGainFlag_MuteValid |
+                                      fuchsia::media::SetAudioGainFlag_AgcValid;
 
 const std::string kSettingsPath = "/data/settings";
 const std::string kDefaultSettingsPath = "/config/data/settings/default";
 
-std::ostream& operator<<(std::ostream& stream,
-                         const rapidjson::ParseResult& result) {
+std::ostream& operator<<(std::ostream& stream, const rapidjson::ParseResult& result) {
   return stream << "(offset " << result.Offset() << " : "
                 << rapidjson::GetParseError_En(result.Code()) << ")";
 }
 
-std::ostream& operator<<(std::ostream& stream,
-                         const rapidjson::SchemaValidator::ValueType& value) {
+std::ostream& operator<<(std::ostream& stream, const rapidjson::SchemaValidator::ValueType& value) {
   // clang-format off
   if (value.IsNull()) return stream << "<null>";
   if (value.IsBool()) return stream << value.GetBool();
@@ -102,15 +99,13 @@ void AudioDeviceSettings::Initialize() {
   }
 
   if (!files::CreateDirectory(kSettingsPath)) {
-    FXL_LOG(ERROR)
-        << "Failed to ensure that \"" << kSettingsPath
-        << "\" exists!  Settings will neither be persisted nor restored.";
+    FXL_LOG(ERROR) << "Failed to ensure that \"" << kSettingsPath
+                   << "\" exists!  Settings will neither be persisted nor restored.";
     return;
   }
 
   rapidjson::Document schema_doc;
-  rapidjson::ParseResult parse_res =
-      schema_doc.Parse(kAudioDeviceSettingsSchema.c_str());
+  rapidjson::ParseResult parse_res = schema_doc.Parse(kAudioDeviceSettingsSchema.c_str());
   if (parse_res.IsError()) {
     FXL_LOG(ERROR) << "Failed to parse settings file JSON schema " << parse_res
                    << "!  Settings will neither be persisted nor restored.";
@@ -149,7 +144,7 @@ zx_status_t AudioDeviceSettings::InitFromDisk() {
     fbl::unique_fd storage;
 
     CreateSettingsPath(cfg_src.prefix, path, sizeof(path));
-    storage.reset(::open(path, cfg_src.is_default ? O_RDONLY : O_RDWR));
+    storage.reset(open(path, cfg_src.is_default ? O_RDONLY : O_RDWR));
 
     if (static_cast<bool>(storage)) {
       zx_status_t res = Deserialize(storage);
@@ -168,13 +163,11 @@ zx_status_t AudioDeviceSettings::InitFromDisk() {
       } else {
         storage_.reset();
         if (!cfg_src.is_default) {
-          FXL_LOG(INFO) << "Failed to read device settings at \"" << path
-                        << "\" (err " << res
-                        << "). Re-creating file from defaults.";
-          ::unlink(path);
+          FXL_PLOG(INFO, res) << "Failed to read device settings at \"" << path
+                              << "\". Re-creating file from defaults";
+          unlink(path);
         } else {
-          FXL_LOG(INFO) << "Could not load default audio settings file \""
-                        << path << "\" (err " << res << ").";
+          FXL_PLOG(INFO, res) << "Could not load default audio settings file \"" << path << "\"";
         }
       }
     }
@@ -190,34 +183,32 @@ zx_status_t AudioDeviceSettings::InitFromDisk() {
   char path[256];
   CreateSettingsPath(kSettingsPath, path, sizeof(path));
   FXL_DCHECK(static_cast<bool>(storage_) == false);
-  storage_.reset(::open(path, O_RDWR | O_CREAT));
+  storage_.reset(open(path, O_RDWR | O_CREAT));
 
   if (!static_cast<bool>(storage_)) {
     // TODO(mpuryear): define and enforce a limit for the number of settings
     // files allowed to be created.
-    FXL_LOG(WARNING) << "Failed to create new audio settings file \"" << path
-                     << "\" (err " << errno
+    FXL_LOG(WARNING) << "Failed to create new audio settings file \"" << path << "\" (err " << errno
                      << "). Settings for this device will not be persisted.";
     return ZX_ERR_IO;
   }
 
   zx_status_t res = Serialize();
   if (res != ZX_OK) {
-    FXL_LOG(WARNING) << "Failed to write new settings file at \"" << path
-                     << "\" (err " << res
-                     << "). Settings for this device will not be persisted.";
+    FXL_PLOG(WARNING, res) << "Failed to write new settings file at \"" << path
+                           << "\". Settings for this device will not be persisted";
     storage_.reset();
-    ::unlink(path);
+    unlink(path);
   }
 
   return res;
 }
 
 void AudioDeviceSettings::InitFromClone(const AudioDeviceSettings& other) {
-  FXL_DCHECK(::memcmp(&uid_, &other.uid_, sizeof(uid_)) == 0);
+  FXL_DCHECK(memcmp(&uid_, &other.uid_, sizeof(uid_)) == 0);
 
   // Clone the gain settings.
-  ::fuchsia::media::AudioGainInfo gain_info;
+  fuchsia::media::AudioGainInfo gain_info;
   other.GetGainInfo(&gain_info);
   SetGainInfo(gain_info, kAllSetGainFlags);
 
@@ -226,33 +217,27 @@ void AudioDeviceSettings::InitFromClone(const AudioDeviceSettings& other) {
   disallow_auto_routing_ = other.disallow_auto_routing();
 }
 
-bool AudioDeviceSettings::SetGainInfo(
-    const ::fuchsia::media::AudioGainInfo& req, uint32_t set_flags) {
+bool AudioDeviceSettings::SetGainInfo(const fuchsia::media::AudioGainInfo& req,
+                                      uint32_t set_flags) {
   fbl::AutoLock lock(&settings_lock_);
   audio_set_gain_flags_t dirtied = gain_state_dirty_flags_;
   namespace fm = ::fuchsia::media;
 
-  if ((set_flags & fm::SetAudioGainFlag_GainValid) &&
-      (gain_state_.gain_db != req.gain_db)) {
+  if ((set_flags & fm::SetAudioGainFlag_GainValid) && (gain_state_.gain_db != req.gain_db)) {
     gain_state_.gain_db = req.gain_db;
-    dirtied =
-        static_cast<audio_set_gain_flags_t>(dirtied | AUDIO_SGF_GAIN_VALID);
+    dirtied = static_cast<audio_set_gain_flags_t>(dirtied | AUDIO_SGF_GAIN_VALID);
   }
 
   bool mute_tgt = (req.flags & fm::AudioGainInfoFlag_Mute) != 0;
-  if ((set_flags & fm::SetAudioGainFlag_MuteValid) &&
-      (gain_state_.muted != mute_tgt)) {
+  if ((set_flags & fm::SetAudioGainFlag_MuteValid) && (gain_state_.muted != mute_tgt)) {
     gain_state_.muted = mute_tgt;
-    dirtied =
-        static_cast<audio_set_gain_flags_t>(dirtied | AUDIO_SGF_MUTE_VALID);
+    dirtied = static_cast<audio_set_gain_flags_t>(dirtied | AUDIO_SGF_MUTE_VALID);
   }
 
   bool agc_tgt = (req.flags & fm::AudioGainInfoFlag_AgcEnabled) != 0;
-  if ((set_flags & fm::SetAudioGainFlag_AgcValid) &&
-      (gain_state_.agc_enabled != agc_tgt)) {
+  if ((set_flags & fm::SetAudioGainFlag_AgcValid) && (gain_state_.agc_enabled != agc_tgt)) {
     gain_state_.agc_enabled = agc_tgt;
-    dirtied =
-        static_cast<audio_set_gain_flags_t>(dirtied | AUDIO_SGF_AGC_VALID);
+    dirtied = static_cast<audio_set_gain_flags_t>(dirtied | AUDIO_SGF_AGC_VALID);
   }
 
   bool needs_wake = (!gain_state_dirty_flags_ && dirtied && writes_enabled_);
@@ -283,8 +268,7 @@ zx::time AudioDeviceSettings::Commit(bool force) {
   return next_commit_time_;
 }
 
-void AudioDeviceSettings::GetGainInfo(
-    ::fuchsia::media::AudioGainInfo* out_info) const {
+void AudioDeviceSettings::GetGainInfo(fuchsia::media::AudioGainInfo* out_info) const {
   FXL_DCHECK(out_info != nullptr);
 
   // TODO(johngro): consider eliminating the acquisition of this lock.  In
@@ -304,19 +288,18 @@ void AudioDeviceSettings::GetGainInfo(
   out_info->flags = 0;
 
   if (can_mute_ && gain_state_.muted) {
-    out_info->flags |= ::fuchsia::media::AudioGainInfoFlag_Mute;
+    out_info->flags |= fuchsia::media::AudioGainInfoFlag_Mute;
   }
 
   if (can_agc_) {
-    out_info->flags |= ::fuchsia::media::AudioGainInfoFlag_AgcSupported;
+    out_info->flags |= fuchsia::media::AudioGainInfoFlag_AgcSupported;
     if (gain_state_.agc_enabled) {
-      out_info->flags |= ::fuchsia::media::AudioGainInfoFlag_AgcEnabled;
+      out_info->flags |= fuchsia::media::AudioGainInfoFlag_AgcEnabled;
     }
   }
 }
 
-audio_set_gain_flags_t AudioDeviceSettings::SnapshotGainState(
-    GainState* out_state) {
+audio_set_gain_flags_t AudioDeviceSettings::SnapshotGainState(GainState* out_state) {
   FXL_DCHECK(out_state != nullptr);
   audio_set_gain_flags_t ret;
 
@@ -339,19 +322,18 @@ zx_status_t AudioDeviceSettings::Deserialize(const fbl::unique_fd& storage) {
 
   // Figure out the size of the file, then allocate storage for reading the
   // whole thing.
-  off_t file_size = ::lseek(storage.get(), 0, SEEK_END);
-  if ((file_size <= 0) ||
-      (static_cast<size_t>(file_size) > kMaxSettingFileSize)) {
+  off_t file_size = lseek(storage.get(), 0, SEEK_END);
+  if ((file_size <= 0) || (static_cast<size_t>(file_size) > kMaxSettingFileSize)) {
     return ZX_ERR_BAD_STATE;
   }
 
-  if (::lseek(storage.get(), 0, SEEK_SET) != 0) {
+  if (lseek(storage.get(), 0, SEEK_SET) != 0) {
     return ZX_ERR_IO;
   }
 
   // Allocate the buffer and read in the contents.
   auto buffer = std::make_unique<char[]>(file_size + 1);
-  if (::read(storage.get(), buffer.get(), file_size) != file_size) {
+  if (read(storage.get(), buffer.get(), file_size) != file_size) {
     return ZX_ERR_IO;
   }
   buffer[file_size] = 0;
@@ -360,8 +342,7 @@ zx_status_t AudioDeviceSettings::Deserialize(const fbl::unique_fd& storage) {
   rapidjson::Document doc;
   rapidjson::ParseResult parse_res = doc.ParseInsitu(buffer.get());
   if (parse_res.IsError()) {
-    FXL_LOG(WARNING) << "Parse error " << parse_res
-                     << " when reading persisted audio settings.";
+    FXL_LOG(WARNING) << "Parse error " << parse_res << " when reading persisted audio settings.";
     return ZX_ERR_IO_DATA_INTEGRITY;
   }
 
@@ -369,24 +350,23 @@ zx_status_t AudioDeviceSettings::Deserialize(const fbl::unique_fd& storage) {
   FXL_DCHECK(file_schema_ != nullptr);
   rapidjson::SchemaValidator validator(*file_schema_);
   if (!doc.Accept(validator)) {
-    FXL_LOG(WARNING)
-        << "Schema validation error when reading persisted audio settings.";
+    FXL_LOG(WARNING) << "Schema validation error when reading persisted audio settings.";
     FXL_LOG(WARNING) << "Error: " << validator.GetError();
     return ZX_ERR_IO_DATA_INTEGRITY;
   }
 
   // Extract the gain information
-  ::fuchsia::media::AudioGainInfo gain_info;
+  fuchsia::media::AudioGainInfo gain_info;
   const auto& gain_obj = doc["gain"].GetObject();
 
   gain_info.gain_db = static_cast<float>(gain_obj["gain_db"].GetDouble());
 
   if (gain_obj["mute"].GetBool()) {
-    gain_info.flags |= ::fuchsia::media::AudioGainInfoFlag_Mute;
+    gain_info.flags |= fuchsia::media::AudioGainInfoFlag_Mute;
   }
 
   if (gain_obj["agc"].GetBool()) {
-    gain_info.flags |= ::fuchsia::media::AudioGainInfoFlag_AgcEnabled;
+    gain_info.flags |= fuchsia::media::AudioGainInfoFlag_AgcEnabled;
   }
 
   // Apply gain settings.
@@ -415,7 +395,7 @@ zx_status_t AudioDeviceSettings::Serialize() {
   // Serialize our state into a string buffer.
   rapidjson::StringBuffer buffer(nullptr, 4096);
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  ::fuchsia::media::AudioGainInfo gain_info;
+  fuchsia::media::AudioGainInfo gain_info;
 
   GetGainInfo(&gain_info);
   writer.StartObject();
@@ -424,11 +404,10 @@ zx_status_t AudioDeviceSettings::Serialize() {
   writer.Key("gain_db");
   writer.Double(gain_info.gain_db);
   writer.Key("mute");
-  writer.Bool(gain_info.flags & ::fuchsia::media::AudioGainInfoFlag_Mute);
+  writer.Bool(gain_info.flags & fuchsia::media::AudioGainInfoFlag_Mute);
   writer.Key("agc");
-  writer.Bool(
-      (gain_info.flags & ::fuchsia::media::AudioGainInfoFlag_AgcEnabled) &&
-      (gain_info.flags & ::fuchsia::media::AudioGainInfoFlag_AgcSupported));
+  writer.Bool((gain_info.flags & fuchsia::media::AudioGainInfoFlag_AgcEnabled) &&
+              (gain_info.flags & fuchsia::media::AudioGainInfoFlag_AgcSupported));
   writer.EndObject();  // end "gain" object
   writer.Key("ignore_device");
   writer.Bool(ignore_device());
@@ -444,10 +423,9 @@ zx_status_t AudioDeviceSettings::Serialize() {
   // fashion along with other features like rate limiting of updates.
   const char* data = buffer.GetString();
   const size_t sz = buffer.GetSize();
-  if ((::lseek(storage_.get(), 0, SEEK_SET) != 0) ||
-      (::ftruncate(storage_.get(), 0) != 0) ||
-      (::write(storage_.get(), data, sz) != static_cast<ssize_t>(sz)) ||
-      (::fsync(storage_.get()) != 0)) {
+  if ((lseek(storage_.get(), 0, SEEK_SET) != 0) || (ftruncate(storage_.get(), 0) != 0) ||
+      (write(storage_.get(), data, sz) != static_cast<ssize_t>(sz)) ||
+      (fsync(storage_.get()) != 0)) {
     return ZX_ERR_INTERNAL;
   }
 
@@ -476,18 +454,15 @@ void AudioDeviceSettings::CancelCommitTimeouts() {
   max_commit_time_ = zx::time::infinite();
 }
 
-void AudioDeviceSettings::CreateSettingsPath(const std::string& prefix,
-                                             char* out_path,
+void AudioDeviceSettings::CreateSettingsPath(const std::string& prefix, char* out_path,
                                              size_t out_path_len) {
   const uint8_t* x = uid_.data;
-  snprintf(
-      out_path, out_path_len,
-      "%s/"
-      "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x-%s."
-      "json",
-      prefix.c_str(), x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8],
-      x[9], x[10], x[11], x[12], x[13], x[14], x[15],
-      is_input_ ? "input" : "output");
+  snprintf(out_path, out_path_len,
+           "%s/"
+           "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x-%s."
+           "json",
+           prefix.c_str(), x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11],
+           x[12], x[13], x[14], x[15], is_input_ ? "input" : "output");
 }
 
 }  // namespace media::audio

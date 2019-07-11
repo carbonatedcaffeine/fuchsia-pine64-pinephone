@@ -5,13 +5,13 @@
 #include "peridot/lib/ledger_client/page_client.h"
 
 #include <lib/fsl/vmo/strings.h>
+#include <zircon/status.h>
 
 #include <memory>
 #include <utility>
 
 #include "peridot/lib/fidl/array_to_string.h"
 #include "peridot/lib/ledger_client/ledger_client.h"
-#include "peridot/lib/ledger_client/status.h"
 
 namespace modular {
 
@@ -37,7 +37,7 @@ fuchsia::ledger::PageSnapshotPtr PageClient::NewSnapshot() {
   fuchsia::ledger::PageSnapshotPtr ptr;
   ptr.set_error_handler([](zx_status_t status) {
     if (status != ZX_OK && status != ZX_ERR_PEER_CLOSED) {
-      FXL_LOG(ERROR) << "PageSnapshot error: " << LedgerEpitaphToString(status);
+      FXL_LOG(ERROR) << "PageSnapshot error: " << zx_status_get_string(status);
     }
   });
   page_->GetSnapshot(ptr.NewRequest(), to_array(prefix_),
@@ -96,14 +96,13 @@ void GetEntriesRecursive(fuchsia::ledger::PageSnapshot* const snapshot,
                          fit::function<void()> done) {
   snapshot->GetEntries(
       std::vector<uint8_t>{} /* key_start */, std::move(next_token),
-      [snapshot, entries, done = std::move(done)](
-          fuchsia::ledger::IterationStatus status, auto new_entries,
-          auto next_token) mutable {
+      [snapshot, entries, done = std::move(done)](auto new_entries,
+                                                  auto next_token) mutable {
         for (size_t i = 0; i < new_entries.size(); ++i) {
           entries->push_back(std::move(new_entries.at(i)));
         }
 
-        if (status == fuchsia::ledger::IterationStatus::OK) {
+        if (!next_token) {
           done();
           return;
         }

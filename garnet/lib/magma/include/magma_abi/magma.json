@@ -24,6 +24,28 @@
         ]
       },
       {
+        "name": "magma_query_returns_buffer",
+        "type": "magma_status_t",
+        "description": "Performs a query for a large amount of data and puts that into a buffer. Returns synchronously",
+        "arguments": [
+          {
+            "name": "file_descriptor",
+            "type": "int32_t",
+            "description": "An open device of class gpu."
+          },
+          {
+            "name": "id",
+            "type": "uint64_t",
+            "description": "A vendor-specific ID."
+          },
+          {
+            "name": "handle_out",
+            "type": "uint32_t*",
+            "description": "Handle to the returned buffer."
+          }
+        ]
+      },
+      {
         "name": "magma_create_connection",
         "type": "magma_status_t",
         "description": "Opens a connection to a device.",
@@ -275,6 +297,23 @@
             "name": "is_mappable_out",
             "type": "magma_bool_t*",
             "description": "The returned mappability value."
+          }
+        ]
+      },
+      {
+        "name": "magma_set_buffer_mapping_address_range",
+        "type": "magma_status_t",
+        "description": "Sets the mapping address range on the given buffer.  Ownership of the handle is transferred to magma.",
+        "arguments": [
+          {
+            "name": "buffer",
+            "type": "magma_buffer_t",
+            "description": "The given buffer."
+          },
+          {
+            "name": "handle",
+            "type": "uint32_t",
+            "description": "A platform specific handle to the address range."
           }
         ]
       },
@@ -548,7 +587,7 @@
       {
         "name": "magma_submit_command_buffer",
         "type": "void",
-        "description": "Submits a command buffer for execution on the GPU, and transfers ownership to the given context.",
+        "description": "Submits a command buffer for execution on the GPU, and transfers ownership to the given context. The command buffer should not be mapped.",
         "arguments": [
           {
             "name": "connection",
@@ -570,7 +609,7 @@
       {
         "name": "magma_execute_immediate_commands",
         "type": "void",
-        "description": "Submits a series of commands for execution on the GPU without using a command buffer.",
+        "description": "Deprecated; Submits a series of commands for execution on the GPU without using a command buffer.",
         "arguments": [
           {
             "name": "connection",
@@ -591,6 +630,33 @@
             "name": "command_buffers",
             "type": "struct magma_system_inline_command_buffer*",
             "description": "An array of command_count magma_system_inline_command_buffer structs."
+          }
+        ]
+      },
+      {
+        "name": "magma_execute_immediate_commands2",
+        "type": "void",
+        "description": "Submits a series of commands for execution on the GPU without using a command buffer.",
+        "arguments": [
+          {
+            "name": "connection",
+            "type": "magma_connection_t",
+            "description": "An open connection."
+          },
+          {
+            "name": "context_id",
+            "type": "uint32_t",
+            "description": "A valid context ID."
+          },
+          {
+            "name": "command_count",
+            "type": "uint64_t",
+            "description": "The number of commands in the provided buffer."
+          },
+          {
+            "name": "command_buffers",
+            "type": "struct magma_inline_command_buffer*",
+            "description": "An array of command_count magma_inline_command_buffer structs."
           }
         ]
       },
@@ -631,7 +697,7 @@
       {
         "name": "magma_get_semaphore_id",
         "type": "uint64_t",
-        "description": "Returnes a unique id for the given semaphore.",
+        "description": "Returns a unique id for the given semaphore.",
         "arguments": [
           {
             "name": "semaphore",

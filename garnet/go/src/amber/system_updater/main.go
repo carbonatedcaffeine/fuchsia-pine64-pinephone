@@ -26,9 +26,15 @@ var (
 	startTime     time.Time
 	sourceVersion string
 	targetVersion string
+	updateURL     string
 )
 
 func run() (err error) {
+	metrics.Log(metrics.OtaStart{
+		Initiator: initiator,
+		Target:    targetVersion,
+		When:      startTime,
+	})
 	phase := metrics.PhaseEndToEnd
 
 	var queryFreeSpace func() int64
@@ -54,20 +60,27 @@ func run() (err error) {
 	history := IncrementOrCreateUpdateHistory(sourceVersion, targetVersion, startTime)
 	defer func() {
 		if err != nil {
-			metrics.Log(metrics.OtaResult{
-				//TODO(kevinwells) populate ErrorSource, ErrorCode
+			metrics.Log(metrics.OtaResultAttempt{
+				Initiator: initiator,
+				Target:    targetVersion,
+				Attempt:   int64(history.Attempts),
+				Phase:     phase,
+				Status:    metrics.StatusFromError(err),
+			})
+			metrics.Log(metrics.OtaResultDuration{
+				Initiator: initiator,
+				Target:    targetVersion,
+				Duration:  time.Since(startTime),
+				Phase:     phase,
+				Status:    metrics.StatusFromError(err),
+			})
+			metrics.Log(metrics.OtaResultFreeSpaceDelta{
 				Initiator:      initiator,
-				Source:         sourceVersion,
 				Target:         targetVersion,
-				Attempt:        int64(history.Attempts),
-				FreeSpaceStart: freeSpaceStart,
-				FreeSpaceEnd:   queryFreeSpace(),
-				When:           startTime,
+				FreeSpaceDelta: queryFreeSpace() - freeSpaceStart,
 				Duration:       time.Since(startTime),
 				Phase:          phase,
-				ErrorSource:    "unknown",
-				ErrorText:      err.Error(),
-				ErrorCode:      -1,
+				Status:         metrics.StatusFromError(err),
 			})
 			if err := history.Save(); err != nil {
 				syslog.Errorf("error writing update history: %s", err)
@@ -75,7 +88,16 @@ func run() (err error) {
 		}
 	}()
 
-	dataPath := filepath.Join("/pkgfs", "packages", "update", "0")
+	resolver, err := ConnectToPackageResolver()
+	if err != nil {
+		return fmt.Errorf("unable to connect to update service: %s", err)
+	}
+	defer resolver.Close()
+
+	dataPath, err := CacheUpdatePackage(updateURL, resolver)
+	if err != nil {
+		return fmt.Errorf("error caching update package! %s", err)
+	}
 
 	pFile, err := os.Open(filepath.Join(dataPath, "packages"))
 	if err != nil {
@@ -94,12 +116,6 @@ func run() (err error) {
 		return fmt.Errorf("could not parse requirements: %s", err)
 	}
 
-	resolver, err := ConnectToPackageResolver()
-	if err != nil {
-		return fmt.Errorf("unable to connect to update service: %s", err)
-	}
-	defer resolver.Close()
-
 	phase = metrics.PhasePackageDownload
 	if err := FetchPackages(pkgs, resolver); err != nil {
 		return fmt.Errorf("failed getting packages: %s", err)
@@ -115,19 +131,27 @@ func run() (err error) {
 	}
 
 	phase = metrics.PhaseSuccessPendingReboot
-	metrics.Log(metrics.OtaResult{
+	metrics.Log(metrics.OtaResultAttempt{
+		Initiator: initiator,
+		Target:    targetVersion,
+		Attempt:   int64(history.Attempts),
+		Phase:     phase,
+		Status:    metrics.StatusFromError(nil),
+	})
+	metrics.Log(metrics.OtaResultDuration{
+		Initiator: initiator,
+		Target:    targetVersion,
+		Duration:  time.Since(startTime),
+		Phase:     phase,
+		Status:    metrics.StatusFromError(nil),
+	})
+	metrics.Log(metrics.OtaResultFreeSpaceDelta{
 		Initiator:      initiator,
-		Source:         sourceVersion,
 		Target:         targetVersion,
-		Attempt:        int64(history.Attempts),
-		FreeSpaceStart: freeSpaceStart,
-		FreeSpaceEnd:   queryFreeSpace(),
-		When:           startTime,
+		FreeSpaceDelta: queryFreeSpace() - freeSpaceStart,
 		Duration:       time.Since(startTime),
 		Phase:          phase,
-		ErrorSource:    "",
-		ErrorText:      "",
-		ErrorCode:      0,
+		Status:         metrics.StatusFromError(nil),
 	})
 
 	if err := UpdateCurrentChannel(); err != nil {
@@ -200,6 +224,7 @@ func Main() {
 	start := flag.Int64("start", time.Now().UnixNano(), "start time of update attempt, as unix nanosecond timestamp")
 	flag.StringVar(&sourceVersion, "source", "", "current OS version")
 	flag.StringVar(&targetVersion, "target", "", "target OS version")
+	flag.StringVar(&updateURL, "update", "fuchsia-pkg://fuchsia.com/update", "update package URL")
 	flag.Parse()
 
 	startTime = time.Unix(0, *start)

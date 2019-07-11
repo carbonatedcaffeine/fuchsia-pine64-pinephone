@@ -16,8 +16,8 @@ struct WlantapPhyConfig {
 };
 
 /// Instruct the wlantap-ctl device to creates a fake wlantap-phy device based on the
-/// |WlantapPhyConfig| passed in. The newly created wlantap-phy device will use the channel to
-/// allow a |WlantapPhy| client to observe and control its behavior
+/// `WlantapPhyConfig` passed in. The newly created wlantap-phy device will use the channel to
+/// allow a `WlantapPhy` client to observe and control its behavior
 protocol WlantapCtl {
     CreatePhy(WlantapPhyConfig config, request<WlantapPhy> proxy) -> (zx.status status);
 };
@@ -81,6 +81,11 @@ struct WlanTxStatus {
     bool success;
 };
 
+// See also phy.fidl SetCountryRequest/Response.
+struct SetCountryArgs {
+    array<uint8>:2 alpha2;
+};
+
 protocol WlantapPhy {
     // wlanmac_ifc_t callbacks
     Rx(uint16 wlanmac_id, vector<uint8> data, WlanRxInfo info);
@@ -93,6 +98,7 @@ protocol WlantapPhy {
     // TODO: ConfigureBeacon
     -> SetKey(SetKeyArgs args);
     -> WlanmacStart(WlanmacStartArgs args);
+    -> SetCountry(SetCountryArgs args);
 };
 
 struct TxArgs {

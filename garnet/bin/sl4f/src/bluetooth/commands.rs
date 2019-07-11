@@ -4,7 +4,7 @@
 
 use failure::{bail, Error};
 use fidl_fuchsia_bluetooth_gatt::ServiceInfo;
-use fidl_fuchsia_bluetooth_le::{AdvertisingData, ScanFilter};
+use fidl_fuchsia_bluetooth_le::{AdvertisingDataDeprecated, ScanFilter};
 use fuchsia_bluetooth::error::Error as BTError;
 use fuchsia_syslog::macros::*;
 use parking_lot::RwLock;
@@ -37,7 +37,7 @@ macro_rules! parse_arg {
 // a FIDL ble_advertise command
 fn ble_advertise_args_to_fidl(
     args_raw: Value,
-) -> Result<(Option<AdvertisingData>, Option<u32>, bool), Error> {
+) -> Result<(Option<AdvertisingDataDeprecated>, Option<u32>, bool), Error> {
     let adv_data_raw = match args_raw.get("advertising_data") {
         Some(adr) => adr.clone(),
         None => bail!("Advertising data missing."),
@@ -57,7 +57,7 @@ fn ble_advertise_args_to_fidl(
 
     // TODO(NET-1026): Is there a better way to unpack the args into an AdvData
     // struct? Unfortunately, can't derive deserialize for AdvData
-    let ad = Some(AdvertisingData {
+    let ad = Some(AdvertisingDataDeprecated {
         name: name,
         tx_power_level: None,
         appearance: None,
@@ -347,8 +347,10 @@ pub async fn gatt_client_method_to_fidl(
         }
         BluetoothMethod::GattcWriteDescriptorById => {
             let id = parse_u64_identifier(args.clone())?;
+            let offset_as_u64 = parse_offset(args.clone())?;
+            let offset = offset_as_u64 as u16;
             let value = parse_write_value(args)?;
-            await!(gattc_write_desc_by_id_async(&facade, id, value))
+            await!(gattc_write_desc_by_id_async(&facade, id, offset, value))
         }
         BluetoothMethod::GattcReadDescriptorById => {
             let id = parse_u64_identifier(args.clone())?;
@@ -497,9 +499,10 @@ async fn gattc_read_desc_by_id_async(facade: &GattClientFacade, id: u64) -> Resu
 async fn gattc_write_desc_by_id_async(
     facade: &GattClientFacade,
     id: u64,
+    offset: u16,
     write_value: Vec<u8>,
 ) -> Result<Value, Error> {
-    let write_desc_status = await!(facade.gattc_write_desc_by_id(id, write_value))?;
+    let write_desc_status = await!(facade.gattc_write_desc_by_id(id, offset, write_value))?;
     Ok(to_value(write_desc_status)?)
 }
 

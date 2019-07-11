@@ -12,36 +12,48 @@ namespace ordinals {
 
 // Returns the Selector. If the Selector attribute is present, the
 // function returns its value; otherwise, it returns the name parameter.
-std::string GetSelector(const raw::AttributeList* attributes,
-                        SourceLocation name);
+std::string GetSelector(const raw::AttributeList* attributes, SourceLocation name);
 
-// Computes the ordinal for this method.
+// Computes the 32bits ordinal for this |method|.
 //
 // The ordinal value is equal to
 //
-//    *((int32_t *)sha256(library_name + "." + interface_name + "/" + method_name)) & 0x7fffffff;
+//    *((int32_t *)sha256(library_name + "." + protocol_name + "/" + selector_name)) & 0x7fffffff;
 //
-// If |method| has an Selector attribute, that value will be used as the
-// method_name.
-raw::Ordinal GetGeneratedOrdinal(const std::vector<std::string_view>& library_name,
-                                 const std::string_view& interface_name,
-                                 const raw::InterfaceMethod& method);
-
-// Retrieves the correct ordinal for this method.
+// Note: the slash separator is between the protocol_name and selector_name.
 //
-// If |method.ordinal| is not null, this method will return |method.ordinal|.
-// Otherwise, the ordinal value is computed with GetGeneratedOrdinal.
-raw::Ordinal GetOrdinal(const std::vector<std::string_view>& library_name,
-                        const std::string_view& interface_name,
-                        const raw::InterfaceMethod& method);
+// The selector_name is retrieved using GetSelector.
+raw::Ordinal32 GetGeneratedOrdinal32(const std::vector<std::string_view>& library_name,
+                                     const std::string_view& protocol_name,
+                                     const raw::ProtocolMethod& method);
 
-// Retrieves the correct ordinal for |xunion_member|, following the same
-// algorithm as GetOrdinal() for interface methods above.
-raw::Ordinal GetOrdinal(const std::vector<std::string_view>& library_name,
-                        const std::string_view& xunion_declaration_name,
-                        const raw::XUnionMember& xunion_member);
+// Computes the 32bits ordinal for this |xunion_member|.
+//
+// The 32bits ordinal value is equal to
+//
+//    *((int32_t *)sha256(library_name + "." + xunion_declaration_name + "/" + selector_name)) & 0x7fffffff;
+//
+// Note: the slash separator is between the xunion_declaration_name and selector_name.
+//
+// The selector_name is retrieved using GetSelector.
+raw::Ordinal32 GetGeneratedOrdinal32(const std::vector<std::string_view>& library_name,
+                                     const std::string_view& xunion_declaration_name,
+                                     const raw::XUnionMember& xunion_member);
 
-} // namespace ordinals
-} // namespace fidl
+// Computes the 64bits ordinal for this |method|.
+//
+// The ordinal value is equal to
+//
+//    *((int64_t *)sha256(library_name + "/" + protocol_name + "." + selector_name)) & 0x7fffffffffffffff;
+//
+// Note: the slash separator is between the library_name and protocol_name.
+//
+// The selector_name is retrieved using GetSelector.
+raw::Ordinal64 GetGeneratedOrdinal64(const std::vector<std::string_view>& library_name,
+                                     const std::string_view& protocol_name,
+                                     const raw::ProtocolMethod& method);
 
-#endif // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_ORDINALS_H_
+}  // namespace ordinals
+}  // namespace fidl
+
+#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_ORDINALS_H_

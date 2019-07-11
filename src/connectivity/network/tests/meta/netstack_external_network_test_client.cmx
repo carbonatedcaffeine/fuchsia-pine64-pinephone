@@ -1,0 +1,12 @@
+{
+    "program": {
+        "binary": "bin/netstack_external_network_test_client"
+    },
+    "sandbox": {
+        "services": [
+            "fuchsia.net.NameLookup",
+            "fuchsia.posix.socket.Provider",
+            "fuchsia.net.SocketProvider"
+        ]
+    }
+}

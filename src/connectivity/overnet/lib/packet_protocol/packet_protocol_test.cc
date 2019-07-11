@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 
 #include "src/connectivity/overnet/lib/packet_protocol/packet_protocol.h"
+
 #include <memory>
+
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "src/connectivity/overnet/lib/environment/trace_cout.h"
@@ -30,6 +32,7 @@ static const uint64_t kMSS = 1500;
 class MockPacketSender : public PacketProtocol::PacketSender {
  public:
   MOCK_METHOD2(SendPacketMock, void(SeqNum, Slice));
+  MOCK_METHOD0(NoConnectivity, void());
 
   void SendPacket(SeqNum seq, LazySlice slice) override {
     SendPacketMock(seq, slice(LazySliceArgs{Border::None(), kMSS, false}));
@@ -101,7 +104,7 @@ TEST_P(PacketProtocolTest, NoOp) {
   StrictMock<MockPacketSender> ps;
   std::mt19937 rng{123};
   MakeClosedPtr<PacketProtocol>(
-      &timer, [&rng] { return rng(); }, &ps, GetParam(), kMSS);
+      &timer, [&rng] { return rng(); }, &ps, GetParam(), kMSS, true);
 }
 
 TEST_P(PacketProtocolTest, SendOnePacket) {
@@ -114,7 +117,7 @@ TEST_P(PacketProtocolTest, SendOnePacket) {
   StrictMock<MockPacketSender> ps;
   std::mt19937 rng{123};
   auto packet_protocol = MakeClosedPtr<PacketProtocol>(
-      &timer, [&rng] { return rng(); }, &ps, GetParam(), kMSS);
+      &timer, [&rng] { return rng(); }, &ps, GetParam(), kMSS, true);
 
   // Send some dummy data: we expect to see a packet emitted immediately
   Slice got_slice;
@@ -5268,7 +5271,7 @@ TEST_P(PacketProtocolTest, _9a9d0c4f2766121be0657c11a5fa3d354b7cf63e) {
 }
 
 INSTANTIATE_TEST_SUITE_P(PacketProtocol, PacketProtocolTest,
-                         ::testing::Values(PacketProtocol::NullCodec(),
+                         ::testing::Values(PacketProtocol::PlaintextCodec(),
                                            &dummy_codec,
                                            aead_codec_chacha.get(),
                                            aead_codec_hmac.get()));

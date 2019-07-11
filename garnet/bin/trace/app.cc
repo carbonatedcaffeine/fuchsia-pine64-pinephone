@@ -4,17 +4,18 @@
 
 #include "garnet/bin/trace/app.h"
 
+#include <src/lib/fxl/logging.h>
+
 #include "garnet/bin/trace/commands/list_categories.h"
 #include "garnet/bin/trace/commands/record.h"
 #include "garnet/bin/trace/commands/time.h"
-#include "src/lib/fxl/logging.h"
 
 namespace tracing {
 
 App::App(sys::ComponentContext* context) : Command(context) {
-  RegisterCommand(ListCategories::Describe());
-  RegisterCommand(Record::Describe());
-  RegisterCommand(Time::Describe());
+  RegisterCommand(ListCategoriesCommand::Describe());
+  RegisterCommand(RecordCommand::Describe());
+  RegisterCommand(TimeCommand::Describe());
 }
 
 App::~App() {}

@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SESSION_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SESSION_H_
 
 #include <functional>
 #include <map>
@@ -10,6 +11,7 @@
 #include <set>
 #include <vector>
 
+#include "lib/fit/function.h"
 #include "src/developer/debug/zxdb/client/session_observer.h"
 #include "src/developer/debug/zxdb/client/system_impl.h"
 #include "src/developer/debug/zxdb/common/err.h"
@@ -54,6 +56,10 @@ class Session : public SettingStoreObserver {
   void AddObserver(SessionObserver* observer);
   void RemoveObserver(SessionObserver* observer);
 
+  // Returns information about whether this session is connected to a minidump
+  // instead of a live system.
+  bool is_minidump() const { return is_minidump_; }
+
   // Notification about the stream.
   void OnStreamReadable();
   void OnStreamError();
@@ -61,10 +67,14 @@ class Session : public SettingStoreObserver {
   // Returns true if there is currently a connection.
   bool IsConnected() const;
 
+  // Information about the current connection.
+  const std::string minidump_path() const { return minidump_path_; }
+  const std::string connected_host() const { return connected_host_; }
+  uint16_t connected_port() const { return connected_port_; }
+
   // Connects to a remote system. Calling when there is already a connection
   // will issue the callback with an error.
-  void Connect(const std::string& host, uint16_t port,
-               std::function<void(const Err&)> callback);
+  void Connect(const std::string& host, uint16_t port, std::function<void(const Err&)> callback);
 
   // Disconnects from the remote system. Calling when there is no connection
   // connection will issue the callback with an error.
@@ -78,8 +88,7 @@ class Session : public SettingStoreObserver {
   // Open a minidump instead of connecting to a running system. The callback
   // will be issued with an error if the file cannot be opened or if there is
   // already a connection.
-  void OpenMinidump(const std::string& path,
-                    std::function<void(const Err&)> callback);
+  void OpenMinidump(const std::string& path, std::function<void(const Err&)> callback);
 
   // Frees all connection-related data. A helper for different modes of
   // cleanup. Returns true if there was a connection to clear.
@@ -120,8 +129,7 @@ class Session : public SettingStoreObserver {
   // in the exception.
   void DispatchNotifyThreadStarting(const debug_ipc::NotifyThread& notify);
   void DispatchNotifyThreadExiting(const debug_ipc::NotifyThread& notify);
-  void DispatchNotifyException(const debug_ipc::NotifyException& notify,
-                               bool set_metadata = true);
+  void DispatchNotifyException(const debug_ipc::NotifyException& notify, bool set_metadata = true);
   void DispatchNotifyModules(const debug_ipc::NotifyModules& notify);
   void DispatchProcessStarting(const debug_ipc::NotifyProcessStarting&);
   void DispatchNotifyIO(const debug_ipc::NotifyIO& notify);
@@ -130,8 +138,7 @@ class Session : public SettingStoreObserver {
   void QuitAgent(std::function<void(const Err&)> callback);
 
   // SettingStoreObserver
-  void OnSettingChanged(const SettingStore&,
-                        const std::string& setting_name) override;
+  void OnSettingChanged(const SettingStore&, const std::string& setting_name) override;
 
  protected:
   fxl::ObserverList<SessionObserver> observers_;
@@ -146,7 +153,7 @@ class Session : public SettingStoreObserver {
   // the type-specific parameter pre-bound). The uint32_t is the transaction
   // ID. If the error is set, the data will be invalid and the callback should
   // be issued with the error instead of trying to deserialize.
-  using Callback = std::function<void(const Err&, std::vector<char>)>;
+  using Callback = fit::function<void(const Err&, std::vector<char>)>;
 
   // Set the arch_ and arch_info_ fields.
   Err SetArch(debug_ipc::Arch arch);
@@ -155,30 +162,26 @@ class Session : public SettingStoreObserver {
   // callback is invoked with details. The opening_dump argument indicates
   // whether we are trying to open a dump file rather than connect to a debug
   // agent.
-  bool ConnectCanProceed(std::function<void(const Err&)> callback,
-                         bool opening_dump);
+  bool ConnectCanProceed(std::function<void(const Err&)> callback, bool opening_dump);
 
   // Dispatches unsolicited notifications sent from the agent.
-  void DispatchNotification(const debug_ipc::MsgHeader& header,
-                            std::vector<char> data);
+  void DispatchNotification(const debug_ipc::MsgHeader& header, std::vector<char> data);
 
   // Returns the thread object from the given koids, or null.
   ThreadImpl* ThreadImplFromKoid(uint64_t process_koid, uint64_t thread_koid);
 
   // Callback when a connection has been successful or failed.
-  void ConnectionResolved(fxl::RefPtr<PendingConnection> pending,
-                          const Err& err, const debug_ipc::HelloReply& reply,
+  void ConnectionResolved(fxl::RefPtr<PendingConnection> pending, const Err& err,
+                          const debug_ipc::HelloReply& reply,
                           std::unique_ptr<debug_ipc::BufferedFD> buffer,
                           std::function<void(const Err&)> callback);
 
   // Sends a notification to all the UI observers.
-  void SendSessionNotification(SessionObserver::NotificationType,
-                               const char* fmt, ...) FXL_PRINTF_FORMAT(3, 4);
-  void SendSessionNotification(SessionObserver::NotificationType,
-                               const std::string& msg);
+  void SendSessionNotification(SessionObserver::NotificationType, const char* fmt, ...)
+      FXL_PRINTF_FORMAT(3, 4);
+  void SendSessionNotification(SessionObserver::NotificationType, const std::string& msg);
 
-  SessionObserver::NotificationType HandleProcessIO(ProcessImpl*,
-                                                    const debug_ipc::NotifyIO&);
+  SessionObserver::NotificationType HandleProcessIO(ProcessImpl*, const debug_ipc::NotifyIO&);
   void ListenForSystemSettings();
 
   // Configurations ------------------------------------------------------------
@@ -189,8 +192,7 @@ class Session : public SettingStoreObserver {
 
   // Notifies the agent that it should quit upon connection closing.
   // Will no-op if not connected.
-  void ConfigQuitAgent(bool quit,
-                       std::vector<debug_ipc::ConfigAction>* actions);
+  void ConfigQuitAgent(bool quit, std::vector<debug_ipc::ConfigAction>* actions);
 
   // Whether we have opened a core dump. Makes much of the connection-related
   // stuff obsolete.
@@ -208,10 +210,15 @@ class Session : public SettingStoreObserver {
 
   // When using non-persistent connections (no connection passed in via the
   // constructor), this will hold the underlying OS connection that is used
-  // to back stream_.
+  // to back stream_ as well as the
   //
   // Code should use stream_ for sending and receiving.
   std::unique_ptr<debug_ipc::BufferedFD> connection_storage_;
+
+  // Stores what the session is currently connected to.
+  std::string minidump_path_;
+  std::string connected_host_;
+  uint16_t connected_port_ = 0;
 
   // When a connection has been requested but is being connected on the
   // background thread, this will hold the pointer.
@@ -233,3 +240,5 @@ class Session : public SettingStoreObserver {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SESSION_H_

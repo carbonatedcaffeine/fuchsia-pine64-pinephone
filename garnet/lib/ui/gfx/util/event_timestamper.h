@@ -44,8 +44,7 @@ class EventTimestamper {
   class Watch {
    public:
     Watch();
-    Watch(EventTimestamper* ts, zx::event event, zx_status_t trigger,
-          Callback callback);
+    Watch(EventTimestamper* ts, zx::event event, zx_status_t trigger, Callback callback);
     Watch(Watch&& rhs);
     Watch& operator=(Watch&& rhs);
     ~Watch();
@@ -57,6 +56,10 @@ class EventTimestamper {
 
     // Return the watched event (or a null handle, if this Watch was moved).
     const zx::event& event() const;
+
+    // Returns true if the Watch has been started and has not yet observed the
+    // signal or called the callback.
+    bool IsWatching() const;
 
    private:
     Waiter* waiter_;
@@ -74,8 +77,7 @@ class EventTimestamper {
    public:
     enum class State { STARTED, STOPPED, ABANDONED };
 
-    Waiter(async_dispatcher_t* dispatcher, zx::event event, zx_status_t trigger,
-           Callback callback);
+    Waiter(async_dispatcher_t* dispatcher, zx::event event, zx_status_t trigger, Callback callback);
     ~Waiter();
 
     void set_state(State state) { state_ = state; }
@@ -85,8 +87,8 @@ class EventTimestamper {
     const zx::event& event() const { return event_; }
 
    private:
-    void Handle(async_dispatcher_t* dispatcher, async::WaitBase* wait,
-                zx_status_t status, const zx_packet_signal_t* signal);
+    void Handle(async_dispatcher_t* dispatcher, async::WaitBase* wait, zx_status_t status,
+                const zx_packet_signal_t* signal);
 
     async_dispatcher_t* const dispatcher_;
     zx::event event_;

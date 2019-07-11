@@ -6,9 +6,12 @@
 
 #include <fidl/test/misc/cpp/fidl.h>
 #include <lib/fidl/internal.h>
+
 #include <iostream>
+
 #include "gtest/gtest.h"
 #include "lib/fidl/cpp/clone.h"
+#include "lib/fidl/cpp/test/test_util.h"
 
 namespace fidl {
 namespace test {
@@ -16,72 +19,12 @@ namespace misc {
 
 namespace {
 
-template <class Output, class Input>
-Output RoundTrip(const Input& input) {
-  const ::fidl::FidlStructField fake_input_interface_fields[] = {
-      ::fidl::FidlStructField(Input::FidlType, 16),
-  };
-  const fidl_type_t fake_input_interface_struct{
-      ::fidl::FidlCodedStruct(fake_input_interface_fields, 1,
-                              16 + CodingTraits<Input>::encoded_size, "Input")};
-  const ::fidl::FidlStructField fake_output_interface_fields[] = {
-      ::fidl::FidlStructField(Output::FidlType, 16),
-  };
-  const fidl_type_t fake_output_interface_struct{::fidl::FidlCodedStruct(
-      fake_output_interface_fields, 1, 16 + CodingTraits<Output>::encoded_size,
-      "Output")};
-
-  fidl::Encoder enc(0xfefefefe);
-  auto ofs = enc.Alloc(CodingTraits<Input>::encoded_size);
-  fidl::Clone(input).Encode(&enc, ofs);
-  auto msg = enc.GetMessage();
-
-  const char* err_msg = nullptr;
-  EXPECT_EQ(ZX_OK, msg.Validate(&fake_input_interface_struct, &err_msg))
-      << err_msg;
-  EXPECT_EQ(ZX_OK, msg.Decode(&fake_output_interface_struct, &err_msg))
-      << err_msg;
-  fidl::Decoder dec(std::move(msg));
-  Output output;
-  Output::Decode(&dec, &output, ofs);
-  return output;
-}
+using fidl::test::util::RoundTrip;
+using fidl::test::util::ValueToBytes;
 
 TEST(SimpleStruct, SerializeAndDeserialize) {
   Int64Struct input{1};
   EXPECT_TRUE(fidl::Equals(input, RoundTrip<Int64Struct>(input)));
-}
-
-bool cmp_payload(const uint8_t* actual, size_t actual_size,
-                 const uint8_t* expected, size_t expected_size) {
-  bool pass = true;
-  for (size_t i = 0; i < actual_size && i < expected_size; i++) {
-    if (actual[i] != expected[i]) {
-      pass = false;
-      std::cout << std::dec << "element[" << i << "]: " << std::hex
-                << "actual=0x" << +actual[i] << " "
-                << "expected=0x" << +expected[i] << "\n";
-    }
-  }
-  if (actual_size != expected_size) {
-    pass = false;
-    std::cout << std::dec << "element[...]: "
-              << "actual.size=" << +actual_size << " "
-              << "expected.size=" << +expected_size << "\n";
-  }
-  return pass;
-}
-
-template <class Input>
-bool ValueToBytes(const Input& input, const std::vector<uint8_t>& expected) {
-  fidl::Encoder enc(0xfefefefe);
-  auto offset = enc.Alloc(CodingTraits<Input>::encoded_size);
-  fidl::Clone(input).Encode(&enc, offset);
-  auto msg = enc.GetMessage();
-  auto payload = msg.payload();
-  return cmp_payload(
-      reinterpret_cast<const uint8_t*>(payload.data()), payload.actual(),
-      reinterpret_cast<const uint8_t*>(expected.data()), expected.size());
 }
 
 TEST(SimpleTable, CheckEmptyTable) {
@@ -96,34 +39,20 @@ TEST(SimpleTable, CheckEmptyTable) {
 }
 
 std::vector<uint8_t> kSimpleTable_X_42_Y_67 = std::vector<uint8_t>{
-    5,   0,   0,   0,
-    0,   0,   0,   0,  // max ordinal
-    255, 255, 255, 255,
-    255, 255, 255, 255,  // alloc present
-    8,   0,   0,   0,
-    0,   0,   0,   0,  // envelope 1: num bytes / num handles
-    255, 255, 255, 255,
-    255, 255, 255, 255,  // alloc present
-    0,   0,   0,   0,
-    0,   0,   0,   0,  // envelope 2: num bytes / num handles
-    0,   0,   0,   0,
-    0,   0,   0,   0,  // no alloc
-    0,   0,   0,   0,
-    0,   0,   0,   0,  // envelope 3: num bytes / num handles
-    0,   0,   0,   0,
-    0,   0,   0,   0,  // no alloc
-    0,   0,   0,   0,
-    0,   0,   0,   0,  // envelope 4: num bytes / num handles
-    0,   0,   0,   0,
-    0,   0,   0,   0,  // no alloc
-    8,   0,   0,   0,
-    0,   0,   0,   0,  // envelope 5: num bytes / num handles
-    255, 255, 255, 255,
-    255, 255, 255, 255,  // alloc present
-    42,  0,   0,   0,
-    0,   0,   0,   0,  // field X
-    67,  0,   0,   0,
-    0,   0,   0,   0,  // field Y
+    5,   0,   0,   0,   0,   0,   0,   0,    // max ordinal
+    255, 255, 255, 255, 255, 255, 255, 255,  // alloc present
+    8,   0,   0,   0,   0,   0,   0,   0,    // envelope 1: num bytes / num handles
+    255, 255, 255, 255, 255, 255, 255, 255,  // alloc present
+    0,   0,   0,   0,   0,   0,   0,   0,    // envelope 2: num bytes / num handles
+    0,   0,   0,   0,   0,   0,   0,   0,    // no alloc
+    0,   0,   0,   0,   0,   0,   0,   0,    // envelope 3: num bytes / num handles
+    0,   0,   0,   0,   0,   0,   0,   0,    // no alloc
+    0,   0,   0,   0,   0,   0,   0,   0,    // envelope 4: num bytes / num handles
+    0,   0,   0,   0,   0,   0,   0,   0,    // no alloc
+    8,   0,   0,   0,   0,   0,   0,   0,    // envelope 5: num bytes / num handles
+    255, 255, 255, 255, 255, 255, 255, 255,  // alloc present
+    42,  0,   0,   0,   0,   0,   0,   0,    // field X
+    67,  0,   0,   0,   0,   0,   0,   0,    // field Y
 };
 
 TEST(SimpleTable, CheckBytesWithXY) {
@@ -168,8 +97,7 @@ TEST(Empty, CheckBytes) {
   Empty input;
 
   auto expected = std::vector<uint8_t>{
-      0,                       // empty struct zero field
-         0, 0, 0, 0, 0, 0, 0,  // 7 bytes of padding
+      0, 0, 0, 0, 0, 0, 0, 0,  // empty struct zero field + padding
   };
   EXPECT_TRUE(ValueToBytes(input, expected));
 }
@@ -188,14 +116,11 @@ TEST(EmptyStructSandwich, CheckBytes) {
   auto expected = std::vector<uint8_t>{
       6,   0,   0,   0,   0,   0,   0,   0,    // length of "before"
       255, 255, 255, 255, 255, 255, 255, 255,  // "before" is present
-      0,                                       // empty struct zero field
-           0,   0,   0,   0,   0,   0,   0,    // 7 bytes of padding
+      0,   0,   0,   0,   0,   0,   0,   0,    // empty struct zero field + padding
       5,   0,   0,   0,   0,   0,   0,   0,    // length of "world"
       255, 255, 255, 255, 255, 255, 255, 255,  // "after" is present
-      'b', 'e', 'f', 'o', 'r', 'e',            // "before" string
-                                    0,   0,    // 2 bytes of padding
-      'a', 'f', 't', 'e', 'r',                 // "after" string
-                               0,   0,   0,    // 3 bytes of padding
+      'b', 'e', 'f', 'o', 'r', 'e', 0,   0,    // "before" string + padding
+      'a', 'f', 't', 'e', 'r', 0,   0,   0,    // "after" string + padding
   };
   EXPECT_TRUE(ValueToBytes(input, expected));
 }
@@ -258,10 +183,9 @@ TEST(XUnion, SimpleTable) {
       0xdd, 0x2c, 0x65, 0x30, 0x00, 0x00, 0x00, 0x00,  // xunion discriminator + padding
       0x70, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // num bytes + num handles
       0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,  // envelope data is present
-      // <table data follows>
+                                                       // <table data follows>
   };
-  expected.insert(expected.end(), kSimpleTable_X_42_Y_67.cbegin(),
-                  kSimpleTable_X_42_Y_67.cend());
+  expected.insert(expected.end(), kSimpleTable_X_42_Y_67.cbegin(), kSimpleTable_X_42_Y_67.cend());
 
   EXPECT_TRUE(ValueToBytes(input, expected));
 }
@@ -306,20 +230,15 @@ TEST(InlineXUnionInStruct, VerifyWireFormatXUnionIsPresent) {
   auto expected = std::vector<uint8_t>{
       0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // "before" length
       0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,  // "before" presence
-
       0xa5, 0x47, 0xdf, 0x29, 0x00, 0x00, 0x00, 0x00,  // xunion discriminator + padding
       0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // num bytes + num handles
       0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,  // envelope data is present
-
       0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // "after" length
       0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,  // "before" presence
-
       // secondary object 1: "before"
       'b',  'e',  'f',  'o',  'r',  'e',  0x00, 0x00,
-
       // secondary object 2: xunion content
       0xef, 0xbe, 0xad, 0xde, 0x00, 0x00, 0x00, 0x00,  // xunion envelope content (0xdeadbeef) + padding
-
       // secondary object 3: "after"
       'a',  'f',  't',  'e',  'r',  0x00, 0x00, 0x00,
   };
@@ -392,11 +311,7 @@ TEST(OptionalXUnionInStruct, SerializeAndDeserializeAbsent) {
   input.after = "after";
 
   OptionalXUnionInStruct output = RoundTrip<OptionalXUnionInStruct>(input);
-
-  // We cannot byte-wise compare |input| with |output|, since both xunions will
-  // have uninitialized memory in their internal xunions, and are not guaranteed
-  // to be zeroed.
-  EXPECT_EQ(output.xu->Which(), SampleXUnion::Tag::Empty);
+  EXPECT_EQ(output.xu.get(), nullptr);
 }
 
 TEST(OptionalXUnionInStruct, SerializeAndDeserializePresent) {
@@ -510,7 +425,6 @@ TEST(XUnionInTable, SerializeAndDeserialize) {
 
   EXPECT_TRUE(fidl::Equals(input, RoundTrip<XUnionInTable>(input)));
 }
-
 
 TEST(PrimitiveArrayInTable, VerifyWireFormatArrayIsPresent) {
   PrimitiveArrayInTable input;

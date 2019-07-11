@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_LIB_ELFLIB_ELFLIB_H_
-#define GARNET_LIB_ELFLIB_ELFLIB_H_
+#ifndef SRC_LIB_ELFLIB_ELFLIB_H_
+#define SRC_LIB_ELFLIB_ELFLIB_H_
 
 #include <fbl/macros.h>
 #include <stdio.h>
@@ -22,6 +22,8 @@ using namespace llvm::ELF;
 
 class ElfLib {
  public:
+  friend class PltEntryBufferX86;
+  friend class PltEntryBufferArm;
   class MemoryAccessor;
 
   // Essentially just a pointer with a bound.
@@ -87,6 +89,14 @@ class ElfLib {
   // symbols could not be loaded.
   std::optional<std::map<std::string, Elf64_Sym>> GetAllDynamicSymbols();
 
+  // Attempt to discern whether this file has debug symbols (otherwise it is
+  // presumably stripped).
+  bool ProbeHasDebugInfo();
+
+  // Attempt to discern whether this file has the actual program contents. It
+  // may not if it is a split debug info file.
+  bool ProbeHasProgramBits();
+
   // Create a new ElfLib object for reading a file. If take_ownership is set to
   // true, the given handle will be closed when the ElfLib object is destroyed.
   static std::unique_ptr<ElfLib> Create(FILE* fp, Ownership owned);
@@ -142,8 +152,10 @@ class ElfLib {
   static std::unique_ptr<ElfLib> Create(
       std::unique_ptr<MemoryAccessor>&& memory, AddressMode address_mode);
 
-  // x64-specific implementation of GetPLTOffsets
-  std::map<std::string, uint64_t> GetPLTOffsetsX64();
+  // See the definition of this class in elflib.cc for details.
+  class PltEntryBuffer;
+
+  std::map<std::string, uint64_t> GetPLTOffsetsCommon(PltEntryBuffer& adapter);
 
   // Get the header for a section by its index. Return nullptr if the index is
   // invalid.
@@ -205,4 +217,4 @@ class ElfLib {
 
 }  // namespace elflib
 
-#endif  // GARNET_LIB_ELFLIB_ELFLIB_H_
+#endif  // SRC_LIB_ELFLIB_ELFLIB_H_

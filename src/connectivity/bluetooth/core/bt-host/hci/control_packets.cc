@@ -58,7 +58,7 @@ bool StatusCodeFromEvent(const EventPacket& event, hci::StatusCode* out_code) {
   if (event.view().payload_size() < sizeof(T))
     return false;
 
-  *out_code = event.view().payload<T>().status;
+  *out_code = event.params<T>().status;
   return true;
 }
 
@@ -106,6 +106,8 @@ bool EventPacket::ToStatusCode(StatusCode* out_code) const {
     return StatusCodeFromEvent<event_name##EventParams>(*this, out_code)
 
   switch (event_code()) {
+    CASE_EVENT_STATUS(AuthenticationComplete);
+    CASE_EVENT_STATUS(ChangeConnectionLinkKeyComplete);
     CASE_EVENT_STATUS(CommandComplete);
     CASE_EVENT_STATUS(CommandStatus);
     CASE_EVENT_STATUS(ConnectionComplete);

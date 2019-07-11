@@ -5,8 +5,8 @@
 //! Tools for starting or connecting to existing Fuchsia applications and services.
 
 use {
-    failure::{Error, ResultExt},
-    fidl::endpoints::{Proxy, ServiceMarker},
+    failure::{Error, Fail, ResultExt},
+    fidl::endpoints::{DiscoverableService, Proxy},
     fidl_fuchsia_sys::{
         ComponentControllerEvent, ComponentControllerProxy, FileDescriptor, FlatNamespace,
         LaunchInfo, LauncherMarker, LauncherProxy, TerminationReason,
@@ -19,27 +19,31 @@ use {
         stream::{StreamExt, TryStreamExt},
         Future,
     },
-    std::{fs::File, sync::Arc},
+    std::{fmt, fs::File, sync::Arc},
 };
 
 /// Connect to a FIDL service using the provided channel and namespace prefix.
-pub fn connect_channel_to_service_at<S: ServiceMarker>(
+pub fn connect_channel_to_service_at<S: DiscoverableService>(
     server_end: zx::Channel,
     service_prefix: &str,
 ) -> Result<(), Error> {
-    let service_path = format!("{}/{}", service_prefix, S::NAME);
+    let service_path = format!("{}/{}", service_prefix, S::SERVICE_NAME);
     fdio::service_connect(&service_path, server_end)
         .with_context(|_| format!("Error connecting to service path: {}", service_path))?;
     Ok(())
 }
 
 /// Connect to a FIDL service using the provided channel.
-pub fn connect_channel_to_service<S: ServiceMarker>(server_end: zx::Channel) -> Result<(), Error> {
+pub fn connect_channel_to_service<S: DiscoverableService>(
+    server_end: zx::Channel,
+) -> Result<(), Error> {
     connect_channel_to_service_at::<S>(server_end, "/svc")
 }
 
 /// Connect to a FIDL service using the provided namespace prefix.
-pub fn connect_to_service_at<S: ServiceMarker>(service_prefix: &str) -> Result<S::Proxy, Error> {
+pub fn connect_to_service_at<S: DiscoverableService>(
+    service_prefix: &str,
+) -> Result<S::Proxy, Error> {
     let (proxy, server) = zx::Channel::create()?;
     connect_channel_to_service_at::<S>(server, service_prefix)?;
     let proxy = fasync::Channel::from_channel(proxy)?;
@@ -47,7 +51,7 @@ pub fn connect_to_service_at<S: ServiceMarker>(service_prefix: &str) -> Result<S
 }
 
 /// Connect to a FIDL service using the application root namespace.
-pub fn connect_to_service<S: ServiceMarker>() -> Result<S::Proxy, Error> {
+pub fn connect_to_service<S: DiscoverableService>() -> Result<S::Proxy, Error> {
     connect_to_service_at::<S>("/svc")
 }
 
@@ -164,7 +168,7 @@ impl App {
 
     /// Connect to a service provided by the `App`.
     #[inline]
-    pub fn connect_to_service<S: ServiceMarker>(&self) -> Result<S::Proxy, Error> {
+    pub fn connect_to_service<S: DiscoverableService>(&self) -> Result<S::Proxy, Error> {
         let (client_channel, server_channel) = zx::Channel::create()?;
         self.pass_to_service::<S>(server_channel)?;
         Ok(S::Proxy::from_channel(fasync::Channel::from_channel(client_channel)?))
@@ -172,11 +176,11 @@ impl App {
 
     /// Connect to a service by passing a channel for the server.
     #[inline]
-    pub fn pass_to_service<S: ServiceMarker>(
+    pub fn pass_to_service<S: DiscoverableService>(
         &self,
         server_channel: zx::Channel,
     ) -> Result<(), Error> {
-        self.pass_to_named_service(S::NAME, server_channel)
+        self.pass_to_named_service(S::SERVICE_NAME, server_channel)
     }
 
     /// Connect to a service by name.
@@ -434,7 +438,7 @@ impl Stdio {
 }
 
 /// Describes the result of a component after it has terminated.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Fail)]
 pub struct ExitStatus {
     return_code: i64,
     termination_reason: TerminationReason,
@@ -447,21 +451,45 @@ impl ExitStatus {
     pub fn success(&self) -> bool {
         self.exited() && self.return_code == 0
     }
+
     /// Returns true if the component exited, as opposed to not starting at all due to some
     /// error or terminating with any reason other than `EXITED`.
     #[inline]
     pub fn exited(&self) -> bool {
         self.termination_reason == TerminationReason::Exited
     }
+
     /// The reason the component was terminated.
     #[inline]
     pub fn reason(&self) -> TerminationReason {
         self.termination_reason
     }
+
     /// The return code from the component. Guaranteed to be non-zero if termination reason is
     /// not `EXITED`.
+    #[inline]
     pub fn code(&self) -> i64 {
         self.return_code
+    }
+
+    /// Converts the `ExitStatus` to a `Result<(), ExitStatus>`, mapping to `Ok(())` if the
+    /// component exited with status code 0, or to `Err(ExitStatus)` otherwise.
+    pub fn ok(&self) -> Result<(), Self> {
+        if self.success() {
+            Ok(())
+        } else {
+            Err(self.clone())
+        }
+    }
+}
+
+impl fmt::Display for ExitStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.exited() {
+            write!(f, "Exited with {}", self.code())
+        } else {
+            write!(f, "Terminated with reason {:?}", self.reason())
+        }
     }
 }
 
@@ -473,4 +501,52 @@ pub struct Output {
     pub stdout: Vec<u8>,
     /// The data that the component wrote to stderr.
     pub stderr: Vec<u8>,
+}
+
+/// The output of a component that terminated with a failure.
+#[derive(Clone, Fail)]
+#[fail(display = "{}", exit_status)]
+pub struct OutputError {
+    #[cause]
+    exit_status: ExitStatus,
+    stdout: String,
+    stderr: String,
+}
+
+impl Output {
+    /// Converts the `Output` to a `Result<(), OutputError>`, mapping to `Ok(())` if the component
+    /// exited with status code 0, or to `Err(OutputError)` otherwise.
+    pub fn ok(&self) -> Result<(), OutputError> {
+        if self.exit_status.success() {
+            Ok(())
+        } else {
+            let stdout = String::from_utf8_lossy(&self.stdout).into_owned();
+            let stderr = String::from_utf8_lossy(&self.stderr).into_owned();
+            Err(OutputError { exit_status: self.exit_status.clone(), stdout, stderr })
+        }
+    }
+}
+
+impl fmt::Debug for OutputError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        struct RawMultilineString<'a>(&'a str);
+
+        impl<'a> fmt::Debug for RawMultilineString<'a> {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                if self.0.is_empty() {
+                    f.write_str(r#""""#)
+                } else {
+                    f.write_str("r#\"")?;
+                    f.write_str(self.0)?;
+                    f.write_str("\"#")
+                }
+            }
+        }
+
+        f.debug_struct("OutputError")
+            .field("exit_status", &self.exit_status)
+            .field("stdout", &RawMultilineString(&self.stdout))
+            .field("stderr", &RawMultilineString(&self.stderr))
+            .finish()
+    }
 }

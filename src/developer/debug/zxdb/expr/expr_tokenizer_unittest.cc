@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "src/developer/debug/zxdb/expr/expr_tokenizer.h"
+
 #include "gtest/gtest.h"
 
 namespace zxdb {
@@ -17,13 +18,13 @@ TEST(ExprTokenizer, Empty) {
 
 TEST(ExprTokenizer, InvalidChar) {
   // Offsets:      012345
-  ExprTokenizer t("1234 @ hello");
+  ExprTokenizer t("1234 ` hello");
 
   EXPECT_FALSE(t.Tokenize());
   EXPECT_TRUE(t.err().has_error());
   EXPECT_EQ(
-      "Invalid character '@' in expression.\n"
-      "  1234 @ hello\n"
+      "Invalid character '`' in expression.\n"
+      "  1234 ` hello\n"
       "       ^",
       t.err().msg());
   EXPECT_EQ(5u, t.error_location());
@@ -240,6 +241,28 @@ TEST(ExprTokenizer, GetErrorContext) {
       "  foo\n"
       "     ^",
       ExprTokenizer::GetErrorContext("foo", 3));
+}
+
+// Tests that C and Rust tokens are separated.
+TEST(ExprTokenizer, Language) {
+  // Test that "reinterpret_cast is valid in C but not in Rust.
+  ExprTokenizer c("reinterpret_cast", ExprLanguage::kC);
+  EXPECT_TRUE(c.Tokenize());
+  EXPECT_FALSE(c.err().has_error()) << c.err().msg();
+  auto tokens = c.tokens();
+  ASSERT_EQ(1u, tokens.size());
+  EXPECT_EQ(ExprTokenType::kReinterpretCast, tokens[0].type());
+
+  // In Rust it's interpreted as a regular name.
+  ExprTokenizer r("reinterpret_cast", ExprLanguage::kRust);
+  EXPECT_TRUE(r.Tokenize());
+  EXPECT_FALSE(r.err().has_error()) << r.err().msg();
+  tokens = r.tokens();
+  ASSERT_EQ(1u, tokens.size());
+  EXPECT_EQ(ExprTokenType::kName, tokens[0].type());
+
+  // Currently we don't have any Rust-only tokens. When we add one we should
+  // test that it works only in Rust mode.
 }
 
 }  // namespace zxdb

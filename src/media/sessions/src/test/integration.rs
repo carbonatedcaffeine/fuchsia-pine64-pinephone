@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use crate::{clone_session_id_handle, fidl_clones::clone_size, MAX_EVENTS_SENT_WITHOUT_ACK};
+use crate::{clone_session_id_handle, MAX_EVENTS_SENT_WITHOUT_ACK};
 use failure::{Error, ResultExt};
 use fidl::encoding::OutOfLine;
 use fidl::endpoints::{create_endpoints, ClientEnd};
@@ -40,10 +40,7 @@ fn clone_buffer(src: &Buffer) -> Buffer {
 }
 
 fn clone_media_image_bitmap(src: &MediaImageBitmap) -> MediaImageBitmap {
-    MediaImageBitmap {
-        size: clone_size(&src.size),
-        argb8888_pixel_data: clone_buffer(&src.argb8888_pixel_data),
-    }
+    MediaImageBitmap { size: src.size, argb8888_pixel_data: clone_buffer(&src.argb8888_pixel_data) }
 }
 
 fn bitmaps_refer_to_same_memory(a: &MediaImageBitmap, b: &MediaImageBitmap) -> bool {
@@ -151,10 +148,12 @@ impl TestService {
         let mediasession = comp::client::launch(&launcher, String::from(MEDIASESSION_URL), None)
             .context("Launching mediasession")?;
 
-        let publisher =
-            mediasession.connect_to_service::<PublisherMarker>().context("Connecting to Publisher")?;
-        let registry =
-            mediasession.connect_to_service::<RegistryMarker>().context("Connecting to Registry")?;
+        let publisher = mediasession
+            .connect_to_service::<PublisherMarker>()
+            .context("Connecting to Publisher")?;
+        let registry = mediasession
+            .connect_to_service::<RegistryMarker>()
+            .context("Connecting to Registry")?;
         let registry_events = registry.take_event_stream();
 
         Ok(Self { app: mediasession, publisher, registry, registry_events })
@@ -164,54 +163,48 @@ impl TestService {
     /// expectation.
     async fn expect_active_session(&mut self, expected: Option<zx::Koid>) {
         assert!(!self.registry_events.is_terminated());
-        let event = await!(self.registry_events.try_next())
+        let actual = await!(self.registry_events.try_next())
             .expect("taking registry event")
-            .expect("unwrapping registry event");
-        match event {
-            RegistryEvent::OnActiveSessionChanged { active_session: actual } => {
-                let actual = actual.session_id.map(|session_id| {
-                    session_id.as_handle_ref().get_koid().expect("taking handle KOID")
-                });
-                assert_eq!(actual, expected);
-            }
-            other => panic!("Expected active session event; got {:?}", other),
-        }
+            .expect("unwrapping registry event")
+            .into_on_active_session_changed()
+            .expect("Expected active session event");
+        let actual = actual
+            .session_id
+            .map(|session_id| session_id.as_handle_ref().get_koid().expect("taking handle KOID"));
+        assert_eq!(actual, expected);
     }
 
     async fn expect_sessions_change(&mut self, expected_change: SessionsChange) {
         assert!(!self.registry_events.is_terminated());
-        let event = await!(self.registry_events.try_next())
+        let sessions_change = await!(self.registry_events.try_next())
             .expect("taking registry event")
-            .expect("unwrapping registry event");
-        match event {
-            RegistryEvent::OnSessionsChanged { sessions_change } => {
-                match (&sessions_change, &expected_change) {
-                    (
-                        SessionsChange { session: ref actual, delta: SessionDelta::Added },
-                        SessionsChange { session: ref expected, delta: SessionDelta::Added },
-                    ) => {
-                        assert!(
-                            are_session_entries_equal(actual, expected),
-                            "Actual: {:?}\nExpected: {:?}",
-                            sessions_change,
-                            expected_change
-                        );
-                    }
-                    (
-                        SessionsChange { session: ref actual, delta: SessionDelta::Removed },
-                        SessionsChange { session: ref expected, delta: SessionDelta::Removed },
-                    ) => {
-                        assert!(
-                            are_session_entries_equal(actual, expected),
-                            "Actual: {:?}\nExpected: {:?}",
-                            sessions_change,
-                            expected_change
-                        );
-                    }
-                    _ => panic!("Expected {:?}; got {:?}", expected_change, sessions_change),
-                }
+            .expect("unwrapping registry event")
+            .into_on_sessions_changed()
+            .expect("Expected session list");
+        match (&sessions_change, &expected_change) {
+            (
+                SessionsChange { session: ref actual, delta: SessionDelta::Added },
+                SessionsChange { session: ref expected, delta: SessionDelta::Added },
+            ) => {
+                assert!(
+                    are_session_entries_equal(actual, expected),
+                    "Actual: {:?}\nExpected: {:?}",
+                    sessions_change,
+                    expected_change
+                );
             }
-            other => panic!("Expected session list; got {:?}", other),
+            (
+                SessionsChange { session: ref actual, delta: SessionDelta::Removed },
+                SessionsChange { session: ref expected, delta: SessionDelta::Removed },
+            ) => {
+                assert!(
+                    are_session_entries_equal(actual, expected),
+                    "Actual: {:?}\nExpected: {:?}",
+                    sessions_change,
+                    expected_change
+                );
+            }
+            _ => panic!("Expected {:?}; got {:?}", expected_change, sessions_change),
         }
     }
 
@@ -280,15 +273,12 @@ impl TestService {
             let event = await!(new_client_events.try_next())
                 .expect("taking registry event")
                 .expect("unwrapping registry event");
-            match event {
-                RegistryEvent::OnSessionsChanged { sessions_change } => {
-                    if let SessionsChange { session, delta: SessionDelta::Added } = sessions_change
-                    {
-                        sessions.push(session);
-                    }
-                }
-                _ => {}
-            };
+
+            if let Some(SessionsChange { session, delta: SessionDelta::Added }) =
+                event.into_on_sessions_changed()
+            {
+                sessions.push(session);
+            }
             new_client.notify_sessions_change_handled().expect("acking events");
         }
 
@@ -385,8 +375,8 @@ async fn service_routes_bitmaps() {
 
     fasync::spawn(serve_fut(
         expected_url.clone(),
-        clone_size(&expected_minimum_size),
-        clone_size(&expected_desired_size),
+        expected_minimum_size,
+        expected_desired_size,
         clone_media_image_bitmap(&expected_bitmap),
     ));
 
@@ -436,15 +426,9 @@ async fn service_routes_controls() {
     let a_event = await!(request_stream_a.try_next()).expect("taking next request from session a");
     let b_event = await!(request_stream_b.try_next()).expect("taking next request from session b");
 
-    assert!(match a_event {
-        Some(SessionRequest::Play { .. }) => true,
-        _ => false,
-    },);
+    a_event.expect("missing play event").into_play().expect("wasn't a play event");
 
-    assert!(match b_event {
-        Some(SessionRequest::Pause { .. }) => true,
-        _ => false,
-    },);
+    b_event.expect("missing pause event").into_pause().expect("wasn't a pause event");
 
     // Ensure the behaviour continues.
 
@@ -452,10 +436,10 @@ async fn service_routes_controls() {
 
     let b_event = await!(request_stream_b.try_next()).expect("taking next request from session b");
 
-    assert!(match b_event {
-        Some(SessionRequest::Play { .. }) => true,
-        _ => false,
-    },);
+    b_event
+        .expect("missing play event on session b")
+        .into_play()
+        .expect("wasn't a play event on session b");
 }
 
 #[fasync::run_singlethreaded]
@@ -798,7 +782,7 @@ async fn service_stops_sending_sessions_change_events_to_inactive_clients() {
             panic!("Received event even though we didn't ack: {:?}, sessions registered: {:?}",
                    e, expected_sessions);
         }
-        _ = fasync::Timer::new(zx::Time::after(zx::Duration::from_millis(2))).fuse() => {
+        _ = fasync::Timer::new(fasync::Time::after(zx::Duration::from_millis(2))).fuse() => {
             return;
         }
     }
@@ -854,7 +838,7 @@ async fn service_stops_sending_active_session_change_events_to_inactive_clients(
         _ = test_service.registry_events.select_next_some() => {
             panic!("Received event from service even though we didn't ack");
         }
-        _ = fasync::Timer::new(zx::Time::after(zx::Duration::from_millis(2))).fuse() => {
+        _ = fasync::Timer::new(fasync::Time::after(zx::Duration::from_millis(2))).fuse() => {
             return;
         }
     }

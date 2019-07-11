@@ -2,24 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/board.gni")
 import("//build/cmx/cmx.gni")
 import("//build/compiled_action.gni")
 import("//build/disabled_for_asan.gni")
+import("//build/images/boot.gni")
 import("//build/images/manifest.gni")
 import("//build/json/validate_json.gni")
 import("//build/package/component.gni")
 import("//build/testing/test_spec.gni")
-
-declare_args() {
-  # The package key to use for signing Fuchsia packages made by the
-  # `package()` template (and the `system_image` package).  If this
-  # doesn't exist yet when it's needed, it will be generated.  New
-  # keys can be generated with the `pm -k FILE genkey` host command.
-  system_package_key = "//build/development.key"
-
-  # Board name used for paving and amber updates.
-  board_name = ""
-}
 
 # Generate a list of package metadata exported from all packages in the
 # transitive closure of declared dependencies, with an implied barrier at each
@@ -48,7 +39,7 @@ declare_args() {
 #
 #       meta_far_merkle_index_entries
 #         The metafar merkle index entries are aggregated in image builds to
-#         produce package server indices for monolith serving.
+#         produce package server indices for base serving.
 #
 #       package_output_manifests
 #         The path of each output manifest for each package.
@@ -129,7 +120,7 @@ template("component_index_metadata_list") {
   }
 }
 
-# Generate a signed, sealed package file from a manifest.
+# Generate a sealed package file from a manifest.
 #
 # Parameters
 #
@@ -179,14 +170,10 @@ template("pm_build_package") {
     assert(defined(package_name), "A package name is required")
     assert(package_name != "", "A package name is required")
 
-    deps += [
-      "//build/images:system_package_key_check",
-      invoker.manifest,
-    ]
+    deps += [ invoker.manifest ]
 
     inputs = [
       pkg_manifest_file,
-      system_package_key,
     ]
 
     depfile = "$pkg_out_dir/meta.far.d"
@@ -198,10 +185,6 @@ template("pm_build_package") {
 
       # update
       "$pkg_out_dir/meta/contents",
-
-      # sign
-      "$pkg_out_dir/meta/pubkey",
-      "$pkg_out_dir/meta/signature",
 
       # seal
       "$pkg_out_dir/meta.far.merkle",
@@ -251,8 +234,6 @@ template("pm_build_package") {
     }
 
     args = [
-      "-k",
-      rebase_path(system_package_key, root_build_dir),
       "-o",
       rebase_path(pkg_out_dir, root_build_dir),
       "-m",
@@ -464,6 +445,7 @@ template("package") {
                                "components",
                                "data_deps",
                                "deprecated_misc_storage",
+                               "deprecated_shell",
                                "deprecated_system_image",
                                "deps",
                                "public_deps",
@@ -474,6 +456,7 @@ template("package") {
                                "meta",
                                "package_name",
                                "resources",
+                               "system_deprecated_data",
                                "visibility",
                                "tests",
                              ])
@@ -584,6 +567,26 @@ template("package") {
               },
             ]
           }
+
+          # TODO(jseibert): Remove this validation when the "deprecated-shell" feature is removed.
+          if (!defined(pkg.deprecated_shell)) {
+            extra_schemas += [
+              {
+                schema = "//build/cmx/block_deprecated_shell.json"
+                error_msg = "The 'deprecated-shell' feature is deprecated and guarded by an allowlist."
+              },
+            ]
+          }
+
+          # TODO(jmatt): Remove as part of CF-882
+          if (!defined(pkg.system_deprecated_data)) {
+            extra_schemas += [
+              {
+                schema = "//build/cmx/block_system_deprecated_data.json"
+                error_msg = "Use of 'deprecated-data' in 'system' to access /system/data is protected by an allowlist."
+              },
+            ]
+          }
         }
 
         pkg.deps += [ ":$validate" ]
@@ -679,16 +682,37 @@ template("package") {
       } else {
         dest = test.name
       }
+
+      # Check that all tests are components with cmx files at the expected path.
+      if (!pkg.deprecated_system_image && !bootfs_only && !is_disabled &&
+          (!defined(require_bare_tests_allowlist) ||
+           !require_bare_tests_allowlist)) {
+        require_bare_tests_allowlist = true
+        foreach(meta, pkg.meta) {
+          if (get_path_info(meta.dest, "extension") == "cmx") {
+            meta_name = get_path_info(meta.dest, "name")
+            if (dest == meta_name) {
+              require_bare_tests_allowlist = false
+            }
+          }
+        }
+      }
+
       if (is_disabled) {
         dest = "disabled/${dest}"
       }
-      dest = "test/${dest}"
 
-      if (pkg.deprecated_system_image) {
-        path = "/system/$dest"
+      if (bootfs_only) {
+        dest = "test/sys/$dest"
+        path = "/boot/$dest"
       } else {
-        path =
-            "/pkgfs/packages/${pkg.package_name}/${pkg.package_version}/$dest"
+        dest = "test/$dest"
+        if (pkg.deprecated_system_image) {
+          path = "/system/$dest"
+        } else {
+          path =
+              "/pkgfs/packages/${pkg.package_name}/${pkg.package_version}/$dest"
+        }
       }
 
       # TODO(TC-359): Remove this block once no more tests remain in
@@ -808,6 +832,8 @@ template("package") {
 
     if (defined(pkg.visibility)) {
       pkg.visibility += [
+        ":$target_name",
+
         # TODO(raggi): tighten build/images visibility once we've
         # finished doing large scale cleanups.
         "//build/images:*",
@@ -827,7 +853,7 @@ template("package") {
       pkg.deprecated_system_image = true
     }
 
-    if (pkg.deprecated_system_image) {
+    if (pkg.deprecated_system_image || bootfs_only) {
       # System image packages just donate manifest arguments
       generate_response_file(pkg_target_name) {
         if (defined(pkg.visibility)) {
@@ -846,10 +872,10 @@ template("package") {
                                             root_build_dir) ]
         }
       }
-      not_needed(component_indices)
+      not_needed([ "component_indices" ])
     } else {
       # Fuchsia package aggregates a manifest from it's arguments and builds a
-      # signed metadata archive.
+      # metadata archive.
 
       manifest = "${pkg_target_name}.manifest"
 
@@ -890,7 +916,7 @@ template("package") {
         }
       }
 
-      # Next generate a signed, sealed package file.
+      # Next generate a sealed package file.
       pm_build_package(pkg_target_name) {
         if (defined(pkg.visibility)) {
           visibility = pkg.visibility
@@ -920,16 +946,36 @@ template("package") {
             "${pkg.deprecated_misc_storage}:deprecated_misc_storage_allowlist",
           ]
         }
+        if (defined(require_bare_tests_allowlist) &&
+            require_bare_tests_allowlist) {
+          deps += [ "//build:deprecated_bare_tests_allowlist" ]
+        }
+        if (defined(pkg.deprecated_shell)) {
+          deps += [ "${pkg.deprecated_shell}:deprecated_shell_allowlist" ]
+        }
+        if (defined(pkg.system_deprecated_data)) {
+          deps += [
+            "${pkg.system_deprecated_data}:system_deprecated_data_allowlist",
+          ]
+        }
       }
     }
   } else {
+    # A reference from a different toolchain, e.g. a variant toolchain, is
+    # just an indirect way to get the package into the system images.
+    # Redirect it as data_deps on the $target_toolchain package.  This
+    # really ought to be a pure redirect, i.e. public_deps.  But using
+    # data_deps here avoids problems in case some dependency on a package()
+    # target is not in data_deps as it (almost surely) should be.
     group(target_name) {
       forward_variables_from(invoker,
                              [
-                               "public_deps",
-                               "deps",
+                               "visibility",
                                "testonly",
                              ])
+      data_deps = [
+        ":$target_name($target_toolchain)",
+      ]
     }
 
     # Suppress unused variable warnings.

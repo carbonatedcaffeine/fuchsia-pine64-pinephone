@@ -13,15 +13,20 @@
 mod account;
 mod account_handler;
 mod auth_provider_supplier;
+mod common;
+mod inspect;
 mod persona;
+mod stored_account;
 
 #[cfg(test)]
 mod test_util;
 
 use crate::account_handler::AccountHandler;
+use crate::common::AccountLifetime;
 use failure::{Error, ResultExt};
 use fuchsia_async as fasync;
 use fuchsia_component::server::ServiceFs;
+use fuchsia_inspect::Inspector;
 use futures::StreamExt;
 use log::{error, info};
 use std::sync::Arc;
@@ -30,23 +35,35 @@ type TokenManager = token_manager::TokenManager<auth_provider_supplier::AuthProv
 
 const DATA_DIR: &str = "/data";
 
+/// This flag (prefixed with `--`) results in an in-memory ephemeral account.
+const EPHEMERAL_FLAG: &str = "ephemeral";
+
 fn main() -> Result<(), Error> {
+    let mut opts = getopts::Options::new();
+    opts.optflag("", EPHEMERAL_FLAG, "this account is an in-memory ephemeral account");
+    let args: Vec<String> = std::env::args().collect();
+    let options = opts.parse(args)?;
+    let lifetime = if options.opt_present(EPHEMERAL_FLAG) {
+        AccountLifetime::Ephemeral
+    } else {
+        AccountLifetime::Persistent { account_dir: DATA_DIR.into() }
+    };
+
     fuchsia_syslog::init_with_tags(&["auth"]).expect("Can't init logger");
     info!("Starting account handler");
 
     let mut executor = fasync::Executor::new().context("Error creating executor")?;
-    let account_handler = Arc::new(AccountHandler::new(DATA_DIR.into()));
-
+    let inspector = Inspector::new();
     let mut fs = ServiceFs::new();
-    fs.dir("public").add_fidl_service(move |stream| {
+    inspector.export(&mut fs);
+
+    let account_handler = Arc::new(AccountHandler::new(lifetime, &inspector));
+    fs.dir("svc").add_fidl_service(move |stream| {
         let account_handler_clone = Arc::clone(&account_handler);
-        fasync::spawn(
-            async move {
-                await!(account_handler_clone.handle_requests_from_stream(stream)).unwrap_or_else(
-                    |e| error!("Error handling AccountHandlerControl channel {:?}", e),
-                )
-            },
-        );
+        fasync::spawn(async move {
+            await!(account_handler_clone.handle_requests_from_stream(stream))
+                .unwrap_or_else(|e| error!("Error handling AccountHandlerControl channel {:?}", e))
+        });
     });
     fs.take_and_serve_directory_handle()?;
 

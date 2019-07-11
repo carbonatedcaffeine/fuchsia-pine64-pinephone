@@ -12,14 +12,14 @@
 #include "src/developer/debug/zxdb/expr/cast.h"
 #include "src/developer/debug/zxdb/expr/expr_token.h"
 #include "src/developer/debug/zxdb/expr/expr_value.h"
-#include "src/developer/debug/zxdb/symbols/identifier.h"
+#include "src/developer/debug/zxdb/expr/parsed_identifier.h"
 #include "src/lib/fxl/memory/ref_counted.h"
 #include "src/lib/fxl/memory/ref_ptr.h"
 
 namespace zxdb {
 
 class Err;
-class ExprEvalContext;
+class EvalContext;
 class Type;
 
 // Node subclasses.
@@ -85,8 +85,7 @@ class ExprNode : public fxl::RefCountedThreadSafe<ExprNode> {
   // reference counted.
   //
   // See also EvalFollowReferences below.
-  virtual void Eval(fxl::RefPtr<ExprEvalContext> context,
-                    EvalCallback cb) const = 0;
+  virtual void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const = 0;
 
   // Like "Eval" but expands all references to the values they point to. When
   // evaluating a subexpression this is the variant you want because without
@@ -95,8 +94,7 @@ class ExprNode : public fxl::RefCountedThreadSafe<ExprNode> {
   //
   // The time you wouldn't want this is when calling externally where the
   // caller wants to know the actual type the expression evaluated to.
-  void EvalFollowReferences(fxl::RefPtr<ExprEvalContext> context,
-                            EvalCallback cb) const;
+  void EvalFollowReferences(fxl::RefPtr<EvalContext> context, EvalCallback cb) const;
 
   // Dumps the tree to a stream with the given indent. Used for unit testing
   // and debugging.
@@ -107,8 +105,7 @@ class ExprNode : public fxl::RefCountedThreadSafe<ExprNode> {
 class AddressOfExprNode : public ExprNode {
  public:
   const AddressOfExprNode* AsAddressOf() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
  private:
@@ -126,8 +123,7 @@ class AddressOfExprNode : public ExprNode {
 class ArrayAccessExprNode : public ExprNode {
  public:
   const ArrayAccessExprNode* AsArrayAccess() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
  private:
@@ -141,10 +137,11 @@ class ArrayAccessExprNode : public ExprNode {
 
   // Converts the given value which is the result of executing the "inner"
   // expression and converts it to an integer if possible.
-  static Err InnerValueToOffset(const ExprValue& inner, int64_t* offset);
+  static Err InnerValueToOffset(fxl::RefPtr<EvalContext> context, const ExprValue& inner,
+                                int64_t* offset);
 
-  static void DoAccess(fxl::RefPtr<ExprEvalContext> context, ExprValue left,
-                       int64_t offset, EvalCallback cb);
+  static void DoAccess(fxl::RefPtr<EvalContext> context, ExprValue left, int64_t offset,
+                       EvalCallback cb);
 
   fxl::RefPtr<ExprNode> left_;
   fxl::RefPtr<ExprNode> inner_;
@@ -154,8 +151,7 @@ class ArrayAccessExprNode : public ExprNode {
 class BinaryOpExprNode : public ExprNode {
  public:
   const BinaryOpExprNode* AsBinaryOp() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
  private:
@@ -163,8 +159,7 @@ class BinaryOpExprNode : public ExprNode {
   FRIEND_MAKE_REF_COUNTED(BinaryOpExprNode);
 
   BinaryOpExprNode();
-  BinaryOpExprNode(fxl::RefPtr<ExprNode> left, ExprToken op,
-                   fxl::RefPtr<ExprNode> right)
+  BinaryOpExprNode(fxl::RefPtr<ExprNode> left, ExprToken op, fxl::RefPtr<ExprNode> right)
       : left_(std::move(left)), op_(std::move(op)), right_(std::move(right)) {}
   ~BinaryOpExprNode() override = default;
 
@@ -177,8 +172,7 @@ class BinaryOpExprNode : public ExprNode {
 class CastExprNode : public ExprNode {
  public:
   const CastExprNode* AsCast() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
  private:
@@ -186,11 +180,8 @@ class CastExprNode : public ExprNode {
   FRIEND_MAKE_REF_COUNTED(CastExprNode);
 
   CastExprNode();
-  CastExprNode(CastType cast_type, fxl::RefPtr<TypeExprNode> to_type,
-               fxl::RefPtr<ExprNode> from)
-      : cast_type_(cast_type),
-        to_type_(std::move(to_type)),
-        from_(std::move(from)) {}
+  CastExprNode(CastType cast_type, fxl::RefPtr<TypeExprNode> to_type, fxl::RefPtr<ExprNode> from)
+      : cast_type_(cast_type), to_type_(std::move(to_type)), from_(std::move(from)) {}
   ~CastExprNode() override = default;
 
   CastType cast_type_;
@@ -202,8 +193,7 @@ class CastExprNode : public ExprNode {
 class DereferenceExprNode : public ExprNode {
  public:
   const DereferenceExprNode* AsDereference() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
  private:
@@ -221,11 +211,10 @@ class DereferenceExprNode : public ExprNode {
 class FunctionCallExprNode : public ExprNode {
  public:
   const FunctionCallExprNode* AsFunctionCall() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
-  const Identifier& name() const { return name_; }
+  const ParsedIdentifier& name() const { return name_; }
   const std::vector<fxl::RefPtr<ExprNode>>& args() const { return args_; }
 
  private:
@@ -233,11 +222,11 @@ class FunctionCallExprNode : public ExprNode {
   FRIEND_MAKE_REF_COUNTED(FunctionCallExprNode);
 
   FunctionCallExprNode();
-  FunctionCallExprNode(Identifier name, std::vector<fxl::RefPtr<ExprNode>> args)
+  FunctionCallExprNode(ParsedIdentifier name, std::vector<fxl::RefPtr<ExprNode>> args)
       : name_(std::move(name)), args_(std::move(args)) {}
   ~FunctionCallExprNode() override = default;
 
-  Identifier name_;
+  ParsedIdentifier name_;
   std::vector<fxl::RefPtr<ExprNode>> args_;
 };
 
@@ -245,18 +234,17 @@ class FunctionCallExprNode : public ExprNode {
 class IdentifierExprNode : public ExprNode {
  public:
   const IdentifierExprNode* AsIdentifier() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
-  Identifier& ident() { return ident_; }
-  const Identifier& ident() const { return ident_; }
+  ParsedIdentifier& ident() { return ident_; }
+  const ParsedIdentifier& ident() const { return ident_; }
 
   // Destructively moves the identifier out of this class. This unusual
   // mutating getter is implemented because the expression parser is also used
   // to parse identifiers, and this will hold the result which we would prefer
   // not to copy to get out.
-  Identifier TakeIdentifier() { return std::move(ident_); }
+  ParsedIdentifier TakeIdentifier() { return std::move(ident_); }
 
  private:
   FRIEND_REF_COUNTED_THREAD_SAFE(IdentifierExprNode);
@@ -265,21 +253,19 @@ class IdentifierExprNode : public ExprNode {
   IdentifierExprNode() = default;
 
   // Simple one-name identifier.
-  IdentifierExprNode(std::string name)
-      : ident_(IdentifierComponent(std::move(name))) {}
+  IdentifierExprNode(std::string name) : ident_(ParsedIdentifierComponent(std::move(name))) {}
 
-  IdentifierExprNode(Identifier id) : ident_(std::move(id)) {}
+  IdentifierExprNode(ParsedIdentifier id) : ident_(std::move(id)) {}
   ~IdentifierExprNode() override = default;
 
-  Identifier ident_;
+  ParsedIdentifier ident_;
 };
 
 // Implements a literal like a number or a boolean.
 class LiteralExprNode : public ExprNode {
  public:
   const LiteralExprNode* AsLiteral() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
   // The token's value won't have been checked that it's valid, only
@@ -302,8 +288,7 @@ class LiteralExprNode : public ExprNode {
 class MemberAccessExprNode : public ExprNode {
  public:
   const MemberAccessExprNode* AsMemberAccess() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
   // Expression on the left side of the "." or "->".
@@ -313,7 +298,7 @@ class MemberAccessExprNode : public ExprNode {
   const ExprToken& accessor() const { return accessor_; }
 
   // The name of the data member.
-  const Identifier& member() const { return member_; }
+  const ParsedIdentifier& member() const { return member_; }
 
  private:
   FRIEND_REF_COUNTED_THREAD_SAFE(MemberAccessExprNode);
@@ -321,20 +306,19 @@ class MemberAccessExprNode : public ExprNode {
 
   MemberAccessExprNode() = default;
   MemberAccessExprNode(fxl::RefPtr<ExprNode> left, const ExprToken& access,
-                       const Identifier& member)
+                       const ParsedIdentifier& member)
       : left_(std::move(left)), accessor_(access), member_(member) {}
   ~MemberAccessExprNode() override = default;
 
   fxl::RefPtr<ExprNode> left_;
   ExprToken accessor_;
-  Identifier member_;
+  ParsedIdentifier member_;
 };
 
 class SizeofExprNode : public ExprNode {
  public:
   const SizeofExprNode* AsSizeof() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
  private:
@@ -345,7 +329,7 @@ class SizeofExprNode : public ExprNode {
   SizeofExprNode(fxl::RefPtr<ExprNode> expr) : expr_(std::move(expr)) {}
   ~SizeofExprNode() override = default;
 
-  static void SizeofType(const Type* type, EvalCallback cb);
+  static void SizeofType(fxl::RefPtr<EvalContext> context, const Type* type, EvalCallback cb);
 
   fxl::RefPtr<ExprNode> expr_;
 };
@@ -354,8 +338,7 @@ class SizeofExprNode : public ExprNode {
 class TypeExprNode : public ExprNode {
  public:
   const TypeExprNode* AsType() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
   fxl::RefPtr<Type>& type() { return type_; }
@@ -377,8 +360,7 @@ class TypeExprNode : public ExprNode {
 class UnaryOpExprNode : public ExprNode {
  public:
   const UnaryOpExprNode* AsUnaryOp() const override { return this; }
-  void Eval(fxl::RefPtr<ExprEvalContext> context,
-            EvalCallback cb) const override;
+  void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
  private:

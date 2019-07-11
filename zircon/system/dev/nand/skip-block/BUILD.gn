@@ -3,20 +3,16 @@
 # found in the LICENSE file.
 
 driver("skip-block") {
-  sources = [
-    "binding.c",
-  ]
+  sources = []
   deps = [
     ":common",
-    "$zx/system/ulib/ddk",
-    "$zx/system/ulib/zircon",
   ]
 }
 
 source_set("common") {
   sources = [
-    "logical-to-physical-map.cpp",
-    "skip-block.cpp",
+    "logical-to-physical-map.cc",
+    "skip-block.cc",
   ]
   deps = [
     "$zx/system/fidl/fuchsia-hardware-nand:c",
@@ -29,7 +25,7 @@ source_set("common") {
     "$zx/system/banjo/ddk.protocol.badblock",
     "$zx/system/banjo/ddk.protocol.nand",
     "$zx/system/dev/lib/operation",
-    "$zx/system/fidl/fuchsia-hardware-skipblock:c",
+    "$zx/system/fidl/fuchsia-hardware-skipblock:llcpp",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",
     "$zx/system/ulib/fbl",
@@ -39,8 +35,8 @@ source_set("common") {
 test("skip-block-test") {
   output_name = "skip-block-test"
   sources = [
-    "test/logical-to-physical-map-test.cpp",
-    "test/skip-block-test.cpp",
+    "test/logical-to-physical-map-test.cc",
+    "test/skip-block-test.cc",
   ]
   include_dirs = [ "." ]
   deps = [

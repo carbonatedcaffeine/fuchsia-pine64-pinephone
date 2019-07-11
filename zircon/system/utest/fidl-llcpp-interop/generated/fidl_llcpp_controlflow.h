@@ -13,6 +13,8 @@
 #include <lib/zx/channel.h>
 #include <zircon/fidl.h>
 
+namespace llcpp {
+
 namespace fidl {
 namespace test {
 namespace llcpp {
@@ -20,6 +22,7 @@ namespace controlflow {
 
 class ControlFlow;
 
+extern "C" const fidl_type_t fidl_test_llcpp_controlflow_ControlFlowMustSendAccessDeniedEpitaphResponseTable;
 
 // Interface for testing shutdown/epitaphs etc.
 class ControlFlow final {
@@ -34,7 +37,7 @@ class ControlFlow final {
     fidl_message_header_t _hdr;
     int32_t reply;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fidl_test_llcpp_controlflow_ControlFlowMustSendAccessDeniedEpitaphResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -174,15 +177,16 @@ class ControlFlow final {
 }  // namespace llcpp
 }  // namespace test
 }  // namespace fidl
+}  // namespace llcpp
 
 namespace fidl {
 
 template <>
-struct IsFidlType<::fidl::test::llcpp::controlflow::ControlFlow::MustSendAccessDeniedEpitaphResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fidl::test::llcpp::controlflow::ControlFlow::MustSendAccessDeniedEpitaphResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fidl::test::llcpp::controlflow::ControlFlow::MustSendAccessDeniedEpitaphResponse> : public std::true_type {};
-static_assert(sizeof(::fidl::test::llcpp::controlflow::ControlFlow::MustSendAccessDeniedEpitaphResponse)
-    == ::fidl::test::llcpp::controlflow::ControlFlow::MustSendAccessDeniedEpitaphResponse::PrimarySize);
-static_assert(offsetof(::fidl::test::llcpp::controlflow::ControlFlow::MustSendAccessDeniedEpitaphResponse, reply) == 16);
+struct IsFidlMessage<::llcpp::fidl::test::llcpp::controlflow::ControlFlow::MustSendAccessDeniedEpitaphResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fidl::test::llcpp::controlflow::ControlFlow::MustSendAccessDeniedEpitaphResponse)
+    == ::llcpp::fidl::test::llcpp::controlflow::ControlFlow::MustSendAccessDeniedEpitaphResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fidl::test::llcpp::controlflow::ControlFlow::MustSendAccessDeniedEpitaphResponse, reply) == 16);
 
 }  // namespace fidl

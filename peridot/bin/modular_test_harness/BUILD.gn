@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/package.gni")
+import("//build/test/test_package.gni")
 
 executable("modular_test_harness_bin") {
   testonly = true
@@ -81,7 +82,6 @@ executable("test_story_shell_bin") {
 
 executable("modular_test_harness_test") {
   testonly = true
-  output_name = "modular_test_harness_test"
   sources = [
     "modular_test_harness_test.cc",
   ]
@@ -91,13 +91,12 @@ executable("modular_test_harness_test") {
     "//sdk/fidl/fuchsia.sys",
     "//sdk/lib/sys/cpp",
     "//sdk/lib/sys/cpp/testing:integration",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 }
 
 package("modular_test_harness") {
   testonly = true
-
   binaries = [
     {
       name = "test_story_shell_bin"
@@ -113,21 +112,10 @@ package("modular_test_harness") {
     },
   ]
 
-  tests = [
-    {
-      name = "modular_test_harness_test"
-      environments = basic_envs
-    },
-  ]
-
   meta = [
     {
       path = "meta/modular_test_harness.cmx"
       dest = "modular_test_harness.cmx"
-    },
-    {
-      path = "meta/modular_test_harness_test.cmx"
-      dest = "modular_test_harness_test.cmx"
     },
     {
       path = "meta/test_base_shell.cmx"
@@ -145,9 +133,23 @@ package("modular_test_harness") {
 
   deps = [
     ":modular_test_harness_bin",
-    ":modular_test_harness_test",
     ":test_base_shell_bin",
     ":test_session_shell_bin",
     ":test_story_shell_bin",
+  ]
+}
+
+test_package("tests") {
+  package_name = "modular_test_harness_test"
+
+  tests = [
+    {
+      name = "modular_test_harness_test"
+      environments = basic_envs
+    },
+  ]
+
+  deps = [
+    ":modular_test_harness_test",
   ]
 }

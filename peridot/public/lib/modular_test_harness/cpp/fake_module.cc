@@ -7,22 +7,18 @@
 namespace modular {
 namespace testing {
 
+FakeModule::FakeModule() = default;
+
 FakeModule::FakeModule(
     fit::function<void(fuchsia::modular::Intent)> on_intent_handled)
-    : on_intent_handled_(std::move(on_intent_handled)) {
-  ZX_ASSERT(on_intent_handled_);
-}
+    : on_intent_handled_(std::move(on_intent_handled)) {}
 
 FakeModule::~FakeModule() = default;
 
 // |modular::testing::FakeComponent|
 void FakeModule::OnCreate(fuchsia::sys::StartupInfo startup_info) {
+  component_context()->svc()->Connect(component_context_.NewRequest());
   component_context()->svc()->Connect(module_context_.NewRequest());
-  module_context_.set_error_handler([this](zx_status_t err) {
-    if (err != ZX_OK) {
-      ZX_PANIC("Could not connext to ModuleContext service.");
-    }
-  });
 
   component_context()
       ->outgoing()
@@ -34,12 +30,14 @@ void FakeModule::OnCreate(fuchsia::sys::StartupInfo startup_info) {
 }
 
 std::vector<std::string> FakeModule::GetSandboxServices() {
-  return {"fuchsia.modular.ModuleContext"};
+  return {"fuchsia.modular.ComponentContext", "fuchsia.modular.ModuleContext"};
 }
 
 // |IntentHandler|
 void FakeModule::HandleIntent(fuchsia::modular::Intent intent) {
-  on_intent_handled_(std::move(intent));
+  if (on_intent_handled_) {
+    on_intent_handled_(std::move(intent));
+  }
 };
 
 }  // namespace testing

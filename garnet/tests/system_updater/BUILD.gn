@@ -3,17 +3,18 @@
 # found in the LICENSE file.
 
 import("//build/package.gni")
-import("//build/rust/rustc_library.gni")
+import("//build/rust/rustc_test.gni")
 import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
 
-rustc_library("driver") {
-  name = "system_updater_tests"
+rustc_test("driver") {
+  name = "system_updater_v2_test"
   edition = "2018"
-  with_unit_tests = true
 
   deps = [
+    "//garnet/go/src/amber:cobalt_sw_delivery_registry_rustlib",
     "//garnet/public/lib/fidl/rust/fidl",
+    "//garnet/public/rust/fdio",
     "//garnet/public/rust/fuchsia-async",
     "//garnet/public/rust/fuchsia-component",
     "//garnet/public/rust/fuchsia-runtime",
@@ -39,7 +40,6 @@ rustc_library("driver") {
 test_package("systemupdater-tests") {
   deps = [
     ":driver",
-    "//garnet/go/src/amber:cobalt_sw_delivery_registry",
     "//garnet/go/src/grand_unified_binary",
   ]
 
@@ -48,16 +48,14 @@ test_package("systemupdater-tests") {
       name = "system_updater"
       source = "grand_unified_binary"
     },
+    {
+      name = "install-disk-image"
+      source =
+          rebase_path("//garnet/tests/system_updater/install-disk-image.sh")
+    },
   ]
 
   resources = [
-    {
-      path =
-          rebase_path(get_label_info(
-                          "//garnet/go/src/amber:cobalt_sw_delivery_registry",
-                          "target_gen_dir") + "/cobalt_sw_delivery_registry.pb")
-      dest = "cobalt_config.pb"
-    },
     {
       path = rebase_path("//garnet/go/src/amber/system_updater/images")
       dest = "images"
@@ -74,7 +72,7 @@ test_package("systemupdater-tests") {
 
   tests = [
     {
-      name = "system_updater_tests_lib_test"
+      name = "system_updater_v2_test"
       environments = basic_envs
     },
   ]

@@ -8,12 +8,11 @@
 #include <fuchsia/ledger/cloud/cpp/fidl.h>
 #include <fuchsia/ledger/internal/cpp/fidl.h>
 #include <fuchsia/modular/auth/cpp/fidl.h>
-#include <fuchsia/netconnector/cpp/fidl.h>
 #include <lib/callback/auto_cleanable.h>
 #include <lib/callback/cancellable.h>
 #include <lib/callback/managed_container.h>
-#include <lib/inspect/deprecated/expose.h>
-#include <lib/inspect/inspect.h>
+#include <lib/inspect_deprecated/deprecated/expose.h>
+#include <lib/inspect_deprecated/inspect.h>
 
 #include <memory>
 #include <string>
@@ -22,8 +21,8 @@
 #include "src/ledger/bin/app/ledger_repository_impl.h"
 #include "src/ledger/bin/cloud_sync/public/user_config.h"
 #include "src/ledger/bin/environment/environment.h"
-#include "src/ledger/bin/fidl/error_notifier.h"
 #include "src/ledger/bin/fidl/include/types.h"
+#include "src/ledger/bin/fidl/syncable.h"
 #include "src/ledger/bin/p2p_sync/public/user_communicator_factory.h"
 #include "src/ledger/bin/sync_coordinator/impl/user_sync_impl.h"
 #include "src/lib/files/unique_fd.h"
@@ -32,24 +31,20 @@
 namespace ledger {
 
 class LedgerRepositoryFactoryImpl
-    : public ::fuchsia::ledger::internal::
-          LedgerRepositoryFactoryErrorNotifierDelegate {
+    : public ::fuchsia::ledger::internal::LedgerRepositoryFactorySyncableDelegate {
  public:
   explicit LedgerRepositoryFactoryImpl(
       Environment* environment,
-      std::unique_ptr<p2p_sync::UserCommunicatorFactory>
-          user_communicator_factory,
-      inspect::Node inspect_node);
+      std::unique_ptr<p2p_sync::UserCommunicatorFactory> user_communicator_factory,
+      inspect_deprecated::Node inspect_node);
   ~LedgerRepositoryFactoryImpl() override;
 
-  // LedgerRepositoryFactoryErrorNotifierDelegate:
-  void GetRepository(
-      zx::channel repository_handle,
-      fidl::InterfaceHandle<cloud_provider::CloudProvider> cloud_provider,
-      std::string user_id,
-      fidl::InterfaceRequest<ledger_internal::LedgerRepository>
-          repository_request,
-      fit::function<void(Status)> callback) override;
+  // LedgerRepositoryFactorySyncableDelegate:
+  void GetRepository(zx::channel repository_handle,
+                     fidl::InterfaceHandle<cloud_provider::CloudProvider> cloud_provider,
+                     std::string user_id,
+                     fidl::InterfaceRequest<ledger_internal::LedgerRepository> repository_request,
+                     fit::function<void(Status)> callback) override;
 
  private:
   class LedgerRepositoryContainer;
@@ -58,12 +53,10 @@ class LedgerRepositoryFactoryImpl
   // Binds |repository_request| to the repository stored in the directory opened
   // in |root_fd|.
   void GetRepositoryByFD(
-      fxl::UniqueFD root_fd,
-      fidl::InterfaceHandle<cloud_provider::CloudProvider> cloud_provider,
+      fxl::UniqueFD root_fd, fidl::InterfaceHandle<cloud_provider::CloudProvider> cloud_provider,
       std::string user_id,
-      fidl::InterfaceRequest<ledger_internal::LedgerRepository>
-          repository_request,
-      fit::function<void(storage::Status)> callback);
+      fidl::InterfaceRequest<ledger_internal::LedgerRepository> repository_request,
+      fit::function<void(Status)> callback);
   std::unique_ptr<sync_coordinator::UserSyncImpl> CreateUserSync(
       const RepositoryInformation& repository_information,
       fidl::InterfaceHandle<cloud_provider::CloudProvider> cloud_provider,
@@ -72,17 +65,14 @@ class LedgerRepositoryFactoryImpl
       const RepositoryInformation& repository_information);
   void OnVersionMismatch(RepositoryInformation repository_information);
 
-  void DeleteRepositoryDirectory(
-      const RepositoryInformation& repository_information);
+  void DeleteRepositoryDirectory(const RepositoryInformation& repository_information);
 
   Environment* const environment_;
-  std::unique_ptr<p2p_sync::UserCommunicatorFactory> const
-      user_communicator_factory_;
+  std::unique_ptr<p2p_sync::UserCommunicatorFactory> const user_communicator_factory_;
 
-  callback::AutoCleanableMap<std::string, LedgerRepositoryContainer>
-      repositories_;
+  callback::AutoCleanableMap<std::string, LedgerRepositoryContainer> repositories_;
 
-  inspect::Node inspect_node_;
+  inspect_deprecated::Node inspect_node_;
 
   FXL_DISALLOW_COPY_AND_ASSIGN(LedgerRepositoryFactoryImpl);
 };

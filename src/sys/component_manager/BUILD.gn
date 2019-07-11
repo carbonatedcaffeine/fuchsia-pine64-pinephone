@@ -17,10 +17,10 @@ rustc_library("lib") {
   visibility = [ "//src/sys/component_manager/*" ]
 
   deps = [
-    "//garnet/examples/fidl/services:echo-rustc",
     "//garnet/lib/rust/cm_fidl_translator",
+    "//garnet/lib/rust/cm_fidl_validator",
     "//garnet/lib/rust/cm_rust",
-    "//garnet/lib/rust/fuchsia_uri",
+    "//garnet/lib/rust/files_async",
     "//garnet/lib/rust/io_util",
     "//garnet/public/lib/fidl/rust/fidl",
     "//garnet/public/rust/fdio",
@@ -29,23 +29,34 @@ rustc_library("lib") {
     "//garnet/public/rust/fuchsia-runtime",
     "//garnet/public/rust/fuchsia-vfs/pseudo-fs",
     "//garnet/public/rust/fuchsia-zircon",
-    "//sdk/fidl/fuchsia.data:fuchsia.data-rustc",
+    "//garnet/public/rust/fuchsia-zircon/fuchsia-zircon-sys",
     "//sdk/fidl/fuchsia.data:fuchsia.data-rustc",
     "//sdk/fidl/fuchsia.pkg:fuchsia.pkg-rustc",
     "//sdk/fidl/fuchsia.sys2:fuchsia.sys2-rustc",
-    "//sdk/fidl/fuchsia.sys2:fuchsia.sys2-rustc",
+    "//src/lib/process_builder",
+    "//src/sys/lib/fuchsia_url:fuchsia_url",
     "//third_party/rust_crates:byteorder",
     "//third_party/rust_crates:failure",
     "//third_party/rust_crates:futures-preview",
     "//third_party/rust_crates:lazy_static",
     "//third_party/rust_crates:log",
     "//third_party/rust_crates:rand",
-    "//third_party/rust_crates:regex",
     "//third_party/rust_crates:url",
     "//third_party/rust_crates:void",
     "//zircon/public/fidl/fuchsia-io:fuchsia-io-rustc",
     "//zircon/public/fidl/fuchsia-ldsvc:fuchsia-ldsvc-rustc",
     "//zircon/public/fidl/fuchsia-process:fuchsia-process-rustc",
+
+    # Test-only deps
+    "//garnet/examples/fidl/services:echo-rustc",
+    "//src/lib/process_builder:test-util-fidl-rustc",
+  ]
+  non_rust_deps = [
+    "//zircon/public/lib/async",
+    "//zircon/public/lib/async-default",
+    "//zircon/public/lib/async-loop",
+    "//zircon/public/lib/sync",
+    "//zircon/public/lib/memfs",
   ]
 }
 
@@ -54,12 +65,28 @@ rustc_binary("bin") {
   with_unit_tests = true
   edition = "2018"
 
+  # Component manager must always be small (even in debug builds) since it
+  # is part of the Zircon boot image.
+  force_opt = "z"
+  with_lto = "fat"
+
   deps = [
     ":lib",
+    "//garnet/public/lib/fidl/rust/fidl",
     "//garnet/public/rust/fuchsia-async",
+    "//garnet/public/rust/fuchsia-runtime",
+    "//garnet/public/rust/fuchsia-vfs/pseudo-fs",
     "//third_party/rust_crates:failure",
     "//third_party/rust_crates:futures-preview",
     "//third_party/rust_crates:log",
+    "//zircon/public/fidl/fuchsia-io:fuchsia-io-rustc",
+  ]
+  non_rust_deps = [
+    "//zircon/public/lib/async",
+    "//zircon/public/lib/async-default",
+    "//zircon/public/lib/async-loop",
+    "//zircon/public/lib/sync",
+    "//zircon/public/lib/memfs",
   ]
 }
 
@@ -90,8 +117,10 @@ package("component_manager") {
 
 test_package("component_manager_tests") {
   deps = [
-    ":lib",
+    ":lib_test",
     "//examples/components/basic:hello_world_bin",
+    "//src/lib/process_builder:root_job_test_runner",
+    "//src/lib/process_builder:test_util",
   ]
 
   components =
@@ -101,6 +130,11 @@ test_package("component_manager_tests") {
     {
       name = "component_manager_lib_lib_test"
       dest = "component_manager_tests"
+      environments = basic_envs
+    },
+    {
+      name = "component_manager_lib_lib_test"
+      dest = "component_manager_boot_env_tests"
       environments = basic_envs
     },
   ]
@@ -122,6 +156,12 @@ test_package("component_manager_tests") {
   binaries = [
     {
       name = "hello_world"
+    },
+    {
+      name = "process_builder_test_util"
+    },
+    {
+      name = "root_job_test_runner"
     },
   ]
 }

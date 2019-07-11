@@ -1,32 +1,30 @@
-// Copyright 2016 The Fuchsia Authors. All rights reserved.
+// Copyright 2019 The Fuchsia Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SRC_LEDGER_BIN_APP_PAGE_MANAGER_H_
 #define SRC_LEDGER_BIN_APP_PAGE_MANAGER_H_
 
-#include <fuchsia/ledger/internal/cpp/fidl.h>
-#include <lib/callback/auto_cleanable.h>
-#include <lib/callback/scoped_task_runner.h>
-#include <lib/fidl/cpp/binding_set.h>
 #include <lib/fidl/cpp/interface_request.h>
 #include <lib/fit/function.h>
+#include <lib/inspect_deprecated/inspect.h>
 
-#include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
-#include "src/ledger/bin/app/merging/merge_resolver.h"
-#include "src/ledger/bin/app/page_delegate.h"
-#include "src/ledger/bin/app/page_snapshot_impl.h"
-#include "src/ledger/bin/app/sync_watcher_set.h"
+#include "src/ledger/bin/app/active_page_manager_container.h"
+#include "src/ledger/bin/app/ledger_impl.h"
+#include "src/ledger/bin/app/merging/ledger_merge_manager.h"
+#include "src/ledger/bin/app/page_availability_manager.h"
+#include "src/ledger/bin/app/page_connection_notifier.h"
+#include "src/ledger/bin/app/page_impl.h"
+#include "src/ledger/bin/app/page_usage_listener.h"
+#include "src/ledger/bin/app/types.h"
 #include "src/ledger/bin/environment/environment.h"
-#include "src/ledger/bin/fidl/error_notifier.h"
-#include "src/ledger/bin/fidl/include/types.h"
-#include "src/ledger/bin/fidl_helpers/bound_interface.h"
-#include "src/ledger/bin/storage/public/page_storage.h"
-#include "src/ledger/bin/storage/public/page_sync_delegate.h"
-#include "src/ledger/bin/sync_coordinator/public/page_sync.h"
-#include "src/lib/fxl/time/time_delta.h"
+#include "src/ledger/bin/storage/public/ledger_storage.h"
+#include "src/ledger/bin/storage/public/types.h"
+#include "src/ledger/bin/sync_coordinator/public/ledger_sync.h"
 
 namespace ledger {
 // Manages a ledger page.
@@ -36,88 +34,137 @@ namespace ledger {
 // to delete it at any point - this closes all channels, deletes PageImpls and
 // tears down the storage.
 //
-// When the set of PageImpls becomes empty, client is notified through
+// When a PageManager becomes empty, client is notified through
 // |on_empty_callback|.
 class PageManager {
  public:
-  // Whether the page storage needs to sync with the cloud provider before
-  // binding new pages (|NEEDS_SYNC|) or whether it is immediately available
-  // (|AVAILABLE|).
-  enum class PageStorageState {
-    AVAILABLE,
-    NEEDS_SYNC,
-  };
-
-  // Both |page_storage| and |page_sync| are owned by PageManager and are
-  // deleted when it goes away.
-  PageManager(Environment* environment,
-              std::unique_ptr<storage::PageStorage> page_storage,
-              std::unique_ptr<sync_coordinator::PageSync> page_sync,
-              std::unique_ptr<MergeResolver> merge_resolver,
-              PageManager::PageStorageState state,
-              zx::duration sync_timeout = zx::sec(5));
+  PageManager(Environment* environment, std::string ledger_name, storage::PageId page_id,
+              PageUsageListener* page_usage_listener, storage::LedgerStorage* ledger_storage,
+              sync_coordinator::LedgerSync* ledger_sync, LedgerMergeManager* ledger_merge_manager,
+              inspect_deprecated::Node inspect_node);
   ~PageManager();
 
-  // Creates a new PageDelegate managed by this PageManager, and binds it to the
-  // given PageImpl.
-  void AddPageImpl(std::unique_ptr<PageImpl> page_impl,
-                   fit::function<void(storage::Status)> on_done);
+  // Checks whether the given page is closed and synced. The result returned in
+  // the callback will be |PAGE_OPENED| if the page is opened after calling this
+  // method and before the callback is called. Otherwise it will be |YES| or
+  // |NO| depending on whether the page is synced or not.
+  void PageIsClosedAndSynced(fit::function<void(storage::Status, PagePredicateResult)> callback);
 
-  // Creates a new PageSnapshotImpl managed by this PageManager, and binds it to
-  // the request.
-  void BindPageSnapshot(std::unique_ptr<const storage::Commit> commit,
-                        fidl::InterfaceRequest<PageSnapshot> snapshot_request,
-                        std::string key_prefix);
+  // Checks whether the given page is closed, offline and empty. The result
+  // returned in the callback will be |PAGE_OPENED| if the page is opened after
+  // calling this method and before the callback is called. Otherwise it will be
+  // |YES| or |NO| depending on whether the page is offline and empty or not.
+  void PageIsClosedOfflineAndEmpty(
+      fit::function<void(storage::Status, PagePredicateResult)> callback);
 
-  // Create a new reference for the given object identifier.
-  Reference CreateReference(storage::ObjectIdentifier object_identifier);
+  // Deletes the local copy of the page. If the page is currently open, the
+  // callback will be called with |ILLEGAL_STATE|.
+  void DeletePageStorage(fit::function<void(storage::Status)> callback);
 
-  // Retrieve an object identifier from a Reference.
-  storage::Status ResolveReference(
-      Reference reference, storage::ObjectIdentifier* object_identifier);
+  // Keeps track of |callback|. Binds |page| and fires |callback| when a
+  // PageManager is available or an error occurs.
+  void GetPage(LedgerImpl::Delegate::PageState page_state,
+               fidl::InterfaceRequest<Page> page_request,
+               fit::function<void(storage::Status)> callback);
 
-  // Checks whether there are any unsynced commits or pieces in this page.
-  void IsSynced(fit::function<void(storage::Status, bool)> callback);
-
-  // Checks whether the page is offline and has no entries.
-  void IsOfflineAndEmpty(fit::function<void(storage::Status, bool)> callback);
-
-  // Returns true if this PageManager can be deleted without interrupting
-  // syncing, merging, or requests related to this page.
-  bool IsEmpty();
+  // Registers "interest" in this |PageManager| for which this |PageManager|
+  // will remain non-empty and returns a closure that when called will
+  // deregister the "interest" in this |PageManager| (and potentially cause this
+  // |PageManager|'s on_empty_callback_ to be called).
+  fit::closure CreateDetacher();
 
   void set_on_empty(fit::closure on_empty_callback) {
     on_empty_callback_ = std::move(on_empty_callback);
   }
 
  private:
+  using PageTracker = fit::function<bool()>;
+
+  // Requests a PageStorage object for the given |container|. If the page is not
+  // locally available, the |callback| is called with |PAGE_NOT_FOUND|.
+  void InitActivePageManagerContainer(ActivePageManagerContainer* container,
+                                      fit::function<void(storage::Status)> callback);
+
+  // Creates a page storage for the given |page_id| and completes the
+  // ActivePageManagerContainer.
+  void CreatePageStorage(LedgerImpl::Delegate::PageState page_state,
+                         ActivePageManagerContainer* container);
+
+  // Creates the |ActivePageManagerContainer| for this super manager.
+  ActivePageManagerContainer* CreateActivePageManagerContainer();
+
+  // Creates a new |ActivePageManager| for the given storage.
+  std::unique_ptr<ActivePageManager> NewActivePageManager(
+      std::unique_ptr<storage::PageStorage> page_storage,
+      ActivePageManager::PageStorageState state);
+
+  // Checks whether the page is closed and satisfies the given |predicate|. The
+  // |PagePredicateResult| passed to the given callback will be |PAGE_OPENED| if
+  // the page is opened after calling this method and before the callback is
+  // called. Otherwise it will be |YES| or |NO| depending on whether the
+  // predicate is satisfied.
+  void PageIsClosedAndSatisfiesPredicate(
+      fit::function<void(ActivePageManager*, fit::function<void(storage::Status, bool)>)> predicate,
+      fit::function<void(storage::Status, PagePredicateResult)> callback);
+
+  // Returns a tracking Callable object for the page. When called, returns
+  // |true| if the page has not been opened until now, and stops tracking the
+  // page.
+  PageTracker NewPageTracker();
+
+  // If this page is among those whose usage is being tracked, marks this page
+  // as opened. See also |was_opened_|.
+  void MaybeMarkPageOpened();
+
   void CheckEmpty();
-  void OnSyncBacklogDownloaded();
 
   Environment* const environment_;
-  std::unique_ptr<storage::PageStorage> page_storage_;
-  std::unique_ptr<sync_coordinator::PageSync> page_sync_;
-  std::unique_ptr<MergeResolver> merge_resolver_;
-  const zx::duration sync_timeout_;
-  callback::AutoCleanableSet<fidl_helpers::BoundInterface<
-      PageSnapshot, PageSnapshotImpl,
-      ErrorNotifierBinding<fuchsia::ledger::PageSnapshotErrorNotifierDelegate>>>
-      snapshots_;
-  callback::AutoCleanableSet<PageDelegate> page_delegates_;
+  const std::string ledger_name_;
+  const storage::PageId page_id_;
+  PageUsageListener* page_usage_listener_;
+  storage::LedgerStorage* ledger_storage_;
+  sync_coordinator::LedgerSync* ledger_sync_;
+  LedgerMergeManager* ledger_merge_manager_;
+
   fit::closure on_empty_callback_;
 
-  bool sync_backlog_downloaded_ = false;
-  std::vector<std::pair<std::unique_ptr<PageImpl>,
-                        fit::function<void(storage::Status)>>>
-      page_impls_;
+  PageAvailabilityManager page_availability_manager_;
 
-  SyncWatcherSet watchers_;
+  std::optional<ActivePageManagerContainer> active_page_manager_container_;
 
-  // Registered references.
-  std::map<uint64_t, storage::ObjectIdentifier> references_;
+  // TODO(https://fuchsia.atlassian.net/browse/LE-769): Based on the way
+  // was_opened_ is used there may be opportunities to simplify the state that
+  // is maintained in the following fields.
+  // |was_opened_| is used to track whether the page was opened during a given
+  // operation. When |IsClosedAndSatisfiesPredicate| is called, a unique
+  // operation id is added to this vector. The operation id will be deleted from
+  // the vector either when that operation is done, or when the page is opened
+  // because of an external request. This guarantees that if before calling the
+  // callback of |PageIsClosedAndSatisfiesPredicate|, the operation id is still
+  // present in the vector, the page was not opened during that operation.
+  // Otherwise, the page was opened, and |PAGE_OPENED| should be returned.
+  std::vector<uint64_t> was_opened_;
+  uint64_t was_opened_id_ = 0;
+  // |outstanding_operations_| counts the number of active tracking operations.
+  // The super manager is not empty until all operations have completed.
+  uint64_t outstanding_operations_ = 0;
 
-  // Must be the last member field.
-  callback::ScopedTaskRunner task_runner_;
+  // The static Inspect object maintaining in Inspect a representation of this
+  // |PageManager|.
+  inspect_deprecated::Node inspect_node_;
+  // The static Inspect object to which this |PageManager|'s commits are
+  // attached.
+  inspect_deprecated::Node commits_node_;
+  fit::deferred_callback children_manager_retainer_;
+
+  // A nonnegative count of the number of "registered interests" for this
+  // |PageManager|. This field is incremented by calls to |CreateDetacher| and
+  // decremented by calls to the closures returned by calls to |CreateDetacher|.
+  // This |PageManager| is not considered empty while this number is positive.
+  int64_t outstanding_detachers_ = 0;
+
+  // Must be the last member.
+  fxl::WeakPtrFactory<PageManager> weak_factory_;
 
   FXL_DISALLOW_COPY_AND_ASSIGN(PageManager);
 };

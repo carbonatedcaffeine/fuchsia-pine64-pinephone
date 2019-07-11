@@ -6,8 +6,8 @@
 
 #include <fuchsia/sys/cpp/fidl.h>
 #include <fuchsia/ui/views/cpp/fidl.h>
-#include <lib/component/cpp/testing/fake_launcher.h>
 #include <lib/gtest/test_loop_fixture.h>
+#include <lib/sys/cpp/testing/fake_launcher.h>
 
 #include "peridot/lib/fidl/clone.h"
 
@@ -15,7 +15,7 @@ namespace modular {
 namespace testing {
 namespace {
 
-using ::component::testing::FakeLauncher;
+using ::sys::testing::FakeLauncher;
 using SessionContextImplTest = gtest::TestLoopFixture;
 
 // Unique identifier for a test session.
@@ -45,9 +45,10 @@ TEST_F(SessionContextImplTest, StartSessionmgrWithTokenManagers) {
       false /* use_session_shell_for_story_shell_factory */,
       std::move(ledger_token_manager), std::move(agent_token_manager),
       nullptr /* account */, fuchsia::ui::views::ViewToken(),
+      nullptr /* additional_services */,
       [](fidl::InterfaceRequest<fuchsia::ui::policy::Presentation>) {
       } /* get_presentation */,
-      [](bool) {} /* done_callback */);
+      [](SessionContextImpl::ShutDownReason, bool) {} /* done_callback */);
 
   EXPECT_TRUE(callback_called);
 }
@@ -78,10 +79,13 @@ TEST_F(SessionContextImplTest, SessionmgrCrashInvokesDoneCallback) {
       /* use_session_shell_for_story_shell_factory= */ false,
       std::move(ledger_token_manager), std::move(agent_token_manager),
       /* account= */ nullptr, fuchsia::ui::views::ViewToken(),
+      /* additional_services */ nullptr,
       /* get_presentation= */
       [](fidl::InterfaceRequest<fuchsia::ui::policy::Presentation>) {},
       /* done_callback= */
-      [&done_callback_called](bool) { done_callback_called = true; });
+      [&done_callback_called](SessionContextImpl::ShutDownReason, bool) {
+        done_callback_called = true;
+      });
 
   RunLoopUntilIdle();
   EXPECT_TRUE(done_callback_called);

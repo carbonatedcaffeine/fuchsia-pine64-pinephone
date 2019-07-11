@@ -6,9 +6,9 @@
 
 #include <ddk/debug.h>
 #include <ddk/platform-defs.h>
-#include <ddk/protocol/platform-device-lib.h>
+#include <lib/device-protocol/platform-device.h>
 #include <ddktl/device.h>
-#include <ddktl/pdev.h>
+#include <lib/device-protocol/pdev.h>
 #include <ddktl/protocol/mailbox.h>
 #include <ddktl/protocol/scpi.h>
 #include <fuchsia/hardware/thermal/c/fidl.h>
@@ -135,7 +135,7 @@ private:
 
     ddk::MailboxProtocolClient mailbox_;
     mtx_t lock_;
-    scpi_opp_t* scpi_opp[fuchsia_hardware_thermal_MAX_DVFS_DOMAINS];
+    scpi_opp_t* scpi_opp[fuchsia_hardware_thermal_MAX_DVFS_DOMAINS] = {};
 };
 
 } // namespace scpi

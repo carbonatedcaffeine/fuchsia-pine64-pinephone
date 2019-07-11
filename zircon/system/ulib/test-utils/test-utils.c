@@ -2,18 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <stdlib.h>
-#include <string.h>
 #include <launchpad/launchpad.h>
 #include <launchpad/vmo.h>
 #include <lib/backtrace-request/backtrace-request.h>
-#include <zircon/process.h>
-#include <zircon/syscalls.h>
-#include <zircon/syscalls/port.h>
-#include <zircon/status.h>
 #include <runtime/thread.h>
+#include <stdlib.h>
+#include <string.h>
 #include <test-utils/test-utils.h>
 #include <unittest/unittest.h>
+#include <zircon/process.h>
+#include <zircon/status.h>
+#include <zircon/syscalls.h>
+#include <zircon/syscalls/exception.h>
+#include <zircon/syscalls/port.h>
 
 #define TU_FAIL_ERRCODE 10
 
@@ -317,6 +318,58 @@ void tu_set_exception_port(zx_handle_t handle, zx_handle_t eport, uint64_t key, 
         tu_fatal(__func__, status);
 }
 
+void tu_unset_exception_port(zx_handle_t handle) {
+    if (handle == 0)
+        handle = zx_process_self();
+    zx_status_t status = zx_task_bind_exception_port(handle, ZX_HANDLE_INVALID, 0, 0);
+    if (status < 0)
+        tu_fatal(__func__, status);
+}
+
+zx_handle_t tu_create_exception_channel(zx_handle_t task, uint32_t options) {
+    zx_handle_t channel = ZX_HANDLE_INVALID;
+    zx_status_t status = zx_task_create_exception_channel(task, options, &channel);
+    if (status < 0)
+        tu_fatal(__func__, status);
+    return channel;
+}
+
+tu_exception_t tu_read_exception(zx_handle_t channel) {
+    tu_exception_t exception;
+    uint32_t num_bytes = sizeof(exception.info);
+    uint32_t num_handles = 1;
+    tu_channel_read(channel, 0, &exception.info, &num_bytes, &exception.exception, &num_handles);
+    return exception;
+}
+
+zx_handle_t tu_exception_get_process(zx_handle_t exception) {
+    zx_handle_t process = ZX_HANDLE_INVALID;
+    zx_status_t status = zx_exception_get_process(exception, &process);
+    if (status < 0)
+        tu_fatal(__func__, status);
+    return process;
+}
+
+zx_handle_t tu_exception_get_thread(zx_handle_t exception) {
+    zx_handle_t thread = ZX_HANDLE_INVALID;
+    zx_status_t status = zx_exception_get_thread(exception, &thread);
+    if (status < 0)
+        tu_fatal(__func__, status);
+    return thread;
+}
+
+void tu_resume_from_exception(zx_handle_t exception_handle) {
+  uint32_t state = ZX_EXCEPTION_STATE_HANDLED;
+  zx_status_t status = zx_object_set_property(exception_handle, ZX_PROP_EXCEPTION_STATE,
+                                              &state, sizeof(state));
+  if (status != ZX_OK)
+        tu_fatal(__func__, status);
+
+  status = zx_handle_close(exception_handle);
+  if (status != ZX_OK)
+        tu_fatal(__func__, status);
+}
+
 void tu_object_wait_async(zx_handle_t handle, zx_handle_t port, zx_signals_t signals)
 {
     uint64_t key = tu_get_koid(handle);
@@ -417,4 +470,33 @@ int tu_run_command(const char* progname, const char* cmd)
     };
 
     return tu_run_program(progname, countof(argv), argv);
+}
+
+const char* tu_exception_to_string(uint32_t exception) {
+    switch (exception) {
+    case ZX_EXCP_GENERAL:
+        return "ZX_EXCP_GENERAL";
+    case ZX_EXCP_FATAL_PAGE_FAULT:
+        return "ZX_EXCP_FATAL_PAGE_FAULT";
+    case ZX_EXCP_UNDEFINED_INSTRUCTION:
+        return "ZX_EXCP_UNDEFINED_INSTRUCTION";
+    case ZX_EXCP_SW_BREAKPOINT:
+        return "ZX_EXCP_SW_BREAKPOINT";
+    case ZX_EXCP_HW_BREAKPOINT:
+        return "ZX_EXCP_HW_BREAKPOINT";
+    case ZX_EXCP_UNALIGNED_ACCESS:
+        return "ZX_EXCP_UNALIGNED_ACCESS";
+    case ZX_EXCP_THREAD_STARTING:
+        return "ZX_EXCP_THREAD_STARTING";
+    case ZX_EXCP_THREAD_EXITING:
+        return "ZX_EXCP_THREAD_EXITING";
+    case ZX_EXCP_POLICY_ERROR:
+        return "ZX_EXCP_POLICY_ERROR";
+    case ZX_EXCP_PROCESS_STARTING:
+        return "ZX_EXCP_PROCESS_STARTING";
+    default:
+        break;
+    }
+
+    return "<unknown>";
 }

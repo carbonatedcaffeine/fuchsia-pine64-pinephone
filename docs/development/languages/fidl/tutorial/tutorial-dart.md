@@ -1,5 +1,6 @@
-
 # Dart language FIDL tutorial
+
+[TOC]
 
 ## About this tutorial
 
@@ -48,7 +49,7 @@ fx build
 ## `Echo` server
 
 The echo server implementation can be found at:
-[//master/examples /fidl/echo_server_async_dart/lib/main.dart](https://fuchsia.googlesource.com/topaz/+/master/examples/fidl/echo_server_async_dart/).
+[//topaz/examples/fidl/echo_server_async_dart/lib/main.dart](https://fuchsia.googlesource.com/topaz/+/master/examples/fidl/echo_server_async_dart/).
 
 This file implements the `main()` function and the `EchoImpl` class:
 
@@ -96,7 +97,7 @@ import 'package:fuchsia_services/services.dart';
     for `InterfaceRequest`.
 -   `fidl_echo` contains bindings for the `Echo` protocol. This file is
     generated from the protocol defined in `echo.fidl`.
--   `services.dart` is required for ApplicationContext, which is where we 
+-   `services.dart` is required for ApplicationContext, which is where we
     register our service.
 
 ### main()
@@ -152,7 +153,7 @@ will run on different threads.
 
 Finally we reach the implementation of the server API. Your `EchoImpl` object
 receives a call to the `echoString()` function. It accepts a string value
-argument and it returns a Future of type String. 
+argument and it returns a Future of type String.
 
 
 ```dart
@@ -168,11 +169,11 @@ Future<String> echoString(String value) async {
 ## `Echo` client
 
 The echo client implementation can be found at:
-[//master/examples/fidl/echo_client_async_dart/lib/main.dart](https://fuchsia.googlesource.com/topaz/+/master/examples/fidl/echo_client_async_dart/lib/main.dart)
+[//topaz/examples/fidl/echo_client_async_dart/lib/main.dart](https://fuchsia.googlesource.com/topaz/+/master/examples/fidl/echo_client_async_dart/lib/main.dart)
 
 Our simple client does everything in `main()`.
 
-**Note:** a component can be a client, a service, or both, or many. The
+Note: a component can be a client, a service, or both, or many. The
 distinction in this example between Client and Server is purely for
 demonstration purposes.
 
@@ -212,7 +213,7 @@ Future<void> main(List<String> args) async {
   /// this client component and the launched server component we're about to
   /// launch. This client component is looking for service under /in/svc/
   /// directory to connect to while the server exposes services others can
-  /// connect to under /out/public directory.
+  /// connect to under /out/svc directory.
   final dirProxy = DirectoryProxy();
 
   // Connect. The destination server is specified, and we request for it to be

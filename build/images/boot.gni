@@ -4,11 +4,15 @@
 
 import("//build/compiled_action.gni")
 import("//build/config/clang/clang.gni")
-import("//build/config/fuchsia/zircon.gni")
+import("//build/config/fuchsia/zircon_images.gni")
 
 declare_args() {
   # Use vboot images
   use_vboot = false
+
+  # Put the "system image" package in the BOOTFS.  Hence what would
+  # otherwise be /system/... at runtime is /boot/... instead.
+  bootfs_only = false
 }
 
 # Build a "kernel partition" target for ChromeOS targets.

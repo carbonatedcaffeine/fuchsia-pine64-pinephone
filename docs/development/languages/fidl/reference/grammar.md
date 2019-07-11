@@ -7,32 +7,38 @@ a modified BNF format.
 
 A nonterminal symbol matches a sequence of other symbols, delimited by
 commas.
+
 ```
 nonterminal = list , of , symbols ;
 ```
 
 Some symbols are terminals, which are either in all caps or are in
 double quotes.
+
 ```
 another-nonterminal = THESE , ARE , TERMINALS , AND , SO , IS , "this" ;
 ```
 
 Alternation is expressed with a pipe.
+
 ```
 choice = this | that | the-other ;
 ```
 
 An option (zero or one) is expressed with parentheses.
+
 ```
 optional = ( maybe , these ) , but , definitely , these ;
 ```
 
 Repetition (zero or more) is expressed with parentheses and a star.
+
 ```
 zero-or-more = ( list-part )* ;
 ```
 
 Repetition (one or more) is expressed with parentheses and a plus.
+
 ```
 one-or-more = ( list-part )+ ;
 
@@ -56,9 +62,9 @@ file = library-header , ( using-list ) , declaration-list ;
 
 library-header = ( attribute-list ) , "library" , compound-identifier , ";" ;
 
-using-list = ( using )* ;
+using-list = ( using , ";" )* ;
 
-using = "using" , compound-identifier , ( "as" , IDENTIFIER ) , ";" ;
+using = "using" , compound-identifier , ( "as" , IDENTIFIER ) ;
 
 declaration-list = ( declaration , ";" )* ;
 
@@ -102,19 +108,19 @@ struct-field = ( attribute-list ) , type-constructor , IDENTIFIER , ( "=" , cons
 
 union-declaration = ( attribute-list ) , "union" , IDENTIFIER , "{" , ( union-field , ";" )+ , "}" ;
 
-xunion-declaration = ( attribute-list ) , "xunion" , IDENTIFIER , "{" , ( union-field , ";" )* , "}" ;
+xunion-declaration = ( attribute-list ) , ( "strict" ) , "xunion" , IDENTIFIER , "{" , ( union-field , ";" )* , "}" ;
 
 union-field = ( attribute-list ) , type-constructor , IDENTIFIER ;
 
-table-declaration = ( attribute-list ) , "table" , IDENTIFIER , "{" , ( ( attribute-list ) , table-field , ";" )* , "}" ;
+table-declaration = ( attribute-list ) , "table" , IDENTIFIER , "{" , ( table-field , ";" )* , "}" ;
 
-table-field = ( attribute-list ) , table-field-ordinal , table-field-declaration ;
+table-field = ( attribute-list ) , table-field-ordinal , table-field-declaration ; [NOTE 5]
 
 table-field-ordinal = ordinal , ":" ;
 
 table-field-declaration = struct-field | "reserved" ;
 
-type-alias-declaration = "using" , IDENTIFIER ,  "=" , type-constructor , ";" ;
+type-alias-declaration = ( attribute-list ) , "using" , IDENTIFIER ,  "=" , type-constructor ;
 
 attribute-list = "[" , attributes , "]" ;
 
@@ -127,7 +133,7 @@ type-constructor = compound-identifier ( "<" type-constructor ">" ) , (  type-co
 
 handle-type = "handle" , ( "<" , handle-subtype , ">" ) , ( "?" ) ;
 
-handle-subtype = "bti" | "channel" | "debuglog" | "event" | "eventpair"
+handle-subtype = "bti" | "channel" | "debuglog" | "event" | "eventpair" | "exception"
                | "fifo" | "guest" | "interrupt" | "job" | "port" | "process"
                | "profile" | "resource" | "socket" | "thread" | "timer"
                | "vmar" | "vmo" ;
@@ -140,6 +146,7 @@ ordinal = NUMERIC-LITERAL ;
 
 literal = STRING-LITERAL | NUMERIC-LITERAL | "true" | "false" ;
 ```
+
 ----------
 
 ### NOTE 1
@@ -153,6 +160,7 @@ limits this to unsigned integer types, see [primitives].
 
 ### NOTE 3
 The `bits-or-enum-member-value` allows the more liberal `literal` in the grammar, but the compiler limits this to:
+
 * A `NUMERIC-LITERAL` in the context of an `enum`;
 * A `NUMERIC-LITERAL` which must be a power of two, in the context of a `bits`.
 
@@ -160,6 +168,9 @@ The `bits-or-enum-member-value` allows the more liberal `literal` in the grammar
 The `protocol-method` error stanza allows the more liberal `type-constructor`
 in the grammar, but the compiler limits this to an `int32`, `uint32`, or
 an enum thereof.
+
+### NOTE 5
+Attributes cannot be placed on a reserved member.
 
 <!-- xrefs -->
 [primitives]: /docs/development/languages/fidl/reference/language.md#primitives

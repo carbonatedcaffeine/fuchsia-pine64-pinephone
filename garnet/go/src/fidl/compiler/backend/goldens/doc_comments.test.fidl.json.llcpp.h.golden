@@ -13,6 +13,8 @@
 #include <lib/zx/channel.h>
 #include <zircon/fidl.h>
 
+namespace llcpp {
+
 namespace test {
 namespace name {
 
@@ -37,9 +39,6 @@ struct Union {
 
   Union(Union&& other) {
     tag_ = Tag::Invalid;
-    memset(reinterpret_cast<uint8_t*>(&tag_) + sizeof(tag_),
-           0,
-           offsetof(Union, Field_) - sizeof(tag_));
     if (this != &other) {
       MoveImpl_(std::move(other));
     }
@@ -145,7 +144,15 @@ class Interface final {
    public:
     SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
 
+    SyncClient(SyncClient&&) = default;
+
+    SyncClient& operator=(SyncClient&&) = default;
+
     ~SyncClient() {}
+
+    const ::zx::channel& channel() const { return channel_; }
+
+    ::zx::channel* mutable_channel() { return &channel_; }
 
     // method comment #1
     //
@@ -223,17 +230,18 @@ constexpr int32_t C = 4u;
 
 }  // namespace name
 }  // namespace test
+}  // namespace llcpp
 
 namespace fidl {
 
 template <>
-struct IsFidlType<::test::name::Union> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::test::name::Union>);
+struct IsFidlType<::llcpp::test::name::Union> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::test::name::Union>);
 
 template <>
-struct IsFidlType<::test::name::Struct> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::test::name::Struct>);
-static_assert(offsetof(::test::name::Struct, Field) == 0);
-static_assert(sizeof(::test::name::Struct) == ::test::name::Struct::PrimarySize);
+struct IsFidlType<::llcpp::test::name::Struct> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::test::name::Struct>);
+static_assert(offsetof(::llcpp::test::name::Struct, Field) == 0);
+static_assert(sizeof(::llcpp::test::name::Struct) == ::llcpp::test::name::Struct::PrimarySize);
 
 }  // namespace fidl

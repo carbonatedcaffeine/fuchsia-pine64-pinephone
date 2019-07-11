@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_BIN_ZXDB_CONSOLE_COMMAND_H_
-#define GARNET_BIN_ZXDB_CONSOLE_COMMAND_H_
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_COMMAND_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_COMMAND_H_
 
 #include <initializer_list>
 #include <map>
@@ -18,6 +18,7 @@ namespace zxdb {
 
 class Breakpoint;
 class ConsoleContext;
+class Filter;
 class Frame;
 class Target;
 class JobContext;
@@ -87,6 +88,8 @@ class Command {
   void set_thread(Thread* t) { thread_ = t; }
   Breakpoint* breakpoint() const { return breakpoint_; }
   void set_breakpoint(Breakpoint* b) { breakpoint_ = b; }
+  Filter* filter() const { return filter_; }
+  void set_filter(Filter* b) { filter_ = b; }
   SymbolServer* sym_server() const { return symbol_server_; }
   void set_sym_server(SymbolServer* s) { symbol_server_ = s; }
 
@@ -100,11 +103,12 @@ class Command {
   // The effective context for the command. The explicitly specified process/
   // thread/etc. will be reflected here, and anything that wasn't explicit
   // will inherit the default.
-  Target* target_ = nullptr;  // Guaranteed non-null for valid commands.
-  JobContext* job_context_ = nullptr;  // May be null.
-  Thread* thread_ = nullptr;           // Will be null if not running.
-  Frame* frame_ = nullptr;  // Will be null if no valid thread stopped.
+  Target* target_ = nullptr;               // Guaranteed non-null for valid commands.
+  JobContext* job_context_ = nullptr;      // May be null.
+  Thread* thread_ = nullptr;               // Will be null if not running.
+  Frame* frame_ = nullptr;                 // Will be null if no valid thread stopped.
   Breakpoint* breakpoint_ = nullptr;       // May be null.
+  Filter* filter_ = nullptr;               // May be null.
   SymbolServer* symbol_server_ = nullptr;  // May be null.
 
   Verb verb_ = Verb::kNone;
@@ -124,4 +128,4 @@ Err DispatchCommand(ConsoleContext* context, const Command& cmd,
 
 }  // namespace zxdb
 
-#endif  // GARNET_BIN_ZXDB_CONSOLE_COMMAND_H_
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_COMMAND_H_

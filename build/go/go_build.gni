@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/clang/clang.gni")
-import("//build/config/fuchsia/zircon.gni")
+import("//build/config/fuchsia/zircon_legacy_vars.gni")
 import("//build/config/sysroot.gni")
 import("//build/host.gni")
 import("//build/sdk/sdk_atom.gni")
@@ -56,6 +56,11 @@ template("go_build") {
   }
   output_path = "${root_out_dir}/${output_name}"
 
+  use_strip = is_fuchsia
+  if (use_strip) {
+    unstripped_output_path = "${root_out_dir}/exe.unstripped/${output_name}"
+  }
+
   action(main_target_name) {
     deps = []
     if (defined(invoker.non_go_deps)) {
@@ -64,14 +69,11 @@ template("go_build") {
 
     pool = "//build/go:pool($default_toolchain)"
 
-    use_strip = is_fuchsia
-
     outputs = [
       output_path,
     ]
 
     if (use_strip) {
-      unstripped_output_path = "${root_out_dir}/exe.unstripped/${output_name}"
       outputs += [ unstripped_output_path ]
     }
 
@@ -82,7 +84,7 @@ template("go_build") {
       "//build/go/gen_library_metadata.py",
     ]
 
-    godepfile = "//buildtools/${host_platform}/godepfile"
+    godepfile = "//prebuilt/tools/godepfile/${host_platform}/godepfile"
     inputs = [
       godepfile,
     ]
@@ -138,6 +140,15 @@ template("go_build") {
         "--go-root",
         rebase_path("$host_tools_dir/goroot"),
       ]
+      args += [
+        # For garnet/go/src/pmd/ramdisk
+        "--include-dir",
+        rebase_path("//zircon/system/ulib/ramdevice-client/include"),
+        "--lib-dir",
+        rebase_path("gen/zircon/public/lib/ramdevice-client",
+                    "",
+                    root_build_dir),
+      ]
 
       foreach(target, zircon_legacy_targets) {
         if (target.target_name == "zircon") {
@@ -161,16 +172,30 @@ template("go_build") {
     } else {
       args += [
         "--go-root",
-        rebase_path("//buildtools/${host_platform}/go"),
+        rebase_path("//prebuilt/third_party/go/${host_platform}"),
       ]
     }
 
     if (use_strip) {
       args += [
         "--unstripped-binname",
-        "exe.unstripped/${output_name}",
+        rebase_path("${root_out_dir}/exe.unstripped/${output_name}",
+                    root_build_dir),
       ]
     }
+
+    # Add needed arguments for the buildidtool. We should add the stamp file
+    # output by buildidtool to the list of outputs for this action but because
+    # Ninja (and by consequence GN) limits us to one depfile where that depfile
+    # has only one output and we need the depfile for other things we don't
+    # list it as an output.
+    args += [
+      "--buildidtool",
+      rebase_path("//prebuilt/tools/buildidtool/${host_platform}/buildidtool",
+                  root_build_dir),
+      "--build-id-dir",
+      ".build-id",
+    ]
 
     if (defined(invoker.test) && invoker.test) {
       testonly = true

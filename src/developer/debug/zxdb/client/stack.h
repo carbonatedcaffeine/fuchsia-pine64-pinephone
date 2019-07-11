@@ -2,16 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_STACK_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_STACK_H_
 
 #include <functional>
 #include <optional>
 #include <vector>
 
-#include "src/lib/fxl/macros.h"
-#include "src/lib/fxl/memory/weak_ptr.h"
 #include "src/developer/debug/ipc/protocol.h"
 #include "src/developer/debug/zxdb/symbols/location.h"
+#include "src/lib/fxl/macros.h"
+#include "src/lib/fxl/memory/weak_ptr.h"
 
 namespace zxdb {
 
@@ -55,18 +56,16 @@ class Stack {
     //
     // The callback should be issued with an error if the object is destroyed
     // during processing.
-    virtual void SyncFramesForStack(
-        std::function<void(const Err&)> callback) = 0;
+    virtual void SyncFramesForStack(std::function<void(const Err&)> callback) = 0;
 
     // Constructs a Frame implementation for the given IPC stack frame and
     // location. The location must be an input since inline frame expansion
     // requires stack frames be constructed with different symbols than just
     // looking up the address in the symbols.
-    virtual std::unique_ptr<Frame> MakeFrameForStack(
-        const debug_ipc::StackFrame& input, Location location) = 0;
+    virtual std::unique_ptr<Frame> MakeFrameForStack(const debug_ipc::StackFrame& input,
+                                                     Location location) = 0;
 
-    virtual Location GetSymbolizedLocationForStackFrame(
-        const debug_ipc::StackFrame& input) = 0;
+    virtual Location GetSymbolizedLocationForStackFrame(const debug_ipc::StackFrame& input) = 0;
   };
 
   // The delegate must outlive this class.
@@ -80,9 +79,7 @@ class Stack {
   // the top 1-2 (see class-level comment above).
   bool has_all_frames() const { return has_all_frames_; }
 
-  size_t size() const {
-    return frames_.size() - hide_ambiguous_inline_frame_count_;
-  }
+  size_t size() const { return frames_.size() - hide_ambiguous_inline_frame_count_; }
   bool empty() const { return frames_.empty(); }
 
   // Access into the individual frames. The topmost stack frame is index 0.
@@ -105,22 +102,8 @@ class Stack {
   // index. The index must be valid in the current set of frames in this stack
   // object.
   //
-  // To be synchronously available, the synchronous getter requires that there
-  // be a physical frame before the most recent physical frame (the fingerprint
-  // is based on the calling physical frame's stack pointer) or the frame is
-  // known to be the oldest item in the stack (the fingerprint is special-cased
-  // for this entry). Frame 0 should always be synchronously available since
-  // the agent should send the top two physical frames for every stop.
-  //
-  // The asynchonous version will request more stack frames if necessary from
-  // the agent. If the requested frame changes, moves, or is deleted during the
-  // request, or if the Stack object is deleted, the callback will be issued
-  // with an error.
-  //
-  // See frame.h for a discussion on stack frames.
-  std::optional<FrameFingerprint> GetFrameFingerprint(size_t frame_index) const;
-  void GetFrameFingerprint(
-      size_t frame_index, std::function<void(const Err&, FrameFingerprint)> cb);
+  // See frame_fingerprint.h for a discussion on fingerprints.
+  FrameFingerprint GetFrameFingerprint(size_t frame_index) const;
 
   // Sets the number of inline frames at the top of the stack to show. See the
   // class-level comment above for more.
@@ -136,9 +119,7 @@ class Stack {
   // From 0 to "top inline frame count" of inline frames can be hidden or
   // unhidden. By default they are all visible (hide count = 0).
   size_t GetAmbiguousInlineFrameCount() const;
-  size_t hide_ambiguous_inline_frame_count() const {
-    return hide_ambiguous_inline_frame_count_;
-  }
+  size_t hide_ambiguous_inline_frame_count() const { return hide_ambiguous_inline_frame_count_; }
   void SetHideAmbiguousInlineFrameCount(size_t hide_count);
 
   // Queries the size and for frames at indices ignoring any hidden inline
@@ -146,9 +127,7 @@ class Stack {
   // the innermost inline frame and is not affected by
   // SetTopInlineFrameShowCount().
   size_t SizeIncludingHiddenInline() const { return frames_.size(); }
-  Frame* FrameAtIndexIncludingHiddenInline(size_t index) {
-    return frames_[index].get();
-  }
+  Frame* FrameAtIndexIncludingHiddenInline(size_t index) { return frames_[index].get(); }
 
   // Requests that all frame information be updated. This can be used to
   // (asynchronously) populate the frames when a Stack has only partial
@@ -176,8 +155,7 @@ class Stack {
                  const std::vector<debug_ipc::StackFrame>& frames);
 
   // Sets the frames to a known set to provide synthetic stacks for tests.
-  void SetFramesForTest(std::vector<std::unique_ptr<Frame>> frames,
-                        bool has_all);
+  void SetFramesForTest(std::vector<std::unique_ptr<Frame>> frames, bool has_all);
 
   // Removes all frames. In normal operation this is called by the Thread when
   // things happen that invalidate all frames such as resuming the thread.
@@ -210,3 +188,5 @@ class Stack {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_STACK_H_

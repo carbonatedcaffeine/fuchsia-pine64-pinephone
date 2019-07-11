@@ -48,8 +48,7 @@ template <typename T, typename BasePolicyT>
 class HashCacheObjectPoolPolicy : public BasePolicyT {
  public:
   template <typename... Args>
-  HashCacheObjectPoolPolicy(Args&&... args)
-      : BasePolicyT(std::forward<Args>(args)...) {}
+  HashCacheObjectPoolPolicy(Args&&... args) : BasePolicyT(std::forward<Args>(args)...) {}
 
   inline void DestroyPoolObject(T* ptr) {
 #ifndef NDEBUG
@@ -77,7 +76,7 @@ class HashCacheObjectPoolPolicy : public BasePolicyT {
 // evicted from the cache.  The recommended way to do this is to re-request
 // cached objects every frame (or even more often).
 template <typename T, typename ObjectPoolPolicyT = DefaultObjectPoolPolicy<T>,
-          uint32_t FramesUntilEviction = 3>
+          uint32_t FramesUntilEviction = 4>
 class HashCache {
  public:
   template <typename... Args>

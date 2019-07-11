@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_SHARED_BUFFERED_ZX_SOCKET_H_
+#define SRC_DEVELOPER_DEBUG_SHARED_BUFFERED_ZX_SOCKET_H_
 
 #include <lib/zx/socket.h>
+
 #include <functional>
 
 #include "src/developer/debug/shared/message_loop.h"
@@ -22,15 +24,13 @@ class BufferedZxSocket : public SocketWatcher, public StreamBuffer::Writer {
   BufferedZxSocket();
   ~BufferedZxSocket();
 
-  // This won't start listening on the socket (some users might want to delay
-  // doing that).
+  // This won't start listening on the socket (some users might want to delay doing that).
   //
   // If successful, it will leave the object in a valid state.
   zx_status_t Init(zx::socket socket);
 
-  // A MessageLoopZircon must be already set up on the current thread.
-  // Start can be called as long as valid() is true. ZX_ERR_BAD_STATE will be
-  // returned otherwise.
+  // A MessageLoopZircon must be already set up on the current thread. Start can be called as long
+  // as valid() is true. ZX_ERR_BAD_STATE will be returned otherwise.
   zx_status_t Start();
   zx_status_t Stop();
   // Stops and leaves the buffer in an invalid state.
@@ -64,3 +64,5 @@ class BufferedZxSocket : public SocketWatcher, public StreamBuffer::Writer {
 };
 
 }  // namespace debug_ipc
+
+#endif  // SRC_DEVELOPER_DEBUG_SHARED_BUFFERED_ZX_SOCKET_H_

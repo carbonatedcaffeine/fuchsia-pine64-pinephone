@@ -14,8 +14,8 @@ static_library("url") {
   visibility = [
     "//src/lib",
     ":*",
+    "//examples/media/playback/audio_player:*",
     "//garnet/bin/http:*",
-    "//garnet/examples/mediaplayer/audio_player:*",
     "//src/media/playback/mediaplayer:*",
     "//topaz/examples/mediaplayer/mediaplayer_skia:*",
   ]
@@ -73,6 +73,7 @@ source_set("url_unittests_main") {
 
   deps = [
     "//src/lib/fxl",
+    "//src/lib/fxl/test:test_settings",
     "//src/lib/icu_data/cpp",
     "//third_party/googletest:gtest",
     "//third_party/icu",

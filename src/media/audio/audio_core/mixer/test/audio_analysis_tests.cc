@@ -9,6 +9,8 @@
 
 namespace media::audio::test {
 
+constexpr double RT_2 = 1.4142135623730950488016887242;
+
 // Test uint8 version of CompareBuffers, which we use to test output buffers
 TEST(AnalysisHelpers, CompareBuffers_8) {
   uint8_t source[] = {0x42, 0x55};
@@ -69,11 +71,10 @@ TEST(AnalysisHelpers, CompareBuffToVal_8) {
   uint8_t source[] = {0xBB, 0xBB};
 
   // No match ...
-  EXPECT_FALSE(CompareBufferToVal(source, static_cast<uint8_t>(0xBC),
-                                  fbl::count_of(source), false));
+  EXPECT_FALSE(
+      CompareBufferToVal(source, static_cast<uint8_t>(0xBC), fbl::count_of(source), false));
   // Match
-  EXPECT_TRUE(CompareBufferToVal(source, static_cast<uint8_t>(0xBB),
-                                 fbl::count_of(source)));
+  EXPECT_TRUE(CompareBufferToVal(source, static_cast<uint8_t>(0xBB), fbl::count_of(source)));
 }
 
 // Test int16 version of this func, which we use to test output buffers
@@ -81,8 +82,8 @@ TEST(AnalysisHelpers, CompareBuffToVal_16) {
   int16_t source[] = {0xBAD, 0xCAD};
 
   // No match ...
-  EXPECT_FALSE(CompareBufferToVal(source, static_cast<int16_t>(0xBAD),
-                                  fbl::count_of(source), false));
+  EXPECT_FALSE(
+      CompareBufferToVal(source, static_cast<int16_t>(0xBAD), fbl::count_of(source), false));
   // Match - if we only look at the second value
   EXPECT_TRUE(CompareBufferToVal(source + 1, static_cast<int16_t>(0xCAD), 1));
 }
@@ -92,8 +93,7 @@ TEST(AnalysisHelpers, CompareBuffToVal_32) {
   int32_t source[] = {0xF00CAFE, 0xBADF00D};
 
   // No match ...
-  EXPECT_FALSE(
-      CompareBufferToVal(source, 0xF00CAFE, fbl::count_of(source), false));
+  EXPECT_FALSE(CompareBufferToVal(source, 0xF00CAFE, fbl::count_of(source), false));
   // Match - if we only look at the first value
   EXPECT_TRUE(CompareBufferToVal(source, 0xF00CAFE, 1));
 }
@@ -103,8 +103,7 @@ TEST(AnalysisHelpers, CompareBuffToVal_Float) {
   float source[] = {3.1415926f, 2.7182818f};
 
   // No match ...
-  EXPECT_FALSE(
-      CompareBufferToVal(source, 3.1415926f, fbl::count_of(source), false));
+  EXPECT_FALSE(CompareBufferToVal(source, 3.1415926f, fbl::count_of(source), false));
   // Match - if we only look at the first value
   EXPECT_TRUE(CompareBufferToVal(source, 3.1415926f, 1));
 }
@@ -121,8 +120,7 @@ TEST(AnalysisHelpers, GenerateCosine_8) {
   GenerateCosine(source, fbl::count_of(source), 0.0, false, 0.0, 0.0);
 
   // Frequency 0.0 produces constant value. Val 0 is shifted to 0x80.
-  EXPECT_TRUE(CompareBufferToVal(source, static_cast<uint8_t>(0x80),
-                                 fbl::count_of(source)));
+  EXPECT_TRUE(CompareBufferToVal(source, static_cast<uint8_t>(0x80), fbl::count_of(source)));
 }
 
 TEST(AnalysisHelpers, GenerateCosine_16) {
@@ -130,8 +128,7 @@ TEST(AnalysisHelpers, GenerateCosine_16) {
   GenerateCosine(source, fbl::count_of(source), 0.0, false, -32766.4);
 
   // Frequency of 0.0 produces constant value, with -.4 rounded toward zero.
-  EXPECT_TRUE(CompareBufferToVal(source, static_cast<int16_t>(-32766),
-                                 fbl::count_of(source)));
+  EXPECT_TRUE(CompareBufferToVal(source, static_cast<int16_t>(-32766), fbl::count_of(source)));
 
   // Test default bool value (false): also overwrite
   OverwriteCosine(source, 1, 0.0, -41.5, 0.0);
@@ -181,6 +178,197 @@ TEST(AnalysisHelpers, GenerateCosine_Double) {
   EXPECT_TRUE(CompareBuffers(source, expect, fbl::count_of(source)));
 }
 
+TEST(AnalysisHelpers, GetPhase) {
+  double reals[] = {0.5, 23, 0, -42, -0.1, -123, 0, 68, 0};
+  double imags[] = {0, 23, 243, 42, 0, -123, -243, -68, 0};
+  double expect[] = {0,         M_PI / 4,  M_PI / 2, 3 * M_PI / 4, M_PI, -3 * M_PI / 4,
+                     -M_PI / 2, -M_PI / 4, 0};
+  static_assert(fbl::count_of(imags) == fbl::count_of(reals), "buf mismatch");
+  static_assert(fbl::count_of(expect) == fbl::count_of(reals), "buf mismatch");
+
+  for (uint32_t idx = 0; idx < fbl::count_of(reals); ++idx) {
+    EXPECT_EQ(expect[idx], GetPhase(reals[idx], imags[idx]));
+  }
+}
+
+TEST(AnalysisHelpers, RectToPolar) {
+  double real[] = {1.0, 1.0, 0.0, -1.0, -1.0, -1.0, 0.0, 1.0, 0.0, -0.0};
+  double imag[] = {0.0, 1.0, 1.0, 1.0, -0.0, -1.0, -1.0, -1.0, 0.0, -0.0};
+  double magn[10];
+  double phase[10];
+  const double epsilon = 0.00000001;
+
+  RectangularToPolar(real, imag, fbl::count_of(real), magn, phase);
+  double expect_magn[] = {1.0, RT_2, 1.0, RT_2, 1.0, RT_2, 1.0, RT_2, 0.0, 0.0};
+
+  double expect_phase[] = {0.0,           M_PI / 4,  M_PI / 2,  3 * M_PI / 4, M_PI,
+                           -3 * M_PI / 4, -M_PI / 2, -M_PI / 4, 0.0,          0.0};
+
+  // We used double here; below are acceptable and reliable tolerances
+  for (uint32_t idx = 0; idx < fbl::count_of(expect_magn); ++idx) {
+    EXPECT_LE(magn[idx], expect_magn[idx] + epsilon) << idx;
+    EXPECT_GE(magn[idx], expect_magn[idx] - epsilon) << idx;
+
+    EXPECT_LE(phase[idx], expect_phase[idx] + epsilon) << idx;
+    EXPECT_GE(phase[idx], expect_phase[idx] - epsilon) << idx;
+  }
+}
+
+TEST(AnalysisHelpers, RealDFT) {
+  double reals[16];
+  const uint32_t buf_size = fbl::count_of(reals);
+  const double epsilon = 0.0000001024;
+
+  const uint32_t buf_sz_2 = buf_size >> 1;
+  double real_freq[9];
+  double imag_freq[9];
+  static_assert(fbl::count_of(real_freq) == buf_sz_2 + 1, "buf sizes must match");
+  static_assert(fbl::count_of(imag_freq) == buf_sz_2 + 1, "buf sizes must match");
+
+  // impulse
+  OverwriteCosine(reals, buf_size, 0.0, 0.0);
+  reals[0] = 1000000.0;
+  RealDFT(reals, buf_size, real_freq, imag_freq);
+
+  for (uint32_t idx = 0; idx <= buf_sz_2; ++idx) {
+    const double expect = 1000000.0;
+    EXPECT_LE(real_freq[idx], expect + epsilon) << idx;
+    EXPECT_GE(real_freq[idx], expect - epsilon) << idx;
+
+    EXPECT_LE(imag_freq[idx], epsilon) << idx;
+    EXPECT_GE(imag_freq[idx], -epsilon) << idx;
+  }
+
+  // DC
+  OverwriteCosine(reals, buf_size, 0.0, 700000.0);
+  RealDFT(reals, buf_size, real_freq, imag_freq);
+
+  for (uint32_t idx = 0; idx <= buf_sz_2; ++idx) {
+    const double expect = (idx == 0 ? 700000.0 * static_cast<double>(buf_size) : 0.0);
+    EXPECT_LE(real_freq[idx], expect + epsilon) << idx;
+    EXPECT_GE(real_freq[idx], expect - epsilon) << idx;
+
+    EXPECT_LE(imag_freq[idx], epsilon) << idx;
+    EXPECT_GE(imag_freq[idx], -epsilon) << idx;
+  }
+
+  // folding freq
+  OverwriteCosine(reals, buf_size, buf_size / 2.0, 1001001.0);
+  RealDFT(reals, buf_size, real_freq, imag_freq);
+
+  for (uint32_t idx = 0; idx <= buf_sz_2; ++idx) {
+    const double expect = (idx == buf_size / 2) ? (1001001.0 * static_cast<double>(buf_size)) : 0.0;
+    EXPECT_LE(real_freq[idx], expect + epsilon) << idx;
+    EXPECT_GE(real_freq[idx], expect - epsilon) << idx;
+
+    EXPECT_LE(imag_freq[idx], epsilon) << idx;
+    EXPECT_GE(imag_freq[idx], -epsilon) << idx;
+  }
+
+  // 1
+  OverwriteCosine(reals, buf_size, 1.0, 20202020.0);
+  RealDFT(reals, buf_size, real_freq, imag_freq);
+
+  for (uint32_t idx = 0; idx <= buf_sz_2; ++idx) {
+    const double expect = (idx == 1) ? (20202020.0 * static_cast<double>(buf_size) / 2.0) : 0.0;
+    EXPECT_LE(real_freq[idx], expect + epsilon) << idx;
+    EXPECT_GE(real_freq[idx], expect - epsilon) << idx;
+
+    EXPECT_LE(imag_freq[idx], epsilon) << idx;
+    EXPECT_GE(imag_freq[idx], -epsilon) << idx;
+  }
+
+  // 1, with -PI/2 phase
+  OverwriteCosine(reals, buf_size, 1.0, 20202020.0, -M_PI / 2.0);
+  RealDFT(reals, buf_size, real_freq, imag_freq);
+
+  for (uint32_t idx = 0; idx <= buf_sz_2; ++idx) {
+    EXPECT_LE(real_freq[idx], epsilon) << idx;
+    EXPECT_GE(real_freq[idx], -epsilon) << idx;
+
+    const double expect = (idx == 1) ? (20202020.0 * static_cast<double>(buf_size) / 2.0) : 0.0;
+    EXPECT_LE(imag_freq[idx], -expect + epsilon) << idx;
+    EXPECT_GE(imag_freq[idx], -expect - epsilon) << idx;
+  }
+}
+
+TEST(AnalysisHelpers, IDFT) {
+  double reals[16];
+  double expects[16];
+  const uint32_t buf_size = fbl::count_of(reals);
+  const double epsilon = 0.00000002;
+  static_assert(buf_size == fbl::count_of(expects), "buf size mismatch");
+
+  double real_freq[9];
+  double imag_freq[9];
+  const uint32_t buf_sz_2 = buf_size >> 1;
+  static_assert(fbl::count_of(real_freq) == buf_sz_2 + 1, "buf size mismatch");
+  static_assert(fbl::count_of(imag_freq) == buf_sz_2 + 1, "buf size mismatch");
+
+  // impulse
+  OverwriteCosine(real_freq, buf_sz_2 + 1, 0.0, 123.0);
+  OverwriteCosine(imag_freq, buf_sz_2 + 1, 0.0, 0.0);
+
+  InverseDFT(real_freq, imag_freq, buf_size, reals);
+  for (uint32_t idx = 0; idx < buf_size; ++idx) {
+    const double expect = (idx == 0 ? 123.0 : 0.0);
+    EXPECT_LE(reals[idx], expect + epsilon) << idx;
+    EXPECT_GE(reals[idx], expect - epsilon) << idx;
+  }
+
+  // DC
+  OverwriteCosine(real_freq, buf_sz_2 + 1, 0.0, 0.0);
+  real_freq[0] = 4321.0 * buf_size;
+  OverwriteCosine(imag_freq, buf_sz_2 + 1, 0.0, 0.0);
+
+  InverseDFT(real_freq, imag_freq, buf_size, reals);
+  for (uint32_t idx = 0; idx < buf_size; ++idx) {
+    const double expect = 4321.0;
+    EXPECT_LE(reals[idx], expect + epsilon) << idx;
+    EXPECT_GE(reals[idx], expect - epsilon) << idx;
+  }
+
+  // folding freq
+  OverwriteCosine(real_freq, buf_sz_2 + 1, 0.0, 0.0);
+  real_freq[buf_sz_2] = 10203.0 * buf_size;
+  OverwriteCosine(imag_freq, buf_sz_2 + 1, 0.0, 0.0);
+
+  InverseDFT(real_freq, imag_freq, buf_size, reals);
+
+  for (uint32_t idx = 0; idx < buf_size; ++idx) {
+    const double expect = (idx % 2 == 0 ? 10203.0 : -10203.0);
+    EXPECT_LE(reals[idx], expect + epsilon) << idx;
+    EXPECT_GE(reals[idx], expect - epsilon) << idx;
+  }
+
+  // freq 1
+  OverwriteCosine(real_freq, buf_sz_2 + 1, 0.0, 0.0);
+  real_freq[1] = 20202020.0 * buf_sz_2;
+  OverwriteCosine(imag_freq, buf_sz_2 + 1, 0.0, 0.0);
+
+  OverwriteCosine(expects, buf_size, 1.0, 20202020.0);
+  InverseDFT(real_freq, imag_freq, buf_size, reals);
+
+  for (uint32_t idx = 0; idx < buf_size; ++idx) {
+    EXPECT_LE(reals[idx], expects[idx] + epsilon) << idx;
+    EXPECT_GE(reals[idx], expects[idx] - epsilon) << idx;
+  }
+
+  // freq 1, with 3PI/4 phase
+  OverwriteCosine(real_freq, buf_sz_2 + 1, 0.0, 0.0);
+  real_freq[1] = -20202020.0 / RT_2 * buf_sz_2;
+  OverwriteCosine(imag_freq, buf_sz_2 + 1, 0.0, 0.0);
+  imag_freq[1] = 20202020.0 / RT_2 * buf_sz_2;
+
+  OverwriteCosine(expects, buf_size, 1.0, 20202020.0, 3.0 * M_PI / 4.0);
+  InverseDFT(real_freq, imag_freq, buf_size, reals);
+
+  for (uint32_t idx = 0; idx < buf_size; ++idx) {
+    EXPECT_LE(reals[idx], expects[idx] + epsilon) << idx;
+    EXPECT_GE(reals[idx], expects[idx] - epsilon) << idx;
+  }
+}
+
 TEST(AnalysisHelpers, FFT) {
   double reals[16];
   double imags[16];
@@ -211,8 +399,7 @@ TEST(AnalysisHelpers, FFT) {
   FFT(reals, imags, buf_size);
 
   for (uint32_t idx = 0; idx <= buf_sz_2; ++idx) {
-    const double expect =
-        (idx == 0 ? 700000.0 * static_cast<double>(buf_size) : 0.0);
+    const double expect = (idx == 0 ? 700000.0 * static_cast<double>(buf_size) : 0.0);
     EXPECT_LE(reals[idx], expect + epsilon) << idx;
     EXPECT_GE(reals[idx], expect - epsilon) << idx;
 
@@ -267,6 +454,81 @@ TEST(AnalysisHelpers, FFT) {
     const double expect = (idx == 1) ? (test_val * buf_size / 2.0) : 0.0;
     EXPECT_LE(imags[idx], -expect + epsilon) << idx;
     EXPECT_GE(imags[idx], -expect - epsilon) << idx;
+  }
+}
+
+TEST(AnalysisHelpers, IFFT) {
+  double reals[16];
+  double imags[16];
+  double expects[16];
+  const uint32_t buf_size = fbl::count_of(reals);
+  const uint32_t buf_sz_2 = buf_size >> 1;
+
+  const double epsilon = 0.00000002;
+  static_assert(buf_size == fbl::count_of(imags), "buf size mismatch");
+  static_assert(buf_size == fbl::count_of(expects), "buf size mismatch");
+
+  // impulse
+  OverwriteCosine(reals, buf_size, 0.0, 123.0);
+  OverwriteCosine(imags, buf_size, 0.0, 0.0);
+
+  InverseFFT(reals, imags, buf_size);
+  for (uint32_t idx = 0; idx < buf_size; ++idx) {
+    const double expect = (idx == 0 ? 123.0 : 0.0);
+    EXPECT_LE(reals[idx], expect + epsilon) << idx;
+    EXPECT_GE(reals[idx], expect - epsilon) << idx;
+
+    EXPECT_LE(imags[idx], epsilon) << idx;
+    EXPECT_GE(imags[idx], -epsilon) << idx;
+  }
+
+  // DC
+  OverwriteCosine(reals, buf_size, 0.0, 0.0);
+  reals[0] = 4321.0 * buf_size;
+  OverwriteCosine(imags, buf_size, 0.0, 0.0);
+
+  InverseFFT(reals, imags, buf_size);
+  for (uint32_t idx = 0; idx < buf_size; ++idx) {
+    const double expect = 4321.0;
+    EXPECT_LE(reals[idx], expect + epsilon) << idx;
+    EXPECT_GE(reals[idx], expect - epsilon) << idx;
+  }
+
+  // folding freq
+  OverwriteCosine(reals, buf_size, 0.0, 0.0);
+  reals[buf_sz_2] = 10203.0 * buf_size;
+  OverwriteCosine(imags, buf_size, 0.0, 0.0);
+
+  InverseFFT(reals, imags, buf_size);
+  for (uint32_t idx = 0; idx < buf_size; ++idx) {
+    const double expect = (idx % 2 == 0 ? 10203.0 : -10203.0);
+    EXPECT_LE(reals[idx], expect + epsilon) << idx;
+    EXPECT_GE(reals[idx], expect - epsilon) << idx;
+  }
+
+  // freq 1
+  OverwriteCosine(reals, buf_size, 0.0, 0.0);
+  reals[1] = 20202020.0 * buf_size;
+  OverwriteCosine(imags, buf_size, 0.0, 0.0);
+
+  OverwriteCosine(expects, buf_size, 1.0, 20202020.0);
+  InverseFFT(reals, imags, buf_size);
+  for (uint32_t idx = 0; idx < buf_size; ++idx) {
+    EXPECT_LE(reals[idx], expects[idx] + epsilon) << idx;
+    EXPECT_GE(reals[idx], expects[idx] - epsilon) << idx;
+  }
+
+  // freq 1, with 3PI/4 phase
+  OverwriteCosine(reals, buf_size, 0.0, 0.0);
+  reals[1] = -20202020.0 / RT_2 * buf_size;
+  OverwriteCosine(imags, buf_size, 0.0, 0.0);
+  imags[1] = 20202020.0 / RT_2 * buf_size;
+
+  OverwriteCosine(expects, buf_size, 1.0, 20202020.0, 3.0 * M_PI / 4.0);
+  InverseFFT(reals, imags, buf_size);
+  for (uint32_t idx = 0; idx < buf_size; ++idx) {
+    EXPECT_LE(reals[idx], expects[idx] + epsilon) << idx;
+    EXPECT_GE(reals[idx], expects[idx] - epsilon) << idx;
   }
 }
 

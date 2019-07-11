@@ -6,12 +6,14 @@
         "dev": [
             "class/input"
         ],
-        "features" : [
+        "features": [
             "config-data"
         ],
         "services": [
-            "fuchsia.tracelink.Registry",
-            "fuchsia.ui.scenic.Scenic"
+            "fuchsia.recovery.FactoryReset",
+            "fuchsia.tracing.provider.Registry",
+            "fuchsia.ui.scenic.Scenic",
+            "fuchsia.ui.shortcut.Manager"
         ]
     }
 }

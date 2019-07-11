@@ -3,8 +3,10 @@
 // found in the LICENSE file.
 
 #include "src/connectivity/overnet/lib/endpoint/router_endpoint.h"
+
 #include <iostream>
 #include <memory>
+
 #include "garnet/public/lib/fostr/fidl/fuchsia/overnet/protocol/formatting.h"
 #include "src/connectivity/overnet/lib/protocol/coding.h"
 #include "src/connectivity/overnet/lib/protocol/fidl.h"
@@ -43,15 +45,19 @@ void RouterEndpoint::StartGossipTimer() {
 }
 
 void RouterEndpoint::SendGossipTo(NodeId target) {
-  OVERNET_TRACE(DEBUG) << node_id() << " send gossip to " << target;
   // Are we still gossiping?
   if (!gossip_timer_.get()) {
+    OVERNET_TRACE(DEBUG) << node_id() << " send gossip to " << target
+                         << " [skipped: STOPPED GOSSIPING]";
     return;
   }
   auto con = connection_streams_.find(target);
-  if (con == connection_streams_.end()) {
+  if (con == connection_streams_.end() || con->second.IsClosedForSending()) {
+    OVERNET_TRACE(DEBUG) << node_id() << " send gossip to " << target
+                         << " [skipped: NO CONNECTION]";
     return;
   }
+  OVERNET_TRACE(DEBUG) << node_id() << " send gossip to " << target;
   SendGossipUpdate(con->second.proxy(), target);
 }
 
@@ -108,6 +114,11 @@ void RouterEndpoint::UpdatedDescription() {
         description_timer_.Reset();
         auto description = BuildDescription();
         for (auto& id_conn_pair : connection_streams_) {
+          if (id_conn_pair.second.IsClosedForSending()) {
+            OVERNET_TRACE(DEBUG) << node_id() << " skip sending description to "
+                                 << id_conn_pair.first << ": Closing";
+            continue;
+          }
           OVERNET_TRACE(DEBUG)
               << node_id() << " send description to " << id_conn_pair.first
               << ": " << BuildDescription();
@@ -165,9 +176,9 @@ RouterEndpoint::Stream::Stream(NewStream introduction)
   auto it = introduction.creator_->connection_streams_.find(introduction.peer_);
   if (it == introduction.creator_->connection_streams_.end()) {
     OVERNET_TRACE(DEBUG) << "Failed to find connection " << introduction.peer_;
-    Close(Status(StatusCode::FAILED_PRECONDITION,
-                 "Connection closed before stream creation"),
-          Callback<void>::Ignored());
+    Close(
+        Status::FailedPrecondition("Connection closed before stream creation"),
+        Callback<void>::Ignored());
   } else {
     connection_stream_ = &it->second;
     connection_stream_->forked_streams_.PushBack(this);
@@ -352,8 +363,7 @@ void RouterEndpoint::ConnectionStream::Stub::ConnectToService(
       it != connection_stream_->endpoint_->services_.end()) {
     it->second->AcceptStream(std::move(*new_stream));
   } else {
-    new_stream->Fail(
-        Status(StatusCode::INVALID_ARGUMENT, "Service not supported"));
+    new_stream->Fail(Status::InvalidArgument("Service not supported"));
   }
 }
 
@@ -374,9 +384,9 @@ void RouterEndpoint::ConnectionStream::Stub::UpdateNodeStatus(
   auto* const endpoint = connection_stream_->endpoint_;
   OVERNET_TRACE(DEBUG) << "Got: UpdateNodeStatus " << status;
   if (status.id == endpoint->node_id()) {
-    connection_stream_->Close(Status(StatusCode::INVALID_ARGUMENT,
-                                     "Attempt to set this nodes status"),
-                              Callback<void>::Ignored());
+    connection_stream_->Close(
+        Status::InvalidArgument("Attempt to set this nodes status"),
+        Callback<void>::Ignored());
     return;
   }
   connection_stream_->endpoint_->RegisterPeer(NodeId(status.id));
@@ -388,9 +398,9 @@ void RouterEndpoint::ConnectionStream::Stub::UpdateLinkStatus(
   auto* const endpoint = connection_stream_->endpoint_;
   OVERNET_TRACE(DEBUG) << "Got: UpdateLinkStatus " << status;
   if (status.from == endpoint->node_id()) {
-    connection_stream_->Close(Status(StatusCode::INVALID_ARGUMENT,
-                                     "Attempt to set this nodes link status"),
-                              Callback<void>::Ignored());
+    connection_stream_->Close(
+        Status::InvalidArgument("Attempt to set this nodes link status"),
+        Callback<void>::Ignored());
     return;
   }
   endpoint->ApplyGossipUpdate(std::move(status));
@@ -406,17 +416,21 @@ void RouterEndpoint::ConnectionStream::Stub::UpdateNodeDescription(
 }
 
 void RouterEndpoint::OnNodeDescriptionTableChange(uint64_t last_seen_version,
-                                                  Callback<void> on_change) {
+                                                  StatusCallback on_change) {
   if (last_seen_version == node_description_table_version_) {
     on_node_description_table_change_.emplace_back(std::move(on_change));
+  } else {
+    on_change(Status::Ok());
   }
-  // else don't store on_change, forcing its destructor to be called, forcing it
-  // to be called.
 }
 
 void RouterEndpoint::NewNodeDescriptionTableVersion() {
   ++node_description_table_version_;
-  std::vector<Callback<void>>().swap(on_node_description_table_change_);
+  auto cbs = std::move(on_node_description_table_change_);
+  assert(on_node_description_table_change_.empty());
+  for (auto& cb : cbs) {
+    cb(Status::Ok());
+  }
 }
 
 }  // namespace overnet

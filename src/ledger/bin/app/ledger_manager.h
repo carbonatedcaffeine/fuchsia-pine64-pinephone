@@ -9,7 +9,7 @@
 #include <lib/callback/auto_cleanable.h>
 #include <lib/fidl/cpp/binding_set.h>
 #include <lib/fit/function.h>
-#include <lib/inspect/inspect.h>
+#include <lib/inspect_deprecated/inspect.h>
 
 #include <functional>
 #include <map>
@@ -21,13 +21,12 @@
 #include "src/ledger/bin/app/merging/ledger_merge_manager.h"
 #include "src/ledger/bin/app/page_availability_manager.h"
 #include "src/ledger/bin/app/page_manager.h"
-#include "src/ledger/bin/app/page_manager_container.h"
 #include "src/ledger/bin/app/page_usage_listener.h"
 #include "src/ledger/bin/app/types.h"
 #include "src/ledger/bin/encryption/public/encryption_service.h"
 #include "src/ledger/bin/environment/environment.h"
-#include "src/ledger/bin/fidl/error_notifier.h"
-#include "src/ledger/bin/fidl/error_notifier/error_notifier_binding.h"
+#include "src/ledger/bin/fidl/syncable.h"
+#include "src/ledger/bin/fidl/syncable/syncable_binding.h"
 #include "src/ledger/bin/storage/public/types.h"
 #include "src/ledger/bin/sync_coordinator/public/ledger_sync.h"
 #include "src/lib/fxl/macros.h"
@@ -42,15 +41,14 @@ namespace ledger {
 // LedgerManager owns all per-ledger-instance objects: LedgerStorage and a FIDL
 // LedgerImpl. It is safe to delete it at any point - this closes all channels,
 // deletes the LedgerImpl and tears down the storage.
-class LedgerManager : public LedgerImpl::Delegate {
+class LedgerManager : public LedgerImpl::Delegate, inspect_deprecated::ChildrenManager {
  public:
-  LedgerManager(
-      Environment* environment, std::string ledger_name,
-      inspect::Node inspect_node,
-      std::unique_ptr<encryption::EncryptionService> encryption_service,
-      std::unique_ptr<storage::LedgerStorage> storage,
-      std::unique_ptr<sync_coordinator::LedgerSync> ledger_sync,
-      PageUsageListener* page_usage_listener);
+  LedgerManager(Environment* environment, std::string ledger_name,
+                inspect_deprecated::Node inspect_node,
+                std::unique_ptr<encryption::EncryptionService> encryption_service,
+                std::unique_ptr<storage::LedgerStorage> storage,
+                std::unique_ptr<sync_coordinator::LedgerSync> ledger_sync,
+                PageUsageListener* page_usage_listener);
   ~LedgerManager() override;
 
   // Creates a new proxy for the LedgerImpl managed by this LedgerManager.
@@ -60,123 +58,86 @@ class LedgerManager : public LedgerImpl::Delegate {
   // the callback will be |PAGE_OPENED| if the page is opened after calling this
   // method and before the callback is called. Otherwise it will be |YES| or
   // |NO| depending on whether the page is synced or not.
-  void PageIsClosedAndSynced(
-      storage::PageIdView page_id,
-      fit::function<void(storage::Status, PagePredicateResult)> callback);
+  void PageIsClosedAndSynced(storage::PageIdView page_id,
+                             fit::function<void(Status, PagePredicateResult)> callback);
 
   // Checks whether the given page is closed, offline and empty. The result
   // returned in the callback will be |PAGE_OPENED| if the page is opened after
   // calling this method and before the callback is called. Otherwise it will be
   // |YES| or |NO| depending on whether the page is offline and empty or not.
-  void PageIsClosedOfflineAndEmpty(
-      storage::PageIdView page_id,
-      fit::function<void(storage::Status, PagePredicateResult)> callback);
+  void PageIsClosedOfflineAndEmpty(storage::PageIdView page_id,
+                                   fit::function<void(Status, PagePredicateResult)> callback);
 
   // Deletes the local copy of the page. If the page is currently open, the
   // callback will be called with |ILLEGAL_STATE|.
-  void DeletePageStorage(convert::ExtendedStringView page_id,
-                         fit::function<void(storage::Status)> callback);
+  void DeletePageStorage(convert::ExtendedStringView page_id, fit::function<void(Status)> callback);
 
   // LedgerImpl::Delegate:
   void GetPage(convert::ExtendedStringView page_id, PageState page_state,
                fidl::InterfaceRequest<Page> page_request,
-               fit::function<void(storage::Status)> callback) override;
-  void SetConflictResolverFactory(
-      fidl::InterfaceHandle<ConflictResolverFactory> factory) override;
+               fit::function<void(Status)> callback) override;
+  void SetConflictResolverFactory(fidl::InterfaceHandle<ConflictResolverFactory> factory) override;
+
+  // inspect_deprecated::ChildrenManager:
+  void GetNames(fit::function<void(std::vector<std::string>)> callback) override;
+  void Attach(std::string name, fit::function<void(fit::closure)> callback) override;
 
   void set_on_empty(fit::closure on_empty_callback) {
     on_empty_callback_ = std::move(on_empty_callback);
   }
 
+  // Registers "interest" in this LedgerManager for which this LedgerManager
+  // will remain non-empty and returns a closure that when called will
+  // deregister the "interest" in this LedgerManager (and potentially cause this
+  // LedgerManager's on_empty_callback_ to be called).
+  fit::closure CreateDetacher();
+
  private:
   using PageTracker = fit::function<bool()>;
 
-  // Requests a PageStorage object for the given |container|. If the page is not
-  // locally available, the |callback| is called with |PAGE_NOT_FOUND|.
-  void InitPageManagerContainer(PageManagerContainer* container,
-                                convert::ExtendedStringView page_id,
-                                fit::function<void(storage::Status)> callback);
-
-  // Creates a page storage for the given |page_id| and completes the
-  // PageManagerContainer.
-  void CreatePageStorage(storage::PageId page_id, PageState page_state,
-                         PageManagerContainer* container);
-
-  // Adds a new PageManagerContainer for |page_id| and configures it so that it
-  // is automatically deleted from |page_managers_| when the last local client
-  // disconnects from the page. Returns the container.
-  PageManagerContainer* AddPageManagerContainer(storage::PageIdView page_id);
-
-  // Creates a new page manager for the given storage.
-  std::unique_ptr<PageManager> NewPageManager(
-      std::unique_ptr<storage::PageStorage> page_storage,
-      PageManager::PageStorageState state);
-
-  // Checks whether the given page is closed and staisfies the given
-  // |predicate|. The result returned in the callback will be |PAGE_OPENED| if
-  // the page is opened after calling this method and before the callback is
-  // called. Otherwise it will be |YES| or |NO| depending on whether the
-  // predicate is satisfied.
-  void PageIsClosedAndSatisfiesPredicate(
-      storage::PageIdView page_id,
-      fit::function<void(PageManager*,
-                         fit::function<void(storage::Status, bool)>)>
-          predicate,
-      fit::function<void(storage::Status, PagePredicateResult)> callback);
-
-  // Returns a tracking Callable object for the given page. When called, returns
-  // |true| if the page has not been opened until now, and stops tracking the
-  // page.
-  PageTracker NewPageTracker(storage::PageIdView page_id);
-
-  // If the page is among the ones whose usage is being tracked, marks this page
-  // as opened. See also |page_was_opened_map_|.
-  void MaybeMarkPageOpened(storage::PageIdView page_id);
+  // Retrieves (if present in |page_managers_| when called) or creates and
+  // places in |page_managers_| (if not present in |page_managers_| when called)
+  // the |PageManager| for the given |page_id|.
+  // TODO(https://fuchsia.atlassian.net/browse/LE-789): This method's return
+  // value should be an interest-indication "retainer" object that when deleted
+  // indicates to the got-or-created |PageManager| that it should check its
+  // emptiness and possibly call its on_empty_callback.
+  PageManager* GetOrCreatePageManager(convert::ExtendedStringView page_id);
 
   void CheckEmpty();
 
   Environment* const environment_;
   std::string ledger_name_;
+
+  // A nonnegative count of the number of "registered interests" for this
+  // |LedgerManager|. This field is incremented by calls to |CreateDetacher| and
+  // decremented by calls to the closures returned by calls to |CreateDetacher|.
+  // This |LedgerManager| is not considered empty while this number is positive.
+  int64_t outstanding_detachers_ = 0;
+
   std::unique_ptr<encryption::EncryptionService> encryption_service_;
   // |storage_| must outlive objects containing CommitWatchers, which includes
-  // |ledger_sync_| and |page_managers_|.
+  // |ledger_sync_| and |active_page_manager_containers_|.
   std::unique_ptr<storage::LedgerStorage> storage_;
   std::unique_ptr<sync_coordinator::LedgerSync> ledger_sync_;
   LedgerImpl ledger_impl_;
-  // |merge_manager_| must be destructed after |page_managers_| to ensure it
-  // outlives any page-specific merge resolver.
+  // |merge_manager_| must be destructed after |active_page_manager_containers_|
+  // to ensure it outlives any page-specific merge resolver.
   LedgerMergeManager merge_manager_;
-  callback::AutoCleanableSet<
-      ErrorNotifierBinding<fuchsia::ledger::LedgerErrorNotifierDelegate>>
-      bindings_;
+  callback::AutoCleanableSet<SyncableBinding<fuchsia::ledger::LedgerSyncableDelegate>> bindings_;
 
   // Mapping from each page id to the manager of that page.
-  callback::AutoCleanableMap<storage::PageId, PageManagerContainer,
-                             convert::StringViewComparator>
+  callback::AutoCleanableMap<storage::PageId, PageManager, convert::StringViewComparator>
       page_managers_;
   PageUsageListener* page_usage_listener_;
   fit::closure on_empty_callback_;
 
-  PageAvailabilityManager page_availability_manager_;
-
-  // |page_was_opened_map_| is used to track whether certain pages were opened
-  // during a given operation. When |PageIsClosedAndSatisfiesPredicate()| is
-  // called, an entry is added in this map, with the given page_id as key, while
-  // a unique operation id is added in the corresponding value. That entry will
-  // be deleted either when that operation is done, or when the page is opened
-  // because of an external request. This guarantees that if before calling the
-  // callback of |PageIsClosedAndSatisfiesPredicate|, the entry is still present
-  // in the map, the page was not opened during that operation. Otherwise, it
-  // was, and |PAGE_OPENED| should be returned.
-  std::map<storage::PageId, std::vector<uint64_t>> page_was_opened_map_;
-  uint64_t page_was_opened_id_ = 0;
-  // |tracked_pages_| counts the number of active page-tracking operations. The
-  // manager is not empty until all operations have completed.
-  uint64_t tracked_pages_ = 0;
-
   // The static Inspect object maintaining in Inspect a representation of this
   // LedgerManager.
-  inspect::Node inspect_node_;
+  inspect_deprecated::Node inspect_node_;
+  // The static Inspect object to which this LedgerManager's pages are attached.
+  inspect_deprecated::Node pages_node_;
+  fit::deferred_callback children_manager_retainer_;
 
   // Must be the last member.
   fxl::WeakPtrFactory<LedgerManager> weak_factory_;

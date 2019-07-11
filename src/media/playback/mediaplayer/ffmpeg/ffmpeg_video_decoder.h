@@ -5,7 +5,7 @@
 #ifndef SRC_MEDIA_PLAYBACK_MEDIAPLAYER_FFMPEG_FFMPEG_VIDEO_DECODER_H_
 #define SRC_MEDIA_PLAYBACK_MEDIAPLAYER_FFMPEG_FFMPEG_VIDEO_DECODER_H_
 
-#include "lib/media/timeline/timeline_rate.h"
+#include "lib/media/cpp/timeline_rate.h"
 #include "src/media/playback/mediaplayer/ffmpeg/ffmpeg_decoder_base.h"
 
 namespace media_player {
@@ -26,12 +26,10 @@ class FfmpegVideoDecoder : public FfmpegDecoderBase {
   // FfmpegDecoderBase overrides.
   void OnNewInputPacket(const PacketPtr& packet) override;
 
-  int BuildAVFrame(const AVCodecContext& av_codec_context,
-                   AVFrame* av_frame) override;
+  int BuildAVFrame(const AVCodecContext& av_codec_context, AVFrame* av_frame) override;
 
-  PacketPtr CreateOutputPacket(
-      const AVFrame& av_frame,
-      fbl::RefPtr<PayloadBuffer> payload_buffer) override;
+  PacketPtr CreateOutputPacket(const AVFrame& av_frame,
+                               fbl::RefPtr<PayloadBuffer> payload_buffer) override;
 
   const char* label() const override;
 

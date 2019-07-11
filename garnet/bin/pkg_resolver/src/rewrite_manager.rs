@@ -4,9 +4,10 @@
 
 use {
     failure::Fail,
+    fuchsia_inspect::{self as inspect, Property},
     fuchsia_syslog::fx_log_err,
-    fuchsia_uri::pkg_uri::PkgUri,
-    fuchsia_uri_rewrite::{Rule, RuleConfig},
+    fuchsia_url::pkg_url::PkgUrl,
+    fuchsia_url_rewrite::{Rule, RuleConfig, RuleInspectState},
     std::{
         collections::VecDeque,
         fs::{self, File},
@@ -27,6 +28,18 @@ pub struct RewriteManager {
     dynamic_rules: Vec<Rule>,
     generation: u32,
     dynamic_rules_path: PathBuf,
+    inspect: RewriteManagerInspectState,
+}
+
+#[derive(Debug)]
+struct RewriteManagerInspectState {
+    static_rules_node: inspect::Node,
+    static_rules_states: Vec<RuleInspectState>,
+    dynamic_rules_node: inspect::Node,
+    dynamic_rules_states: Vec<RuleInspectState>,
+    generation_property: fuchsia_inspect::UintProperty,
+    dynamic_rules_path_property: fuchsia_inspect::StringProperty,
+    node: inspect::Node,
 }
 
 #[derive(Debug, Fail)]
@@ -36,22 +49,22 @@ pub enum CommitError {
 }
 
 impl RewriteManager {
-    /// Rewrite the given [PkgUri] using the first dynamic or static rewrite rule that matches and
-    /// produces a valid [PkgUri]. If no rewrite rules match or all that do produce invalid
-    /// [PkgUri]s, return the original, unmodified [PkgUri].
-    pub fn rewrite(&self, uri: PkgUri) -> PkgUri {
+    /// Rewrite the given [PkgUrl] using the first dynamic or static rewrite rule that matches and
+    /// produces a valid [PkgUrl]. If no rewrite rules match or all that do produce invalid
+    /// [PkgUrl]s, return the original, unmodified [PkgUrl].
+    pub fn rewrite(&self, url: PkgUrl) -> PkgUrl {
         for rule in self.list() {
-            match rule.apply(&uri) {
+            match rule.apply(&url) {
                 Some(Ok(res)) => {
                     return res;
                 }
                 Some(Err(err)) => {
-                    fx_log_err!("re-write rule {:?} produced an invalid URI, ignoring rule", err);
+                    fx_log_err!("re-write rule {:?} produced an invalid URL, ignoring rule", err);
                 }
                 _ => {}
             }
         }
-        uri
+        url
     }
 
     fn save(&mut self) -> io::Result<()> {
@@ -96,14 +109,47 @@ impl RewriteManager {
             if let Err(err) = self.save() {
                 fx_log_err!("error while saving dynamic rewrite rules: {}", err);
             }
+            self.update_inspect_objects();
             Ok(())
         }
     }
 
+    /// Finds the first rule, if any, that remaps all of `fuchsia.com`.
+    pub fn amber_source_name(&self) -> Option<String> {
+        self.list().filter_map(|rule| rule.fuchsia_replacement()).next()
+    }
+
     /// Return an iterator through all rewrite rules in the order they should be applied to
-    /// incoming `fuchsia-pkg://` URIs.
+    /// incoming `fuchsia-pkg://` URLs.
     pub fn list<'a>(&'a self) -> impl Iterator<Item = &'a Rule> {
-        self.dynamic_rules.iter().chain(self.static_rules.iter())
+        self.dynamic_rules.iter().chain(self.list_static())
+    }
+
+    /// Return an iterator through all static rewrite rules in the order they should be applied to
+    /// incoming `fuchsia-pkg://` URLs, after all dynamic rules have been considered.
+    pub fn list_static<'a>(&'a self) -> impl Iterator<Item = &'a Rule> {
+        self.static_rules.iter()
+    }
+
+    fn update_rule_inspect_states(
+        node: &inspect::Node,
+        rules: &[Rule],
+        states: &mut Vec<RuleInspectState>,
+    ) {
+        states.clear();
+        for (i, rule) in rules.iter().enumerate() {
+            let rule_node = node.create_child(&i.to_string());
+            states.push(rule.create_inspect_state(rule_node));
+        }
+    }
+
+    fn update_inspect_objects(&mut self) {
+        self.inspect.generation_property.set(self.generation.into());
+        RewriteManager::update_rule_inspect_states(
+            &self.inspect.dynamic_rules_node,
+            &self.dynamic_rules,
+            &mut self.inspect.dynamic_rules_states,
+        );
     }
 }
 
@@ -130,22 +176,27 @@ impl Transaction {
         self.dynamic_rules.push_front(rule);
     }
 
-    #[cfg(test)]
-    fn list_dynamic<'a>(&'a self) -> impl Iterator<Item = &'a Rule> {
+    /// Return an iterator through all dynamic rewrite rules in the order they should be applied to
+    /// incoming `fuchsia-pkg://` URLs.
+    pub fn list_dynamic<'a>(&'a self) -> impl Iterator<Item = &'a Rule> {
         self.dynamic_rules.iter()
     }
 }
 
+#[derive(Debug)]
+pub struct UnsetInspectNode;
+
 /// [RewriteManagerBuilder] constructs a [RewriteManager], optionally initializing it with [Rule]s
 /// passed in directly or loaded out of the filesystem.
 #[derive(Debug, PartialEq, Eq)]
-pub struct RewriteManagerBuilder {
+pub struct RewriteManagerBuilder<N> {
     static_rules: Vec<Rule>,
     dynamic_rules: Vec<Rule>,
     dynamic_rules_path: PathBuf,
+    inspect_node: N,
 }
 
-impl RewriteManagerBuilder {
+impl RewriteManagerBuilder<UnsetInspectNode> {
     /// Create a new [RewriteManagerBuilder] and initialize it with the dynamic [Rule]s from the
     /// provided path. If the provided dynamic rule config file does not exist or is corrupt, this
     /// method returns an [RewriteManagerBuilder] initialized with no rules and configured with the
@@ -158,6 +209,7 @@ impl RewriteManagerBuilder {
             static_rules: vec![],
             dynamic_rules: vec![],
             dynamic_rules_path: dynamic_rules_path.into(),
+            inspect_node: UnsetInspectNode,
         };
 
         match Self::load_rules(&builder.dynamic_rules_path) {
@@ -169,6 +221,18 @@ impl RewriteManagerBuilder {
         }
     }
 
+    /// Use the given inspect_node in the [RewriteManager].
+    pub fn inspect_node(self, inspect_node: inspect::Node) -> RewriteManagerBuilder<inspect::Node> {
+        RewriteManagerBuilder {
+            static_rules: self.static_rules,
+            dynamic_rules: self.dynamic_rules,
+            dynamic_rules_path: self.dynamic_rules_path,
+            inspect_node,
+        }
+    }
+}
+
+impl<N> RewriteManagerBuilder<N> {
     /// Load [Rule]s from the provided path and register them as static rewrite rules. On error,
     /// return this [RewriteManagerBuilder] unmodified along with the encountered error.
     pub fn static_rules_path<T>(mut self, path: T) -> Result<Self, (Self, io::Error)>
@@ -202,26 +266,59 @@ impl RewriteManagerBuilder {
         self.static_rules.extend(iter);
         self
     }
+}
 
+#[cfg(test)]
+impl RewriteManagerBuilder<UnsetInspectNode> {
+    /// In test configurations, allow building the [RewriteManager] without a configured inspect
+    /// node.
+    pub fn build(self) -> RewriteManager {
+        let node = inspect::Inspector::new().root().create_child("test");
+        self.inspect_node(node).build()
+    }
+}
+
+impl RewriteManagerBuilder<inspect::Node> {
     /// Build the [RewriteManager].
     pub fn build(self) -> RewriteManager {
-        RewriteManager {
+        let inspect = RewriteManagerInspectState {
+            static_rules_node: self.inspect_node.create_child("static_rules"),
+            static_rules_states: vec![],
+            dynamic_rules_node: self.inspect_node.create_child("dynamic_rules"),
+            dynamic_rules_states: vec![],
+            generation_property: self.inspect_node.create_uint("generation", 0),
+            dynamic_rules_path_property: self.inspect_node.create_string(
+                "dynamic_rules_path",
+                &self.dynamic_rules_path.display().to_string(),
+            ),
+            node: self.inspect_node,
+        };
+
+        let mut rw = RewriteManager {
             static_rules: self.static_rules,
             dynamic_rules: self.dynamic_rules,
             generation: 0,
             dynamic_rules_path: self.dynamic_rules_path,
-        }
+            inspect,
+        };
+        RewriteManager::update_rule_inspect_states(
+            &rw.inspect.static_rules_node,
+            &rw.static_rules,
+            &mut rw.inspect.static_rules_states,
+        );
+        rw.update_inspect_objects();
+        rw
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use {super::*, failure::Error, serde_json::json};
+    use {super::*, failure::Error, fuchsia_inspect::assert_inspect_tree, serde_json::json};
 
     macro_rules! rule {
         ($host_match:expr => $host_replacement:expr,
          $path_prefix_match:expr => $path_prefix_replacement:expr) => {
-            fuchsia_uri_rewrite::Rule::new(
+            fuchsia_url_rewrite::Rule::new(
                 $host_match.to_owned(),
                 $host_replacement.to_owned(),
                 $path_prefix_match.to_owned(),
@@ -256,6 +353,7 @@ pub(crate) mod tests {
             .unwrap()
             .build();
 
+        assert_eq!(manager.list_static().cloned().collect::<Vec<_>>(), vec![]);
         assert_eq!(manager.list().cloned().collect::<Vec<_>>(), vec![]);
     }
 
@@ -271,6 +369,7 @@ pub(crate) mod tests {
             .unwrap()
             .build();
 
+        assert_eq!(manager.list_static().cloned().collect::<Vec<_>>(), rules);
         assert_eq!(manager.list().cloned().collect::<Vec<_>>(), rules);
     }
 
@@ -281,6 +380,7 @@ pub(crate) mod tests {
         let dynamic_config = make_rule_config(rules.clone());
         let manager = RewriteManagerBuilder::new(&dynamic_config).unwrap().build();
 
+        assert_eq!(manager.list_static().cloned().collect::<Vec<_>>(), vec![]);
         assert_eq!(manager.list().cloned().collect::<Vec<_>>(), rules);
     }
 
@@ -304,6 +404,7 @@ pub(crate) mod tests {
             .unwrap_err();
         let manager = builder.build();
 
+        assert_eq!(manager.list_static().cloned().collect::<Vec<_>>(), vec![]);
         assert_eq!(manager.list().cloned().collect::<Vec<_>>(), rules);
     }
 
@@ -340,8 +441,8 @@ pub(crate) mod tests {
         let dynamic_config = make_rule_config(rules);
         let manager = RewriteManagerBuilder::new(&dynamic_config).unwrap().build();
 
-        let uri: PkgUri = "fuchsia-pkg://fuchsia.com/c".parse().unwrap();
-        assert_eq!(manager.rewrite(uri.clone()), uri);
+        let url: PkgUrl = "fuchsia-pkg://fuchsia.com/c".parse().unwrap();
+        assert_eq!(manager.rewrite(url.clone()), url);
     }
 
     #[test]
@@ -354,8 +455,8 @@ pub(crate) mod tests {
         let dynamic_config = make_rule_config(rules);
         let manager = RewriteManagerBuilder::new(&dynamic_config).unwrap().build();
 
-        let uri = "fuchsia-pkg://fuchsia.com/package".parse().unwrap();
-        assert_eq!(manager.rewrite(uri), "fuchsia-pkg://fuchsia.com/remapped".parse().unwrap());
+        let url = "fuchsia-pkg://fuchsia.com/package".parse().unwrap();
+        assert_eq!(manager.rewrite(url), "fuchsia-pkg://fuchsia.com/remapped".parse().unwrap());
     }
 
     #[test]
@@ -372,8 +473,8 @@ pub(crate) mod tests {
             .unwrap()
             .build();
 
-        let uri = "fuchsia-pkg://fuchsia.com/package".parse().unwrap();
-        assert_eq!(manager.rewrite(uri), "fuchsia-pkg://fuchsia.com/remapped".parse().unwrap());
+        let url = "fuchsia-pkg://fuchsia.com/package".parse().unwrap();
+        assert_eq!(manager.rewrite(url), "fuchsia-pkg://fuchsia.com/remapped".parse().unwrap());
     }
 
     #[test]
@@ -387,13 +488,13 @@ pub(crate) mod tests {
         transaction.add(override_rule.clone());
 
         // new rule is not yet committed and should not be used yet
-        let uri: PkgUri = "fuchsia-pkg://fuchsia.com/a".parse().unwrap();
-        assert_eq!(manager.rewrite(uri.clone()), "fuchsia-pkg://fuchsia.com/b".parse().unwrap());
+        let url: PkgUrl = "fuchsia-pkg://fuchsia.com/a".parse().unwrap();
+        assert_eq!(manager.rewrite(url.clone()), "fuchsia-pkg://fuchsia.com/b".parse().unwrap());
 
         manager.apply(transaction).unwrap();
 
-        let uri = "fuchsia-pkg://fuchsia.com/a".parse().unwrap();
-        assert_eq!(manager.rewrite(uri), "fuchsia-pkg://fuchsia.com/c".parse().unwrap());
+        let url = "fuchsia-pkg://fuchsia.com/a".parse().unwrap();
+        assert_eq!(manager.rewrite(url), "fuchsia-pkg://fuchsia.com/c".parse().unwrap());
     }
 
     #[test]
@@ -443,5 +544,95 @@ pub(crate) mod tests {
 
         let manager = RewriteManagerBuilder::new(&dynamic_config).unwrap().build();
         assert_eq!(manager.list().cloned().collect::<Vec<_>>(), vec![]);
+    }
+
+    #[test]
+    fn test_building_rewrite_manager_populates_inspect() {
+        let inspector = fuchsia_inspect::Inspector::new();
+        let node = inspector.root().create_child("rewrite_manager");
+        let dynamic_rules = vec![
+            rule!("this.example.com" => "that.example.com", "/this_rolldice" => "/that_rolldice"),
+        ];
+        let dynamic_config = make_rule_config(dynamic_rules.clone());
+        let static_rules =
+            vec![rule!("example.com" => "example.org", "/this_throwdice" => "/that_throwdice")];
+        let static_config = make_rule_config(static_rules.clone());
+
+        let _manager = RewriteManagerBuilder::new(&dynamic_config)
+            .unwrap()
+            .static_rules_path(&static_config)
+            .unwrap()
+            .inspect_node(node)
+            .build();
+
+        assert_inspect_tree!(
+            inspector,
+            root: {
+                rewrite_manager: {
+                    dynamic_rules: {
+                        "0": {
+                            host_match: "this.example.com",
+                            host_replacement: "that.example.com",
+                            path_prefix_match: "/this_rolldice",
+                            path_prefix_replacement: "/that_rolldice",
+                        },
+                    },
+                    dynamic_rules_path: dynamic_config.to_str().unwrap().to_string(),
+                    static_rules: {
+                        "0": {
+                            host_match: "example.com",
+                            host_replacement: "example.org",
+                            path_prefix_match: "/this_throwdice",
+                            path_prefix_replacement: "/that_throwdice",
+                        },
+                    },
+                    generation: 0u64,
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn test_transaction_updates_inspect() {
+        let inspector = fuchsia_inspect::Inspector::new();
+        let node = inspector.root().create_child("rewrite_manager");
+        let dynamic_config = make_rule_config(vec![]);
+        let mut manager =
+            RewriteManagerBuilder::new(&dynamic_config).unwrap().inspect_node(node).build();
+        assert_inspect_tree!(
+            inspector,
+            root: {
+                rewrite_manager: {
+                    dynamic_rules: {},
+                    dynamic_rules_path: dynamic_config.to_str().unwrap().to_string(),
+                    static_rules: {},
+                    generation: 0u64,
+                }
+            }
+        );
+
+        let mut transaction = manager.transaction();
+        transaction
+            .add(rule!("example.com" => "example.org", "/this_rolldice/" => "/that_rolldice/"));
+        manager.apply(transaction).unwrap();
+
+        assert_inspect_tree!(
+            inspector,
+            root: {
+                rewrite_manager: {
+                    dynamic_rules: {
+                        "0": {
+                            host_match: "example.com",
+                            host_replacement: "example.org",
+                            path_prefix_match: "/this_rolldice/",
+                            path_prefix_replacement: "/that_rolldice/",
+                        },
+                    },
+                    dynamic_rules_path: dynamic_config.to_str().unwrap().to_string(),
+                    static_rules: {},
+                    generation: 1u64,
+                }
+            }
+        );
     }
 }

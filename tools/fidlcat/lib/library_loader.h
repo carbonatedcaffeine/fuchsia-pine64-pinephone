@@ -26,8 +26,7 @@
 // following, if they have a fidl::Message:
 //
 // fidl_message_header_t header = message.header();
-// const InterfaceMethod* method;
-// loader_->GetByOrdinal(header.ordinal, &method);
+// const InterfaceMethod* method = loader_->GetByOrdinal(header.ordinal);
 // rapidjson::Document actual;
 // fidlcat::RequestToJSON(method, message, actual);
 //
@@ -38,7 +37,8 @@
 
 namespace fidlcat {
 
-typedef uint32_t Ordinal;
+typedef uint32_t Ordinal32;
+typedef uint64_t Ordinal64;
 
 struct LibraryReadError {
   enum ErrorValue {
@@ -106,14 +106,14 @@ class UnionMember {
   std::string_view name() const { return name_; }
   uint64_t size() const { return size_; }
   uint64_t offset() const { return offset_; }
-  Ordinal ordinal() const { return ordinal_; }
+  Ordinal32 ordinal() const { return ordinal_; }
   const Type* type() const { return type_.get(); }
 
  private:
   const std::string name_;
   const uint64_t offset_;
   const uint64_t size_;
-  const Ordinal ordinal_;
+  const Ordinal32 ordinal_;
   std::unique_ptr<Type> type_;
 };
 
@@ -126,17 +126,14 @@ class Union {
   const std::string& name() const { return name_; }
   uint64_t alignment() const { return alignment_; }
   uint32_t size() const { return size_; }
-  const std::vector<std::unique_ptr<UnionMember>>& members() const {
-    return members_;
-  }
+  const std::vector<std::unique_ptr<UnionMember>>& members() const { return members_; }
 
   const UnionMember* MemberWithTag(uint32_t tag) const;
 
-  const UnionMember* MemberWithOrdinal(Ordinal ordinal) const;
+  const UnionMember* MemberWithOrdinal(Ordinal32 ordinal) const;
 
-  std::unique_ptr<UnionField> DecodeUnion(MessageDecoder* decoder,
-                                          std::string_view name,
-                                          uint64_t offset, bool nullable) const;
+  std::unique_ptr<UnionField> DecodeUnion(MessageDecoder* decoder, std::string_view name,
+                                          const Type* type, uint64_t offset, bool nullable) const;
 
  private:
   Union(const Library& enclosing_library, const rapidjson::Value& value);
@@ -185,14 +182,12 @@ class Struct {
   friend class InterfaceMethod;
 
   const Library& enclosing_library() const { return enclosing_library_; }
+  const std::string& name() const { return name_; }
   uint32_t size() const { return size_; }
-  const std::vector<std::unique_ptr<StructMember>>& members() const {
-    return members_;
-  }
+  const std::vector<std::unique_ptr<StructMember>>& members() const { return members_; }
 
-  std::unique_ptr<Object> DecodeObject(MessageDecoder* decoder,
-                                       std::string_view name, uint64_t offset,
-                                       bool nullable) const;
+  std::unique_ptr<Object> DecodeObject(MessageDecoder* decoder, std::string_view name,
+                                       const Type* type, uint64_t offset, bool nullable) const;
 
  private:
   Struct(const Library& enclosing_library, const rapidjson::Value& value);
@@ -226,13 +221,13 @@ class TableMember {
   ~TableMember();
 
   const std::string_view name() const { return name_; }
-  Ordinal ordinal() const { return ordinal_; }
+  Ordinal32 ordinal() const { return ordinal_; }
   uint64_t size() const { return size_; }
   const Type* type() const { return type_.get(); }
 
  private:
   const std::string name_;
-  const Ordinal ordinal_;
+  const Ordinal32 ordinal_;
   const uint64_t size_;
   std::unique_ptr<Type> type_;
 };
@@ -280,7 +275,8 @@ class InterfaceMethod {
   friend class Interface;
 
   const Interface& enclosing_interface() const { return enclosing_interface_; }
-  Ordinal ordinal() const { return ordinal_; }
+  Ordinal64 ordinal() const { return ordinal_; }
+  Ordinal64 old_ordinal() const { return old_ordinal_; }
   std::string name() const { return name_; }
   Struct* request() const {
     if (request_ != nullptr) {
@@ -305,7 +301,8 @@ class InterfaceMethod {
 
   const Interface& enclosing_interface_;
   const rapidjson::Value& value_;
-  const Ordinal ordinal_;
+  const Ordinal64 ordinal_;
+  const Ordinal64 old_ordinal_;
   const std::string name_;
   std::unique_ptr<Struct> request_;
   std::unique_ptr<Struct> response_;
@@ -321,16 +318,16 @@ class Interface {
   const Library& enclosing_library() const { return enclosing_library_; }
   std::string_view name() const { return name_; }
 
-  void AddMethodsToIndex(std::map<Ordinal, const InterfaceMethod*>& index) {
+  void AddMethodsToIndex(std::map<Ordinal64, const InterfaceMethod*>& index) {
     for (size_t i = 0; i < interface_methods_.size(); i++) {
       const InterfaceMethod* method = interface_methods_[i].get();
       index[method->ordinal()] = method;
+      index[method->old_ordinal()] = method;
     }
   }
 
   // Sets *|method| to the fully qualified |name|'s InterfaceMethod
-  bool GetMethodByFullName(const std::string& name,
-                           const InterfaceMethod** method) const;
+  bool GetMethodByFullName(const std::string& name, const InterfaceMethod** method) const;
 
   const std::vector<std::unique_ptr<InterfaceMethod>>& methods() const {
     return interface_methods_;
@@ -355,12 +352,9 @@ class Library {
 
   LibraryLoader* enclosing_loader() const { return enclosing_loader_; }
   const std::string name() { return name_; }
-  const std::vector<std::unique_ptr<Interface>>& interfaces() const {
-    return interfaces_;
-  }
+  const std::vector<std::unique_ptr<Interface>>& interfaces() const { return interfaces_; }
 
-  std::unique_ptr<Type> TypeFromIdentifier(bool is_nullable,
-                                           std::string& identifier,
+  std::unique_ptr<Type> TypeFromIdentifier(bool is_nullable, std::string& identifier,
                                            size_t inline_size);
 
   // The size of the type with name |identifier| when it is inline (e.g.,
@@ -375,7 +369,7 @@ class Library {
 
  private:
   Library(LibraryLoader* enclosing_loader, rapidjson::Document& document,
-          std::map<Ordinal, const InterfaceMethod*>& index);
+          std::map<Ordinal64, const InterfaceMethod*>& index);
 
   // Decode all the values from the JSON definition.
   void DecodeTypes();
@@ -398,21 +392,19 @@ class Library {
 //          should be one of the last objects we destroy).
 class LibraryLoader {
  public:
-  LibraryLoader(std::vector<std::unique_ptr<std::istream>>& library_streams,
-                LibraryReadError* err);
+  LibraryLoader(std::vector<std::unique_ptr<std::istream>>& library_streams, LibraryReadError* err);
 
   LibraryLoader& operator=(const LibraryLoader&) = delete;
   LibraryLoader(const LibraryLoader&) = delete;
 
   // Returns true and sets **method if the ordinal was present in the map, and
   // false otherwise.
-  bool GetByOrdinal(Ordinal ordinal, const InterfaceMethod** method) {
+  const InterfaceMethod* GetByOrdinal(Ordinal64 ordinal) {
     auto m = ordinal_map_.find(ordinal);
     if (m != ordinal_map_.end()) {
-      *method = m->second;
-      return true;
+      return m->second;
     }
-    return false;
+    return nullptr;
   }
 
   // If the library with name |name| is present in this loader, returns the
@@ -431,8 +423,7 @@ class LibraryLoader {
  private:
   void Add(std::string& ir, LibraryReadError* err) {
     rapidjson::Document document;
-    err->parse_result =
-        document.Parse<rapidjson::kParseNumbersAsStringsFlag>(ir.c_str());
+    err->parse_result = document.Parse<rapidjson::kParseNumbersAsStringsFlag>(ir.c_str());
     // TODO: This would be a good place to validate that the resulting JSON
     // matches the schema in zircon/system/host/fidl/schema.json.  If there are
     // errors, we will currently get mysterious crashes.
@@ -441,13 +432,12 @@ class LibraryLoader {
       return;
     }
     std::string library_name = document["name"].GetString();
-    representations_.emplace(
-        std::piecewise_construct, std::forward_as_tuple(library_name),
-        std::forward_as_tuple(new Library(this, document, ordinal_map_)));
+    representations_.emplace(std::piecewise_construct, std::forward_as_tuple(library_name),
+                             std::forward_as_tuple(new Library(this, document, ordinal_map_)));
   }
 
   std::map<std::string, std::unique_ptr<Library>> representations_;
-  std::map<Ordinal, const InterfaceMethod*> ordinal_map_;
+  std::map<Ordinal64, const InterfaceMethod*> ordinal_map_;
 };
 
 }  // namespace fidlcat

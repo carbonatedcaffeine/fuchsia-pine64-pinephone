@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "src/developer/debug/zxdb/client/process_impl.h"
+
 #include "gtest/gtest.h"
 #include "src/developer/debug/zxdb/client/remote_api_test.h"
 #include "src/developer/debug/zxdb/client/session.h"
@@ -16,18 +17,15 @@ class ProcessSink : public RemoteAPI {
   ProcessSink() = default;
   ~ProcessSink() = default;
 
-  const debug_ipc::ResumeRequest& resume_request() const {
-    return resume_request_;
-  }
+  const debug_ipc::ResumeRequest& resume_request() const { return resume_request_; }
   int resume_count() const { return resume_count_; }
 
-  void Resume(
-      const debug_ipc::ResumeRequest& request,
-      std::function<void(const Err&, debug_ipc::ResumeReply)> cb) override {
+  void Resume(const debug_ipc::ResumeRequest& request,
+              std::function<void(const Err&, debug_ipc::ResumeReply)> cb) override {
     resume_count_++;
     resume_request_ = request;
-    debug_ipc::MessageLoop::Current()->PostTask(
-        FROM_HERE, [cb]() { cb(Err(), debug_ipc::ResumeReply()); });
+    debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE,
+                                                [cb]() { cb(Err(), debug_ipc::ResumeReply()); });
   }
 
  private:

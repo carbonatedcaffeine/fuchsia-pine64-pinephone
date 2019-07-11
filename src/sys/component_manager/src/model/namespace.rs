@@ -3,12 +3,15 @@
 // found in the LICENSE file.
 
 use {
+    crate::constants::PKG_PATH,
     crate::directory_broker,
     crate::model::*,
-    crate::ns_util::PKG_PATH,
-    cm_rust::{self, ComponentDecl, UseDirectoryDecl, UseServiceDecl},
+    cm_rust::{self, Capability, ComponentDecl, UseDirectoryDecl, UseServiceDecl, UseStorageDecl},
     fidl::endpoints::{create_endpoints, ClientEnd, ServerEnd},
-    fidl_fuchsia_io::{DirectoryProxy, NodeMarker, MODE_TYPE_DIRECTORY, OPEN_RIGHT_READABLE},
+    fidl_fuchsia_io::{
+        DirectoryProxy, NodeMarker, CLONE_FLAG_SAME_RIGHTS, MODE_TYPE_DIRECTORY,
+        OPEN_RIGHT_READABLE, OPEN_RIGHT_WRITABLE,
+    },
     fidl_fuchsia_sys2 as fsys, fuchsia_async as fasync, fuchsia_vfs_pseudo_fs as fvfs,
     fuchsia_vfs_pseudo_fs::directory::entry::DirectoryEntry,
     fuchsia_zircon as zx,
@@ -18,7 +21,7 @@ use {
 };
 
 pub struct IncomingNamespace {
-    package_dir: Option<DirectoryProxy>,
+    pub package_dir: Option<DirectoryProxy>,
     dir_abort_handles: Vec<AbortHandle>,
 }
 
@@ -87,6 +90,15 @@ impl IncomingNamespace {
                 cm_rust::UseDecl::Service(s) => {
                     Self::add_service_use(&mut svc_dirs, s, model.clone(), abs_moniker.clone())?;
                 }
+                cm_rust::UseDecl::Storage(s) => {
+                    Self::add_storage_use(
+                        &mut ns,
+                        &mut directory_waiters,
+                        s,
+                        model.clone(),
+                        abs_moniker.clone(),
+                    )?;
+                }
             }
         }
 
@@ -101,7 +113,7 @@ impl IncomingNamespace {
         ns: &mut fsys::ComponentNamespace,
         package_dir: &DirectoryProxy,
     ) -> Result<(), ModelError> {
-        let clone_dir_proxy = io_util::clone_directory(package_dir)
+        let clone_dir_proxy = io_util::clone_directory(package_dir, CLONE_FLAG_SAME_RIGHTS)
             .map_err(|e| ModelError::namespace_creation_failed(e))?;
         let cloned_dir = ClientEnd::new(
             clone_dir_proxy
@@ -125,9 +137,44 @@ impl IncomingNamespace {
         model: Model,
         abs_moniker: AbsoluteMoniker,
     ) -> Result<(), ModelError> {
-        let (client_end, server_end) =
-            create_endpoints().expect("could not create directory proxy endpoints");
+        let target_path = use_.target_path.to_string();
         let capability = use_.clone().into();
+        Self::add_directory_helper(ns, waiters, target_path, capability, model, abs_moniker)
+    }
+
+    /// Adds a directory waiter to `waiters` and updates `ns` to contain a handle for the
+    /// storage described by `use_`. Once the channel is readable, the future calls
+    /// `route_storage` to forward the channel to the source component's outgoing directory and
+    /// terminates.
+    fn add_storage_use(
+        ns: &mut fsys::ComponentNamespace,
+        waiters: &mut Vec<FutureObj<()>>,
+        use_: &UseStorageDecl,
+        model: Model,
+        abs_moniker: AbsoluteMoniker,
+    ) -> Result<(), ModelError> {
+        let target_path = match use_ {
+            UseStorageDecl::Data(p) => p.to_string(),
+            UseStorageDecl::Cache(p) => p.to_string(),
+            UseStorageDecl::Meta => {
+                error!("meta is currently unsupported!");
+                return Err(ModelError::unsupported("meta storage capabilities"));
+            }
+        };
+        let capability = use_.clone().into();
+        Self::add_directory_helper(ns, waiters, target_path, capability, model, abs_moniker)
+    }
+
+    fn add_directory_helper(
+        ns: &mut fsys::ComponentNamespace,
+        waiters: &mut Vec<FutureObj<()>>,
+        target_path: String,
+        capability: Capability,
+        model: Model,
+        abs_moniker: AbsoluteMoniker,
+    ) -> Result<(), ModelError> {
+        let (client_end, server_end) =
+            create_endpoints().expect("could not create storage proxy endpoints");
         let route_on_usage = async move {
             // Wait for the channel to become readable.
             let server_end_chan = fasync::Channel::from_channel(server_end.into_channel())
@@ -136,19 +183,20 @@ impl IncomingNamespace {
                 fasync::OnSignals::new(&server_end_chan, zx::Signals::CHANNEL_READABLE);
             await!(on_signal_fut).unwrap();
             // Route this capability to the right component
-            let res = await!(route_directory(
+            let res = await!(route_use_capability(
                 &model,
+                MODE_TYPE_DIRECTORY,
                 &capability,
                 abs_moniker.clone(),
                 server_end_chan.into_zx_channel()
             ));
             if let Err(e) = res {
-                error!("failed to route directory for component {}: {:?}", abs_moniker, e);
+                error!("failed to route storage for component {}: {:?}", abs_moniker, e);
             }
         };
 
         waiters.push(FutureObj::new(Box::new(route_on_usage)));
-        ns.paths.push(use_.target_path.to_string());
+        ns.paths.push(target_path);
         ns.directories.push(client_end);
         Ok(())
     }
@@ -184,22 +232,28 @@ impl IncomingNamespace {
         abs_moniker: AbsoluteMoniker,
     ) -> Result<(), ModelError> {
         let capability: cm_rust::Capability = use_.clone().into();
-        let route_service_fn = Box::new(move |server_end: ServerEnd<NodeMarker>| {
-            let capability = capability.clone();
-            let model = model.clone();
-            let abs_moniker = abs_moniker.clone();
-            fasync::spawn(async move {
-                let res = await!(route_service(
-                    &model,
-                    &capability,
-                    abs_moniker.clone(),
-                    server_end.into_channel()
-                ));
-                if let Err(e) = res {
-                    error!("failed to route service for component {}: {:?}", abs_moniker, e);
-                }
-            });
-        });
+        let route_open_fn = Box::new(
+            move |_flags: u32,
+                  mode: u32,
+                  _relative_path: String,
+                  server_end: ServerEnd<NodeMarker>| {
+                let capability = capability.clone();
+                let model = model.clone();
+                let abs_moniker = abs_moniker.clone();
+                fasync::spawn(async move {
+                    let res = await!(route_use_capability(
+                        &model,
+                        mode,
+                        &capability,
+                        abs_moniker.clone(),
+                        server_end.into_channel()
+                    ));
+                    if let Err(e) = res {
+                        error!("failed to route service for component {}: {:?}", abs_moniker, e);
+                    }
+                });
+            },
+        );
 
         let service_dir = svc_dirs
             .entry(use_.target_path.dirname.clone())
@@ -207,7 +261,7 @@ impl IncomingNamespace {
         service_dir
             .add_entry(
                 &use_.target_path.basename,
-                directory_broker::DirectoryBroker::new_service_broker(route_service_fn),
+                directory_broker::DirectoryBroker::new(route_open_fn),
             )
             .map_err(|(status, _)| status)
             .expect("could not add service to directory");
@@ -227,7 +281,7 @@ impl IncomingNamespace {
             let (client_end, server_end) =
                 create_endpoints::<NodeMarker>().expect("could not create node proxy endpoints");
             pseudo_dir.open(
-                OPEN_RIGHT_READABLE,
+                OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE,
                 MODE_TYPE_DIRECTORY,
                 &mut iter::empty(),
                 server_end,

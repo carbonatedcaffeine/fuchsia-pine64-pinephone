@@ -7,6 +7,7 @@
 
 #include <map>
 
+#include "src/developer/debug/zxdb/common/mock_memory.h"
 #include "src/developer/debug/zxdb/symbols/symbol_data_provider.h"
 #include "src/lib/fxl/memory/weak_ptr.h"
 
@@ -22,14 +23,14 @@ class MockSymbolDataProvider : public SymbolDataProvider {
 
   void set_ip(uint64_t ip) { ip_ = ip; }
   void set_bp(uint64_t bp) { bp_ = bp; }
+  void set_cfa(uint64_t cfa) { cfa_ = cfa; }
 
   // Adds the given canned result for the given register. Set synchronous if
   // the register contents should be synchronously available, false if it
   // should require a callback to retrieve.
   //
   // Any registers not set will be synchronously reported as unknown.
-  void AddRegisterValue(debug_ipc::RegisterID id, bool synchronous,
-                        uint64_t value);
+  void AddRegisterValue(debug_ipc::RegisterID id, bool synchronous, uint64_t value);
 
   // Sets an expected memory value.
   void AddMemory(uint64_t address, std::vector<uint8_t> data);
@@ -40,14 +41,12 @@ class MockSymbolDataProvider : public SymbolDataProvider {
 
   // SymbolDataProvider implementation.
   debug_ipc::Arch GetArch() override;
-  bool GetRegister(debug_ipc::RegisterID id,
-                   std::optional<uint64_t>* value) override;
-  void GetRegisterAsync(debug_ipc::RegisterID id,
-                        GetRegisterCallback callback) override;
+  bool GetRegister(debug_ipc::RegisterID id, std::optional<uint64_t>* value) override;
+  void GetRegisterAsync(debug_ipc::RegisterID id, GetRegisterCallback callback) override;
   std::optional<uint64_t> GetFrameBase() override;
   void GetFrameBaseAsync(GetRegisterCallback callback) override;
-  void GetMemoryAsync(uint64_t address, uint32_t size,
-                      GetMemoryCallback callback) override;
+  uint64_t GetCanonicalFrameAddress() const override;
+  void GetMemoryAsync(uint64_t address, uint32_t size, GetMemoryCallback callback) override;
   void WriteMemory(uint64_t address, std::vector<uint8_t> data,
                    std::function<void(const Err&)> cb) override;
 
@@ -60,18 +59,12 @@ class MockSymbolDataProvider : public SymbolDataProvider {
     uint64_t value = 0;
   };
 
-  // Registered memory blocks indexed by address.
-  using RegisteredMemory = std::map<uint64_t, std::vector<uint8_t>>;
-
-  // Returns the memory block that contains the given address, or mem_.end()
-  // if not found.
-  RegisteredMemory::const_iterator FindBlockForAddress(uint64_t address) const;
-
   uint64_t ip_ = 0;
   uint64_t bp_ = 0;
+  uint64_t cfa_ = 0;
   std::map<debug_ipc::RegisterID, RegData> regs_;
 
-  RegisteredMemory mem_;
+  MockMemory memory_;
 
   MemoryWrites memory_writes_;  // Logs calls to WriteMemory().
 

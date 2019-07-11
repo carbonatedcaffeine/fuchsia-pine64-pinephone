@@ -16,6 +16,7 @@
 #include "src/developer/debug/zxdb/symbols/base_type.h"
 #include "src/developer/debug/zxdb/symbols/code_block.h"
 #include "src/developer/debug/zxdb/symbols/collection.h"
+#include "src/developer/debug/zxdb/symbols/compile_unit.h"
 #include "src/developer/debug/zxdb/symbols/data_member.h"
 #include "src/developer/debug/zxdb/symbols/dwarf_die_decoder.h"
 #include "src/developer/debug/zxdb/symbols/enumeration.h"
@@ -28,6 +29,8 @@
 #include "src/developer/debug/zxdb/symbols/namespace.h"
 #include "src/developer/debug/zxdb/symbols/symbol.h"
 #include "src/developer/debug/zxdb/symbols/variable.h"
+#include "src/developer/debug/zxdb/symbols/variant.h"
+#include "src/developer/debug/zxdb/symbols/variant_part.h"
 
 namespace zxdb {
 
@@ -97,8 +100,7 @@ VariableLocation DecodeVariableLocation(const llvm::DWARFUnit* unit,
 
   // Extract the LLVM location list.
   llvm::DWARFDebugLoc debug_loc;
-  llvm::DWARFDataExtractor data(object, debug_loc_section,
-                                context.isLittleEndian(),
+  llvm::DWARFDataExtractor data(object, debug_loc_section, context.isLittleEndian(),
                                 object.getAddressSize());
   llvm::Optional<llvm::DWARFDebugLoc::LocationList> location_list =
       debug_loc.parseOneLocationList(data, &offset);
@@ -127,8 +129,7 @@ VariableLocation DecodeVariableLocation(const llvm::DWARFUnit* unit,
     if (base_address) {
       dest.begin = base_address->Address + llvm_entry.Begin;
       dest.end = base_address->Address + llvm_entry.End;
-      const uint8_t* data =
-          reinterpret_cast<const uint8_t*>(llvm_entry.Loc.data());
+      const uint8_t* data = reinterpret_cast<const uint8_t*>(llvm_entry.Loc.data());
       dest.expression.assign(data, data + llvm_entry.Loc.size());
     } else {
       FXL_NOTREACHED() << "No base address.";
@@ -139,15 +140,25 @@ VariableLocation DecodeVariableLocation(const llvm::DWARFUnit* unit,
 
 // Extracts the subrange size from an array subrange DIE. Puts the result in
 // *size and returns true on success, false on failure.
-bool ReadArraySubrange(llvm::DWARFContext* context,
-                       const llvm::DWARFDie& subrange_die, uint64_t* size) {
-  // Extract the DW_AT_count attribute (an unsigned number).
+bool ReadArraySubrange(llvm::DWARFContext* context, const llvm::DWARFDie& subrange_die,
+                       uint64_t* size) {
+  // Extract the DW_AT_count attribute which Clang generates, and
+  // DW_AT_upper_bound which GCC generated.
   DwarfDieDecoder range_decoder(context, subrange_die.getDwarfUnit());
+
   llvm::Optional<uint64_t> count;
   range_decoder.AddUnsignedConstant(llvm::dwarf::DW_AT_count, &count);
-  if (!range_decoder.Decode(subrange_die) || !count)
+
+  llvm::Optional<uint64_t> upper_bound;
+  range_decoder.AddUnsignedConstant(llvm::dwarf::DW_AT_upper_bound, &upper_bound);
+
+  if (!range_decoder.Decode(subrange_die) || (!count && !upper_bound))
     return false;
-  *size = *count;
+
+  if (count)
+    *size = *count;
+  else
+    *size = *upper_bound;
   return true;
 }
 
@@ -157,8 +168,7 @@ DwarfSymbolFactory::DwarfSymbolFactory(fxl::WeakPtr<ModuleSymbolsImpl> symbols)
     : symbols_(symbols) {}
 DwarfSymbolFactory::~DwarfSymbolFactory() = default;
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::CreateSymbol(void* data_ptr,
-                                                     uint32_t offset) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::CreateSymbol(void* data_ptr, uint32_t offset) {
   if (!symbols_)
     return fxl::MakeRefCounted<Symbol>();
 
@@ -170,8 +180,7 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::CreateSymbol(void* data_ptr,
   return DecodeSymbol(die);
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeSymbol(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeSymbol(const llvm::DWARFDie& die) {
   DwarfTag tag = static_cast<DwarfTag>(die.getTag());
   if (DwarfTagIsTypeModifier(tag))
     return DecodeModifiedType(die);
@@ -183,6 +192,9 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeSymbol(
       break;
     case DwarfTag::kBaseType:
       symbol = DecodeBaseType(die);
+      break;
+    case DwarfTag::kCompileUnit:
+      symbol = DecodeCompileUnit(die);
       break;
     case DwarfTag::kEnumerationType:
       symbol = DecodeEnum(die);
@@ -221,6 +233,12 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeSymbol(
     case DwarfTag::kUnionType:
       symbol = DecodeCollection(die);
       break;
+    case DwarfTag::kVariantPart:
+      symbol = DecodeVariantPart(die);
+      break;
+    case DwarfTag::kVariant:
+      symbol = DecodeVariant(die);
+      break;
     case DwarfTag::kUnspecifiedType:
       symbol = DecodeUnspecifiedType(die);
       break;
@@ -244,12 +262,11 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeSymbol(
 }
 
 LazySymbol DwarfSymbolFactory::MakeLazy(const llvm::DWARFDie& die) {
-  return LazySymbol(fxl::RefPtr<SymbolFactory>(this), die.getDwarfUnit(),
-                    die.getOffset());
+  return LazySymbol(fxl::RefPtr<SymbolFactory>(this), die.getDwarfUnit(), die.getOffset());
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeFunction(
-    const llvm::DWARFDie& die, DwarfTag tag, bool is_specification) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeFunction(const llvm::DWARFDie& die, DwarfTag tag,
+                                                       bool is_specification) {
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
   llvm::DWARFDie parent;
@@ -283,8 +300,7 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeFunction(
 
   VariableLocation frame_base;
   decoder.AddCustom(llvm::dwarf::DW_AT_frame_base,
-                    [unit = die.getDwarfUnit(),
-                     &frame_base](const llvm::DWARFFormValue& value) {
+                    [unit = die.getDwarfUnit(), &frame_base](const llvm::DWARFFormValue& value) {
                       frame_base = DecodeVariableLocation(unit, value);
                     });
 
@@ -316,7 +332,8 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeFunction(
   if (linkage_name)
     function->set_linkage_name(*linkage_name);
   function->set_code_ranges(GetCodeRanges(die));
-  function->set_decl_line(MakeFileLine(decl_file, decl_line));
+  if (decl_file)
+    function->set_decl_line(MakeFileLine(decl_file, decl_line));
   function->set_call_line(MakeFileLine(call_file, call_line));
   if (return_type)
     function->set_return_type(MakeLazy(return_type));
@@ -385,8 +402,7 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeFunction(
 // dimension where the contained type is an array of another. But both Clang
 // and GCC generate one array entry with two subrange children. The order of
 // these represents the declaration order in the code.
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeArrayType(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeArrayType(const llvm::DWARFDie& die) {
   // Extract the type attribute from the root DIE (should be a
   // DW_TAG_array_type).
   DwarfDieDecoder array_decoder(symbols_->context(), die.getDwarfUnit());
@@ -409,8 +425,7 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeArrayType(
   for (const llvm::DWARFDie& child : die) {
     if (child.getTag() == llvm::dwarf::DW_TAG_subrange_type) {
       subrange_sizes.push_back(0);
-      if (!ReadArraySubrange(symbols_->context(), child,
-                             &subrange_sizes.back()))
+      if (!ReadArraySubrange(symbols_->context(), child, &subrange_sizes.back()))
         return fxl::MakeRefCounted<Symbol>();
     }
   }
@@ -425,15 +440,13 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeArrayType(
   // definitions. The innermost definition refers to the contained type.
   fxl::RefPtr<Type> cur(contained_type);
   for (int i = static_cast<int>(subrange_sizes.size()) - 1; i >= 0; i--) {
-    auto new_array =
-        fxl::MakeRefCounted<ArrayType>(std::move(cur), subrange_sizes[i]);
+    auto new_array = fxl::MakeRefCounted<ArrayType>(std::move(cur), subrange_sizes[i]);
     cur = std::move(new_array);
   }
   return cur;
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeBaseType(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeBaseType(const llvm::DWARFDie& die) {
   // This object and its setup could be cached for better performance.
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
@@ -478,8 +491,7 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeBaseType(
   return base_type;
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeCollection(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeCollection(const llvm::DWARFDie& die) {
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
   // Types must always use the parent of the abstract origin (if it exists) so
@@ -493,11 +505,13 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeCollection(
   llvm::Optional<uint64_t> byte_size;
   decoder.AddUnsignedConstant(llvm::dwarf::DW_AT_byte_size, &byte_size);
 
+  llvm::Optional<bool> is_declaration;
+  decoder.AddBool(llvm::dwarf::DW_AT_declaration, &is_declaration);
+
   if (!decoder.Decode(die))
     return fxl::MakeRefCounted<Symbol>();
 
-  auto result =
-      fxl::MakeRefCounted<Collection>(static_cast<DwarfTag>(die.getTag()));
+  auto result = fxl::MakeRefCounted<Collection>(static_cast<DwarfTag>(die.getTag()));
   if (name)
     result->set_assigned_name(*name);
   if (byte_size)
@@ -506,6 +520,7 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeCollection(
   // Handle sub-DIEs: data members and inheritance.
   std::vector<LazySymbol> data;
   std::vector<LazySymbol> inheritance;
+  LazySymbol variant_part;
   for (const llvm::DWARFDie& child : die) {
     switch (child.getTag()) {
       case llvm::dwarf::DW_TAG_inheritance:
@@ -514,12 +529,20 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeCollection(
       case llvm::dwarf::DW_TAG_member:
         data.push_back(MakeLazy(child));
         break;
+      case llvm::dwarf::DW_TAG_variant_part:
+        // Currently we only support one variant_part per struct. This could be
+        // expanded to a vector if a compiler generates such a structure.
+        variant_part = MakeLazy(child);
+        break;
       default:
         break;  // Skip everything else.
     }
   }
   result->set_data_members(std::move(data));
   result->set_inherited_from(std::move(inheritance));
+  result->set_variant_part(variant_part);
+  if (is_declaration)
+    result->set_is_declaration(*is_declaration);
 
   if (parent)
     result->set_parent(MakeLazy(parent));
@@ -527,8 +550,28 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeCollection(
   return result;
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeDataMember(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeCompileUnit(const llvm::DWARFDie& die) {
+  DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
+
+  llvm::Optional<const char*> name;
+  decoder.AddCString(llvm::dwarf::DW_AT_name, &name);
+
+  llvm::Optional<uint64_t> language;
+  decoder.AddUnsignedConstant(llvm::dwarf::DW_AT_language, &language);
+
+  if (!decoder.Decode(die))
+    return fxl::MakeRefCounted<Symbol>();
+
+  auto result = fxl::MakeRefCounted<CompileUnit>();
+  if (name)
+    result->set_name(*name);
+  if (language)
+    result->set_language(static_cast<DwarfLang>(*language));
+
+  return result;
+}
+
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeDataMember(const llvm::DWARFDie& die) {
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
   llvm::Optional<const char*> name;
@@ -537,9 +580,11 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeDataMember(
   llvm::DWARFDie type;
   decoder.AddReference(llvm::dwarf::DW_AT_type, &type);
 
+  llvm::Optional<bool> artificial;
+  decoder.AddBool(llvm::dwarf::DW_AT_artificial, &artificial);
+
   llvm::Optional<uint64_t> member_offset;
-  decoder.AddUnsignedConstant(llvm::dwarf::DW_AT_data_member_location,
-                              &member_offset);
+  decoder.AddUnsignedConstant(llvm::dwarf::DW_AT_data_member_location, &member_offset);
 
   if (!decoder.Decode(die))
     return fxl::MakeRefCounted<Symbol>();
@@ -549,6 +594,8 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeDataMember(
     result->set_assigned_name(*name);
   if (type)
     result->set_type(MakeLazy(type));
+  if (artificial)
+    result->set_artificial(*artificial);
   if (member_offset)
     result->set_member_location(static_cast<uint32_t>(*member_offset));
   return result;
@@ -569,6 +616,9 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeEnum(const llvm::DWARFDie& die) {
   llvm::Optional<uint64_t> byte_size;
   main_decoder.AddUnsignedConstant(llvm::dwarf::DW_AT_byte_size, &byte_size);
 
+  llvm::Optional<bool> is_declaration;
+  main_decoder.AddBool(llvm::dwarf::DW_AT_declaration, &is_declaration);
+
   // The type is optional for an enumeration.
   llvm::DWARFDie type;
   main_decoder.AddReference(llvm::dwarf::DW_AT_type, &type);
@@ -586,23 +636,22 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeEnum(const llvm::DWARFDie& die) {
   // must be encoded differently.
   llvm::Optional<uint64_t> enumerator_value;
   bool is_signed = false;
-  enumerator_decoder.AddCustom(
-      llvm::dwarf::DW_AT_const_value,
-      [&enumerator_value, &is_signed](const llvm::DWARFFormValue& value) {
-        if (value.getForm() == llvm::dwarf::DW_FORM_udata) {
-          enumerator_value = value.getAsUnsignedConstant();
-        } else if (value.getForm() == llvm::dwarf::DW_FORM_sdata) {
-          // Cast signed values to unsigned.
-          if (auto signed_value = value.getAsSignedConstant()) {
-            is_signed = true;
-            enumerator_value = static_cast<uint64_t>(*signed_value);
-          }
-          // Else case is corrupted symbols or an unsupported format, just
-          // ignore this one.
-        }
-      });
+  enumerator_decoder.AddCustom(llvm::dwarf::DW_AT_const_value,
+                               [&enumerator_value, &is_signed](const llvm::DWARFFormValue& value) {
+                                 if (value.getForm() == llvm::dwarf::DW_FORM_udata) {
+                                   enumerator_value = value.getAsUnsignedConstant();
+                                 } else if (value.getForm() == llvm::dwarf::DW_FORM_sdata) {
+                                   // Cast signed values to unsigned.
+                                   if (auto signed_value = value.getAsSignedConstant()) {
+                                     is_signed = true;
+                                     enumerator_value = static_cast<uint64_t>(*signed_value);
+                                   }
+                                   // Else case is corrupted symbols or an unsupported format, just
+                                   // ignore this one.
+                                 }
+                               });
 
-  if (!main_decoder.Decode(die) || !byte_size)
+  if (!main_decoder.Decode(die))
     return fxl::MakeRefCounted<Symbol>();
 
   Enumeration::Map map;
@@ -622,16 +671,16 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeEnum(const llvm::DWARFDie& die) {
   if (type)
     lazy_type = MakeLazy(type);
   const char* type_name_str = type_name ? *type_name : "";
-  auto result =
-      fxl::MakeRefCounted<Enumeration>(type_name_str, std::move(lazy_type),
-                                       *byte_size, is_signed, std::move(map));
+  auto result = fxl::MakeRefCounted<Enumeration>(type_name_str, std::move(lazy_type), *byte_size,
+                                                 is_signed, std::move(map));
   if (parent)
     result->set_parent(MakeLazy(parent));
+  if (is_declaration)
+    result->set_is_declaration(*is_declaration);
   return result;
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeFunctionType(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeFunctionType(const llvm::DWARFDie& die) {
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
   // Types must always use the parent of the abstract origin (if it exists) so
@@ -661,8 +710,7 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeFunctionType(
   if (return_type)
     lazy_return_type = MakeLazy(return_type);
 
-  auto function = fxl::MakeRefCounted<FunctionType>(lazy_return_type,
-                                                    std::move(parameters));
+  auto function = fxl::MakeRefCounted<FunctionType>(lazy_return_type, std::move(parameters));
   if (parent)
     function->set_parent(MakeLazy(parent));
   return function;
@@ -672,8 +720,7 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeFunctionType(
 // like "using std::vector;".
 //
 // Type renames like "using Foo = std::vector;" is encoded as a typedef.
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeImportedDeclaration(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeImportedDeclaration(const llvm::DWARFDie& die) {
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
   llvm::DWARFDie imported;
@@ -682,20 +729,17 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeImportedDeclaration(
   if (!decoder.Decode(die) || !imported)
     return fxl::MakeRefCounted<Symbol>();
 
-  return fxl::MakeRefCounted<ModifiedType>(DwarfTag::kImportedDeclaration,
-                                           MakeLazy(imported));
+  return fxl::MakeRefCounted<ModifiedType>(DwarfTag::kImportedDeclaration, MakeLazy(imported));
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeInheritedFrom(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeInheritedFrom(const llvm::DWARFDie& die) {
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
   llvm::DWARFDie type;
   decoder.AddReference(llvm::dwarf::DW_AT_type, &type);
 
   llvm::Optional<uint64_t> member_offset;
-  decoder.AddUnsignedConstant(llvm::dwarf::DW_AT_data_member_location,
-                              &member_offset);
+  decoder.AddUnsignedConstant(llvm::dwarf::DW_AT_data_member_location, &member_offset);
 
   if (!decoder.Decode(die))
     return fxl::MakeRefCounted<Symbol>();
@@ -713,12 +757,10 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeInheritedFrom(
     return fxl::MakeRefCounted<Symbol>();
   }
 
-  return fxl::MakeRefCounted<InheritedFrom>(std::move(lazy_type),
-                                            *member_offset);
+  return fxl::MakeRefCounted<InheritedFrom>(std::move(lazy_type), *member_offset);
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeLexicalBlock(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeLexicalBlock(const llvm::DWARFDie& die) {
   auto block = fxl::MakeRefCounted<CodeBlock>(DwarfTag::kLexicalBlock);
   block->set_code_ranges(GetCodeRanges(die));
 
@@ -743,8 +785,7 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeLexicalBlock(
   return block;
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeMemberPtr(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeMemberPtr(const llvm::DWARFDie& die) {
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
   llvm::DWARFDie container_type;
@@ -755,13 +796,11 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeMemberPtr(
   if (!decoder.Decode(die) || !container_type || !type)
     return fxl::MakeRefCounted<Symbol>();
 
-  auto member_ptr =
-      fxl::MakeRefCounted<MemberPtr>(MakeLazy(container_type), MakeLazy(type));
+  auto member_ptr = fxl::MakeRefCounted<MemberPtr>(MakeLazy(container_type), MakeLazy(type));
   return member_ptr;
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeModifiedType(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeModifiedType(const llvm::DWARFDie& die) {
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
   // Types must always use the parent of the abstract origin (if it exists) so
@@ -783,8 +822,8 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeModifiedType(
   if (modified)
     lazy_modified = MakeLazy(modified);
 
-  auto result = fxl::MakeRefCounted<ModifiedType>(
-      static_cast<DwarfTag>(die.getTag()), std::move(lazy_modified));
+  auto result = fxl::MakeRefCounted<ModifiedType>(static_cast<DwarfTag>(die.getTag()),
+                                                  std::move(lazy_modified));
   if (name)
     result->set_assigned_name(*name);
 
@@ -794,8 +833,7 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeModifiedType(
   return result;
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeNamespace(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeNamespace(const llvm::DWARFDie& die) {
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
   // Types must always use the parent of the abstract origin (if it exists) so
@@ -822,8 +860,7 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeNamespace(
 // used as a variable this appears as a pointer with 0 value, despite not
 // having any declared size in the symbols. Therefore, we make up a byte size
 // equal to the pointer size (8 bytes on our 64-bit systems).
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeUnspecifiedType(
-    const llvm::DWARFDie& die) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeUnspecifiedType(const llvm::DWARFDie& die) {
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
   // Types must always use the parent of the abstract origin (if it exists) so
@@ -847,8 +884,8 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeUnspecifiedType(
   return result;
 }
 
-fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeVariable(
-    const llvm::DWARFDie& die, bool is_specification) {
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeVariable(const llvm::DWARFDie& die,
+                                                       bool is_specification) {
   DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
 
   llvm::DWARFDie specification;
@@ -859,13 +896,15 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeVariable(
 
   VariableLocation location;
   decoder.AddCustom(llvm::dwarf::DW_AT_location,
-                    [unit = die.getDwarfUnit(),
-                     &location](const llvm::DWARFFormValue& value) {
+                    [unit = die.getDwarfUnit(), &location](const llvm::DWARFFormValue& value) {
                       location = DecodeVariableLocation(unit, value);
                     });
 
   llvm::DWARFDie type;
   decoder.AddReference(llvm::dwarf::DW_AT_type, &type);
+
+  llvm::Optional<bool> artificial;
+  decoder.AddBool(llvm::dwarf::DW_AT_artificial, &artificial);
 
   if (!decoder.Decode(die))
     return fxl::MakeRefCounted<Symbol>();
@@ -885,14 +924,15 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeVariable(
       variable = fxl::RefPtr<Variable>(spec_variable);
   }
   if (!variable) {
-    variable =
-        fxl::MakeRefCounted<Variable>(static_cast<DwarfTag>(die.getTag()));
+    variable = fxl::MakeRefCounted<Variable>(static_cast<DwarfTag>(die.getTag()));
   }
 
   if (name)
     variable->set_assigned_name(*name);
   if (type)
     variable->set_type(MakeLazy(type));
+  if (artificial)
+    variable->set_artificial(*artificial);
   variable->set_location(std::move(location));
 
   if (!variable->parent()) {
@@ -904,6 +944,55 @@ fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeVariable(
       variable->set_parent(MakeLazy(parent));
   }
   return variable;
+}
+
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeVariant(const llvm::DWARFDie& die) {
+  DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
+
+  // Assume unsigned discriminant values since this is always true for our
+  // current uses. See Variant::discr_value() comment for more.
+  llvm::Optional<uint64_t> discr_value;
+  decoder.AddUnsignedConstant(llvm::dwarf::DW_AT_discr_value, &discr_value);
+
+  if (!decoder.Decode(die))
+    return fxl::MakeRefCounted<Symbol>();
+
+  // Collect the data members.
+  std::vector<LazySymbol> members;
+  for (const llvm::DWARFDie& child : die) {
+    if (child.getTag() == llvm::dwarf::DW_TAG_member)
+      members.push_back(MakeLazy(child));
+  }
+
+  // Convert from LLVM-style to C++-style optional.
+  std::optional<uint64_t> discr;
+  if (discr_value)
+    discr = *discr_value;
+
+  return fxl::MakeRefCounted<Variant>(discr, std::move(members));
+}
+
+fxl::RefPtr<Symbol> DwarfSymbolFactory::DecodeVariantPart(const llvm::DWARFDie& die) {
+  DwarfDieDecoder decoder(symbols_->context(), die.getDwarfUnit());
+
+  // The discriminant is the DataMember in the variant whose value indicates
+  // which variant currently applies.
+  llvm::DWARFDie discriminant;
+  decoder.AddReference(llvm::dwarf::DW_AT_discr, &discriminant);
+
+  if (!decoder.Decode(die) || !discriminant)
+    return fxl::MakeRefCounted<Symbol>();
+
+  // Look for variants in this variant_part. It will also have a data member
+  // for the disciminant but we will have already found that above via
+  // reference.
+  std::vector<LazySymbol> variants;
+  for (const llvm::DWARFDie& child : die) {
+    if (child.getTag() == llvm::dwarf::DW_TAG_variant)
+      variants.push_back(MakeLazy(child));
+  }
+
+  return fxl::MakeRefCounted<VariantPart>(MakeLazy(discriminant), std::move(variants));
 }
 
 }  // namespace zxdb

@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_INPUT_LOCATION_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_INPUT_LOCATION_H_
 
 #include <stdint.h>
 
@@ -29,12 +30,9 @@ struct InputLocation {
   enum class Type { kNone, kLine, kSymbol, kAddress };
 
   InputLocation() = default;
-  explicit InputLocation(FileLine file_line)
-      : type(Type::kLine), line(std::move(file_line)) {}
-  explicit InputLocation(Identifier symbol)
-      : type(Type::kSymbol), symbol(std::move(symbol)) {}
-  explicit InputLocation(uint64_t address)
-      : type(Type::kAddress), address(address) {}
+  explicit InputLocation(FileLine file_line) : type(Type::kLine), line(std::move(file_line)) {}
+  explicit InputLocation(Identifier symbol) : type(Type::kSymbol), symbol(std::move(symbol)) {}
+  explicit InputLocation(uint64_t address) : type(Type::kAddress), address(address) {}
 
   // Converts the input location type to a string. This is intended to be used
   // in error messages.
@@ -65,3 +63,5 @@ struct InputLocation {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_INPUT_LOCATION_H_

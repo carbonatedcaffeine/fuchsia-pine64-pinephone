@@ -4,6 +4,7 @@
 
 library("syslog") {
   sdk = "shared"
+  sdk_publishable = true
   sdk_headers = [
     "lib/syslog/global.h",
     "lib/syslog/logger.h",
@@ -11,9 +12,9 @@ library("syslog") {
   ]
   shared = true
   sources = [
-    "fx_logger.cpp",
-    "global.cpp",
-    "logger.cpp",
+    "fx_logger.cc",
+    "global.cc",
+    "logger.cc",
   ]
   deps = [
     "$zx/system/fidl/fuchsia-logger:c",
@@ -22,5 +23,8 @@ library("syslog") {
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",
   ]
-  configs += [ "$zx/public/gn/config:static-libc++" ]
+  configs += [
+    "$zx/public/gn/config:static-libc++",
+    "$zx/public/gn/config:visibility_hidden",
+  ]
 }

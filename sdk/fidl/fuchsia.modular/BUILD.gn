@@ -11,7 +11,6 @@ fidl("fuchsia.modular") {
     "agent/agent.fidl",
     "agent/agent_context.fidl",
     "agent/agent_controller/agent_controller.fidl",
-    "agent/agent_provider.fidl",
     "basemgr/base_shell.fidl",
     "basemgr/user_provider.fidl",
     "clipboard/clipboard.fidl",
@@ -54,14 +53,6 @@ fidl("fuchsia.modular") {
     "story/story_shell_factory.fidl",
     "story/story_state.fidl",
     "story/story_visibility_state.fidl",
-    "suggestion/debug.fidl",
-    "suggestion/proposal.fidl",
-    "suggestion/proposal_publisher.fidl",
-    "suggestion/query_handler.fidl",
-    "suggestion/suggestion_display.fidl",
-    "suggestion/suggestion_engine.fidl",
-    "suggestion/suggestion_provider.fidl",
-    "suggestion/user_input.fidl",
     "surface/container.fidl",
     "surface/surface.fidl",
     "user_intelligence/intelligence_services.fidl",
@@ -71,15 +62,12 @@ fidl("fuchsia.modular") {
 
   deps = [
     "//sdk/fidl/fuchsia.auth",
-    "//sdk/fidl/fuchsia.images",
     "//sdk/fidl/fuchsia.ledger",
     "//sdk/fidl/fuchsia.modular.auth",
     "//sdk/fidl/fuchsia.speech",
     "//sdk/fidl/fuchsia.sys",
-    "//sdk/fidl/fuchsia.ui.gfx",
     "//sdk/fidl/fuchsia.ui.policy",
     "//sdk/fidl/fuchsia.ui.views",
-    "//sdk/fidl/fuchsia.ui.viewsv1token",
     "//zircon/public/fidl/fuchsia-mem",
   ]
 }

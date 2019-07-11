@@ -96,16 +96,33 @@ struct rpc_gpio_rsp_t {
 enum {
     CLK_ENABLE,
     CLK_DISABLE,
+    CLK_IS_ENABLED,
+    CLK_SET_RATE,
+    CLK_QUERY_SUPPORTED_RATE,
+    CLK_GET_RATE,
 };
 
 struct rpc_clk_req_t {
     platform_proxy_req_t header;
     uint32_t index;
+    uint64_t rate;
+};
+
+struct rpc_clk_rsp_t {
+    platform_proxy_rsp_t header;
+    bool is_enabled;
+    uint64_t rate;
 };
 
 // ZX_PROTOCOL_SYSMEM proxy support.
 enum {
     SYSMEM_CONNECT,
+    SYSMEM_REGISTER_HEAP,
+};
+
+struct rpc_sysmem_req_t {
+    platform_proxy_req_t header;
+    uint64_t heap;
 };
 
 // ZX_PROTOCOL_AMLOGIC_CANVAS proxy support.

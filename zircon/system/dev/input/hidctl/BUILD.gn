@@ -4,8 +4,7 @@
 
 driver("hidctl") {
   sources = [
-    "binding.c",
-    "hidctl.cpp",
+    "hidctl.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.hidbus",

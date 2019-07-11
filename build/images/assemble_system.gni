@@ -12,7 +12,7 @@ import("//garnet/build/pkgfs.gni")
 
 # Assembles a Fuchsia system.
 #
-# Given base, cache, and available packages, assembles a Fuchsia system
+# Given base, cache, and universe packages, assembles a Fuchsia system
 # containing those packages.
 #
 # This template can be instantiated at most one in a given BUILD.gn file.
@@ -201,41 +201,65 @@ template("assemble_system") {
     outputs = [
       "$target_out_dir/$target_name",
     ]
-    pkgfs = "bin/" + pkgfs_binary_name
-    pkgfs_label = pkgfs_package_label
-    pkgfs_pkg_out_dir = get_label_info(pkgfs_label, "target_out_dir") + "/" +
-                        get_label_info(pkgfs_label, "name")
-    pkgfs_blob_manifest = "$pkgfs_pkg_out_dir/meta/contents"
-    system_image_merkleroot = "$target_out_dir/system_image.meta/meta.far.merkle"
-
+    args = [ "--output=" + rebase_path(outputs[0], root_build_dir) ]
+    sources = []
     deps = [
-      ":system_image.meta",
-      pkgfs_label,
+        ":system_image.manifest",
     ]
 
-    sources = [
-      pkgfs_blob_manifest,
-      system_image_merkleroot,
-    ]
+    if (!bootfs_only) {
+      pkgfs = "bin/" + pkgfs_binary_name
+      pkgfs_label = pkgfs_package_label
+      pkgfs_pkg_out_dir = get_label_info(pkgfs_label, "target_out_dir") + "/" +
+                          get_label_info(pkgfs_label, "name")
+      pkgfs_blob_manifest = "$pkgfs_pkg_out_dir/meta/contents"
+      system_image_merkleroot =
+          "$target_out_dir/system_image.meta/meta.far.merkle"
 
-    args = [
-      "--output=" + rebase_path(outputs[0], root_build_dir),
-      "--entry=devmgr.require-system=true",
+      deps += [
+        ":system_image.meta",
+        pkgfs_label,
+      ]
 
-      "--contents",
-      "--rewrite=*=zircon.system.pkgfs.cmd={target}+{source}",
-      "--entry=${pkgfs}=" + rebase_path(system_image_merkleroot, root_build_dir),
-      "--no-contents",
-      "--reset-rewrite",
+      sources += [
+        pkgfs_blob_manifest,
+        system_image_merkleroot,
+      ]
 
-      "--rewrite=*=zircon.system.pkgfs.file.{target}={source}",
-      "--manifest=" + rebase_path(pkgfs_blob_manifest, root_build_dir),
-      "--reset-rewrite",
-    ]
+      args += [
+        "--entry=devmgr.require-system=true",
+
+        "--contents",
+        "--rewrite=*=zircon.system.pkgfs.cmd={target}+{source}",
+        "--entry=${pkgfs}=" +
+            rebase_path(system_image_merkleroot, root_build_dir),
+        "--no-contents",
+        "--reset-rewrite",
+
+        "--rewrite=*=zircon.system.pkgfs.file.{target}={source}",
+        "--manifest=" + rebase_path(pkgfs_blob_manifest, root_build_dir),
+        "--reset-rewrite",
+      ]
+    }
 
     foreach(entry, devmgr_config) {
       args += [ "--entry=$entry" ]
     }
+
+    # If there were any ASan drivers in the build, bin/devhost.asan
+    # should have been brought into the boot manifest.  devmgr needs to
+    # be told to use it in case there are ASan drivers in /system but
+    # none in /boot.  If there were any non-ASan drivers in the build,
+    # bin/devhost.asan will load them and needs to know to moderate the
+    # checking for interacting with uninstrumented code.
+    sources += [ boot_manifest ]
+    args += [
+      "--include=bin/devhost.asan",
+      "--include=bin/devhost",
+      "--rewrite=bin/devhost.asan=devmgr.devhost.asan=true",
+      "--rewrite=bin/devhost=devhost.asan.strict=false",
+      "--manifest=" + rebase_path(boot_manifest, root_build_dir),
+    ]
   }
 
   zbi(image_name) {
@@ -249,7 +273,7 @@ template("assemble_system") {
       config_package_barrier = []
 
       if (defined(invoker.metadata)) {
-        forward_variables_from(invoker.metadata, [ "metadata" ])
+        forward_variables_from(invoker.metadata, "*")
       }
     }
 

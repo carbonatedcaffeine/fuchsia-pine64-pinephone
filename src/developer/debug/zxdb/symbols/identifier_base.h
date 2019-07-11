@@ -21,47 +21,51 @@ enum class IdentifierQualification { kGlobal, kRelative };
 // identifier. This class encapsulates the core hierarchical part of an
 // identifier.
 //
-// Most code will want to use an "Identifier" which contains language-neutral
-// string components.
+// Code in the symbols directory must use "Identifier" which contains opaque
+// strings as components. The "expr" library adds a "ParsedIdentifier" which
+// has more C++-aware parsing of template types. See those classes for more.
 //
 // The ComponentType must be copyable and moveable and implement:
 //  - Construction from simple name:
 //      ComponentType(const std::string&)
 //  - Conversion to a string:
 //      std::string GetName(bool include_debug)
+//  - Comparison:
+//      operator==
+//      operator!=
 template <class ComponentType>
 class IdentifierBase {
  public:
   using Qualification = IdentifierQualification;
 
-  explicit IdentifierBase(Qualification qual = Qualification::kRelative)
-      : qualification_(qual) {}
+  explicit IdentifierBase(Qualification qual = Qualification::kRelative) : qualification_(qual) {}
 
   // Makes an identifier from a single component. Without the qualification
   // means relative.
   explicit IdentifierBase(ComponentType comp)
-      : qualification_(Qualification::kRelative),
-        components_({std::move(comp)}) {}
+      : qualification_(Qualification::kRelative), components_({std::move(comp)}) {}
   IdentifierBase(Qualification qual, ComponentType comp)
       : qualification_(qual), components_({std::move(comp)}) {}
 
   // Construction of a relative identifier from a simple single-name string.
   // This string is passed to the underlying component's constructor.
   IdentifierBase(const std::string& name)
-      : qualification_(Qualification::kRelative),
-        components_({ComponentType(name)}) {}
+      : qualification_(Qualification::kRelative), components_({ComponentType(name)}) {}
 
   // Makes an identifier over a range of components.
   template <class InputIterator>
   IdentifierBase(Qualification qual, InputIterator first, InputIterator last)
       : qualification_(qual), components_(first, last) {}
 
+  bool operator==(const IdentifierBase<ComponentType>& other) const {
+    return qualification_ == other.qualification_ && components_ == other.components_;
+  }
+  bool operator!=(const IdentifierBase<ComponentType>& other) const { return !operator==(other); }
+
   std::vector<ComponentType>& components() { return components_; }
   const std::vector<ComponentType>& components() const { return components_; }
 
-  bool empty() const {
-    return components_.empty() && qualification_ == Qualification::kRelative;
-  }
+  bool empty() const { return components_.empty() && qualification_ == Qualification::kRelative; }
 
   // Appends a single component.
   void AppendComponent(ComponentType c) { components_.push_back(std::move(c)); }
@@ -73,6 +77,7 @@ class IdentifierBase {
   }
 
   Qualification qualification() const { return qualification_; }
+  void set_qualification(Qualification q) { qualification_ = q; }
 
   // Returns a new identifier that's the scope of this one. The scope is
   // everything but the last component. The qualification remains unchanged.

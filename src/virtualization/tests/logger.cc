@@ -18,3 +18,5 @@ void Logger::Write(const char* s, size_t count) {
     std::cout.flush();
   }
 }
+
+void Logger::Write(const std::string& buffer) { Write(buffer.data(), buffer.size()); }

@@ -5,6 +5,7 @@
 import("//build/config.gni")
 import("//build/package.gni")
 import("//build/rust/rustc_binary.gni")
+import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
 
 rustc_binary("bin") {
@@ -35,11 +36,13 @@ rustc_binary("bin") {
     "//sdk/fidl/fuchsia.images:fuchsia.images-rustc",
     "//sdk/fidl/fuchsia.intl:fuchsia.intl-rustc",
     "//sdk/fidl/fuchsia.media:fuchsia.media-rustc",
+    "//sdk/fidl/fuchsia.modular.internal:fuchsia.modular.internal-rustc",
     "//sdk/fidl/fuchsia.setui:fuchsia.setui-rustc",
     "//sdk/fidl/fuchsia.ui.app:fuchsia.ui.app-rustc",
     "//sdk/fidl/fuchsia.ui.policy:fuchsia.ui.policy-rustc",
     "//sdk/fidl/fuchsia.ui.scenic:fuchsia.ui.scenic-rustc",
     "//sdk/fidl/fuchsia.virtualaudio:fuchsia.virtualaudio-rustc",
+    "//sdk/fidl/fuchsia.web:fuchsia.web-rustc",
     "//src/connectivity/bluetooth/lib/fuchsia-bluetooth",
     "//third_party/rust_crates:base64",
     "//third_party/rust_crates:byteorder",
@@ -61,6 +64,8 @@ rustc_binary("bin") {
 }
 
 package("sl4f") {
+  deprecated_shell = "//build"
+
   meta = [
     {
       path = "meta/sl4f.cmx"
@@ -75,11 +80,9 @@ package("sl4f") {
   binary = "sl4f"
 }
 
-package("sl4f-tests") {
-  testonly = true
-
+unittest_package("sl4f-tests") {
   deps = [
-    ":bin",
+    ":bin_test",
   ]
 
   tests = [

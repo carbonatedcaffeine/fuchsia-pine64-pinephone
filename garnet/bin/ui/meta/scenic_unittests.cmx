@@ -1,12 +1,27 @@
 {
+    "facets": {
+        "fuchsia.test": {
+            "injected-services": {
+                "fuchsia.sysmem.Allocator": "fuchsia-pkg://fuchsia.com/sysmem_connector#meta/sysmem_connector.cmx",
+                "fuchsia.vulkan.loader.Loader": "fuchsia-pkg://fuchsia.com/vulkan_loader#meta/vulkan_loader.cmx"
+            },
+            "system-services": [
+                "fuchsia.scheduler.ProfileProvider"
+            ]
+        }
+    },
     "program": {
         "binary": "test/scenic_unittests"
     },
     "sandbox": {
-        "features": [ "vulkan" ],
+        "features": [
+            "vulkan"
+        ],
         "services": [
+            "fuchsia.logger.LogSink",
             "fuchsia.vulkan.loader.Loader",
-            "fuchsia.scheduler.ProfileProvider"
+            "fuchsia.scheduler.ProfileProvider",
+            "fuchsia.sysmem.Allocator"
         ]
     }
 }

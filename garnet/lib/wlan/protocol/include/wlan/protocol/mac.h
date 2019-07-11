@@ -5,6 +5,7 @@
 #ifndef GARNET_LIB_WLAN_PROTOCOL_INCLUDE_WLAN_PROTOCOL_MAC_H_
 #define GARNET_LIB_WLAN_PROTOCOL_INCLUDE_WLAN_PROTOCOL_MAC_H_
 
+#include <ddk/hw/wlan/wlaninfo.h>
 #include <ddk/protocol/ethernet.h>
 #include <wlan/protocol/info.h>
 #include <zircon/compiler.h>
@@ -177,12 +178,12 @@ typedef struct wlan_key_config {
 
 typedef struct wlan_tx_packet {
     // Leading bytes of the packet to transmit. Any 802.11 frame headers must be in the packet_head.
-    ethmac_netbuf_t packet_head;
+    ethernet_netbuf_t packet_head;
     // Trailing bytes of the packet to transmit. May be NULL if all bytes to be transmitted are in
     // the packet_head. Typically used to transport ethernet frames from a higher layer.
-    ethmac_netbuf_t* packet_tail;
+    ethernet_netbuf_t* packet_tail;
     // If packet_tail is not NULL, the offset into the packet tail that should be used before
-    // transmitting. The ethmac_netbuf_t len field will reflect the original packet length without
+    // transmitting. The ethernet_netbuf_t len field will reflect the original packet length without
     // the offset.
     uint16_t tail_offset;
     // Additional data needed to transmit the packet.
@@ -206,7 +207,7 @@ typedef struct wlan_hw_scan_config {
     // Number of channels in the |channels| array. Must be at least 1
     uint8_t num_channels;
     // Channel numbers to scan
-    uint8_t channels[WLAN_CHANNELS_MAX_LEN];
+    uint8_t channels[WLAN_INFO_CHANNEL_LIST_MAX_CHANNELS];
     // SSID for directed probe requests
     wlan_ssid_t ssid;
 } wlan_hw_scan_config_t;

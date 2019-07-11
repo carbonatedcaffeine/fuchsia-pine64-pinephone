@@ -3,13 +3,18 @@
 // found in the LICENSE file.
 
 #![allow(non_camel_case_types)]
-#![deny(warnings)]
 
 pub type zx_addr_t = usize;
 pub type zx_clock_t = u32;
 pub type zx_duration_t = i64;
 pub type zx_futex_t = i32;
+pub type zx_gpaddr_t = usize;
+pub type zx_guest_trap_t = u32;
 pub type zx_handle_t = u32;
+pub type zx_koid_t = u64;
+pub type zx_obj_props_t = u32;
+pub type zx_obj_type_t = u32;
+pub type zx_object_info_topic_t = u32;
 pub type zx_off_t = u64;
 pub type zx_paddr_t = usize;
 pub type zx_rights_t = u32;
@@ -19,13 +24,7 @@ pub type zx_status_t = i32;
 pub type zx_ticks_t = u64;
 pub type zx_time_t = i64;
 pub type zx_vaddr_t = usize;
-pub type zx_gpaddr_t = usize;
 pub type zx_vm_option_t = u32;
-pub type zx_obj_type_t = i32;
-pub type zx_obj_props_t = u32;
-pub type zx_koid_t = u64;
-pub type zx_object_info_topic_t = u32;
-pub type zx_guest_trap_t = u32;
 
 pub const ZX_MAX_NAME_LEN: usize = 32;
 
@@ -47,6 +46,12 @@ macro_rules! multiconst {
 
 multiconst!(zx_handle_t, [
     ZX_HANDLE_INVALID = 0;
+]);
+
+multiconst!(zx_koid_t, [
+    ZX_KOID_INVALID = 0;
+    ZX_KOID_KERNEL = 1;
+    ZX_KOID_FIRST = 1024;
 ]);
 
 multiconst!(zx_time_t, [
@@ -80,7 +85,6 @@ multiconst!(zx_rights_t, [
 ]);
 
 multiconst!(u32, [
-    ZX_VMO_NON_RESIZABLE = 1;
     ZX_VMO_RESIZABLE = 1 << 1;
 ]);
 
@@ -288,12 +292,16 @@ multiconst!(zx_obj_type_t, [
     ZX_OBJ_TYPE_PMT                 = 26;
     ZX_OBJ_TYPE_SUSPEND_TOKEN       = 27;
     ZX_OBJ_TYPE_PAGER               = 28;
+    ZX_OBJ_TYPE_EXCEPTION           = 29;
 ]);
 
 multiconst!(zx_obj_props_t, [
     ZX_OBJ_PROP_NONE                  = 0;
     ZX_OBJ_PROP_WAITABLE              = 1;
+]);
 
+// TODO: add an alias for this type in the C headers.
+multiconst!(u32, [
     // Argument is a char[ZX_MAX_NAME_LEN].
     ZX_PROP_NAME                      = 3;
 
@@ -343,12 +351,18 @@ pub const ZX_SOCKET_SHUTDOWN_READ: u32 = 1 << 1;
 
 // VM Object clone flags
 pub const ZX_VMO_CHILD_COPY_ON_WRITE: u32 = 1;
-pub const ZX_VMO_CHILD_NON_RESIZEABLE: u32 = 1 << 1;
 pub const ZX_VMO_CHILD_RESIZABLE: u32 = 1 << 2;
 
 // channel write size constants
 pub const ZX_CHANNEL_MAX_MSG_HANDLES: u32 = 64;
 pub const ZX_CHANNEL_MAX_MSG_BYTES: u32 = 65536;
+
+// Task response codes if a process is externally killed
+pub const ZX_TASK_RETCODE_SYSCALL_KILL: i64 = -1024;
+pub const ZX_TASK_RETCODE_OOM_KILL: i64 = -1025;
+pub const ZX_TASK_RETCODE_POLICY_KILL: i64 = -1026;
+pub const ZX_TASK_RETCODE_VDSO_KILL: i64 = -1027;
+pub const ZX_TASK_RETCODE_EXCEPTION_KILL: i64 = -1028;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -555,20 +569,39 @@ multiconst!(zx_object_info_topic_t, [
     ZX_INFO_BTI                        = 20; // zx_info_bti_t[1]
     ZX_INFO_PROCESS_HANDLE_STATS       = 21; // zx_info_process_handle_stats_t[1]
     ZX_INFO_SOCKET                     = 22; // zx_info_socket_t[1]
+    ZX_INFO_VMO                        = 23; // zx_info_vmo_t[1]
+    ZX_INFO_JOB                        = 24; // zx_info_job_t[1]
 ]);
 
+// This macro takes struct-like syntax and creates another macro that can be used to create
+// different instances of the struct with different names. This is used to keep struct definitions
+// from drifting between this crate and the fuchsia-zircon crate where they are identical other
+// than in name and location.
+macro_rules! struct_decl_macro {
+    ( $(#[$attrs:meta])* $vis:vis struct <$macro_name:ident> $($any:tt)* ) => {
+        #[macro_export]
+        macro_rules! $macro_name {
+            ($name:ident) => {
+                $(#[$attrs])* $vis struct $name $($any)*
+            }
+        }
+    }
+}
+
+// Don't need struct_decl_macro for this, the wrapper is different.
 #[repr(C)]
-#[derive(Copy, Clone, Default)]
+#[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
 pub struct zx_info_handle_basic_t {
     pub koid: zx_koid_t,
     pub rights: zx_rights_t,
-    pub type_: u32,
+    pub type_: zx_obj_type_t,
     pub related_koid: zx_koid_t,
-    pub props: u32,
+    pub props: zx_obj_props_t,
 }
 
+// Don't need struct_decl_macro for this, the wrapper is different.
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
+#[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
 pub struct zx_info_socket_t {
     pub options: u32,
     pub rx_buf_max: usize,
@@ -577,6 +610,43 @@ pub struct zx_info_socket_t {
     pub tx_buf_max: usize,
     pub tx_buf_size: usize,
 }
+
+struct_decl_macro! {
+    #[repr(C)]
+    #[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
+    pub struct <zx_info_process_t> {
+        pub return_code: i64,
+        pub started: bool,
+        pub exited: bool,
+        pub debugger_attached: bool,
+    }
+}
+
+zx_info_process_t!(zx_info_process_t);
+
+struct_decl_macro! {
+    #[repr(C)]
+    #[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
+    pub struct <zx_info_job_t> {
+        pub return_code: i64,
+        pub exited: bool,
+        pub kill_on_oom: bool,
+        pub debugger_attached: bool,
+    }
+}
+
+zx_info_job_t!(zx_info_job_t);
+
+struct_decl_macro! {
+    #[repr(C)]
+    #[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
+    pub struct <zx_info_vmar_t> {
+        pub base: usize,
+        pub len: usize,
+    }
+}
+
+zx_info_vmar_t!(zx_info_vmar_t);
 
 multiconst!(zx_guest_trap_t, [
     ZX_GUEST_TRAP_BELL = 0;

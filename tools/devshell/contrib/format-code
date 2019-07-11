@@ -54,19 +54,15 @@ function get-diff-base() {
 function format-cmd() {
   if [ -f "$1" ]; then
     case "$1" in
-      *.c) printf "${CLANG_CMD}" ;;
-      *.cc) printf "${CLANG_CMD}" ;;
+      *.c | *.cc | *.cpp | *.h | *.hh | *.hpp | *.proto | *.ts)
+        printf "${CLANG_CMD}" ;;
+
       *.cmx) printf "${JSON_FMT_CMD}" ;;
-      *.cpp) printf "${CLANG_CMD}" ;;
       *.dart) printf "${DART_CMD}" ;;
       *.fidl) printf "${FIDL_CMD}" ;;
       *.gn) printf "${GN_CMD}" ;;
       *.gni) printf "${GN_CMD}" ;;
       *.go) printf "${GO_CMD}" ;;
-      *.h) printf "${CLANG_CMD}" ;;
-      *.hh) printf "${CLANG_CMD}" ;;
-      *.hpp) printf "${CLANG_CMD}" ;;
-      *.ts) printf "${CLANG_CMD}" ;;
       *.rs) printf "${RUST_FMT_CMD}" ;;
     esac
   fi
@@ -154,7 +150,7 @@ esac
 declare HOST_PLATFORM="${HOST_OS}-${HOST_ARCH}"
 
 declare CLANG_CMD="${BUILDTOOLS_ROOT}/${HOST_PLATFORM}/clang/bin/clang-format -style=file -fallback-style=Google -sort-includes -i"
-declare DART_CMD="${FUCHSIA_DIR}/topaz/tools/prebuilt-dart-sdk/${HOST_PLATFORM}/bin/dartfmt -w"
+declare DART_CMD="${FUCHSIA_DIR}/prebuilt/third_party/dart/${HOST_PLATFORM}/bin/dartfmt -w"
 declare FIDL_BIN="${ZIRCON_TOOLS_DIR}"/fidl-format
 declare FIDL_CMD="${FIDL_BIN} -i"
 declare GN_CMD="${BUILDTOOLS_ROOT}/gn format"

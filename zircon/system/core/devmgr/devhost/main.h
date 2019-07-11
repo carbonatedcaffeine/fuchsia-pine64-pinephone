@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef ZIRCON_SYSTEM_CORE_DEVMGR_DEVHOST_MAIN_H_
+#define ZIRCON_SYSTEM_CORE_DEVMGR_DEVHOST_MAIN_H_
 
-namespace devmgr {
+extern "C" int devmgr_device_host_main(int argc, char** argv);
 
-int device_host_main(int argc, char** argv);
-
-} // namespace devmgr
+#endif  // ZIRCON_SYSTEM_CORE_DEVMGR_DEVHOST_MAIN_H_

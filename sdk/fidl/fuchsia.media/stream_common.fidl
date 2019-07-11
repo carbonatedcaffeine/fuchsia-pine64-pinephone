@@ -6,6 +6,9 @@ library fuchsia.media;
 
 using fuchsia.sysmem;
 
+const uint32 KEY_ID_SIZE = 16;
+const uint32 MAX_INIT_VECTOR_SIZE = 16;
+
 /// Value
 ///
 /// Generic "value" for use within generic "Parameter" struct.
@@ -36,66 +39,9 @@ struct Parameter {
     Value value;
 };
 
-// FormatDetails
-//
-// The purpose of FormatDetails is to fill in additional details not
-// conveyed via other means.
-//
-// TODO(dustingreen): Where at all possible, definitions for the concepts
-// within FormatDetails should go in media_types.fidl or another location
-// that's widely shared.  Maybe some encoder settings could remain
-// codec-specific.
-//
-// For decoders input, the format details tend to be fairly sparse, since most
-// compressed formats tend to be mostly self-describing.
-//
-// For decoder output and encoder input, the format details need to include all
-// the out-of-band information regarding the uncompressed data, which tends not
-// to be self-describing.
-//
-// For encoder output, we also include in FormatDetails some additional
-// encoding parameters which are needed to configure the encoder. These are not
-// really needed by any downstream decoder under most circumstances, but these
-// encoder config settings are legitimate optional format details, so we use
-// the same overall structure, but name them "Encoder" to make it more obvious
-// that these are mostly relevant to the encoder.  A downstream consumer could
-// potentially benefit from knowing these settings, but most won't look at them.
-//
-// Settings that are completely redundant with the data in the format itself
-// should not be in a required field here.  Some encoder parameters may also be
-// represented in oob_bytes on the output of an encoder - a downstream
-// consumer can assume the oob_bytes are correct and not check for whether
-// encoder settings are present or consistent.
-//
-// With some exceptions made for encoder settings on output of an encoder, this
-// stuff should be limited to things we need to know to properly process the
-// data which we can't already determine from the data itself, and which isn't
-// already covered by a format's defined OOB binary config blob, which is
-// conveyed in oob_bytes.
-//
-// TODO(dustingreen): Consider whether to split encoder settings into a
-// separate struct - the main counter-argument would be if a consumer
-// immediately downstream of an encoder may have good reason to know encoder
-// settings to help process the data.  For example, the nominal bit-rate.
-// Compressed formats tend to be much more self-describing than uncompressed
-// formats.  (The "self" in "self-describing" includes the oob_bytes.)
-//
-// Most decoders can have FormatDetails.domain null.
-
-/// AudioCompressedFormat
-///
-/// Format details relevant to compressed audio, mostly for encoder settings.
-///
-/// Unless otherwise specified in a comment on a field in this structure,
-/// FormatDetails.domain is null for a decoder.  A sub-structure whose name
-/// ends in "Encoder" is for encoder output settings.
-///
-// TODO(dustingreen): Consider whether splitting encoder settings out separately
-// would be better.
-union AudioCompressedFormat {
-    // For an aac encoder, this field has settings the encoder needs which are
-    // specific to AAC encoding.
-    AudioCompressedFormatAacEncoder aac;
+xunion AudioCompressedFormat {
+    AudioCompressedFormatAac aac;
+    AudioCompressedFormatSbc sbc;
 };
 
 enum AudioBitrateMode {
@@ -108,42 +54,10 @@ enum AudioBitrateMode {
     VBR = 2;
 };
 
-/// AudioCompressedFormatAacEncoder
-///
-/// Encoder settings for an AAC encoder.
-struct AudioCompressedFormatAacEncoder {
-    // In SetOutputConfig():
-    //
-    // If zero, an encoder should generate 256 kbps, and a consumer should not
-    // assume any particular bitrate.
-    //
-    // If not zero, the encoder should not exceed this bitrate.  In CBR the
-    // encoder should use the highest available bitrate that doesn't exceed this
-    // value, or if there is no such bitrate, the lowest available bitrate.  In
-    // VBR, the encoder should stay at or below this bitrate.
-    //
-    // In VBR it's left up to the encoder to choose a reasonable ratio between
-    // max bits per second and min bits per second, with the aim in VBR being
-    // constant perceived quality.
-    //
-    // In OnOutputConstraints():
-    //
-    // In CBR, the nominal bits per second.  In VBR, the nominal max bits per
-    // second.
-    uint32 bits_per_second;
+struct AudioCompressedFormatAac {
+};
 
-    // In SetOutputConfig():
-    //
-    // If UNSPECIFIED, up to the encoder.  If CBR or VBR, a hint to the encoder
-    // to use that mode.
-    //
-    // In OnOutputConstraints():
-    //
-    // Actual mode being used.  UNSPECIFIED means the source is not specifying
-    // which mode.
-    AudioBitrateMode bitrate_mode;
-
-    // TODO(dustingreen): AAC profile settings.
+struct AudioCompressedFormatSbc {
 };
 
 /// AudioPcmMode
@@ -386,20 +300,231 @@ union VideoFormat {
     VideoUncompressedFormat uncompressed;
 };
 
+/// KeyId
+///
+/// An encryption key identifier.
+struct KeyId {
+    array<uint8>:KEY_ID_SIZE data;
+};
+
+/// SubsampleEntry
+///
+/// A subsample is a byte range within a sample consisting of a clear byte range
+/// followed by an encrypted byte range. This structure specifies the size of
+/// each range in the subsample.
+struct SubsampleEntry {
+    uint32 clear_bytes;
+    uint32 encrypted_bytes;
+};
+
+/// EncryptionPattern
+///
+/// Pattern encryption utilizes a pattern of encrypted and clear 16 byte blocks
+/// over the protected range of a subsample (the encrypted_bytes of a
+/// `SubsampleEntry`). This structure specifies the number of encrypted data
+/// blocks followed by the number of clear data blocks.
+struct EncryptionPattern {
+    uint32 clear_blocks;
+    uint32 encrypted_blocks;
+};
+
+/// EncryptedFormat
+///
+/// The stream format details payload of a decrypting stream processor. This is
+/// a sparsely populated table to specify parameters necessary for decryption
+/// other than the data stream. It is only necessary to update fields if they
+/// changed, but not an error if the same value is repeated.
+table EncryptedFormat {
+    /// `mode` specifies which encryption scheme to use, such as
+    /// fuchsia.media.ENCRYPTION_MODE_CENC.
+    /// Usage:
+    ///  - It is required to be set prior to delivery of input packets.
+    ///  - This should only be changed at the beginning of a data stream.
+    1: string mode;
+
+    /// `key_id` identifies the key that should be used for decrypting
+    /// subsequent data.
+    /// Usage:
+    ///  - It is required to be set prior to delivery of input packets to a
+    ///    decryptor.
+    ///  - This may be changed multiple times during a data stream.
+    2: KeyId key_id;
+
+    /// `init_vector` is used in combination with a key and a block of content
+    /// to create the first cipher block in a chain and derive subsequent cipher
+    /// blocks in a cipher block chain.
+    /// Usage:
+    ///  - It is required to be set prior to the delivery of input packets to a
+    ///    decryptor.
+    ///  - This may be changed multiple times during a data stream.
+    3: bytes:MAX_INIT_VECTOR_SIZE init_vector;
+
+    /// `subsamples` is used to identify the clear and encrypted portions of a
+    /// subsample.
+    /// Usage:
+    ///  - For whole sample encryption, this parameter should not be sent.
+    ///  - This may be changed multiple times during a data stream.
+    4: vector<SubsampleEntry> subsamples;
+
+    /// `pattern` is used to identify the clear and encrypted blocks for pattern
+    /// based encryption.
+    /// Usage:
+    /// - This is not allowed for CENC and CBC1 and required for CENS and CBCS.
+    /// - If required, it must be set prior to the delivery of input packets to
+    ///   a decryptor.
+    /// - This may be changed multiple times during a data stream.
+    5: EncryptionPattern pattern;
+};
+
+/// DecryptedFormat
+///
+/// This describes the format of the decrypted content. It is required to be
+/// sent by the StreamProcessor server prior to the delivery of output packets.
+/// Currently, there is no additional format details for decrypted output.
+table DecryptedFormat {
+    // TODO(FIDL-709): Empty tables cause dart analysis error. Remove this
+    // unused field once the issue is resolved.
+    1: bool ignore_this_field;
+};
+
+/// CryptoFormat
+///
+/// Crypto (encrypted or decrypted) format details.
+xunion CryptoFormat {
+    EncryptedFormat encrypted;
+    DecryptedFormat decrypted;
+};
+
 /// DomainFormat
 ///
 // Domain-specific format details (audio or video, compressed or uncompressed).
 union DomainFormat {
     AudioFormat audio;
     VideoFormat video;
+    CryptoFormat crypto;
 };
 
 const uint64 kMaxOobBytesSize = 8192;
+
+enum SbcSubBands {
+    SUB_BANDS_4 = 4;
+    SUB_BANDS_8 = 8;
+};
+
+enum SbcBlockCount {
+    BLOCK_COUNT_4 = 4;
+    BLOCK_COUNT_8 = 8;
+    BLOCK_COUNT_12 = 12;
+    BLOCK_COUNT_16 = 16;
+};
+
+enum SbcAllocation {
+    ALLOC_LOUDNESS = 0;
+    ALLOC_SNR = 1;
+};
+
+enum SbcChannelMode {
+    MONO = 0;
+    DUAL = 1;
+    STEREO = 2;
+    JOINT_STEREO = 3;
+};
+
+/// Settings for an SBC Encoder.
+///
+/// SBC Encoders take signed little endian 16 bit linear PCM samples and
+/// return encoded SBC frames. SBC encoder PCM data in batches of
+/// `sub_bands * block_count` PCM frames. This encoder will accept PCM data on
+/// arbitrary frame boundaries, but the output flushed when EOS is queued may be
+/// zero-padded to make a full batch for encoding.
+struct SbcEncoderSettings {
+    SbcSubBands sub_bands = SUB_BANDS_8;
+    SbcAllocation allocation = ALLOC_LOUDNESS;
+    SbcBlockCount block_count = BLOCK_COUNT_4;
+    SbcChannelMode channel_mode;
+    /// SBC bit pool value.
+    uint64 bit_pool;
+};
+
+/// Raw AAC access units.
+struct AacTransportRaw {
+};
+
+xunion AacTransport {
+    AacTransportRaw raw;
+};
+
+enum AacChannelMode {
+    MONO = 0;
+    STEREO = 2;
+};
+
+struct AacConstantBitRate {
+    /// Bits per second
+    uint32 bit_rate;
+};
+
+/// Variable bit rate modes. The actual resulting bitrate
+/// varies based on input signal and other encoding settings.
+///
+/// See https://wiki.hydrogenaud.io/index.php?title=Fraunhofer_FDK_AAC#Bitrate_Modes
+enum AacVariableBitRate {
+    V1 = 1;
+    V2 = 2;
+    V3 = 3;
+    V4 = 4;
+    V5 = 5;
+};
+
+union AacBitRate {
+    AacConstantBitRate constant;
+    AacVariableBitRate variable;
+};
+
+enum AacAudioObjectType {
+    /// MPEG-2 Low Complexity
+    MPEG2_AAC_LC = 0;
+};
+
+struct AacEncoderSettings {
+    AacTransport transport;
+    AacChannelMode channel_mode;
+    AacBitRate bit_rate;
+    AacAudioObjectType aot;
+};
+
+/// Settings for encoders that tell them how to encode raw
+/// formats.
+xunion EncoderSettings {
+    SbcEncoderSettings sbc;
+    AacEncoderSettings aac;
+};
 
 /// FormatDetails
 ///
 /// This describes/details the format on input or output of a StreamProcessor
 /// (separate instances for input vs. output).
+//
+// The purpose of FormatDetails is to fill in additional details not
+// conveyed via other means.
+//
+// For decoder input, the format details tend to be fairly sparse, since most
+// compressed formats tend to be mostly self-describing.
+//
+// For decoder output and encoder input, the format details need to include all
+// the out-of-band information regarding the uncompressed data, which tends not
+// to be self-describing.
+//
+// Settings that are completely redundant with the data in the format itself
+// should not be in a required field here. An encoder may set oob_bytes on its
+// output.
+//
+// This stuff should be limited to things we need to know to properly process the
+// data which we can't already determine from the data itself, and which isn't
+// already covered by a format's defined OOB binary config blob, which is
+// conveyed in oob_bytes.
+//
+// Most decoders can have FormatDetails.domain null.
 table FormatDetails {
     // Particular instances of FormatDetails will set this field to make it
     // easier for a receiver to determine if any part of the format has changed
@@ -492,4 +617,25 @@ table FormatDetails {
     // For streams that define their own stream-specific config/OOB data, put
     // that in oob_bytes above instead of this field.
     5: vector<Parameter> pass_through_parameters;
+
+    /// Instructs an encoder on how to encode raw data.
+    ///
+    /// Decoders may ignore this field but are entitled to rejected requests with
+    /// this field set because it doesn't make sense.
+    6: EncoderSettings encoder_settings;
+
+    /// The number of ticks of the timebase of input packet timestamp_ish values
+    /// per second.
+    ///
+    /// The timebase is only used used for optional extrapolation of timestamp_ish
+    /// values when an input timestamp which applies to byte 0 of the valid portion
+    /// of the input packet does not correspond directly to byte 0 of the valid
+    /// portion of any output packet.
+    ///
+    /// Leave unset if timestamp extrapolation is not needed, either due to lack of
+    /// timestamps on input, or due to input being provided in increments of the
+    /// encoder's input chunk size (based on the encoder settings and calculated
+    /// independently by the client).  Set if timestamp extrapolation is known to be
+    /// needed or known to be acceptable to the client.
+    7: uint64 timebase;
 };

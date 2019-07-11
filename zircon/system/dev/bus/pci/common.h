@@ -1,15 +1,21 @@
-// Copyright 2018 The Fuchsia Authors
-//
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file or at
-// https://opensource.org/licenses/MIT
+// Copyright 2018 The Fuchsia Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 #pragma once
 
 #include <ddk/debug.h>
 
+// Switch for easy enabling of output during unit tests where we
+// won't have driver log values set.
+#if 1
 #define pci_tracef(...) zxlogf(TRACE, "pci: " __VA_ARGS__)
 #define pci_errorf(...) zxlogf(ERROR, "pci: " __VA_ARGS__)
 #define pci_infof(...) zxlogf(INFO, "pci: " __VA_ARGS__)
+#else
+#define pci_tracef(...) printf("pci: " __VA_ARGS__)
+#define pci_errorf(...) printf("pci: " __VA_ARGS__)
+#define pci_infof(...) printf("pci: " __VA_ARGS__)
+#endif
 
 /*
  * PCI access return codes
@@ -22,6 +28,9 @@
 #define _PCI_SET_FAILED 0x88
 #define _PCI_BUFFER_TOO_SMALL 0x89
 
+#define PCI_CONFIG_HDR_SIZE (64u)
+#define PCI_BASE_CONFIG_SIZE (256u)
+#define PCI_EXT_CONFIG_SIZE (4096u)
 /*
  * PCI configuration space offsets
  */

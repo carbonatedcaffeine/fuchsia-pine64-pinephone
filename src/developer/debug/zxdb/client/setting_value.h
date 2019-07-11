@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SETTING_VALUE_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SETTING_VALUE_H_
 
 #include <string>
 #include <variant>
@@ -25,7 +26,7 @@ struct SettingInfo {
 };
 
 struct SettingValue {
-  SettingValue();   // Creates a kNull type.
+  SettingValue();  // Creates a kNull type.
   explicit SettingValue(bool);
   explicit SettingValue(int);
   explicit SettingValue(const char*);
@@ -41,9 +42,7 @@ struct SettingValue {
   const auto& get_bool() const { return std::get<bool>(value); }
   const auto& get_int() const { return std::get<int>(value); }
   const auto& get_string() const { return std::get<std::string>(value); }
-  const auto& get_list() const {
-    return std::get<std::vector<std::string>>(value);
-  }
+  const auto& get_list() const { return std::get<std::vector<std::string>>(value); }
 
   void set_bool(bool v) { value = v; }
   void set_int(int v) { value = v; }
@@ -52,8 +51,7 @@ struct SettingValue {
 
   std::string ToDebugString() const;
 
-  using VariantValue =
-      std::variant<bool, int, std::string, std::vector<std::string>>;
+  using VariantValue = std::variant<bool, int, std::string, std::vector<std::string>>;
 
   SettingType type = SettingType::kNull;
   VariantValue value;
@@ -65,3 +63,5 @@ struct Setting {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SETTING_VALUE_H_

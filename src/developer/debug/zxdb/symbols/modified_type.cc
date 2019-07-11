@@ -29,8 +29,7 @@ bool IsPointerTag(DwarfTag tag) {
 
 }  // namespace
 
-ModifiedType::ModifiedType(DwarfTag kind, LazySymbol modified)
-    : Type(kind), modified_(modified) {
+ModifiedType::ModifiedType(DwarfTag kind, LazySymbol modified) : Type(kind), modified_(modified) {
   FXL_DCHECK(DwarfTagIsTypeModifier(kind));
   if (IsTransparentTag(kind)) {
     const Type* mod_type = modified_.Get()->AsType();
@@ -45,11 +44,11 @@ ModifiedType::~ModifiedType() = default;
 
 const ModifiedType* ModifiedType::AsModifiedType() const { return this; }
 
-const Type* ModifiedType::GetConcreteType() const {
+const Type* ModifiedType::StripCVT() const {
   if (IsTransparentTag(tag())) {
     const Type* mod = modified_.Get()->AsType();
     if (mod)
-      return mod->GetConcreteType();
+      return mod->StripCVT();
   }
   return this;
 }
@@ -68,7 +67,7 @@ bool ModifiedType::ModifiesVoid() const {
     return false;
   }
 
-  if (const BaseType* base = type->GetConcreteType()->AsBaseType())
+  if (const BaseType* base = type->StripCVT()->AsBaseType())
     return base->base_type() == BaseType::kBaseTypeNone;
   return false;
 }
@@ -79,7 +78,7 @@ std::string ModifiedType::ComputeFullName() const {
   // Typedefs are special and just use the assigned name. Every other modifier
   // below is based on the underlying type name.
   if (tag() == DwarfTag::kTypedef)
-    return GetAssignedName();
+    return GetIdentifier().GetFullName();
 
   const Type* modified_type = nullptr;
   std::string modified_name;
@@ -139,6 +138,16 @@ std::string ModifiedType::ComputeFullName() const {
     default:
       return kUnknown;
   }
+}
+
+Identifier ModifiedType::ComputeIdentifier() const {
+  // Typedefs are special and just use the assigned name.
+  if (tag() == DwarfTag::kTypedef)
+    return Symbol::ComputeIdentifier();
+
+  // Every other modifier has decorations around it that means it can't have an
+  // identifier.
+  return Identifier();
 }
 
 }  // namespace zxdb

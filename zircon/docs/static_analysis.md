@@ -8,14 +8,14 @@ This document describes:
 
 ## Steps to run Clang Static Analyzer
 
-Assuming you already obtained a local copy of Fuchsia workspace according to the instructions written in [getting_started.md](https://fuchsia.googlesource.com/fuchsia/+/master/docs/getting_started.md) and the source tree of fuchsia is located at `$LOCAL_DIR/fuchsia` and current working directory is `$LOCAL_DIR/fuchsia/zircon`. The Clang Static Analayzer can be run on Zircon by following commands:
+Assuming you already obtained a local copy of Fuchsia workspace according to the instructions written in [getting_started.md](/docs/getting_started.md) and the source tree of fuchsia is located at `$LOCAL_DIR/fuchsia` and current working directory is `$LOCAL_DIR/fuchsia/zircon`. The Clang Static Analayzer can be run on Zircon by following commands:
 
 ```sh
 ./scripts/download-prebuilt
 ./scripts/analyze-zircon
 ```
 
-The Clang Static Analyzer will be run on Zircon code base with default checkers. After the finish of the analysis, you can see an outout in stdout similar to the one below:
+The Clang Static Analyzer will be run on Zircon code base with default checkers. After the finish of the analysis, you can see an output in stdout similar to the one below:
 
 ```
 scan-build: Run 'scan-view $LOCAL_DIR/fuchsia/zircon/AnalysisResult/scan-build-2017-08-08-11-26-25-914570-SKSE39' to examine bug reports.
@@ -34,7 +34,7 @@ At the time this document is written, all Zircon related checkers are still unde
 
 They are enabled by default when you executed the 'analyze-zircon' script. We will update the 'analyze-zircon' script to enable them by default once they get landed.
 
-In the mean time, if you would like to try ZirconHandleChecker now, you can download the source code of LLVM with Clang and apply the patch from the diffs above and follow the instructions in [toolchain.md](https://fuchsia.googlesource.com/fuchsia/+/master/docs/development/build/toolchain.md) to build your own toolchain. Assuming you have built your own toolchain and it is located at `$LOCAL_TOOLCHAIN_PREFIX` and `$LOCAL_TOOLCHAIN_PREFIX/bin/clang` is the path to the `clang` command. The Clang Static Analyzer can be run with ZirconHandleChecker and other default checkers enabled by following command:
+In the mean time, if you would like to try ZirconHandleChecker now, you can download the source code of LLVM with Clang and apply the patch from the diffs above and follow the instructions in [toolchain.md](/docs/development/build/toolchain.md) to build your own toolchain. Assuming you have built your own toolchain and it is located at `$LOCAL_TOOLCHAIN_PREFIX` and `$LOCAL_TOOLCHAIN_PREFIX/bin/clang` is the path to the `clang` command. The Clang Static Analyzer can be run with ZirconHandleChecker and other default checkers enabled by following command:
 
 ```
 ./scripts/analyze-zircon -p $LOCAL_TOOLCHAIN_PREFIX -m all
@@ -131,6 +131,7 @@ zx_status_t create_channel(
   ZX_SYSCALL_PARAM_ATTR(handle_acquire) zx_handle_t* out0,
   ZX_SYSCALL_PARAM_ATTR(handle_acquire) zx_handle_t* out1);
 ```
+
 Another example, we have another function `takeover_handle` that will take care the lifecycle of a handle if it is successfully executed and do nothing if it failed, we can declare this function in header file like this:
 
 ```c

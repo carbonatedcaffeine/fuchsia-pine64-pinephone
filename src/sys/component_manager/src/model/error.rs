@@ -12,6 +12,12 @@ use {
 pub enum ModelError {
     #[fail(display = "component instance not found with moniker {}", moniker)]
     InstanceNotFound { moniker: AbsoluteMoniker },
+    #[fail(display = "component instance with moniker {} already exists", moniker)]
+    InstanceAlreadyExists { moniker: AbsoluteMoniker },
+    #[fail(display = "component collection not found with name {}", name)]
+    CollectionNotFound { name: String },
+    #[fail(display = "{} is not supported", feature)]
+    Unsupported { feature: String },
     #[fail(display = "component declaration invalid")]
     ComponentInvalid,
     #[fail(display = "component manifest invalid")]
@@ -35,16 +41,35 @@ pub enum ModelError {
         #[fail(cause)]
         err: RunnerError,
     },
+    #[fail(display = "ambient error")]
+    AmbientError {
+        #[fail(cause)]
+        err: AmbientError,
+    },
     #[fail(display = "capability discovery error")]
     CapabilityDiscoveryError {
         #[fail(cause)]
         err: Error,
     },
+    #[fail(display = "add entry error")]
+    AddEntryError { moniker: AbsoluteMoniker, entry_name: String },
 }
 
 impl ModelError {
     pub fn instance_not_found(moniker: AbsoluteMoniker) -> ModelError {
         ModelError::InstanceNotFound { moniker }
+    }
+
+    pub fn instance_already_exists(moniker: AbsoluteMoniker) -> ModelError {
+        ModelError::InstanceAlreadyExists { moniker }
+    }
+
+    pub fn collection_not_found(name: impl Into<String>) -> ModelError {
+        ModelError::CollectionNotFound { name: name.into() }
+    }
+
+    pub fn unsupported(feature: impl Into<String>) -> ModelError {
+        ModelError::Unsupported { feature: feature.into() }
     }
 
     pub fn namespace_creation_failed(err: impl Into<Error>) -> ModelError {
@@ -58,6 +83,10 @@ impl ModelError {
     pub fn capability_discovery_error(err: impl Into<Error>) -> ModelError {
         ModelError::CapabilityDiscoveryError { err: err.into() }
     }
+
+    pub fn add_entry_error(moniker: AbsoluteMoniker, entry_name: impl Into<String>) -> ModelError {
+        ModelError::AddEntryError { moniker, entry_name: entry_name.into() }
+    }
 }
 
 impl From<ResolverError> for ModelError {
@@ -69,5 +98,11 @@ impl From<ResolverError> for ModelError {
 impl From<RunnerError> for ModelError {
     fn from(err: RunnerError) -> Self {
         ModelError::RunnerError { err }
+    }
+}
+
+impl From<AmbientError> for ModelError {
+    fn from(err: AmbientError) -> Self {
+        ModelError::AmbientError { err }
     }
 }

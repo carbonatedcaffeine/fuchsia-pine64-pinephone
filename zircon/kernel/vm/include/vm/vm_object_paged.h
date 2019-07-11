@@ -33,6 +33,7 @@ public:
     static constexpr uint32_t kResizable = (1u << 0);
     static constexpr uint32_t kContiguous = (1u << 1);
     static constexpr uint32_t kHidden = (1u << 2);
+    static constexpr uint32_t kSlice = (1u << 3);
 
     static zx_status_t Create(uint32_t pmm_alloc_flags,
                               uint32_t options,
@@ -81,17 +82,23 @@ public:
         Guard<fbl::Mutex> guard{&lock_};
         return GetRootPageSourceLocked() != nullptr;
     }
-    bool is_hidden() const { return (options_ & kHidden); }
+    bool is_hidden() const override { return (options_ & kHidden); }
     ChildType child_type() const override {
         Guard<fbl::Mutex> guard{&lock_};
         return (original_parent_user_id_ != 0) ? ChildType::kCowClone : ChildType::kNotChild;
     }
+    bool is_slice() const { return options_ & kSlice; }
     uint64_t parent_user_id() const override {
         Guard<fbl::Mutex> guard{&lock_};
         return original_parent_user_id_;
     }
+    void set_user_id(uint64_t user_id) override {
+        VmObject::set_user_id(user_id);
+        Guard<fbl::Mutex> guard{&lock_};
+        page_attribution_user_id_ = user_id;
+    }
 
-    size_t AllocatedPagesInRange(uint64_t offset, uint64_t len) const override;
+    size_t AttributedPagesInRange(uint64_t offset, uint64_t len) const override;
 
     zx_status_t CommitRange(uint64_t offset, uint64_t len) override;
     zx_status_t DecommitRange(uint64_t offset, uint64_t len) override;
@@ -135,7 +142,7 @@ public:
     uint32_t GetMappingCachePolicy() const override;
     zx_status_t SetMappingCachePolicy(const uint32_t cache_policy) override;
 
-    void OnChildRemoved(Guard<Mutex>&& guard) override
+    void RemoveChild(VmObjectPaged* child, Guard<Mutex>&& guard) override
         // Analysis doesn't know that the guard passed to this function is the vmo's lock.
         TA_NO_THREAD_SAFETY_ANALYSIS;
     bool OnChildAddedLocked() override TA_REQ(lock_);
@@ -144,6 +151,11 @@ public:
         DEBUG_ASSERT(page_source_);
         page_source_->Detach();
     }
+
+    zx_status_t CreateChildSlice(uint64_t offset, uint64_t size, bool copy_name,
+                                 fbl::RefPtr<VmObject>* child_vmo) override
+        // This function reaches into the created child, which confuses analysis.
+        TA_NO_THREAD_SAFETY_ANALYSIS;
 
     static constexpr uint64_t MAX_SIZE = VmPageList::MAX_SIZE;
     // Ensure that MAX_SIZE + PAGE_SIZE doesn't overflow so VmObjectPaged doesn't
@@ -176,15 +188,23 @@ private:
 
     DISALLOW_COPY_ASSIGN_AND_MOVE(VmObjectPaged);
 
-    // add a page to the object
+    // Add a page to the object. This operation unmaps the corresponding
+    // offset from any existing mappings.
     zx_status_t AddPage(vm_page_t* p, uint64_t offset);
-    zx_status_t AddPageLocked(vm_page_t* p, uint64_t offset) TA_REQ(lock_);
+    // If |do_range_update| is false, this function will skip updating mappings.
+    zx_status_t AddPageLocked(vm_page_t* p, uint64_t offset,
+                              bool do_range_update = true) TA_REQ(lock_);
 
     // internal page list routine
     void AddPageToArray(size_t index, vm_page_t* p);
 
     zx_status_t PinLocked(uint64_t offset, uint64_t len) TA_REQ(lock_);
     void UnpinLocked(uint64_t offset, uint64_t len) TA_REQ(lock_);
+
+    // Internal decommit range helper that expects the lock to be held. On success it will populate
+    // the past in page list with any pages that should be freed.
+    zx_status_t DecommitRangeLocked(uint64_t offset, uint64_t len, list_node_t &free_list)
+        TA_REQ(lock_);
 
     fbl::RefPtr<PageSource> GetRootPageSourceLocked() const
         // Walks the parent chain to get the root page source, which confuses analysis.
@@ -197,8 +217,13 @@ private:
     // internal check if any pages in a range are pinned
     bool AnyPagesPinnedLocked(uint64_t offset, size_t len) TA_REQ(lock_);
 
-    // see AllocatedPagesInRange
-    size_t AllocatedPagesInRangeLocked(uint64_t offset, uint64_t len) const TA_REQ(lock_);
+    // see AttributedPagesInRange
+    size_t AttributedPagesInRangeLocked(uint64_t offset, uint64_t len) const TA_REQ(lock_);
+    // Helper function for ::AllocatedPagesInRangeLocked. Returns true if there is a page
+    // in an ancestor vmo at |offset| which should be attributed to this vmo.
+    bool HasAttributedAncestorPageLocked(uint64_t offset) const
+        // Walks the parent chain, which analysis can't handle.
+        TA_NO_THREAD_SAFETY_ANALYSIS;
 
     // internal read/write routine that takes a templated copy function to help share some code
     template <typename T>
@@ -217,21 +242,156 @@ private:
             // Walks the child chain, which confuses analysis.
             TA_NO_THREAD_SAFETY_ANALYSIS;
 
+    // GetPageLocked helper function that 'forks' the page at |offset| of the current vmo. If
+    // this function successfully inserts a page into |offset| of the current vmo, it returns
+    // a pointer to the corresponding vm_page_t struct. The only failure condition is memory
+    // allocation failure, in which case this function returns null.
+    //
+    // The source page that is being forked has already been calculated - it is |page|, which
+    // is currently in |page_owner| at offset |owner_offset|.
+    //
+    // This function is responsible for ensuring that COW clones never result in worse memory
+    // consumption than simply creating a new vmo and memcpying the content. It does this by
+    // migrating a page from a hidden vmo into one child if that page is not 'accessible' to the
+    // other child (instead of allocating a new page into the child and making the hidden vmo's
+    // page inaccessible).
+    //
+    // Whether a particular page in a hidden vmo is 'accessible' to a particular child is
+    // determined by a combination of two factors. First, if the page lies outside of the range
+    // in the hidden vmo the child can see (specified by parent_offset_ and parent_limit_), then
+    // the page is not accessible. Second, if the page has already been copied into the child,
+    // then the page in the hidden vmo is not accessible to that child. This is tracked by the
+    // cow_X_split bits in the vm_page_t structure.
+    //
+    // To handle memory allocation failure, this function performs the fork operation from the
+    // root vmo towards the leaf vmo. This allows the COW invariants to always be preserved.
+    //
+    // |page| must not be the zero-page, as there is no need to do the complex page
+    // fork logic to reduce memory consumption in that case.
+    vm_page_t* CloneCowPageLocked(uint64_t offset, list_node_t* free_list,
+                                  VmObjectPaged* page_owner, vm_page_t* page,
+                                  uint64_t owner_offset)
+            // Walking through the ancestors confuses analysis.
+            TA_NO_THREAD_SAFETY_ANALYSIS;
+
+    // Returns true if |page| (located at |offset| in this vmo) is only accessible by one
+    // child, where 'accessible' is defined by ::CloneCowPageLocked.
+    bool IsUniAccessibleLocked(vm_page_t* page, uint64_t offset) const
+            // Reaching into the children confuses analysis
+            TA_NO_THREAD_SAFETY_ANALYSIS;
+
+    // ::CloneCowPageLocked helper function that ensures contigous vmos remain contiguous.
+    //
+    // In general, it does not matter which vmo gets which physical page when forking pages in
+    // hidden vmos. However, if there are COW clones of a contiguous vmo, the original vmo
+    // must always see the original physical pages, so that it always looks contiguous to
+    // userspace.  This function is responsible for fixing up any violations to this property
+    // introduced by the primary page forking logic in ::CloneCowPageLocked.
+    //
+    // |page_owner| is the original owner of the page being forked, and |page_owner_offset|
+    // is the offset of the original page. |last_contig| is the last contiguous vmo between
+    // |this| and |page_owner| that can also no longer see the desired page.
+    void ContiguousCowFixupLocked(VmObjectPaged* page_owner, uint64_t page_owner_offset,
+                                  VmObjectPaged* last_contig, uint64_t last_contig_offset)
+            // Walking through the ancestors confuses analysis.
+            TA_NO_THREAD_SAFETY_ANALYSIS;
+
+    // Releases this vmo's reference to any ancestor vmo's COW pages, for the range [start, end)
+    // in this vmo. This is done by either setting the pages' split bits (if something else
+    // can access the pages) or by freeing the pages onto |free_list| (if nothing else can
+    // access the pages).
+    //
+    // This function recursively invokes itself for regions of the parent vmo which are
+    // not accessible by the sibling vmo.
+    // TODO(ZX-757): Carefully constructed clone chains can blow the stack.
+    void ReleaseCowParentPagesLocked(uint64_t start, uint64_t end, list_node_t* free_list)
+            // Calling into the parents confuses analysis
+            TA_NO_THREAD_SAFETY_ANALYSIS;
+
+    // Updates the parent limits of all children so that they will never be able to
+    // see above |new_size| in this vmo, even if the vmo is enlarged in the future.
+    void UpdateChildParentLimitsLocked(uint64_t new_size)
+            // Calling into the children confuses analysis
+            TA_NO_THREAD_SAFETY_ANALYSIS;
+
+    // When cleaning up a hidden vmo, merges the hidden vmo's content (e.g. page list, view
+    // of the parent) into the remaining child.
+    void MergeContentWithChildLocked(VmObjectPaged* removed, bool removed_left)
+            // Accesses into the child confuse analysis
+            TA_NO_THREAD_SAFETY_ANALYSIS;
+
+    // Only valid to be called when is_slice() is true and returns the first parent of this
+    // hierarchy that is not a slice. The offset of this slice within that VmObjectPaged is set as
+    // the output.
+    VmObjectPaged* PagedParentOfSliceLocked(uint64_t *offset)
+            // Calling into the parent confuses analysis
+            TA_NO_THREAD_SAFETY_ANALYSIS;
+
+    // Outside of initialization/destruction, hidden vmos always have two children. For
+    // clarity, whichever child is first in the list is the 'left' child, and whichever
+    // child is second is the 'right' child.
+    VmObjectPaged& left_child_locked() TA_REQ(lock_) {
+        DEBUG_ASSERT(is_hidden());
+        DEBUG_ASSERT(children_list_len_ == 2);
+        return children_list_.front();
+    }
+    VmObjectPaged& right_child_locked() TA_REQ(lock_) {
+        DEBUG_ASSERT(is_hidden());
+        DEBUG_ASSERT(children_list_len_ == 2);
+        return children_list_.back();
+    }
+    const VmObjectPaged& left_child_locked() const TA_REQ(lock_) {
+        DEBUG_ASSERT(is_hidden());
+        DEBUG_ASSERT(children_list_len_ == 2);
+        return children_list_.front();
+    }
+    const VmObjectPaged& right_child_locked() const TA_REQ(lock_) {
+        DEBUG_ASSERT(is_hidden());
+        DEBUG_ASSERT(children_list_len_ == 2);
+        return children_list_.back();
+    }
+
     // members
     const uint32_t options_;
     uint64_t size_ TA_GUARDED(lock_) = 0;
-    // offset in the *parent* where this object starts
+    // Offset in the *parent* where this object starts.
     uint64_t parent_offset_ TA_GUARDED(lock_) = 0;
-    // offset in *this object* where it stops referring to its parent
+    // Offset in *this object* above which accesses will no longer access the parent.
     uint64_t parent_limit_ TA_GUARDED(lock_) = 0;
+    // Offset in *this object* below which this vmo stops referring to its parent. This field
+    // is only useful for hidden vmos, where it is used by ::ReleaseCowPagesParentLocked
+    // together with parent_limit_ to reduce how often page split bits need to be set. It is
+    // effectively a summary of the parent_offset_ values of all descendants - unlike
+    // parent_limit_, this value does not directly impact page lookup.
+    uint64_t parent_start_limit_ TA_GUARDED(lock_) = 0;
     const uint32_t pmm_alloc_flags_ = PMM_ALLOC_FLAG_ANY;
     uint32_t cache_policy_ TA_GUARDED(lock_) = ARCH_MMU_FLAG_CACHED;
+
+    // Flag which is true if there was a call to ::ReleaseCowParentPagesLocked which was
+    // not able to update the parent limits. When this is not set, it is sometimes
+    // possible for ::MergeContentWithChildLocked to do significantly less work.
+    bool partial_cow_release_ TA_GUARDED(lock_) = false;
 
     // parent pointer (may be null)
     fbl::RefPtr<VmObject> parent_ TA_GUARDED(lock_);
     // Record the user_id_ of the original parent, in case we make
     // a bidirectional clone and end up changing parent_.
     uint64_t original_parent_user_id_ TA_GUARDED(lock_) = 0;
+
+    // Flag used for walking back up clone tree without recursion. See ::CloneCowPageLocked.
+    enum class StackDir {
+        Left, Right,
+    };
+    StackDir page_stack_flag_ TA_GUARDED(lock_);
+
+    // This value is used when determining against which user-visible vmo a hidden vmo's
+    // pages should be attributed. It serves as a tie-breaker for pages that are accessible by
+    // multiple user-visible vmos. See ::HasAttributedAncestorPageLocked for more details.
+    //
+    // For non-hidden vmobjects, this always equals user_id_. For hidden vmobjects, this
+    // is the page_attribution_user_id_ of one of their children (i.e. the user_id_ of one
+    // of their non-hidden descendants).
+    uint64_t page_attribution_user_id_ TA_GUARDED(lock_) = 0;
 
     // The page source, if any.
     const fbl::RefPtr<PageSource> page_source_;

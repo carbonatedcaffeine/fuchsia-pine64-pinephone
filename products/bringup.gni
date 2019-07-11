@@ -2,10 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-enable_netboot = true
+bootfs_only = true
 
 zircon_enable_kernel_debugging_features = true
 zircon_enable_netsvc_debugging_features = true
+
+# TODO(BLD-382): Once everything is moved over to using these product configs,
+# update the bootsvc default to this.
+# Note: When removing this, don't delete the line, just switch to [].
+kernel_cmdline_args = [ "bootsvc.next=bin/component_manager,fuchsia-boot:///boot#meta/root.cm,--use-builtin-process-launcher" ]
 
 meta_package_labels = [ "//build/images:config-data" ]
 
@@ -13,4 +18,7 @@ base_package_labels = []
 
 cache_package_labels = []
 
-universe_package_labels = [ "//garnet/packages/prod:vboot_reference" ]
+universe_package_labels = [
+  "//garnet/tools/vboot_reference:cgpt_host",
+  "//garnet/tools/vboot_reference:futility_host",
+]

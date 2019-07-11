@@ -4,12 +4,12 @@
 
 driver("gpio-light") {
   sources = [
-    "gpio-light.cpp",
+    "gpio-light.cc",
   ]
   deps = [
+    "$zx/system/banjo/ddk.protocol.composite",
     "$zx/system/banjo/ddk.protocol.gpio",
     "$zx/system/banjo/ddk.protocol.gpioimpl",
-    "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/fidl/fuchsia-hardware-light:c",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",

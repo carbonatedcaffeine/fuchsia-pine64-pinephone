@@ -64,13 +64,12 @@ void GetEntries(
   snapshot_ptr->GetEntries(
       fidl::VectorPtr<uint8_t>::New(0), std::move(token),
       [snapshot = std::move(snapshot), entries = std::move(entries),
-       callback = std::move(callback)](fuchsia::ledger::IterationStatus status,
-                                       auto new_entries,
+       callback = std::move(callback)](auto new_entries,
                                        auto next_token) mutable {
         for (size_t i = 0; i < new_entries.size(); ++i) {
           entries.push_back(std::move(new_entries.at(i)));
         }
-        if (status == fuchsia::ledger::IterationStatus::OK) {
+        if (!next_token) {
           callback(std::move(entries));
           return;
         }
@@ -93,9 +92,9 @@ TodoApp::TodoApp(async::Loop* loop)
       size_distribution_(kMeanListSize, kListSizeStdDev),
       delay_distribution_(kMinDelaySeconds, kMaxDelaySeconds),
       generator_(&rng_),
-      context_(component::StartupContext::CreateFromStartupInfo()),
+      context_(sys::ComponentContext::Create()),
       page_watcher_binding_(this) {
-  context_->ConnectToEnvironmentService(module_context_.NewRequest());
+  context_->svc()->Connect(module_context_.NewRequest());
   module_context_->GetComponentContext(component_context_.NewRequest());
   ledger_.set_error_handler(
       NewErrorHandler([this] { loop_->Quit(); }, "Ledger"));
@@ -146,9 +145,7 @@ void TodoApp::GetKeys(fit::function<void(std::vector<Key>)> callback) {
   snapshot_ptr->GetKeys(
       {}, nullptr,
       [snapshot = std::move(snapshot), callback = std::move(callback)](
-          fuchsia::ledger::IterationStatus status, auto keys, auto next_token) {
-        callback(std::move(keys));
-      });
+          auto keys, auto next_token) { callback(std::move(keys)); });
 }
 
 void TodoApp::AddNew() {

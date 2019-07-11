@@ -27,12 +27,14 @@ use crate::{
     host_dispatcher::{HostService::*, *},
 };
 
-mod services;
-mod store;
-
 mod adapters;
 mod host_device;
 mod host_dispatcher;
+mod services;
+mod store;
+#[cfg(test)]
+mod test;
+mod types;
 
 const BT_GAP_COMPONENT_ID: &'static str = "bt-gap";
 
@@ -80,7 +82,7 @@ fn run() -> Result<(), Error> {
     });
 
     let mut fs = ServiceFs::new();
-    fs.dir("public")
+    fs.dir("svc")
         .add_fidl_service(move |s| control_service(control_hd.clone(), s))
         .add_service_at(CentralMarker::NAME, move |chan| {
             if let Ok(chan) = fasync::Channel::from_channel(chan) {
@@ -112,7 +114,8 @@ fn run() -> Result<(), Error> {
         });
     fs.take_and_serve_directory_handle()?;
 
-    executor.run_singlethreaded(try_join(fs.collect::<()>().map(Ok), host_watcher))
+    executor
+        .run_singlethreaded(try_join(fs.collect::<()>().map(Ok), host_watcher))
         .map(|((), ())| ())
 }
 

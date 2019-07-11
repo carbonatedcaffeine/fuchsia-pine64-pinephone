@@ -37,6 +37,7 @@ Adding debug info to the boot image is for when you are running debugging
 tools on zircon itself.
 
 Example:
+
 ```
 $ gn gen build-zircon --args='BOOTFS_DEBUG_MODULES=ulib/%,utest/debugger symbol_level = 1'
 ```
@@ -51,7 +52,7 @@ is passed.
 See "Debugging the kernel with GDB" in [QEMU](../qemu.md) for
 documentation on debugging zircon with QEMU+GDB.
 
-[fuchsia-debugging-doc]: https://fuchsia.googlesource.com/fuchsia/+/master/docs/development/workflows/debugging.md
+[fuchsia-debugging-doc]: /docs/development/workflows/debugging.md
 
 ## Symbolizing the backtraces
 
@@ -59,7 +60,9 @@ To automatically symbolize the backtraces when running zircon, pass the logs
 through the symbolizer as follows:
 
 ```
-$ ./scripts/run-zircon -a (x64|arm64) | ./scripts/symbolize
+fx set bringup.x64 --variant asan  # or bringup.arm64
+fx build
+fx run | ./scripts/symbolize
 ...
 > crasher
 ...
@@ -98,7 +101,6 @@ start of symbolized stack:
 #03: start_main at ./third_party/ulib/musl/src/env/__libc_start_main.c:49
 #04: unknown, can't find pc, sp or app/library in line
 end of symbolized stack
-``
 ```
 
 ## Kernel commands

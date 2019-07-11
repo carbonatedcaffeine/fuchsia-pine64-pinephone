@@ -5,6 +5,7 @@
 //! This module provides common constants and helpers to assist in the unit-testing of other
 //! modules within the crate.
 
+use crate::common::AccountLifetime;
 use account_common::{LocalAccountId, LocalPersonaId};
 use fidl::endpoints::{create_endpoints, ClientEnd};
 use fidl_fuchsia_auth::AppConfig;
@@ -26,6 +27,8 @@ lazy_static! {
 }
 
 pub static TEST_APPLICATION_URL: &str = "test_app_url";
+
+pub static TEST_ACCOUNT_ID_UINT: u64 = 111111;
 
 // TODO(jsankey): If fidl calls ever accept non-mutable structs, move this to a lazy_static.
 // Currently FIDL requires mutable access to a type that doesn't support clone, so we just create a
@@ -58,6 +61,11 @@ impl TempLocation {
     /// default.
     pub fn test_path(&self) -> PathBuf {
         self.path.join("test_path")
+    }
+
+    /// Returns a persistent AccountLifetime with the path set to this TempLocation's path.
+    pub fn to_persistent_lifetime(&self) -> AccountLifetime {
+        AccountLifetime::Persistent { account_dir: self.path.clone() }
     }
 }
 
@@ -101,12 +109,10 @@ pub fn spawn_context_channel(
     let (client_end, server_end) = create_endpoints().unwrap();
     let request_stream = server_end.into_stream().unwrap();
     let context_clone = Arc::clone(&context);
-    fasync::spawn(
-        async move {
-            await!(context_clone.handle_requests_from_stream(request_stream))
-                .unwrap_or_else(|err| error!("Error handling FakeAccountHandlerContext: {:?}", err))
-        },
-    );
+    fasync::spawn(async move {
+        await!(context_clone.handle_requests_from_stream(request_stream))
+            .unwrap_or_else(|err| error!("Error handling FakeAccountHandlerContext: {:?}", err))
+    });
     client_end
 }
 

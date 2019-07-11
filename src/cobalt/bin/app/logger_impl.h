@@ -12,6 +12,11 @@
 
 namespace cobalt {
 
+// Implementations of the Logger and LoggerSimple fidl interfaces.
+//
+// To test run:
+//    fx set --with-base //bundles:tools,//src/cobalt/bin:cobalt_tests;
+//    fx run-test-component cobalt_testapp_no_network
 class LoggerImpl : public fuchsia::cobalt::Logger,
                    public fuchsia::cobalt::LoggerSimple {
  public:
@@ -20,6 +25,7 @@ class LoggerImpl : public fuchsia::cobalt::Logger,
              logger::EventAggregator* event_aggregator,
              logger::ObservationWriter* observation_writer,
              TimerManager* timer_manager,
+             encoder::SystemDataInterface* system_data,
              logger::LoggerInterface* internal_logger);
 
  private:

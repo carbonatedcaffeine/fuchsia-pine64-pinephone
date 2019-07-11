@@ -122,8 +122,8 @@ TEST_F(TestHarnessImplTest, DefaultInjectedServices) {
 
   auto generated_accountmgr_url = GenerateFakeUrl();
 
-  spec.mutable_env_services_to_inject()->push_back(
-      fuchsia::modular::testing::InjectedService{
+  spec.mutable_env_services()->mutable_services_from_components()->push_back(
+      fuchsia::modular::testing::ComponentService{
           // Override the default injected AccountManager.
           .name = fuchsia::auth::account::AccountManager::Name_,
           .url = generated_accountmgr_url});
@@ -161,13 +161,13 @@ TEST_F(TestHarnessImplTest, DefaultInjectedServices) {
 // Test that additional injected services are made available, spin up the
 // associated component when requested. This test exercises injecting a custom
 // service.
-TEST_F(TestHarnessImplTest, CustomInjectedServices) {
+TEST_F(TestHarnessImplTest, ComponentProvidedService) {
   fuchsia::modular::testing::TestHarnessSpec spec;
 
   auto generated_componentctx_url = GenerateFakeUrl();
 
-  spec.mutable_env_services_to_inject()->push_back(
-      fuchsia::modular::testing::InjectedService{
+  spec.mutable_env_services()->mutable_services_from_components()->push_back(
+      fuchsia::modular::testing::ComponentService{
           // Provide a custom injected service.
           .name = fuchsia::modular::ComponentContext::Name_,
           .url = generated_componentctx_url});
@@ -306,9 +306,9 @@ TEST_F(TestHarnessImplTest, InterceptStoryShellAndModule) {
   fuchsia::modular::PuppetMasterPtr puppet_master;
   fuchsia::modular::StoryPuppetMasterPtr story_master;
 
-  fuchsia::modular::testing::TestHarnessService svc;
+  fuchsia::modular::testing::ModularService svc;
   svc.set_puppet_master(puppet_master.NewRequest());
-  test_harness()->GetService(std::move(svc));
+  test_harness()->ConnectToModularService(std::move(svc));
 
   puppet_master->ControlStory("my_story", story_master.NewRequest());
 
@@ -332,6 +332,83 @@ TEST_F(TestHarnessImplTest, InterceptStoryShellAndModule) {
   ASSERT_TRUE(RunLoopWithTimeoutOrUntil([&] { return fake_module_intercepted; },
                                         zx::sec(10)));
 };
+
+// Tests that services in |TestHarnessSpec.env_services.service_dir| are
+// accessible in the test harness environment.
+TEST_F(TestHarnessImplTest, EnvironmentServiceDirectory) {
+  constexpr char kTestServiceName[] = "my.test.service";
+
+  bool svc_requested = false;
+  auto svc_dir = std::make_unique<vfs::PseudoDir>();
+  svc_dir->AddEntry(kTestServiceName,
+                    std::make_unique<vfs::Service>(
+                        [&svc_requested](zx::channel request,
+                                         async_dispatcher_t* dispatcher) {
+                          svc_requested = true;
+                        }));
+
+  PseudoDirServer svc_dir_server(std::move(svc_dir));
+
+  fuchsia::modular::testing::TestHarnessSpec spec;
+  spec.mutable_env_services()->set_service_dir(
+      svc_dir_server.Serve().Unbind().TakeChannel());
+  test_harness()->Run(std::move(spec));
+
+  fuchsia::io::NodePtr node;
+  test_harness()->ConnectToEnvironmentService(kTestServiceName,
+                                              node.NewRequest().TakeChannel());
+  RunLoopUntil([&] { return svc_requested; });
+}
+
+// Tests that that the test harness correctly parses modular configs from a
+// string.
+TEST_F(TestHarnessImplTest, ParseConfigFromString) {
+  auto config = R"({
+  "basemgr": {
+    "test": true,
+    "base_shell": {
+      "url": "fuchsia-pkg://fuchsia.com/dev_base_shell#meta/dev_base_shell.cmx",
+      "keep_alive_after_login": true
+    },
+    "session_shells": [
+      {
+        "url": "fuchsia-pkg://fuchsia.com/dev_session_shell#meta/dev_session_shell.cmx",
+        "display_usage": "near"
+      }
+    ]
+  },
+  "sessionmgr": {
+    "use_memfs_for_ledger": true,
+    "startup_agents": [
+      "fuchsia-pkg://fuchsia.com/startup_agent#meta/startup_agent.cmx"
+    ]
+  }
+  })";
+  auto config_path = "/pkg/data/test_config.json";
+
+  fuchsia::modular::session::BasemgrConfig basemgr_config;
+  fuchsia::modular::session::SessionmgrConfig sessionmgr_config;
+  bool done = false;
+  test_harness()->ParseConfig(
+      config, config_path,
+      [&](fuchsia::modular::session::BasemgrConfig parsed_basemgr_config,
+          fuchsia::modular::session::SessionmgrConfig
+              parsed_sessionmgr_config) {
+        basemgr_config = std::move(parsed_basemgr_config);
+        sessionmgr_config = std::move(parsed_sessionmgr_config);
+        done = true;
+      });
+
+  RunLoopUntil([&] { return done; });
+  EXPECT_TRUE(basemgr_config.test());
+  EXPECT_EQ("fuchsia-pkg://fuchsia.com/dev_base_shell#meta/dev_base_shell.cmx",
+            basemgr_config.base_shell().app_config().url());
+  ASSERT_EQ(1u, basemgr_config.session_shell_map().size());
+  EXPECT_EQ(
+      "fuchsia-pkg://fuchsia.com/dev_session_shell#meta/dev_session_shell.cmx",
+      basemgr_config.session_shell_map().at(0).config().app_config().url());
+  EXPECT_TRUE(sessionmgr_config.use_memfs_for_ledger());
+}
 
 }  // namespace
 }  // namespace testing

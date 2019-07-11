@@ -62,27 +62,26 @@ if (toolchain.tags + exclude_tags - exclude_tags != toolchain.tags ||
 
     sources = [
       "data.S",
-      "syscall-wrappers.cpp",
-      "zx_cache_flush.cpp",
-      "zx_channel_call.cpp",
-      "zx_cprng_draw.cpp",
-      "zx_deadline_after.cpp",
-      "zx_status_get_string.cpp",
-      "zx_system_get_dcache_line_size.cpp",
-      "zx_system_get_features.cpp",
-      "zx_system_get_num_cpus.cpp",
-      "zx_system_get_physmem.cpp",
-      "zx_system_get_version.cpp",
-      "zx_ticks_get.cpp",
-      "zx_ticks_per_second.cpp",
-      "zx_vmo_clone.cpp",
+      "syscall-wrappers.cc",
+      "zx_cache_flush.cc",
+      "zx_channel_call.cc",
+      "zx_cprng_draw.cc",
+      "zx_deadline_after.cc",
+      "zx_status_get_string.cc",
+      "zx_system_get_dcache_line_size.cc",
+      "zx_system_get_features.cc",
+      "zx_system_get_num_cpus.cc",
+      "zx_system_get_physmem.cc",
+      "zx_system_get_version.cc",
+      "zx_ticks_get.cc",
+      "zx_ticks_per_second.cc",
     ]
 
     configs += [ ":config" ]
     deps = [
       ":generate",
       ":syscall-asm",
-      "$zx/kernel/lib/vdso:headers",
+      "$zx/kernel/lib/userabi:headers",
     ]
     public_deps = [
       ":generated-public-headers",
@@ -182,6 +181,12 @@ if (toolchain.tags + exclude_tags - exclude_tags != toolchain.tags ||
           libs = [ rebase_path(link_file, root_build_dir) ]
         },
       ]
+
+      # This library is on the allowlist for driver() shared library deps.
+      # It doesn't cause driver-denylist-check.sh to fail, and it prunes the
+      # metadata walk here so our own deps are not subject to the check.
+      driver_shlib_denylist = []
+      driver_shlib_denylist_barrier = []
     }
   }
 
@@ -190,8 +195,8 @@ if (toolchain.tags + exclude_tags - exclude_tags != toolchain.tags ||
     visibility = [ ":*" ]
 
     # This library should not depend on libc.
-    cflags = [ "-ffreestanding" ]
     configs = [
+      "$zx/public/gn/config:freestanding",
       "$zx/public/gn/config:no_sanitizers",
       "$zx/public/gn/config:rodso",
     ]

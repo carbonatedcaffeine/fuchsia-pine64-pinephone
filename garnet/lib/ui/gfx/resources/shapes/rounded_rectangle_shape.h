@@ -6,7 +6,6 @@
 #define GARNET_LIB_UI_GFX_RESOURCES_SHAPES_ROUNDED_RECTANGLE_SHAPE_H_
 
 #include "garnet/lib/ui/gfx/resources/shapes/planar_shape.h"
-
 #include "src/ui/lib/escher/forward_declarations.h"
 #include "src/ui/lib/escher/shape/rounded_rect.h"
 
@@ -17,8 +16,7 @@ class RoundedRectangleShape final : public PlanarShape {
  public:
   static const ResourceTypeInfo kTypeInfo;
 
-  RoundedRectangleShape(Session* session, ResourceId id,
-                        const escher::RoundedRectSpec& spec,
+  RoundedRectangleShape(Session* session, ResourceId id, const escher::RoundedRectSpec& spec,
                         escher::MeshPtr mesh);
 
   float width() const { return spec_.width; }
@@ -35,11 +33,16 @@ class RoundedRectangleShape final : public PlanarShape {
   bool ContainsPoint(const escher::vec2& point) const override;
 
   // |Shape|.
-  escher::Object GenerateRenderObject(
-      const escher::mat4& transform,
-      const escher::MaterialPtr& material) override;
+  escher::Object GenerateRenderObject(const escher::mat4& transform,
+                                      const escher::MaterialPtr& material) override;
 
-  const escher::MeshPtr& escher_mesh() const { return mesh_; }
+  const escher::MeshPtr& escher_mesh() const {
+    // During tests, this mesh can be null, but otherwise
+    // we expect it to be allocated.
+    // TODO(SCN-1429) This is going to be removed anyway.
+    FXL_CHECK(mesh_);
+    return mesh_;
+  }
 
   const escher::RoundedRectSpec& spec() const { return spec_; }
 

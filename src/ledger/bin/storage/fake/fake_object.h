@@ -7,6 +7,7 @@
 
 #include "src/ledger/bin/storage/public/object.h"
 #include "src/ledger/bin/storage/public/types.h"
+#include "src/lib/fxl/memory/weak_ptr.h"
 #include "src/lib/fxl/strings/string_view.h"
 
 namespace storage {
@@ -18,8 +19,7 @@ class FakePiece : public Piece {
 
   fxl::StringView GetData() const override;
   ObjectIdentifier GetIdentifier() const override;
-  Status AppendReferences(
-      ObjectReferencesAndPriority* references) const override;
+  Status AppendReferences(ObjectReferencesAndPriority* references) const override;
 
  private:
   ObjectIdentifier identifier_;
@@ -33,11 +33,42 @@ class FakeObject : public Object {
 
   ObjectIdentifier GetIdentifier() const override;
   Status GetData(fxl::StringView* data) const override;
-  Status AppendReferences(
-      ObjectReferencesAndPriority* references) const override;
+  Status AppendReferences(ObjectReferencesAndPriority* references) const override;
 
  private:
   std::unique_ptr<const Piece> piece_;
+};
+
+class FakeTokenChecker;
+
+class FakePieceToken : public PieceToken {
+ public:
+  explicit FakePieceToken(ObjectIdentifier identifier);
+
+  // Returns a token checker associated with this token.
+  FakeTokenChecker GetChecker();
+
+  // PieceToken:
+  const ObjectIdentifier& GetIdentifier() const override;
+
+ private:
+  ObjectIdentifier identifier_;
+  fxl::WeakPtrFactory<FakePieceToken> weak_factory_;
+};
+
+// This class allows to decide if a particular FakePieceToken is still alive.
+class FakeTokenChecker {
+ public:
+  explicit FakeTokenChecker(const fxl::WeakPtr<FakePieceToken>& token);
+
+  // The token checker converts to true iff the PieceToken is still alive.
+  explicit operator bool() const;
+
+  // Returns whether this token checker tracks |token|.
+  bool TracksToken(const std::unique_ptr<const PieceToken>& token) const;
+
+ private:
+  fxl::WeakPtr<FakePieceToken> token_;
 };
 
 }  // namespace fake

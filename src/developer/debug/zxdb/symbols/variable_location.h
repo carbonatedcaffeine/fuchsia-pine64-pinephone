@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_VARIABLE_LOCATION_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_VARIABLE_LOCATION_H_
 
 #include <inttypes.h>
 
@@ -61,8 +62,7 @@ class VariableLocation {
 
   // Returns the Entry that corresponds to the given IP, or nullptr if none
   // matched.
-  const Entry* EntryForIP(const SymbolContext& symbol_context,
-                          uint64_t ip) const;
+  const Entry* EntryForIP(const SymbolContext& symbol_context, uint64_t ip) const;
 
  private:
   // The location list. The DWARF spec explicitly allows for ranges to overlap
@@ -71,3 +71,5 @@ class VariableLocation {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_VARIABLE_LOCATION_H_

@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <ddk/protocol/platform-device-lib.h>
+#include <lib/device-protocol/platform-device.h>
 #include <ddk/protocol/platform/device.h>
 #include <ddktl/device.h>
 #include <ddktl/protocol/empty-protocol.h>
@@ -14,6 +14,7 @@
 #include <fbl/unique_ptr.h>
 #include <fuchsia/hardware/tee/c/fidl.h>
 #include <lib/zx/channel.h>
+#include <lib/zx/resource.h>
 #include <zircon/thread_annotations.h>
 
 #include "optee-message.h"
@@ -39,6 +40,7 @@ public:
     OpteeController(const OpteeController&) = delete;
     OpteeController& operator=(const OpteeController&) = delete;
 
+    static zx_status_t Create(void* ctx, zx_device_t* parent);
     zx_status_t Bind();
 
     zx_status_t DdkMessage(fidl_msg_t* msg, fidl_txn_t* txn);
@@ -84,7 +86,7 @@ private:
     static fuchsia_hardware_tee_DeviceConnector_ops_t kFidlOps;
 
     pdev_protocol_t pdev_proto_ = {};
-    zx_handle_t secure_monitor_ = ZX_HANDLE_INVALID;
+    zx::resource secure_monitor_;
     uint32_t secure_world_capabilities_ = 0;
     fuchsia_tee_OsRevision os_revision_ = {};
     fbl::Mutex clients_lock_;

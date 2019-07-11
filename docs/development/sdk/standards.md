@@ -6,6 +6,29 @@ the Platform Source Tree. Some of the information in this document might be of
 interest to clients of the Fuchsia SDK, but the primary focus of the document is
 how the Fuchsia project develops the SDK.
 
+## Governance
+
+The contents of the Fuchsia SDK are governed by the [Fuchsia API Council]. The
+SDK does not contain libraries developed outside the Fuchsia project because
+those libraries are not subject to the governance of the Fuchsia API Council.
+
+Client libraries in the SDK do not depend on libraries outside the SDK unless
+the external library has been approved by the Fuchsia API Council. Typically,
+the council will not approve a dependency unless the dependency has strict
+evolution criteria (e.g., the standard libraries for the various supported
+languages).
+
+### Example: Google Test
+
+The Fuchsia SDK does not include the _Google Test_ library because the
+governance for the _Google Test_ library is provided by Google, not by the
+Fuchsia API Council.
+
+The Fuchsia SDK does not depend on the _Google Test_ library because the
+[promises made by the governing body](https://abseil.io/about/philosophy#upgrade-support)
+for the _Google Test_ library are not compatible with the model used by the
+Fuchsia SDK.
+
 ## FIDL interfaces and libzircon are the system ABI
 
 Broadly speaking, the binary interface to the system is defined by the FIDL
@@ -42,14 +65,13 @@ compatibility.
 
 ### Naming
 
-Public FIDL definitions are located in the source tree at a path with the
-following pattern: `$LAYER/public/lib/$NAME/fidl`. The target name should be
-`fidl`. Related FIDL libraries can be grouped in a directory. For example,
-`$LAYER/public/lib/$GROUP/$NAME/fidl`.
+Public FIDL definitions are located in the source tree under
+`//sdk/fidl/$LIBRARY_NAME`.
+The target name should be the name of the library.
 
 ### Style
 
-FIDL definitions in the SDK should follow the [FIDL API readability rubric].
+FIDL definitions in the SDK should follow the [FIDL API style rubric].
 
 ## Client Libraries
 
@@ -80,7 +102,8 @@ link against these libraries directly.
 A client that takes a dependency on a client library must also take a dependency
 on all the dependencies of that library. For this reason, client libraries
 should have minimal dependencies. For example, client libraries should avoid
-dependencies on FBL, FXL, FSL, or other "base" libraries.
+dependencies on FBL, FXL, FSL, or other "base" libraries that are not in
+the SDK.
 
 Client libraries that need to perform asynchronous operations should depend on
 `libasync.a` and `libasync-default.so`. However, these libraries should not
@@ -98,13 +121,10 @@ transitively include headers from these dependencies.
 ### Naming
 
 Client libraries should be named according to the language they expect their
-clients to use. For example, the C++ variant of the `$NAME` library should be
-located in the source tree at a path with the following pattern:
-`$LAYER/public/lib/$NAME/cpp`.
-
-In some cases, a library only makes sense for one language. In that case, the
-language suffix may be omitted unless the client library has an associated
-FIDL protocol.
+clients to use.
+For example, the C++ variant of the `$NAME` library should be located in the
+source tree under `//sdk/lib/$NAME/cpp`.
+The C variant should simply be under `//sdk/lib/$NAME`.
 
 ### Style
 
@@ -123,4 +143,5 @@ in `<zircon/assert.h>`, to assert invariants. Client libraries may also use the
 `_MSG` variants to provide a message when the assertion fails.
 
 
-[FIDL API readability rubric]: ../api/fidl.md
+[Fuchsia API Council]: ../api/council.md
+[FIDL API style rubric]: ../languages/fidl/style.md

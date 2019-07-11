@@ -5,9 +5,9 @@
 #include <fuchsia/modular/internal/cpp/fidl.h>
 #include <lib/app_driver/cpp/app_driver.h>
 #include <lib/async-loop/cpp/loop.h>
-#include <lib/component/cpp/startup_context.h>
 #include <lib/fit/defer.h>
 #include <lib/fit/function.h>
+#include <lib/sys/cpp/component_context.h>
 #include <src/lib/fxl/command_line.h>
 #include <src/lib/fxl/macros.h>
 #include <src/lib/fxl/strings/split_string.h>
@@ -22,11 +22,11 @@
 
 fit::deferred_action<fit::closure> SetupCobalt(
     const bool enable_cobalt, async_dispatcher_t* dispatcher,
-    component::StartupContext* const startup_context) {
+    sys::ComponentContext* component_context) {
   if (!enable_cobalt) {
     return fit::defer<fit::closure>([] {});
   }
-  return modular::InitializeCobalt(dispatcher, startup_context);
+  return modular::InitializeCobalt(dispatcher, component_context);
 }
 
 void OverrideConfigFromCommandLine(
@@ -97,16 +97,18 @@ int main(int argc, const char** argv) {
   }
 
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
-  trace::TraceProvider trace_provider(loop.dispatcher());
-  std::unique_ptr<component::StartupContext> context =
-      component::StartupContext::CreateFromStartupInfo();
 
-  auto cobalt_cleanup = SetupCobalt(
-      (config.enable_cobalt()), std::move(loop.dispatcher()), context.get());
+  trace::TraceProviderWithFdio trace_provider(loop.dispatcher());
+  std::unique_ptr<sys::ComponentContext> component_context(
+      sys::ComponentContext::Create());
+
+  auto cobalt_cleanup =
+      SetupCobalt((config.enable_cobalt()), std::move(loop.dispatcher()),
+                  component_context.get());
 
   modular::AppDriver<modular::SessionmgrImpl> driver(
-      context->outgoing().deprecated_services(),
-      std::make_unique<modular::SessionmgrImpl>(context.get(),
+      component_context->outgoing(),
+      std::make_unique<modular::SessionmgrImpl>(component_context.get(),
                                                 std::move(config)),
       [&loop, &cobalt_cleanup] {
         cobalt_cleanup.call();

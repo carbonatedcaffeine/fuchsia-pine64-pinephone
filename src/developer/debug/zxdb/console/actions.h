@@ -10,7 +10,8 @@
 #include "src/developer/debug/zxdb/console/console.h"
 #include "src/lib/fxl/command_line.h"
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_ACTIONS_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_ACTIONS_H_
 
 namespace zxdb {
 
@@ -23,8 +24,7 @@ class Session;
 class Action {
  public:
   // The functor to be called for each action
-  using ActionFunction =
-      std::function<void(const Action&, const Session&, Console*)>;
+  using ActionFunction = std::function<void(const Action&, const Session&, Console*)>;
 
   Action();
   explicit Action(std::string name, ActionFunction action);
@@ -63,8 +63,7 @@ class ActionFlow {
   // The given callback will be called with the result of the actions. If the
   // Err has ErrType::kCanceled, it means that a command wants to stop the
   // action processing and the caller might want to react accordingly.
-  void ScheduleActions(std::vector<Action>&& actions, const Session*, Console*,
-                       Callback);
+  void ScheduleActions(std::vector<Action>&& actions, const Session*, Console*, Callback);
 
   // This function is the one that ties all the Actions together. Each of
   // generated flag actions will run this function as their callback. This
@@ -107,3 +106,5 @@ std::vector<Action> CommandsToActions(const std::string& input);
 Err ScriptFileToActions(const std::string& path, std::vector<Action>* actions);
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_ACTIONS_H_

@@ -19,6 +19,8 @@
 
 #include <fuchsia/mem/llcpp/fidl.h>
 
+namespace llcpp {
+
 namespace fuchsia {
 namespace io {
 
@@ -26,6 +28,7 @@ struct WatchedEvent;
 struct Vmofile;
 struct Tty;
 class DirectoryWatcher;
+struct Socket;
 struct Service;
 enum class SeekOrigin : uint32_t {
   START = 0u,
@@ -48,8 +51,6 @@ class DirectoryAdmin;
 
 extern "C" const fidl_type_t fuchsia_io_WatchedEventTable;
 
-// TODO(ZX-2645): Unused.
-//
 // WatchedEvent describes events returned from a DirectoryWatcher.
 struct WatchedEvent {
   static constexpr const fidl_type_t* Type = &fuchsia_io_WatchedEventTable;
@@ -114,10 +115,10 @@ struct Vmofile {
   // The VMO which backs this file.
   ::zx::vmo vmo{};
 
-  // The index into |vmo| which represents the first byte of the file.
+  // The index into `vmo` which represents the first byte of the file.
   uint64_t offset{};
 
-  // The number of bytes, starting at |offset|, which may be used to represent this file.
+  // The number of bytes, starting at `offset`, which may be used to represent this file.
   uint64_t length{};
 };
 
@@ -155,8 +156,6 @@ struct Tty {
 
 extern "C" const fidl_type_t fuchsia_io_DirectoryWatcherOnEventRequestTable;
 
-// TODO(ZX-2645): Unused.
-//
 // DirectoryWatcher transmits messages from a filesystem server
 // about events happening in the filesystem. Clients can register
 // new watchers using the Directory "Watch" method, where they can
@@ -180,16 +179,21 @@ class DirectoryWatcher final {
    public:
     SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
 
+    SyncClient(SyncClient&&) = default;
+
+    SyncClient& operator=(SyncClient&&) = default;
+
     ~SyncClient() {}
 
-    // TODO(smklein): Convert this to a vector of WatchedEvents, when possible.
+    const ::zx::channel& channel() const { return channel_; }
+
+    ::zx::channel* mutable_channel() { return &channel_; }
+
     zx_status_t OnEvent(::fidl::VectorView<uint8_t> events);
 
-    // TODO(smklein): Convert this to a vector of WatchedEvents, when possible.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     zx_status_t OnEvent(::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> events);
 
-    // TODO(smklein): Convert this to a vector of WatchedEvents, when possible.
     // Messages are encoded and decoded in-place.
     zx_status_t OnEvent(::fidl::DecodedMessage<OnEventRequest> params);
 
@@ -201,14 +205,11 @@ class DirectoryWatcher final {
   class Call final {
    public:
 
-    // TODO(smklein): Convert this to a vector of WatchedEvents, when possible.
     static zx_status_t OnEvent(zx::unowned_channel _client_end, ::fidl::VectorView<uint8_t> events);
 
-    // TODO(smklein): Convert this to a vector of WatchedEvents, when possible.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     static zx_status_t OnEvent(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> events);
 
-    // TODO(smklein): Convert this to a vector of WatchedEvents, when possible.
     // Messages are encoded and decoded in-place.
     static zx_status_t OnEvent(zx::unowned_channel _client_end, ::fidl::DecodedMessage<OnEventRequest> params);
 
@@ -246,6 +247,19 @@ class DirectoryWatcher final {
     return Dispatch(static_cast<Interface*>(impl), msg, txn);
   }
 
+};
+
+extern "C" const fidl_type_t fuchsia_io_SocketTable;
+
+// The object is accompanied by a socket.
+struct Socket {
+  static constexpr const fidl_type_t* Type = &fuchsia_io_SocketTable;
+  static constexpr uint32_t MaxNumHandles = 1;
+  static constexpr uint32_t PrimarySize = 4;
+  [[maybe_unused]]
+  static constexpr uint32_t MaxOutOfLine = 0;
+
+  ::zx::socket socket{};
 };
 
 
@@ -320,8 +334,8 @@ constexpr uint32_t OPEN_FLAG_NOT_DIRECTORY = 33554432u;
 // otherwise an error is returned.
 // If an object is opened or cloned using this method, the resulting connection does not carry
 // any permission flags.
-// The resulting node allows a limited set of operations: |GetAttr|, |Clone|, |Close|, |Describe|,
-// and, if the node is a file, these extra operations: |GetFlags|, |SetFlags|.
+// The resulting node allows a limited set of operations: `GetAttr`, `Clone`, `Close`, `Describe`,
+// and, if the node is a file, these extra operations: `GetFlags`, `SetFlags`.
 constexpr uint32_t OPEN_FLAG_NODE_REFERENCE = 4194304u;
 
 // Assert that the object to be opened is a directory.
@@ -345,11 +359,11 @@ constexpr uint32_t OPEN_FLAG_APPEND = 1048576u;
 // OPEN_FLAG_NODE_REFERENCE. Flags used when opening a node reference must fall within this mask.
 constexpr uint32_t OPEN_FLAGS_ALLOWED_WITH_NODE_REFERENCE = 46661632u;
 
-
+extern "C" const fidl_type_t fuchsia_io_NodeAttributesTable;
 
 // NodeAttributes defines generic information about a filesystem node.
 struct NodeAttributes {
-  static constexpr const fidl_type_t* Type = nullptr;
+  static constexpr const fidl_type_t* Type = &fuchsia_io_NodeAttributesTable;
   static constexpr uint32_t MaxNumHandles = 0;
   static constexpr uint32_t PrimarySize = 56;
   [[maybe_unused]]
@@ -464,9 +478,6 @@ struct FilesystemInfo {
 
   uint32_t padding{};
 
-  // TODO(smklein): Replace this field with a string when supported
-  // by the "Simple" interface. At the moment, name is a fixed-size,
-  // null-terminated buffer.
   ::fidl::Array<int8_t, 32> name{};
 };
 
@@ -529,7 +540,7 @@ extern "C" const fidl_type_t fuchsia_io_NodeInfoTable;
 // Describes how the connection to an should be handled, as well as
 // how to interpret the optional handle.
 //
-// Refer to |Node::Describe()| and |Node::OnOpen()| for usage.
+// Refer to `Node::Describe()` and `Node::OnOpen()` for usage.
 struct NodeInfo {
   enum class Tag : fidl_union_tag_t {
     kService = 0,
@@ -539,6 +550,7 @@ struct NodeInfo {
     kVmofile = 4,
     kDevice = 5,
     kTty = 6,
+    kSocket = 7,
     Invalid = ::std::numeric_limits<::fidl_union_tag_t>::max(),
   };
 
@@ -547,9 +559,6 @@ struct NodeInfo {
 
   NodeInfo(NodeInfo&& other) {
     tag_ = Tag::Invalid;
-    memset(reinterpret_cast<uint8_t*>(&tag_) + sizeof(tag_),
-           0,
-           offsetof(NodeInfo, service_) - sizeof(tag_));
     if (this != &other) {
       MoveImpl_(std::move(other));
     }
@@ -690,6 +699,24 @@ struct NodeInfo {
 
   Tty const & tty() const { return tty_; }
 
+  bool is_socket() const { return tag_ == Tag::kSocket; }
+
+  Socket& mutable_socket();
+
+  template <typename T>
+  std::enable_if_t<std::is_convertible<T, Socket>::value && std::is_copy_assignable<T>::value>
+  set_socket(const T& v) {
+    mutable_socket() = v;
+  }
+
+  template <typename T>
+  std::enable_if_t<std::is_convertible<T, Socket>::value && std::is_move_assignable<T>::value>
+  set_socket(T&& v) {
+    mutable_socket() = std::move(v);
+  }
+
+  Socket const & socket() const { return socket_; }
+
   Tag which() const { return tag_; }
 
   static constexpr const fidl_type_t* Type = &fuchsia_io_NodeInfoTable;
@@ -711,12 +738,18 @@ struct NodeInfo {
     Vmofile vmofile_;
     Device device_;
     Tty tty_;
+    Socket socket_;
   };
 };
 
 extern "C" const fidl_type_t fuchsia_io_NodeCloneRequestTable;
+extern "C" const fidl_type_t fuchsia_io_NodeCloseResponseTable;
 extern "C" const fidl_type_t fuchsia_io_NodeDescribeResponseTable;
 extern "C" const fidl_type_t fuchsia_io_NodeOnOpenEventTable;
+extern "C" const fidl_type_t fuchsia_io_NodeSyncResponseTable;
+extern "C" const fidl_type_t fuchsia_io_NodeGetAttrResponseTable;
+extern "C" const fidl_type_t fuchsia_io_NodeSetAttrRequestTable;
+extern "C" const fidl_type_t fuchsia_io_NodeSetAttrResponseTable;
 extern "C" const fidl_type_t fuchsia_io_NodeIoctlRequestTable;
 extern "C" const fidl_type_t fuchsia_io_NodeIoctlResponseTable;
 
@@ -741,7 +774,7 @@ class Node final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_NodeCloseResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -776,7 +809,7 @@ class Node final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_NodeSyncResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -789,7 +822,7 @@ class Node final {
     int32_t s;
     NodeAttributes attributes;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_NodeGetAttrResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 80;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -801,7 +834,7 @@ class Node final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_NodeSetAttrResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -812,7 +845,7 @@ class Node final {
     uint32_t flags;
     NodeAttributes attributes;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_NodeSetAttrRequestTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 80;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -848,11 +881,11 @@ class Node final {
 
 
   struct EventHandlers {
-    // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+    // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
     //
     // Indicates the success or failure of the open operation, and optionally describes the
-    // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-    // (the same as would be returned by |Describe|).
+    // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+    // (the same as would be returned by `Describe`).
     fit::function<zx_status_t(int32_t s, NodeInfo* info)> on_open;
 
     // Fallback handler when an unknown ordinal is received.
@@ -864,11 +897,19 @@ class Node final {
    public:
     SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
 
+    SyncClient(SyncClient&&) = default;
+
+    SyncClient& operator=(SyncClient&&) = default;
+
     ~SyncClient() {}
+
+    const ::zx::channel& channel() const { return channel_; }
+
+    ::zx::channel* mutable_channel() { return &channel_; }
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -877,7 +918,7 @@ class Node final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -886,7 +927,7 @@ class Node final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -895,7 +936,7 @@ class Node final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -905,7 +946,7 @@ class Node final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -914,7 +955,7 @@ class Node final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -941,13 +982,13 @@ class Node final {
     ::fidl::DecodeResult<CloseResponse> Close(::fidl::BytePart response_buffer);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     zx_status_t Describe(NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -955,7 +996,7 @@ class Node final {
     ::fidl::DecodeResult<DescribeResponse> Describe(::fidl::BytePart _response_buffer, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Messages are encoded and decoded in-place.
@@ -998,13 +1039,13 @@ class Node final {
     ::fidl::DecodeResult<GetAttrResponse> GetAttr(::fidl::BytePart response_buffer);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     zx_status_t SetAttr(uint32_t flags, NodeAttributes attributes, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -1012,7 +1053,7 @@ class Node final {
     ::fidl::DecodeResult<SetAttrResponse> SetAttr(::fidl::BytePart _request_buffer, uint32_t flags, NodeAttributes attributes, ::fidl::BytePart _response_buffer, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Messages are encoded and decoded in-place.
@@ -1043,7 +1084,7 @@ class Node final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -1052,7 +1093,7 @@ class Node final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -1061,7 +1102,7 @@ class Node final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -1070,7 +1111,7 @@ class Node final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -1080,7 +1121,7 @@ class Node final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -1089,7 +1130,7 @@ class Node final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -1116,13 +1157,13 @@ class Node final {
     static ::fidl::DecodeResult<CloseResponse> Close(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     static zx_status_t Describe(zx::unowned_channel _client_end, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -1130,7 +1171,7 @@ class Node final {
     static ::fidl::DecodeResult<DescribeResponse> Describe(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Messages are encoded and decoded in-place.
@@ -1173,13 +1214,13 @@ class Node final {
     static ::fidl::DecodeResult<GetAttrResponse> GetAttr(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     static zx_status_t SetAttr(zx::unowned_channel _client_end, uint32_t flags, NodeAttributes attributes, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -1187,7 +1228,7 @@ class Node final {
     static ::fidl::DecodeResult<SetAttrResponse> SetAttr(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t flags, NodeAttributes attributes, ::fidl::BytePart _response_buffer, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Messages are encoded and decoded in-place.
@@ -1326,40 +1367,53 @@ class Node final {
     return Dispatch(static_cast<Interface*>(impl), msg, txn);
   }
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, int32_t s, NodeInfo* info);
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   // Caller provides the backing storage for FIDL message via response buffers.
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, ::fidl::BytePart _buffer, int32_t s, NodeInfo* info);
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   // Messages are encoded in-place.
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, ::fidl::DecodedMessage<OnOpenResponse> params);
 
 };
 
 extern "C" const fidl_type_t fuchsia_io_FileCloneRequestTable;
+extern "C" const fidl_type_t fuchsia_io_FileCloseResponseTable;
 extern "C" const fidl_type_t fuchsia_io_FileDescribeResponseTable;
 extern "C" const fidl_type_t fuchsia_io_FileOnOpenEventTable;
+extern "C" const fidl_type_t fuchsia_io_FileSyncResponseTable;
+extern "C" const fidl_type_t fuchsia_io_FileGetAttrResponseTable;
+extern "C" const fidl_type_t fuchsia_io_FileSetAttrRequestTable;
+extern "C" const fidl_type_t fuchsia_io_FileSetAttrResponseTable;
 extern "C" const fidl_type_t fuchsia_io_FileIoctlRequestTable;
 extern "C" const fidl_type_t fuchsia_io_FileIoctlResponseTable;
 extern "C" const fidl_type_t fuchsia_io_FileReadResponseTable;
 extern "C" const fidl_type_t fuchsia_io_FileReadAtResponseTable;
 extern "C" const fidl_type_t fuchsia_io_FileWriteRequestTable;
+extern "C" const fidl_type_t fuchsia_io_FileWriteResponseTable;
 extern "C" const fidl_type_t fuchsia_io_FileWriteAtRequestTable;
+extern "C" const fidl_type_t fuchsia_io_FileWriteAtResponseTable;
+extern "C" const fidl_type_t fuchsia_io_FileSeekRequestTable;
+extern "C" const fidl_type_t fuchsia_io_FileSeekResponseTable;
+extern "C" const fidl_type_t fuchsia_io_FileTruncateResponseTable;
+extern "C" const fidl_type_t fuchsia_io_FileSetFlagsRequestTable;
+extern "C" const fidl_type_t fuchsia_io_FileSetFlagsResponseTable;
+extern "C" const fidl_type_t fuchsia_io_FileGetBufferRequestTable;
 extern "C" const fidl_type_t fuchsia_io_FileGetBufferResponseTable;
 
 // File defines the interface of a node which contains a flat layout of data.
@@ -1383,7 +1437,7 @@ class File final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileCloseResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1418,7 +1472,7 @@ class File final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileSyncResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1431,7 +1485,7 @@ class File final {
     int32_t s;
     NodeAttributes attributes;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileGetAttrResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 80;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1443,7 +1497,7 @@ class File final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileSetAttrResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1454,7 +1508,7 @@ class File final {
     uint32_t flags;
     NodeAttributes attributes;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileSetAttrRequestTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 80;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1541,7 +1595,7 @@ class File final {
     int32_t s;
     uint64_t actual;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileWriteResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 32;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1564,7 +1618,7 @@ class File final {
     int32_t s;
     uint64_t actual;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileWriteAtResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 32;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1588,7 +1642,7 @@ class File final {
     int32_t s;
     uint64_t offset;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileSeekResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 32;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1599,7 +1653,7 @@ class File final {
     int64_t offset;
     SeekOrigin start;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileSeekRequestTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 32;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1611,7 +1665,7 @@ class File final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileTruncateResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1646,7 +1700,7 @@ class File final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileSetFlagsResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1656,7 +1710,7 @@ class File final {
     fidl_message_header_t _hdr;
     uint32_t flags;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileSetFlagsRequestTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1667,7 +1721,7 @@ class File final {
     FIDL_ALIGNDECL
     fidl_message_header_t _hdr;
     int32_t s;
-    ::fuchsia::mem::Buffer* buffer;
+    ::llcpp::fuchsia::mem::Buffer* buffer;
 
     static constexpr const fidl_type_t* Type = &fuchsia_io_FileGetBufferResponseTable;
     static constexpr uint32_t MaxNumHandles = 1;
@@ -1679,7 +1733,7 @@ class File final {
     fidl_message_header_t _hdr;
     uint32_t flags;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_FileGetBufferRequestTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -1688,11 +1742,11 @@ class File final {
 
 
   struct EventHandlers {
-    // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+    // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
     //
     // Indicates the success or failure of the open operation, and optionally describes the
-    // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-    // (the same as would be returned by |Describe|).
+    // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+    // (the same as would be returned by `Describe`).
     fit::function<zx_status_t(int32_t s, NodeInfo* info)> on_open;
 
     // Fallback handler when an unknown ordinal is received.
@@ -1704,11 +1758,19 @@ class File final {
    public:
     SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
 
+    SyncClient(SyncClient&&) = default;
+
+    SyncClient& operator=(SyncClient&&) = default;
+
     ~SyncClient() {}
+
+    const ::zx::channel& channel() const { return channel_; }
+
+    ::zx::channel* mutable_channel() { return &channel_; }
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -1717,7 +1779,7 @@ class File final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -1726,7 +1788,7 @@ class File final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -1735,7 +1797,7 @@ class File final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -1745,7 +1807,7 @@ class File final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -1754,7 +1816,7 @@ class File final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -1781,13 +1843,13 @@ class File final {
     ::fidl::DecodeResult<CloseResponse> Close(::fidl::BytePart response_buffer);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     zx_status_t Describe(NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -1795,7 +1857,7 @@ class File final {
     ::fidl::DecodeResult<DescribeResponse> Describe(::fidl::BytePart _response_buffer, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Messages are encoded and decoded in-place.
@@ -1838,13 +1900,13 @@ class File final {
     ::fidl::DecodeResult<GetAttrResponse> GetAttr(::fidl::BytePart response_buffer);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     zx_status_t SetAttr(uint32_t flags, NodeAttributes attributes, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -1852,7 +1914,7 @@ class File final {
     ::fidl::DecodeResult<SetAttrResponse> SetAttr(::fidl::BytePart _request_buffer, uint32_t flags, NodeAttributes attributes, ::fidl::BytePart _response_buffer, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Messages are encoded and decoded in-place.
@@ -1942,13 +2004,13 @@ class File final {
     // Messages are encoded and decoded in-place.
     ::fidl::DecodeResult<WriteAtResponse> WriteAt(::fidl::DecodedMessage<WriteAtRequest> params, ::fidl::BytePart response_buffer);
 
-    // Moves the offset at which the next invocation of |Read()| or |Write()| will
+    // Moves the offset at which the next invocation of `Read()` or `Write()` will
     // occur.
     //
     // This method does not require any rights.
     zx_status_t Seek(int64_t offset, SeekOrigin start, int32_t* out_s, uint64_t* out_offset);
 
-    // Moves the offset at which the next invocation of |Read()| or |Write()| will
+    // Moves the offset at which the next invocation of `Read()` or `Write()` will
     // occur.
     //
     // This method does not require any rights.
@@ -1956,7 +2018,7 @@ class File final {
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
     ::fidl::DecodeResult<SeekResponse> Seek(::fidl::BytePart _request_buffer, int64_t offset, SeekOrigin start, ::fidl::BytePart _response_buffer, int32_t* out_s, uint64_t* out_offset);
 
-    // Moves the offset at which the next invocation of |Read()| or |Write()| will
+    // Moves the offset at which the next invocation of `Read()` or `Write()` will
     // occur.
     //
     // This method does not require any rights.
@@ -2027,23 +2089,23 @@ class File final {
     // Acquires a buffer representing this file, if there is one, with the
     // requested access rights.
     //
-    // |flags| may be any of VMO_FLAG_*.
+    // `flags` may be any of VMO_FLAG_*.
     //
     // This method requires following rights:
-    // - OPEN_RIGHT_WRITABLE if |flags| includes VMO_FLAG_WRITE.
-    // - OPEN_RIGHT_READABLE if |flags| includes VMO_FLAG_READ or VMO_FLAG_EXEC.
+    // - OPEN_RIGHT_WRITABLE if `flags` includes VMO_FLAG_WRITE.
+    // - OPEN_RIGHT_READABLE if `flags` includes VMO_FLAG_READ or VMO_FLAG_EXEC.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetBufferResponse> GetBuffer(::fidl::BytePart _request_buffer, uint32_t flags, ::fidl::BytePart _response_buffer, int32_t* out_s, ::fuchsia::mem::Buffer** out_buffer);
+    ::fidl::DecodeResult<GetBufferResponse> GetBuffer(::fidl::BytePart _request_buffer, uint32_t flags, ::fidl::BytePart _response_buffer, int32_t* out_s, ::llcpp::fuchsia::mem::Buffer** out_buffer);
 
     // Acquires a buffer representing this file, if there is one, with the
     // requested access rights.
     //
-    // |flags| may be any of VMO_FLAG_*.
+    // `flags` may be any of VMO_FLAG_*.
     //
     // This method requires following rights:
-    // - OPEN_RIGHT_WRITABLE if |flags| includes VMO_FLAG_WRITE.
-    // - OPEN_RIGHT_READABLE if |flags| includes VMO_FLAG_READ or VMO_FLAG_EXEC.
+    // - OPEN_RIGHT_WRITABLE if `flags` includes VMO_FLAG_WRITE.
+    // - OPEN_RIGHT_READABLE if `flags` includes VMO_FLAG_READ or VMO_FLAG_EXEC.
     // Messages are encoded and decoded in-place.
     ::fidl::DecodeResult<GetBufferResponse> GetBuffer(::fidl::DecodedMessage<GetBufferRequest> params, ::fidl::BytePart response_buffer);
 
@@ -2062,7 +2124,7 @@ class File final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -2071,7 +2133,7 @@ class File final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -2080,7 +2142,7 @@ class File final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -2089,7 +2151,7 @@ class File final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -2099,7 +2161,7 @@ class File final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -2108,7 +2170,7 @@ class File final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -2135,13 +2197,13 @@ class File final {
     static ::fidl::DecodeResult<CloseResponse> Close(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     static zx_status_t Describe(zx::unowned_channel _client_end, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -2149,7 +2211,7 @@ class File final {
     static ::fidl::DecodeResult<DescribeResponse> Describe(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Messages are encoded and decoded in-place.
@@ -2192,13 +2254,13 @@ class File final {
     static ::fidl::DecodeResult<GetAttrResponse> GetAttr(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     static zx_status_t SetAttr(zx::unowned_channel _client_end, uint32_t flags, NodeAttributes attributes, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -2206,7 +2268,7 @@ class File final {
     static ::fidl::DecodeResult<SetAttrResponse> SetAttr(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t flags, NodeAttributes attributes, ::fidl::BytePart _response_buffer, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Messages are encoded and decoded in-place.
@@ -2296,13 +2358,13 @@ class File final {
     // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<WriteAtResponse> WriteAt(zx::unowned_channel _client_end, ::fidl::DecodedMessage<WriteAtRequest> params, ::fidl::BytePart response_buffer);
 
-    // Moves the offset at which the next invocation of |Read()| or |Write()| will
+    // Moves the offset at which the next invocation of `Read()` or `Write()` will
     // occur.
     //
     // This method does not require any rights.
     static zx_status_t Seek(zx::unowned_channel _client_end, int64_t offset, SeekOrigin start, int32_t* out_s, uint64_t* out_offset);
 
-    // Moves the offset at which the next invocation of |Read()| or |Write()| will
+    // Moves the offset at which the next invocation of `Read()` or `Write()` will
     // occur.
     //
     // This method does not require any rights.
@@ -2310,7 +2372,7 @@ class File final {
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
     static ::fidl::DecodeResult<SeekResponse> Seek(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int64_t offset, SeekOrigin start, ::fidl::BytePart _response_buffer, int32_t* out_s, uint64_t* out_offset);
 
-    // Moves the offset at which the next invocation of |Read()| or |Write()| will
+    // Moves the offset at which the next invocation of `Read()` or `Write()` will
     // occur.
     //
     // This method does not require any rights.
@@ -2381,23 +2443,23 @@ class File final {
     // Acquires a buffer representing this file, if there is one, with the
     // requested access rights.
     //
-    // |flags| may be any of VMO_FLAG_*.
+    // `flags` may be any of VMO_FLAG_*.
     //
     // This method requires following rights:
-    // - OPEN_RIGHT_WRITABLE if |flags| includes VMO_FLAG_WRITE.
-    // - OPEN_RIGHT_READABLE if |flags| includes VMO_FLAG_READ or VMO_FLAG_EXEC.
+    // - OPEN_RIGHT_WRITABLE if `flags` includes VMO_FLAG_WRITE.
+    // - OPEN_RIGHT_READABLE if `flags` includes VMO_FLAG_READ or VMO_FLAG_EXEC.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetBufferResponse> GetBuffer(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t flags, ::fidl::BytePart _response_buffer, int32_t* out_s, ::fuchsia::mem::Buffer** out_buffer);
+    static ::fidl::DecodeResult<GetBufferResponse> GetBuffer(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t flags, ::fidl::BytePart _response_buffer, int32_t* out_s, ::llcpp::fuchsia::mem::Buffer** out_buffer);
 
     // Acquires a buffer representing this file, if there is one, with the
     // requested access rights.
     //
-    // |flags| may be any of VMO_FLAG_*.
+    // `flags` may be any of VMO_FLAG_*.
     //
     // This method requires following rights:
-    // - OPEN_RIGHT_WRITABLE if |flags| includes VMO_FLAG_WRITE.
-    // - OPEN_RIGHT_READABLE if |flags| includes VMO_FLAG_READ or VMO_FLAG_EXEC.
+    // - OPEN_RIGHT_WRITABLE if `flags` includes VMO_FLAG_WRITE.
+    // - OPEN_RIGHT_READABLE if `flags` includes VMO_FLAG_READ or VMO_FLAG_EXEC.
     // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<GetBufferResponse> GetBuffer(zx::unowned_channel _client_end, ::fidl::DecodedMessage<GetBufferRequest> params, ::fidl::BytePart response_buffer);
 
@@ -2618,8 +2680,8 @@ class File final {
 
     class GetBufferCompleterBase : public _Base {
      public:
-      void Reply(int32_t s, ::fuchsia::mem::Buffer* buffer);
-      void Reply(::fidl::BytePart _buffer, int32_t s, ::fuchsia::mem::Buffer* buffer);
+      void Reply(int32_t s, ::llcpp::fuchsia::mem::Buffer* buffer);
+      void Reply(::fidl::BytePart _buffer, int32_t s, ::llcpp::fuchsia::mem::Buffer* buffer);
       void Reply(::fidl::DecodedMessage<GetBufferResponse> params);
 
      protected:
@@ -2650,43 +2712,53 @@ class File final {
     return Dispatch(static_cast<Interface*>(impl), msg, txn);
   }
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, int32_t s, NodeInfo* info);
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   // Caller provides the backing storage for FIDL message via response buffers.
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, ::fidl::BytePart _buffer, int32_t s, NodeInfo* info);
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   // Messages are encoded in-place.
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, ::fidl::DecodedMessage<OnOpenResponse> params);
 
 };
 
 extern "C" const fidl_type_t fuchsia_io_DirectoryCloneRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryCloseResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryDescribeResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryOnOpenEventTable;
+extern "C" const fidl_type_t fuchsia_io_DirectorySyncResponseTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryGetAttrResponseTable;
+extern "C" const fidl_type_t fuchsia_io_DirectorySetAttrRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectorySetAttrResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryIoctlRequestTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryIoctlResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryOpenRequestTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryUnlinkRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryUnlinkResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryReadDirentsResponseTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryRewindResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryGetTokenResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryRenameRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryRenameResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryLinkRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryLinkResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryWatchRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryWatchResponseTable;
 
 // Directory defines a node which is capable of containing other Objects.
 class Directory final {
@@ -2709,7 +2781,7 @@ class Directory final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryCloseResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -2744,7 +2816,7 @@ class Directory final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectorySyncResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -2757,7 +2829,7 @@ class Directory final {
     int32_t s;
     NodeAttributes attributes;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryGetAttrResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 80;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -2769,7 +2841,7 @@ class Directory final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectorySetAttrResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -2780,7 +2852,7 @@ class Directory final {
     uint32_t flags;
     NodeAttributes attributes;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectorySetAttrRequestTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 80;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -2833,7 +2905,7 @@ class Directory final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryUnlinkResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -2878,7 +2950,7 @@ class Directory final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryRewindResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -2903,7 +2975,7 @@ class Directory final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryRenameResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -2927,7 +2999,7 @@ class Directory final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryLinkResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -2951,7 +3023,7 @@ class Directory final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryWatchResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -2972,11 +3044,11 @@ class Directory final {
 
 
   struct EventHandlers {
-    // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+    // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
     //
     // Indicates the success or failure of the open operation, and optionally describes the
-    // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-    // (the same as would be returned by |Describe|).
+    // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+    // (the same as would be returned by `Describe`).
     fit::function<zx_status_t(int32_t s, NodeInfo* info)> on_open;
 
     // Fallback handler when an unknown ordinal is received.
@@ -2988,11 +3060,19 @@ class Directory final {
    public:
     SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
 
+    SyncClient(SyncClient&&) = default;
+
+    SyncClient& operator=(SyncClient&&) = default;
+
     ~SyncClient() {}
+
+    const ::zx::channel& channel() const { return channel_; }
+
+    ::zx::channel* mutable_channel() { return &channel_; }
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -3001,7 +3081,7 @@ class Directory final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -3010,7 +3090,7 @@ class Directory final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -3019,7 +3099,7 @@ class Directory final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -3029,7 +3109,7 @@ class Directory final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -3038,7 +3118,7 @@ class Directory final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -3065,13 +3145,13 @@ class Directory final {
     ::fidl::DecodeResult<CloseResponse> Close(::fidl::BytePart response_buffer);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     zx_status_t Describe(NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -3079,7 +3159,7 @@ class Directory final {
     ::fidl::DecodeResult<DescribeResponse> Describe(::fidl::BytePart _response_buffer, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Messages are encoded and decoded in-place.
@@ -3122,13 +3202,13 @@ class Directory final {
     ::fidl::DecodeResult<GetAttrResponse> GetAttr(::fidl::BytePart response_buffer);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     zx_status_t SetAttr(uint32_t flags, NodeAttributes attributes, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -3136,7 +3216,7 @@ class Directory final {
     ::fidl::DecodeResult<SetAttrResponse> SetAttr(::fidl::BytePart _request_buffer, uint32_t flags, NodeAttributes attributes, ::fidl::BytePart _response_buffer, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Messages are encoded and decoded in-place.
@@ -3154,23 +3234,23 @@ class Directory final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -3178,23 +3258,23 @@ class Directory final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -3203,23 +3283,23 @@ class Directory final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -3237,18 +3317,18 @@ class Directory final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -3266,18 +3346,18 @@ class Directory final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -3297,18 +3377,18 @@ class Directory final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -3405,7 +3485,7 @@ class Directory final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -3415,7 +3495,7 @@ class Directory final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -3427,7 +3507,7 @@ class Directory final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -3439,10 +3519,10 @@ class Directory final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -3451,10 +3531,10 @@ class Directory final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -3465,10 +3545,10 @@ class Directory final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -3486,7 +3566,7 @@ class Directory final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -3505,7 +3585,7 @@ class Directory final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -3526,7 +3606,7 @@ class Directory final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -3550,7 +3630,7 @@ class Directory final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -3559,7 +3639,7 @@ class Directory final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -3568,7 +3648,7 @@ class Directory final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -3577,7 +3657,7 @@ class Directory final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -3587,7 +3667,7 @@ class Directory final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -3596,7 +3676,7 @@ class Directory final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -3623,13 +3703,13 @@ class Directory final {
     static ::fidl::DecodeResult<CloseResponse> Close(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     static zx_status_t Describe(zx::unowned_channel _client_end, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -3637,7 +3717,7 @@ class Directory final {
     static ::fidl::DecodeResult<DescribeResponse> Describe(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Messages are encoded and decoded in-place.
@@ -3680,13 +3760,13 @@ class Directory final {
     static ::fidl::DecodeResult<GetAttrResponse> GetAttr(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     static zx_status_t SetAttr(zx::unowned_channel _client_end, uint32_t flags, NodeAttributes attributes, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -3694,7 +3774,7 @@ class Directory final {
     static ::fidl::DecodeResult<SetAttrResponse> SetAttr(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t flags, NodeAttributes attributes, ::fidl::BytePart _response_buffer, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Messages are encoded and decoded in-place.
@@ -3712,23 +3792,23 @@ class Directory final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -3736,23 +3816,23 @@ class Directory final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -3761,23 +3841,23 @@ class Directory final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -3795,18 +3875,18 @@ class Directory final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -3824,18 +3904,18 @@ class Directory final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -3855,18 +3935,18 @@ class Directory final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -3963,7 +4043,7 @@ class Directory final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -3973,7 +4053,7 @@ class Directory final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -3985,7 +4065,7 @@ class Directory final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -3997,10 +4077,10 @@ class Directory final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -4009,10 +4089,10 @@ class Directory final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -4023,10 +4103,10 @@ class Directory final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -4044,7 +4124,7 @@ class Directory final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -4063,7 +4143,7 @@ class Directory final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -4084,7 +4164,7 @@ class Directory final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -4318,45 +4398,58 @@ class Directory final {
     return Dispatch(static_cast<Interface*>(impl), msg, txn);
   }
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, int32_t s, NodeInfo* info);
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   // Caller provides the backing storage for FIDL message via response buffers.
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, ::fidl::BytePart _buffer, int32_t s, NodeInfo* info);
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   // Messages are encoded in-place.
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, ::fidl::DecodedMessage<OnOpenResponse> params);
 
 };
 
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminCloneRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminCloseResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminDescribeResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminOnOpenEventTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminSyncResponseTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminGetAttrResponseTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminSetAttrRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminSetAttrResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminIoctlRequestTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminIoctlResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminOpenRequestTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminUnlinkRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminUnlinkResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminReadDirentsResponseTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminRewindResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminGetTokenResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminRenameRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminRenameResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminLinkRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminLinkResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminWatchRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminWatchResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminMountRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminMountResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminMountAndCreateRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminMountAndCreateResponseTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminUnmountResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminUnmountNodeResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminQueryFilesystemResponseTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminGetDevicePathResponseTable;
@@ -4383,7 +4476,7 @@ class DirectoryAdmin final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminCloseResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4418,7 +4511,7 @@ class DirectoryAdmin final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminSyncResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4431,7 +4524,7 @@ class DirectoryAdmin final {
     int32_t s;
     NodeAttributes attributes;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminGetAttrResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 80;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4443,7 +4536,7 @@ class DirectoryAdmin final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminSetAttrResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4454,7 +4547,7 @@ class DirectoryAdmin final {
     uint32_t flags;
     NodeAttributes attributes;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminSetAttrRequestTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 80;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4507,7 +4600,7 @@ class DirectoryAdmin final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminUnlinkResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4552,7 +4645,7 @@ class DirectoryAdmin final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminRewindResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4577,7 +4670,7 @@ class DirectoryAdmin final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminRenameResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4601,7 +4694,7 @@ class DirectoryAdmin final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminLinkResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4625,7 +4718,7 @@ class DirectoryAdmin final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminWatchResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4649,7 +4742,7 @@ class DirectoryAdmin final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminMountResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4671,7 +4764,7 @@ class DirectoryAdmin final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminMountAndCreateResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4695,7 +4788,7 @@ class DirectoryAdmin final {
     fidl_message_header_t _hdr;
     int32_t s;
 
-    static constexpr const fidl_type_t* Type = nullptr;
+    static constexpr const fidl_type_t* Type = &fuchsia_io_DirectoryAdminUnmountResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
@@ -4743,11 +4836,11 @@ class DirectoryAdmin final {
 
 
   struct EventHandlers {
-    // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+    // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
     //
     // Indicates the success or failure of the open operation, and optionally describes the
-    // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-    // (the same as would be returned by |Describe|).
+    // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+    // (the same as would be returned by `Describe`).
     fit::function<zx_status_t(int32_t s, NodeInfo* info)> on_open;
 
     // Fallback handler when an unknown ordinal is received.
@@ -4759,11 +4852,19 @@ class DirectoryAdmin final {
    public:
     SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
 
+    SyncClient(SyncClient&&) = default;
+
+    SyncClient& operator=(SyncClient&&) = default;
+
     ~SyncClient() {}
+
+    const ::zx::channel& channel() const { return channel_; }
+
+    ::zx::channel* mutable_channel() { return &channel_; }
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -4772,7 +4873,7 @@ class DirectoryAdmin final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -4781,7 +4882,7 @@ class DirectoryAdmin final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -4790,7 +4891,7 @@ class DirectoryAdmin final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -4800,7 +4901,7 @@ class DirectoryAdmin final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -4809,7 +4910,7 @@ class DirectoryAdmin final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -4836,13 +4937,13 @@ class DirectoryAdmin final {
     ::fidl::DecodeResult<CloseResponse> Close(::fidl::BytePart response_buffer);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     zx_status_t Describe(NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -4850,7 +4951,7 @@ class DirectoryAdmin final {
     ::fidl::DecodeResult<DescribeResponse> Describe(::fidl::BytePart _response_buffer, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Messages are encoded and decoded in-place.
@@ -4893,13 +4994,13 @@ class DirectoryAdmin final {
     ::fidl::DecodeResult<GetAttrResponse> GetAttr(::fidl::BytePart response_buffer);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     zx_status_t SetAttr(uint32_t flags, NodeAttributes attributes, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -4907,7 +5008,7 @@ class DirectoryAdmin final {
     ::fidl::DecodeResult<SetAttrResponse> SetAttr(::fidl::BytePart _request_buffer, uint32_t flags, NodeAttributes attributes, ::fidl::BytePart _response_buffer, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Messages are encoded and decoded in-place.
@@ -4925,23 +5026,23 @@ class DirectoryAdmin final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -4949,23 +5050,23 @@ class DirectoryAdmin final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -4974,23 +5075,23 @@ class DirectoryAdmin final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -5008,18 +5109,18 @@ class DirectoryAdmin final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -5037,18 +5138,18 @@ class DirectoryAdmin final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -5068,18 +5169,18 @@ class DirectoryAdmin final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -5176,7 +5277,7 @@ class DirectoryAdmin final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -5186,7 +5287,7 @@ class DirectoryAdmin final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -5198,7 +5299,7 @@ class DirectoryAdmin final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -5210,10 +5311,10 @@ class DirectoryAdmin final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -5222,10 +5323,10 @@ class DirectoryAdmin final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -5236,10 +5337,10 @@ class DirectoryAdmin final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -5257,7 +5358,7 @@ class DirectoryAdmin final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -5276,7 +5377,7 @@ class DirectoryAdmin final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -5297,7 +5398,7 @@ class DirectoryAdmin final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -5407,7 +5508,7 @@ class DirectoryAdmin final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -5416,7 +5517,7 @@ class DirectoryAdmin final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -5425,7 +5526,7 @@ class DirectoryAdmin final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -5434,7 +5535,7 @@ class DirectoryAdmin final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -5444,7 +5545,7 @@ class DirectoryAdmin final {
 
     // Create another connection to the same remote object.
     //
-    // |flags| may be any of:
+    // `flags` may be any of:
     // - OPEN_RIGHT_*
     // - OPEN_FLAG_APPEND
     // - OPEN_FLAG_NO_REMOTE
@@ -5453,7 +5554,7 @@ class DirectoryAdmin final {
     //
     // All other flags are ignored.
     //
-    // The OPEN_RIGHT_* bits in |flags| request corresponding rights over the resulting
+    // The OPEN_RIGHT_* bits in `flags` request corresponding rights over the resulting
     // cloned object.
     // The cloned object must have rights less than or equal to the original object.
     // Alternatively, pass CLONE_FLAG_SAME_RIGHTS to inherit the rights on the source connection.
@@ -5480,13 +5581,13 @@ class DirectoryAdmin final {
     static ::fidl::DecodeResult<CloseResponse> Close(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     static zx_status_t Describe(zx::unowned_channel _client_end, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -5494,7 +5595,7 @@ class DirectoryAdmin final {
     static ::fidl::DecodeResult<DescribeResponse> Describe(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, NodeInfo* out_info);
 
     // Returns extra information about the type of the object.
-    // If the |Describe| operation fails, the connection is closed.
+    // If the `Describe` operation fails, the connection is closed.
     //
     // This method does not require any rights.
     // Messages are encoded and decoded in-place.
@@ -5537,13 +5638,13 @@ class DirectoryAdmin final {
     static ::fidl::DecodeResult<GetAttrResponse> GetAttr(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     static zx_status_t SetAttr(zx::unowned_channel _client_end, uint32_t flags, NodeAttributes attributes, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Caller provides the backing storage for FIDL message via request and response buffers.
@@ -5551,7 +5652,7 @@ class DirectoryAdmin final {
     static ::fidl::DecodeResult<SetAttrResponse> SetAttr(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t flags, NodeAttributes attributes, ::fidl::BytePart _response_buffer, int32_t* out_s);
 
     // Updates information about the node.
-    // |flags| may be any of NODE_ATTRIBUTE_FLAG_*.
+    // `flags` may be any of NODE_ATTRIBUTE_FLAG_*.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
     // Messages are encoded and decoded in-place.
@@ -5569,23 +5670,23 @@ class DirectoryAdmin final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -5593,23 +5694,23 @@ class DirectoryAdmin final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -5618,23 +5719,23 @@ class DirectoryAdmin final {
 
     // Opens a new object relative to this directory object.
     //
-    // |path| may contain multiple segments, separated by "/" characters,
+    // `path` may contain multiple segments, separated by "/" characters,
     // and should never be empty i.e. "" is an invalid path.
     //
-    // |flags| may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
-    // The OPEN_FLAG_DESCRIBE flag may cause an |OnOpen| event to be transmitted
-    // on the |object| handle, indicating the type of object opened.
+    // `flags` may be any of the OPEN_FLAG_* and OPEN_RIGHT_* values, bitwise ORed together.
+    // The OPEN_FLAG_DESCRIBE flag may cause an `OnOpen` event to be transmitted
+    // on the `object` handle, indicating the type of object opened.
     //
     // If an unknown value is sent for either flags or mode, the connection should
     // be closed.
     //
-    // OPEN_RIGHTS_* flags provided in |flags| will restrict access rights on the |object| channel
+    // OPEN_RIGHTS_* flags provided in `flags` will restrict access rights on the `object` channel
     // which will be connected to the opened entity.
     //
     // Rights are never increased. When you open a nested entity within a directory, you may only
     // request the same rights as what the directory connection already has, or a subset of those.
     // Exceeding those rights causes an access denied error to be transmitted in the
-    // |OnOpen| event if applicable, and the |object| connection closed.
+    // `OnOpen` event if applicable, and the `object` connection closed.
     //
     // The caller must specify either one or more of the OPEN_RIGHT_* flags, or
     // the OPEN_FLAG_NODE_REFERENCE flag.
@@ -5652,18 +5753,18 @@ class DirectoryAdmin final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -5681,18 +5782,18 @@ class DirectoryAdmin final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -5712,18 +5813,18 @@ class DirectoryAdmin final {
     // it must become read-only, preventing new entries from being created
     // until all references close and the directory is destroyed.
     //
-    // |path| identifies the file which should be detached.
-    // If |path| contains multiple segments, separated by "/" characters,
+    // `path` identifies the file which should be detached.
+    // If `path` contains multiple segments, separated by "/" characters,
     // then the directory is traversed, one segment at a time, relative to the
     // originally accessed Directory.
     //
     // Returns:
     //   ZX_ERR_ACCESS_DENIED if the connection (or the underlying filesystem) does not
     //     allow writable access.
-    //   ZX_ERR_INVALID_ARGS if |path| contains ".." segments.
-    //   ZX_ERR_NOT_EMPTY if |path| refers to a non-empty directory.
-    //   ZX_ERR_UNAVAILABLE if |path| refers to a mount point, containing a remote channel.
-    //   ZX_ERR_UNAVAILABLE if |path| is ".".
+    //   ZX_ERR_INVALID_ARGS if `path` contains ".." segments.
+    //   ZX_ERR_NOT_EMPTY if `path` refers to a non-empty directory.
+    //   ZX_ERR_UNAVAILABLE if `path` refers to a mount point, containing a remote channel.
+    //   ZX_ERR_UNAVAILABLE if `path` is ".".
     //
     // Other errors may be returned for filesystem-specific reasons.
     //
@@ -5820,7 +5921,7 @@ class DirectoryAdmin final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -5830,7 +5931,7 @@ class DirectoryAdmin final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -5842,7 +5943,7 @@ class DirectoryAdmin final {
 
     // Renames an object named src to the name dst, in a directory represented by token.
     //
-    // |src/dst| must be resolved object names. Including "/" in any position
+    // `src/dst` must be resolved object names. Including "/" in any position
     // other than the end of the string will return ZX_ERR_INVALID_ARGS.
     // Returning "/" at the end of either string implies that it must be a
     // directory, or else ZX_ERR_NOT_DIR should be returned.
@@ -5854,10 +5955,10 @@ class DirectoryAdmin final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -5866,10 +5967,10 @@ class DirectoryAdmin final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -5880,10 +5981,10 @@ class DirectoryAdmin final {
     // Creates a link to an object named src by the name dst, within a directory represented by
     // token.
     //
-    // |src| must be a resolved object name. Including "/" in the string will
+    // `src` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
-    // |dst| must be a resolved object name. Including "/" in the string will
+    // `dst` must be a resolved object name. Including "/" in the string will
     // return ZX_ERR_INVALID_ARGS.
     //
     // This method requires following rights: OPEN_RIGHT_WRITABLE.
@@ -5901,7 +6002,7 @@ class DirectoryAdmin final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -5920,7 +6021,7 @@ class DirectoryAdmin final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -5941,7 +6042,7 @@ class DirectoryAdmin final {
     // };
     // Where names are NOT null-terminated.
     //
-    // TODO: This API is unstable; in the future, watcher will be a "DirectoryWatcher" client.
+    // This API is unstable"; in the future, watcher will be a "DirectoryWatcher" client.
     //
     // Mask specifies a bitmask of events to observe.
     // Options must be zero; it is reserved.
@@ -6345,26 +6446,26 @@ class DirectoryAdmin final {
     return Dispatch(static_cast<Interface*>(impl), msg, txn);
   }
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, int32_t s, NodeInfo* info);
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   // Caller provides the backing storage for FIDL message via response buffers.
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, ::fidl::BytePart _buffer, int32_t s, NodeInfo* info);
 
-  // An event produced eagerly by a FIDL server if requested by |OPEN_FLAG_DESCRIBE|.
+  // An event produced eagerly by a FIDL server if requested by `OPEN_FLAG_DESCRIBE`.
   //
   // Indicates the success or failure of the open operation, and optionally describes the
-  // object. If the status is |ZX_OK|, |info| contains descriptive information about the object
-  // (the same as would be returned by |Describe|).
+  // object. If the status is `ZX_OK`, `info` contains descriptive information about the object
+  // (the same as would be returned by `Describe`).
   // Messages are encoded in-place.
   static zx_status_t SendOnOpenEvent(::zx::unowned_channel _chan, ::fidl::DecodedMessage<OnOpenResponse> params);
 
@@ -6410,900 +6511,907 @@ constexpr uint32_t CLONE_FLAG_SAME_RIGHTS = 67108864u;
 
 }  // namespace io
 }  // namespace fuchsia
+}  // namespace llcpp
 
 namespace fidl {
 
 template <>
-struct IsFidlType<::fuchsia::io::WatchedEvent> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::fuchsia::io::WatchedEvent>);
-static_assert(offsetof(::fuchsia::io::WatchedEvent, event) == 0);
-static_assert(offsetof(::fuchsia::io::WatchedEvent, len) == 1);
-static_assert(offsetof(::fuchsia::io::WatchedEvent, name) == 8);
-static_assert(sizeof(::fuchsia::io::WatchedEvent) == ::fuchsia::io::WatchedEvent::PrimarySize);
+struct IsFidlType<::llcpp::fuchsia::io::WatchedEvent> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::WatchedEvent>);
+static_assert(offsetof(::llcpp::fuchsia::io::WatchedEvent, event) == 0);
+static_assert(offsetof(::llcpp::fuchsia::io::WatchedEvent, len) == 1);
+static_assert(offsetof(::llcpp::fuchsia::io::WatchedEvent, name) == 8);
+static_assert(sizeof(::llcpp::fuchsia::io::WatchedEvent) == ::llcpp::fuchsia::io::WatchedEvent::PrimarySize);
 
 template <>
-struct IsFidlType<::fuchsia::io::Vmofile> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::fuchsia::io::Vmofile>);
-static_assert(offsetof(::fuchsia::io::Vmofile, vmo) == 0);
-static_assert(offsetof(::fuchsia::io::Vmofile, offset) == 8);
-static_assert(offsetof(::fuchsia::io::Vmofile, length) == 16);
-static_assert(sizeof(::fuchsia::io::Vmofile) == ::fuchsia::io::Vmofile::PrimarySize);
+struct IsFidlType<::llcpp::fuchsia::io::Vmofile> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::Vmofile>);
+static_assert(offsetof(::llcpp::fuchsia::io::Vmofile, vmo) == 0);
+static_assert(offsetof(::llcpp::fuchsia::io::Vmofile, offset) == 8);
+static_assert(offsetof(::llcpp::fuchsia::io::Vmofile, length) == 16);
+static_assert(sizeof(::llcpp::fuchsia::io::Vmofile) == ::llcpp::fuchsia::io::Vmofile::PrimarySize);
 
 template <>
-struct IsFidlType<::fuchsia::io::Tty> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::fuchsia::io::Tty>);
-static_assert(offsetof(::fuchsia::io::Tty, event) == 0);
-static_assert(sizeof(::fuchsia::io::Tty) == ::fuchsia::io::Tty::PrimarySize);
+struct IsFidlType<::llcpp::fuchsia::io::Tty> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::Tty>);
+static_assert(offsetof(::llcpp::fuchsia::io::Tty, event) == 0);
+static_assert(sizeof(::llcpp::fuchsia::io::Tty) == ::llcpp::fuchsia::io::Tty::PrimarySize);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryWatcher::OnEventRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryWatcher::OnEventRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryWatcher::OnEventRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryWatcher::OnEventRequest)
-    == ::fuchsia::io::DirectoryWatcher::OnEventRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryWatcher::OnEventRequest, events) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryWatcher::OnEventRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryWatcher::OnEventRequest)
+    == ::llcpp::fuchsia::io::DirectoryWatcher::OnEventRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryWatcher::OnEventRequest, events) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Service> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::fuchsia::io::Service>);
-static_assert(offsetof(::fuchsia::io::Service, __reserved) == 0);
-static_assert(sizeof(::fuchsia::io::Service) == ::fuchsia::io::Service::PrimarySize);
+struct IsFidlType<::llcpp::fuchsia::io::Socket> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::Socket>);
+static_assert(offsetof(::llcpp::fuchsia::io::Socket, socket) == 0);
+static_assert(sizeof(::llcpp::fuchsia::io::Socket) == ::llcpp::fuchsia::io::Socket::PrimarySize);
 
 template <>
-struct IsFidlType<::fuchsia::io::Pipe> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::fuchsia::io::Pipe>);
-static_assert(offsetof(::fuchsia::io::Pipe, socket) == 0);
-static_assert(sizeof(::fuchsia::io::Pipe) == ::fuchsia::io::Pipe::PrimarySize);
+struct IsFidlType<::llcpp::fuchsia::io::Service> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::Service>);
+static_assert(offsetof(::llcpp::fuchsia::io::Service, __reserved) == 0);
+static_assert(sizeof(::llcpp::fuchsia::io::Service) == ::llcpp::fuchsia::io::Service::PrimarySize);
 
 template <>
-struct IsFidlType<::fuchsia::io::NodeAttributes> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::fuchsia::io::NodeAttributes>);
-static_assert(offsetof(::fuchsia::io::NodeAttributes, mode) == 0);
-static_assert(offsetof(::fuchsia::io::NodeAttributes, id) == 8);
-static_assert(offsetof(::fuchsia::io::NodeAttributes, content_size) == 16);
-static_assert(offsetof(::fuchsia::io::NodeAttributes, storage_size) == 24);
-static_assert(offsetof(::fuchsia::io::NodeAttributes, link_count) == 32);
-static_assert(offsetof(::fuchsia::io::NodeAttributes, creation_time) == 40);
-static_assert(offsetof(::fuchsia::io::NodeAttributes, modification_time) == 48);
-static_assert(sizeof(::fuchsia::io::NodeAttributes) == ::fuchsia::io::NodeAttributes::PrimarySize);
+struct IsFidlType<::llcpp::fuchsia::io::Pipe> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::Pipe>);
+static_assert(offsetof(::llcpp::fuchsia::io::Pipe, socket) == 0);
+static_assert(sizeof(::llcpp::fuchsia::io::Pipe) == ::llcpp::fuchsia::io::Pipe::PrimarySize);
 
 template <>
-struct IsFidlType<::fuchsia::io::FilesystemInfo> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::fuchsia::io::FilesystemInfo>);
-static_assert(offsetof(::fuchsia::io::FilesystemInfo, total_bytes) == 0);
-static_assert(offsetof(::fuchsia::io::FilesystemInfo, used_bytes) == 8);
-static_assert(offsetof(::fuchsia::io::FilesystemInfo, total_nodes) == 16);
-static_assert(offsetof(::fuchsia::io::FilesystemInfo, used_nodes) == 24);
-static_assert(offsetof(::fuchsia::io::FilesystemInfo, free_shared_pool_bytes) == 32);
-static_assert(offsetof(::fuchsia::io::FilesystemInfo, fs_id) == 40);
-static_assert(offsetof(::fuchsia::io::FilesystemInfo, block_size) == 48);
-static_assert(offsetof(::fuchsia::io::FilesystemInfo, max_filename_size) == 52);
-static_assert(offsetof(::fuchsia::io::FilesystemInfo, fs_type) == 56);
-static_assert(offsetof(::fuchsia::io::FilesystemInfo, padding) == 60);
-static_assert(offsetof(::fuchsia::io::FilesystemInfo, name) == 64);
-static_assert(sizeof(::fuchsia::io::FilesystemInfo) == ::fuchsia::io::FilesystemInfo::PrimarySize);
+struct IsFidlType<::llcpp::fuchsia::io::NodeAttributes> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::NodeAttributes>);
+static_assert(offsetof(::llcpp::fuchsia::io::NodeAttributes, mode) == 0);
+static_assert(offsetof(::llcpp::fuchsia::io::NodeAttributes, id) == 8);
+static_assert(offsetof(::llcpp::fuchsia::io::NodeAttributes, content_size) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::NodeAttributes, storage_size) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::NodeAttributes, link_count) == 32);
+static_assert(offsetof(::llcpp::fuchsia::io::NodeAttributes, creation_time) == 40);
+static_assert(offsetof(::llcpp::fuchsia::io::NodeAttributes, modification_time) == 48);
+static_assert(sizeof(::llcpp::fuchsia::io::NodeAttributes) == ::llcpp::fuchsia::io::NodeAttributes::PrimarySize);
 
 template <>
-struct IsFidlType<::fuchsia::io::FileObject> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::fuchsia::io::FileObject>);
-static_assert(offsetof(::fuchsia::io::FileObject, event) == 0);
-static_assert(sizeof(::fuchsia::io::FileObject) == ::fuchsia::io::FileObject::PrimarySize);
+struct IsFidlType<::llcpp::fuchsia::io::FilesystemInfo> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::FilesystemInfo>);
+static_assert(offsetof(::llcpp::fuchsia::io::FilesystemInfo, total_bytes) == 0);
+static_assert(offsetof(::llcpp::fuchsia::io::FilesystemInfo, used_bytes) == 8);
+static_assert(offsetof(::llcpp::fuchsia::io::FilesystemInfo, total_nodes) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::FilesystemInfo, used_nodes) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::FilesystemInfo, free_shared_pool_bytes) == 32);
+static_assert(offsetof(::llcpp::fuchsia::io::FilesystemInfo, fs_id) == 40);
+static_assert(offsetof(::llcpp::fuchsia::io::FilesystemInfo, block_size) == 48);
+static_assert(offsetof(::llcpp::fuchsia::io::FilesystemInfo, max_filename_size) == 52);
+static_assert(offsetof(::llcpp::fuchsia::io::FilesystemInfo, fs_type) == 56);
+static_assert(offsetof(::llcpp::fuchsia::io::FilesystemInfo, padding) == 60);
+static_assert(offsetof(::llcpp::fuchsia::io::FilesystemInfo, name) == 64);
+static_assert(sizeof(::llcpp::fuchsia::io::FilesystemInfo) == ::llcpp::fuchsia::io::FilesystemInfo::PrimarySize);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryObject> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::fuchsia::io::DirectoryObject>);
-static_assert(offsetof(::fuchsia::io::DirectoryObject, __reserved) == 0);
-static_assert(sizeof(::fuchsia::io::DirectoryObject) == ::fuchsia::io::DirectoryObject::PrimarySize);
+struct IsFidlType<::llcpp::fuchsia::io::FileObject> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::FileObject>);
+static_assert(offsetof(::llcpp::fuchsia::io::FileObject, event) == 0);
+static_assert(sizeof(::llcpp::fuchsia::io::FileObject) == ::llcpp::fuchsia::io::FileObject::PrimarySize);
 
 template <>
-struct IsFidlType<::fuchsia::io::Device> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::fuchsia::io::Device>);
-static_assert(offsetof(::fuchsia::io::Device, event) == 0);
-static_assert(sizeof(::fuchsia::io::Device) == ::fuchsia::io::Device::PrimarySize);
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryObject> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::DirectoryObject>);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryObject, __reserved) == 0);
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryObject) == ::llcpp::fuchsia::io::DirectoryObject::PrimarySize);
 
 template <>
-struct IsFidlType<::fuchsia::io::NodeInfo> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::fuchsia::io::NodeInfo>);
+struct IsFidlType<::llcpp::fuchsia::io::Device> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::Device>);
+static_assert(offsetof(::llcpp::fuchsia::io::Device, event) == 0);
+static_assert(sizeof(::llcpp::fuchsia::io::Device) == ::llcpp::fuchsia::io::Device::PrimarySize);
 
 template <>
-struct IsFidlType<::fuchsia::io::Node::CloneRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::NodeInfo> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::io::NodeInfo>);
+
+template <>
+struct IsFidlType<::llcpp::fuchsia::io::Node::CloneRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Node::CloneRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Node::CloneRequest)
-    == ::fuchsia::io::Node::CloneRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Node::CloneRequest, flags) == 16);
-static_assert(offsetof(::fuchsia::io::Node::CloneRequest, object) == 20);
+struct IsFidlMessage<::llcpp::fuchsia::io::Node::CloneRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Node::CloneRequest)
+    == ::llcpp::fuchsia::io::Node::CloneRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::CloneRequest, flags) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::CloneRequest, object) == 20);
 
 template <>
-struct IsFidlType<::fuchsia::io::Node::CloseResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Node::CloseResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Node::CloseResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Node::CloseResponse)
-    == ::fuchsia::io::Node::CloseResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Node::CloseResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Node::CloseResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Node::CloseResponse)
+    == ::llcpp::fuchsia::io::Node::CloseResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::CloseResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Node::DescribeResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Node::DescribeResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Node::DescribeResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Node::DescribeResponse)
-    == ::fuchsia::io::Node::DescribeResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Node::DescribeResponse, info) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Node::DescribeResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Node::DescribeResponse)
+    == ::llcpp::fuchsia::io::Node::DescribeResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::DescribeResponse, info) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Node::OnOpenResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Node::OnOpenResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Node::OnOpenResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Node::OnOpenResponse)
-    == ::fuchsia::io::Node::OnOpenResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Node::OnOpenResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::Node::OnOpenResponse, info) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::Node::OnOpenResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Node::OnOpenResponse)
+    == ::llcpp::fuchsia::io::Node::OnOpenResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::OnOpenResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::OnOpenResponse, info) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::Node::SyncResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Node::SyncResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Node::SyncResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Node::SyncResponse)
-    == ::fuchsia::io::Node::SyncResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Node::SyncResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Node::SyncResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Node::SyncResponse)
+    == ::llcpp::fuchsia::io::Node::SyncResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::SyncResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Node::GetAttrResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Node::GetAttrResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Node::GetAttrResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Node::GetAttrResponse)
-    == ::fuchsia::io::Node::GetAttrResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Node::GetAttrResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::Node::GetAttrResponse, attributes) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::Node::GetAttrResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Node::GetAttrResponse)
+    == ::llcpp::fuchsia::io::Node::GetAttrResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::GetAttrResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::GetAttrResponse, attributes) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::Node::SetAttrRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Node::SetAttrRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Node::SetAttrRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Node::SetAttrRequest)
-    == ::fuchsia::io::Node::SetAttrRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Node::SetAttrRequest, flags) == 16);
-static_assert(offsetof(::fuchsia::io::Node::SetAttrRequest, attributes) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::Node::SetAttrRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Node::SetAttrRequest)
+    == ::llcpp::fuchsia::io::Node::SetAttrRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::SetAttrRequest, flags) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::SetAttrRequest, attributes) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::Node::SetAttrResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Node::SetAttrResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Node::SetAttrResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Node::SetAttrResponse)
-    == ::fuchsia::io::Node::SetAttrResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Node::SetAttrResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Node::SetAttrResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Node::SetAttrResponse)
+    == ::llcpp::fuchsia::io::Node::SetAttrResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::SetAttrResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Node::IoctlRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Node::IoctlRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Node::IoctlRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Node::IoctlRequest)
-    == ::fuchsia::io::Node::IoctlRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Node::IoctlRequest, opcode) == 16);
-static_assert(offsetof(::fuchsia::io::Node::IoctlRequest, max_out) == 24);
-static_assert(offsetof(::fuchsia::io::Node::IoctlRequest, handles) == 32);
-static_assert(offsetof(::fuchsia::io::Node::IoctlRequest, in) == 48);
+struct IsFidlMessage<::llcpp::fuchsia::io::Node::IoctlRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Node::IoctlRequest)
+    == ::llcpp::fuchsia::io::Node::IoctlRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::IoctlRequest, opcode) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::IoctlRequest, max_out) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::IoctlRequest, handles) == 32);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::IoctlRequest, in) == 48);
 
 template <>
-struct IsFidlType<::fuchsia::io::Node::IoctlResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Node::IoctlResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Node::IoctlResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Node::IoctlResponse)
-    == ::fuchsia::io::Node::IoctlResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Node::IoctlResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::Node::IoctlResponse, handles) == 24);
-static_assert(offsetof(::fuchsia::io::Node::IoctlResponse, out) == 40);
+struct IsFidlMessage<::llcpp::fuchsia::io::Node::IoctlResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Node::IoctlResponse)
+    == ::llcpp::fuchsia::io::Node::IoctlResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::IoctlResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::IoctlResponse, handles) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::Node::IoctlResponse, out) == 40);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::CloneRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::CloneRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::CloneRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::CloneRequest)
-    == ::fuchsia::io::File::CloneRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::CloneRequest, flags) == 16);
-static_assert(offsetof(::fuchsia::io::File::CloneRequest, object) == 20);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::CloneRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::CloneRequest)
+    == ::llcpp::fuchsia::io::File::CloneRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::CloneRequest, flags) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::CloneRequest, object) == 20);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::CloseResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::CloseResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::CloseResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::CloseResponse)
-    == ::fuchsia::io::File::CloseResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::CloseResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::CloseResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::CloseResponse)
+    == ::llcpp::fuchsia::io::File::CloseResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::CloseResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::DescribeResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::DescribeResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::DescribeResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::DescribeResponse)
-    == ::fuchsia::io::File::DescribeResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::DescribeResponse, info) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::DescribeResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::DescribeResponse)
+    == ::llcpp::fuchsia::io::File::DescribeResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::DescribeResponse, info) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::OnOpenResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::OnOpenResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::OnOpenResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::OnOpenResponse)
-    == ::fuchsia::io::File::OnOpenResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::OnOpenResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::File::OnOpenResponse, info) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::OnOpenResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::OnOpenResponse)
+    == ::llcpp::fuchsia::io::File::OnOpenResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::OnOpenResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::OnOpenResponse, info) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::SyncResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::SyncResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::SyncResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::SyncResponse)
-    == ::fuchsia::io::File::SyncResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::SyncResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::SyncResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::SyncResponse)
+    == ::llcpp::fuchsia::io::File::SyncResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::SyncResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::GetAttrResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::GetAttrResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::GetAttrResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::GetAttrResponse)
-    == ::fuchsia::io::File::GetAttrResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::GetAttrResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::File::GetAttrResponse, attributes) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::GetAttrResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::GetAttrResponse)
+    == ::llcpp::fuchsia::io::File::GetAttrResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::GetAttrResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::GetAttrResponse, attributes) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::SetAttrRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::SetAttrRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::SetAttrRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::SetAttrRequest)
-    == ::fuchsia::io::File::SetAttrRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::SetAttrRequest, flags) == 16);
-static_assert(offsetof(::fuchsia::io::File::SetAttrRequest, attributes) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::SetAttrRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::SetAttrRequest)
+    == ::llcpp::fuchsia::io::File::SetAttrRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::SetAttrRequest, flags) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::SetAttrRequest, attributes) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::SetAttrResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::SetAttrResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::SetAttrResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::SetAttrResponse)
-    == ::fuchsia::io::File::SetAttrResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::SetAttrResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::SetAttrResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::SetAttrResponse)
+    == ::llcpp::fuchsia::io::File::SetAttrResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::SetAttrResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::IoctlRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::IoctlRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::IoctlRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::IoctlRequest)
-    == ::fuchsia::io::File::IoctlRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::IoctlRequest, opcode) == 16);
-static_assert(offsetof(::fuchsia::io::File::IoctlRequest, max_out) == 24);
-static_assert(offsetof(::fuchsia::io::File::IoctlRequest, handles) == 32);
-static_assert(offsetof(::fuchsia::io::File::IoctlRequest, in) == 48);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::IoctlRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::IoctlRequest)
+    == ::llcpp::fuchsia::io::File::IoctlRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::IoctlRequest, opcode) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::IoctlRequest, max_out) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::File::IoctlRequest, handles) == 32);
+static_assert(offsetof(::llcpp::fuchsia::io::File::IoctlRequest, in) == 48);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::IoctlResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::IoctlResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::IoctlResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::IoctlResponse)
-    == ::fuchsia::io::File::IoctlResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::IoctlResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::File::IoctlResponse, handles) == 24);
-static_assert(offsetof(::fuchsia::io::File::IoctlResponse, out) == 40);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::IoctlResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::IoctlResponse)
+    == ::llcpp::fuchsia::io::File::IoctlResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::IoctlResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::IoctlResponse, handles) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::File::IoctlResponse, out) == 40);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::ReadRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::ReadRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::ReadRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::ReadRequest)
-    == ::fuchsia::io::File::ReadRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::ReadRequest, count) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::ReadRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::ReadRequest)
+    == ::llcpp::fuchsia::io::File::ReadRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::ReadRequest, count) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::ReadResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::ReadResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::ReadResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::ReadResponse)
-    == ::fuchsia::io::File::ReadResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::ReadResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::File::ReadResponse, data) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::ReadResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::ReadResponse)
+    == ::llcpp::fuchsia::io::File::ReadResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::ReadResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::ReadResponse, data) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::ReadAtRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::ReadAtRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::ReadAtRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::ReadAtRequest)
-    == ::fuchsia::io::File::ReadAtRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::ReadAtRequest, count) == 16);
-static_assert(offsetof(::fuchsia::io::File::ReadAtRequest, offset) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::ReadAtRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::ReadAtRequest)
+    == ::llcpp::fuchsia::io::File::ReadAtRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::ReadAtRequest, count) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::ReadAtRequest, offset) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::ReadAtResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::ReadAtResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::ReadAtResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::ReadAtResponse)
-    == ::fuchsia::io::File::ReadAtResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::ReadAtResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::File::ReadAtResponse, data) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::ReadAtResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::ReadAtResponse)
+    == ::llcpp::fuchsia::io::File::ReadAtResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::ReadAtResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::ReadAtResponse, data) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::WriteRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::WriteRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::WriteRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::WriteRequest)
-    == ::fuchsia::io::File::WriteRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::WriteRequest, data) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::WriteRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::WriteRequest)
+    == ::llcpp::fuchsia::io::File::WriteRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::WriteRequest, data) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::WriteResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::WriteResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::WriteResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::WriteResponse)
-    == ::fuchsia::io::File::WriteResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::WriteResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::File::WriteResponse, actual) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::WriteResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::WriteResponse)
+    == ::llcpp::fuchsia::io::File::WriteResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::WriteResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::WriteResponse, actual) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::WriteAtRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::WriteAtRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::WriteAtRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::WriteAtRequest)
-    == ::fuchsia::io::File::WriteAtRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::WriteAtRequest, data) == 16);
-static_assert(offsetof(::fuchsia::io::File::WriteAtRequest, offset) == 32);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::WriteAtRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::WriteAtRequest)
+    == ::llcpp::fuchsia::io::File::WriteAtRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::WriteAtRequest, data) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::WriteAtRequest, offset) == 32);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::WriteAtResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::WriteAtResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::WriteAtResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::WriteAtResponse)
-    == ::fuchsia::io::File::WriteAtResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::WriteAtResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::File::WriteAtResponse, actual) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::WriteAtResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::WriteAtResponse)
+    == ::llcpp::fuchsia::io::File::WriteAtResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::WriteAtResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::WriteAtResponse, actual) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::SeekRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::SeekRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::SeekRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::SeekRequest)
-    == ::fuchsia::io::File::SeekRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::SeekRequest, offset) == 16);
-static_assert(offsetof(::fuchsia::io::File::SeekRequest, start) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::SeekRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::SeekRequest)
+    == ::llcpp::fuchsia::io::File::SeekRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::SeekRequest, offset) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::SeekRequest, start) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::SeekResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::SeekResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::SeekResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::SeekResponse)
-    == ::fuchsia::io::File::SeekResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::SeekResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::File::SeekResponse, offset) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::SeekResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::SeekResponse)
+    == ::llcpp::fuchsia::io::File::SeekResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::SeekResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::SeekResponse, offset) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::TruncateRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::TruncateRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::TruncateRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::TruncateRequest)
-    == ::fuchsia::io::File::TruncateRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::TruncateRequest, length) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::TruncateRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::TruncateRequest)
+    == ::llcpp::fuchsia::io::File::TruncateRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::TruncateRequest, length) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::TruncateResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::TruncateResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::TruncateResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::TruncateResponse)
-    == ::fuchsia::io::File::TruncateResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::TruncateResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::TruncateResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::TruncateResponse)
+    == ::llcpp::fuchsia::io::File::TruncateResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::TruncateResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::GetFlagsResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::GetFlagsResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::GetFlagsResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::GetFlagsResponse)
-    == ::fuchsia::io::File::GetFlagsResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::GetFlagsResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::File::GetFlagsResponse, flags) == 20);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::GetFlagsResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::GetFlagsResponse)
+    == ::llcpp::fuchsia::io::File::GetFlagsResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::GetFlagsResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::GetFlagsResponse, flags) == 20);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::SetFlagsRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::SetFlagsRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::SetFlagsRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::SetFlagsRequest)
-    == ::fuchsia::io::File::SetFlagsRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::SetFlagsRequest, flags) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::SetFlagsRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::SetFlagsRequest)
+    == ::llcpp::fuchsia::io::File::SetFlagsRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::SetFlagsRequest, flags) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::SetFlagsResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::SetFlagsResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::SetFlagsResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::SetFlagsResponse)
-    == ::fuchsia::io::File::SetFlagsResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::SetFlagsResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::SetFlagsResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::SetFlagsResponse)
+    == ::llcpp::fuchsia::io::File::SetFlagsResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::SetFlagsResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::GetBufferRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::GetBufferRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::GetBufferRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::GetBufferRequest)
-    == ::fuchsia::io::File::GetBufferRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::GetBufferRequest, flags) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::GetBufferRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::GetBufferRequest)
+    == ::llcpp::fuchsia::io::File::GetBufferRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::GetBufferRequest, flags) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::File::GetBufferResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::File::GetBufferResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::File::GetBufferResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::File::GetBufferResponse)
-    == ::fuchsia::io::File::GetBufferResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::File::GetBufferResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::File::GetBufferResponse, buffer) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::File::GetBufferResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::File::GetBufferResponse)
+    == ::llcpp::fuchsia::io::File::GetBufferResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::File::GetBufferResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::File::GetBufferResponse, buffer) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::CloneRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::CloneRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::CloneRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::CloneRequest)
-    == ::fuchsia::io::Directory::CloneRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::CloneRequest, flags) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::CloneRequest, object) == 20);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::CloneRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::CloneRequest)
+    == ::llcpp::fuchsia::io::Directory::CloneRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::CloneRequest, flags) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::CloneRequest, object) == 20);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::CloseResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::CloseResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::CloseResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::CloseResponse)
-    == ::fuchsia::io::Directory::CloseResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::CloseResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::CloseResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::CloseResponse)
+    == ::llcpp::fuchsia::io::Directory::CloseResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::CloseResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::DescribeResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::DescribeResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::DescribeResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::DescribeResponse)
-    == ::fuchsia::io::Directory::DescribeResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::DescribeResponse, info) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::DescribeResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::DescribeResponse)
+    == ::llcpp::fuchsia::io::Directory::DescribeResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::DescribeResponse, info) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::OnOpenResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::OnOpenResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::OnOpenResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::OnOpenResponse)
-    == ::fuchsia::io::Directory::OnOpenResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::OnOpenResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::OnOpenResponse, info) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::OnOpenResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::OnOpenResponse)
+    == ::llcpp::fuchsia::io::Directory::OnOpenResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::OnOpenResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::OnOpenResponse, info) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::SyncResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::SyncResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::SyncResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::SyncResponse)
-    == ::fuchsia::io::Directory::SyncResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::SyncResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::SyncResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::SyncResponse)
+    == ::llcpp::fuchsia::io::Directory::SyncResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::SyncResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::GetAttrResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::GetAttrResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::GetAttrResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::GetAttrResponse)
-    == ::fuchsia::io::Directory::GetAttrResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::GetAttrResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::GetAttrResponse, attributes) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::GetAttrResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::GetAttrResponse)
+    == ::llcpp::fuchsia::io::Directory::GetAttrResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::GetAttrResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::GetAttrResponse, attributes) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::SetAttrRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::SetAttrRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::SetAttrRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::SetAttrRequest)
-    == ::fuchsia::io::Directory::SetAttrRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::SetAttrRequest, flags) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::SetAttrRequest, attributes) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::SetAttrRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::SetAttrRequest)
+    == ::llcpp::fuchsia::io::Directory::SetAttrRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::SetAttrRequest, flags) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::SetAttrRequest, attributes) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::SetAttrResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::SetAttrResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::SetAttrResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::SetAttrResponse)
-    == ::fuchsia::io::Directory::SetAttrResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::SetAttrResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::SetAttrResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::SetAttrResponse)
+    == ::llcpp::fuchsia::io::Directory::SetAttrResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::SetAttrResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::IoctlRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::IoctlRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::IoctlRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::IoctlRequest)
-    == ::fuchsia::io::Directory::IoctlRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::IoctlRequest, opcode) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::IoctlRequest, max_out) == 24);
-static_assert(offsetof(::fuchsia::io::Directory::IoctlRequest, handles) == 32);
-static_assert(offsetof(::fuchsia::io::Directory::IoctlRequest, in) == 48);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::IoctlRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::IoctlRequest)
+    == ::llcpp::fuchsia::io::Directory::IoctlRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::IoctlRequest, opcode) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::IoctlRequest, max_out) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::IoctlRequest, handles) == 32);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::IoctlRequest, in) == 48);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::IoctlResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::IoctlResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::IoctlResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::IoctlResponse)
-    == ::fuchsia::io::Directory::IoctlResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::IoctlResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::IoctlResponse, handles) == 24);
-static_assert(offsetof(::fuchsia::io::Directory::IoctlResponse, out) == 40);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::IoctlResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::IoctlResponse)
+    == ::llcpp::fuchsia::io::Directory::IoctlResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::IoctlResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::IoctlResponse, handles) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::IoctlResponse, out) == 40);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::OpenRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::OpenRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::OpenRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::OpenRequest)
-    == ::fuchsia::io::Directory::OpenRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::OpenRequest, flags) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::OpenRequest, mode) == 20);
-static_assert(offsetof(::fuchsia::io::Directory::OpenRequest, path) == 24);
-static_assert(offsetof(::fuchsia::io::Directory::OpenRequest, object) == 40);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::OpenRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::OpenRequest)
+    == ::llcpp::fuchsia::io::Directory::OpenRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::OpenRequest, flags) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::OpenRequest, mode) == 20);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::OpenRequest, path) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::OpenRequest, object) == 40);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::UnlinkRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::UnlinkRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::UnlinkRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::UnlinkRequest)
-    == ::fuchsia::io::Directory::UnlinkRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::UnlinkRequest, path) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::UnlinkRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::UnlinkRequest)
+    == ::llcpp::fuchsia::io::Directory::UnlinkRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::UnlinkRequest, path) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::UnlinkResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::UnlinkResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::UnlinkResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::UnlinkResponse)
-    == ::fuchsia::io::Directory::UnlinkResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::UnlinkResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::UnlinkResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::UnlinkResponse)
+    == ::llcpp::fuchsia::io::Directory::UnlinkResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::UnlinkResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::ReadDirentsRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::ReadDirentsRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::ReadDirentsRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::ReadDirentsRequest)
-    == ::fuchsia::io::Directory::ReadDirentsRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::ReadDirentsRequest, max_bytes) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::ReadDirentsRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::ReadDirentsRequest)
+    == ::llcpp::fuchsia::io::Directory::ReadDirentsRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::ReadDirentsRequest, max_bytes) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::ReadDirentsResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::ReadDirentsResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::ReadDirentsResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::ReadDirentsResponse)
-    == ::fuchsia::io::Directory::ReadDirentsResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::ReadDirentsResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::ReadDirentsResponse, dirents) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::ReadDirentsResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::ReadDirentsResponse)
+    == ::llcpp::fuchsia::io::Directory::ReadDirentsResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::ReadDirentsResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::ReadDirentsResponse, dirents) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::RewindResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::RewindResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::RewindResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::RewindResponse)
-    == ::fuchsia::io::Directory::RewindResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::RewindResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::RewindResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::RewindResponse)
+    == ::llcpp::fuchsia::io::Directory::RewindResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::RewindResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::GetTokenResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::GetTokenResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::GetTokenResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::GetTokenResponse)
-    == ::fuchsia::io::Directory::GetTokenResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::GetTokenResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::GetTokenResponse, token) == 20);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::GetTokenResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::GetTokenResponse)
+    == ::llcpp::fuchsia::io::Directory::GetTokenResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::GetTokenResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::GetTokenResponse, token) == 20);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::RenameRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::RenameRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::RenameRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::RenameRequest)
-    == ::fuchsia::io::Directory::RenameRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::RenameRequest, src) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::RenameRequest, dst_parent_token) == 32);
-static_assert(offsetof(::fuchsia::io::Directory::RenameRequest, dst) == 40);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::RenameRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::RenameRequest)
+    == ::llcpp::fuchsia::io::Directory::RenameRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::RenameRequest, src) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::RenameRequest, dst_parent_token) == 32);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::RenameRequest, dst) == 40);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::RenameResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::RenameResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::RenameResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::RenameResponse)
-    == ::fuchsia::io::Directory::RenameResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::RenameResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::RenameResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::RenameResponse)
+    == ::llcpp::fuchsia::io::Directory::RenameResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::RenameResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::LinkRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::LinkRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::LinkRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::LinkRequest)
-    == ::fuchsia::io::Directory::LinkRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::LinkRequest, src) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::LinkRequest, dst_parent_token) == 32);
-static_assert(offsetof(::fuchsia::io::Directory::LinkRequest, dst) == 40);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::LinkRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::LinkRequest)
+    == ::llcpp::fuchsia::io::Directory::LinkRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::LinkRequest, src) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::LinkRequest, dst_parent_token) == 32);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::LinkRequest, dst) == 40);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::LinkResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::LinkResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::LinkResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::LinkResponse)
-    == ::fuchsia::io::Directory::LinkResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::LinkResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::LinkResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::LinkResponse)
+    == ::llcpp::fuchsia::io::Directory::LinkResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::LinkResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::WatchRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::WatchRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::WatchRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::WatchRequest)
-    == ::fuchsia::io::Directory::WatchRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::WatchRequest, mask) == 16);
-static_assert(offsetof(::fuchsia::io::Directory::WatchRequest, options) == 20);
-static_assert(offsetof(::fuchsia::io::Directory::WatchRequest, watcher) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::WatchRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::WatchRequest)
+    == ::llcpp::fuchsia::io::Directory::WatchRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::WatchRequest, mask) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::WatchRequest, options) == 20);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::WatchRequest, watcher) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::Directory::WatchResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::Directory::WatchResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::Directory::WatchResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::Directory::WatchResponse)
-    == ::fuchsia::io::Directory::WatchResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::Directory::WatchResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::Directory::WatchResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::Directory::WatchResponse)
+    == ::llcpp::fuchsia::io::Directory::WatchResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::Directory::WatchResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::CloneRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::CloneRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::CloneRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::CloneRequest)
-    == ::fuchsia::io::DirectoryAdmin::CloneRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::CloneRequest, flags) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::CloneRequest, object) == 20);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::CloneRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::CloneRequest)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::CloneRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::CloneRequest, flags) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::CloneRequest, object) == 20);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::CloseResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::CloseResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::CloseResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::CloseResponse)
-    == ::fuchsia::io::DirectoryAdmin::CloseResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::CloseResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::CloseResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::CloseResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::CloseResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::CloseResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::DescribeResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::DescribeResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::DescribeResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::DescribeResponse)
-    == ::fuchsia::io::DirectoryAdmin::DescribeResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::DescribeResponse, info) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::DescribeResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::DescribeResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::DescribeResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::DescribeResponse, info) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::OnOpenResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::OnOpenResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::OnOpenResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::OnOpenResponse)
-    == ::fuchsia::io::DirectoryAdmin::OnOpenResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::OnOpenResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::OnOpenResponse, info) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::OnOpenResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::OnOpenResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::OnOpenResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::OnOpenResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::OnOpenResponse, info) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::SyncResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::SyncResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::SyncResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::SyncResponse)
-    == ::fuchsia::io::DirectoryAdmin::SyncResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::SyncResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::SyncResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::SyncResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::SyncResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::SyncResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::GetAttrResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::GetAttrResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::GetAttrResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::GetAttrResponse)
-    == ::fuchsia::io::DirectoryAdmin::GetAttrResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::GetAttrResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::GetAttrResponse, attributes) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::GetAttrResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::GetAttrResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::GetAttrResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::GetAttrResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::GetAttrResponse, attributes) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::SetAttrRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::SetAttrRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::SetAttrRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::SetAttrRequest)
-    == ::fuchsia::io::DirectoryAdmin::SetAttrRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::SetAttrRequest, flags) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::SetAttrRequest, attributes) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::SetAttrRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::SetAttrRequest)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::SetAttrRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::SetAttrRequest, flags) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::SetAttrRequest, attributes) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::SetAttrResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::SetAttrResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::SetAttrResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::SetAttrResponse)
-    == ::fuchsia::io::DirectoryAdmin::SetAttrResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::SetAttrResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::SetAttrResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::SetAttrResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::SetAttrResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::SetAttrResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::IoctlRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::IoctlRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::IoctlRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::IoctlRequest)
-    == ::fuchsia::io::DirectoryAdmin::IoctlRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::IoctlRequest, opcode) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::IoctlRequest, max_out) == 24);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::IoctlRequest, handles) == 32);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::IoctlRequest, in) == 48);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::IoctlRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::IoctlRequest)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::IoctlRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::IoctlRequest, opcode) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::IoctlRequest, max_out) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::IoctlRequest, handles) == 32);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::IoctlRequest, in) == 48);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::IoctlResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::IoctlResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::IoctlResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::IoctlResponse)
-    == ::fuchsia::io::DirectoryAdmin::IoctlResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::IoctlResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::IoctlResponse, handles) == 24);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::IoctlResponse, out) == 40);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::IoctlResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::IoctlResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::IoctlResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::IoctlResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::IoctlResponse, handles) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::IoctlResponse, out) == 40);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::OpenRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::OpenRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::OpenRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::OpenRequest)
-    == ::fuchsia::io::DirectoryAdmin::OpenRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::OpenRequest, flags) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::OpenRequest, mode) == 20);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::OpenRequest, path) == 24);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::OpenRequest, object) == 40);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::OpenRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::OpenRequest)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::OpenRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::OpenRequest, flags) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::OpenRequest, mode) == 20);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::OpenRequest, path) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::OpenRequest, object) == 40);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::UnlinkRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::UnlinkRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::UnlinkRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::UnlinkRequest)
-    == ::fuchsia::io::DirectoryAdmin::UnlinkRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::UnlinkRequest, path) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::UnlinkRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::UnlinkRequest)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::UnlinkRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::UnlinkRequest, path) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::UnlinkResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::UnlinkResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::UnlinkResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::UnlinkResponse)
-    == ::fuchsia::io::DirectoryAdmin::UnlinkResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::UnlinkResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::UnlinkResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::UnlinkResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::UnlinkResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::UnlinkResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::ReadDirentsRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::ReadDirentsRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::ReadDirentsRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::ReadDirentsRequest)
-    == ::fuchsia::io::DirectoryAdmin::ReadDirentsRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::ReadDirentsRequest, max_bytes) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::ReadDirentsRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::ReadDirentsRequest)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::ReadDirentsRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::ReadDirentsRequest, max_bytes) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::ReadDirentsResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::ReadDirentsResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::ReadDirentsResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::ReadDirentsResponse)
-    == ::fuchsia::io::DirectoryAdmin::ReadDirentsResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::ReadDirentsResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::ReadDirentsResponse, dirents) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::ReadDirentsResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::ReadDirentsResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::ReadDirentsResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::ReadDirentsResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::ReadDirentsResponse, dirents) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::RewindResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::RewindResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::RewindResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::RewindResponse)
-    == ::fuchsia::io::DirectoryAdmin::RewindResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::RewindResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::RewindResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::RewindResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::RewindResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::RewindResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::GetTokenResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::GetTokenResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::GetTokenResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::GetTokenResponse)
-    == ::fuchsia::io::DirectoryAdmin::GetTokenResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::GetTokenResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::GetTokenResponse, token) == 20);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::GetTokenResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::GetTokenResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::GetTokenResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::GetTokenResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::GetTokenResponse, token) == 20);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::RenameRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::RenameRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::RenameRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::RenameRequest)
-    == ::fuchsia::io::DirectoryAdmin::RenameRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::RenameRequest, src) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::RenameRequest, dst_parent_token) == 32);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::RenameRequest, dst) == 40);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::RenameRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::RenameRequest)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::RenameRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::RenameRequest, src) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::RenameRequest, dst_parent_token) == 32);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::RenameRequest, dst) == 40);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::RenameResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::RenameResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::RenameResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::RenameResponse)
-    == ::fuchsia::io::DirectoryAdmin::RenameResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::RenameResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::RenameResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::RenameResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::RenameResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::RenameResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::LinkRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::LinkRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::LinkRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::LinkRequest)
-    == ::fuchsia::io::DirectoryAdmin::LinkRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::LinkRequest, src) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::LinkRequest, dst_parent_token) == 32);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::LinkRequest, dst) == 40);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::LinkRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::LinkRequest)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::LinkRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::LinkRequest, src) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::LinkRequest, dst_parent_token) == 32);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::LinkRequest, dst) == 40);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::LinkResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::LinkResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::LinkResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::LinkResponse)
-    == ::fuchsia::io::DirectoryAdmin::LinkResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::LinkResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::LinkResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::LinkResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::LinkResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::LinkResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::WatchRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::WatchRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::WatchRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::WatchRequest)
-    == ::fuchsia::io::DirectoryAdmin::WatchRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::WatchRequest, mask) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::WatchRequest, options) == 20);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::WatchRequest, watcher) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::WatchRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::WatchRequest)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::WatchRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::WatchRequest, mask) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::WatchRequest, options) == 20);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::WatchRequest, watcher) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::WatchResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::WatchResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::WatchResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::WatchResponse)
-    == ::fuchsia::io::DirectoryAdmin::WatchResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::WatchResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::WatchResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::WatchResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::WatchResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::WatchResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::MountRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::MountRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::MountRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::MountRequest)
-    == ::fuchsia::io::DirectoryAdmin::MountRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::MountRequest, remote) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::MountRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::MountRequest)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::MountRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::MountRequest, remote) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::MountResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::MountResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::MountResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::MountResponse)
-    == ::fuchsia::io::DirectoryAdmin::MountResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::MountResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::MountResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::MountResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::MountResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::MountResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::MountAndCreateRequest> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateRequest> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::MountAndCreateRequest> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::MountAndCreateRequest)
-    == ::fuchsia::io::DirectoryAdmin::MountAndCreateRequest::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::MountAndCreateRequest, remote) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::MountAndCreateRequest, name) == 24);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::MountAndCreateRequest, flags) == 40);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateRequest> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateRequest)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateRequest::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateRequest, remote) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateRequest, name) == 24);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateRequest, flags) == 40);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::MountAndCreateResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::MountAndCreateResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::MountAndCreateResponse)
-    == ::fuchsia::io::DirectoryAdmin::MountAndCreateResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::MountAndCreateResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::MountAndCreateResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::UnmountResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::UnmountResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::UnmountResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::UnmountResponse)
-    == ::fuchsia::io::DirectoryAdmin::UnmountResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::UnmountResponse, s) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::UnmountResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::UnmountResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::UnmountResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::UnmountResponse, s) == 16);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::UnmountNodeResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::UnmountNodeResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::UnmountNodeResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::UnmountNodeResponse)
-    == ::fuchsia::io::DirectoryAdmin::UnmountNodeResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::UnmountNodeResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::UnmountNodeResponse, remote) == 20);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::UnmountNodeResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::UnmountNodeResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::UnmountNodeResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::UnmountNodeResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::UnmountNodeResponse, remote) == 20);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse)
-    == ::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse, info) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::QueryFilesystemResponse, info) == 24);
 
 template <>
-struct IsFidlType<::fuchsia::io::DirectoryAdmin::GetDevicePathResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::io::DirectoryAdmin::GetDevicePathResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::fuchsia::io::DirectoryAdmin::GetDevicePathResponse> : public std::true_type {};
-static_assert(sizeof(::fuchsia::io::DirectoryAdmin::GetDevicePathResponse)
-    == ::fuchsia::io::DirectoryAdmin::GetDevicePathResponse::PrimarySize);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::GetDevicePathResponse, s) == 16);
-static_assert(offsetof(::fuchsia::io::DirectoryAdmin::GetDevicePathResponse, path) == 24);
+struct IsFidlMessage<::llcpp::fuchsia::io::DirectoryAdmin::GetDevicePathResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::io::DirectoryAdmin::GetDevicePathResponse)
+    == ::llcpp::fuchsia::io::DirectoryAdmin::GetDevicePathResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::GetDevicePathResponse, s) == 16);
+static_assert(offsetof(::llcpp::fuchsia::io::DirectoryAdmin::GetDevicePathResponse, path) == 24);
 
 }  // namespace fidl

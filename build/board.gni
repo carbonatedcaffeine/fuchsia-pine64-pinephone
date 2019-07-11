@@ -1,0 +1,17 @@
+# Copyright 2017 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+declare_args() {
+  # Board name used for paving and amber updates.
+  board_name = ""
+
+  # A list of package labels to include in the 'base' package set. Used by the
+  # board definition rather than the product definition.
+  board_package_labels = []
+
+  # List of kernel command line this board to bake into the boot image that are
+  # required by this board. See also kernel_cmdline_args in
+  # //build/images/BUILD.gn
+  board_kernel_cmdline_args = []
+}

@@ -9,12 +9,14 @@
         "features": [
             "build-info",
             "config-data",
-            "isolated-persistent-storage",
-            "root-ssl-certificates"
+            "root-ssl-certificates",
+            "system-temp"
         ],
         "services": [
             "fuchsia.feedback.DataProvider",
             "fuchsia.logger.LogSink",
+            "fuchsia.net.NameLookup",
+            "fuchsia.posix.socket.Provider",
             "fuchsia.net.SocketProvider"
         ]
     }

@@ -18,8 +18,10 @@ static_library("symbols") {
     "base_type.h",
     "code_block.h",
     "collection.h",
+    "compile_unit.h",
     "data_member.h",
     "dwarf_expr_eval.h",
+    "dwarf_lang.h",
     "dwarf_tag.h",
     "enumeration.h",
     "file_line.h",
@@ -27,6 +29,8 @@ static_library("symbols") {
     "function_type.h",
     "identifier.h",
     "identifier_base.h",
+    "index.h",
+    "index_node.h",
     "inherited_from.h",
     "input_location.h",
     "lazy_symbol.h",
@@ -35,8 +39,6 @@ static_library("symbols") {
     "location.h",
     "member_ptr.h",
     "modified_type.h",
-    "module_symbol_index.h",
-    "module_symbol_index_node.h",
     "module_symbol_status.h",
     "module_symbols.h",
     "namespace.h",
@@ -50,10 +52,11 @@ static_library("symbols") {
     "system_symbols.h",
     "target_symbols.h",
     "type.h",
-    "type_utils.h",
     "value.h",
     "variable.h",
     "variable_location.h",
+    "variant.h",
+    "variant_part.h",
     "visit_scopes.h",
   ]
 
@@ -65,10 +68,12 @@ static_library("symbols") {
     "build_id_index.h",
     "code_block.cc",
     "collection.cc",
+    "compile_unit.cc",
     "data_member.cc",
     "dwarf_die_decoder.cc",
     "dwarf_die_decoder.h",
     "dwarf_expr_eval.cc",
+    "dwarf_lang.cc",
     "dwarf_symbol_factory.cc",
     "dwarf_symbol_factory.h",
     "dwarf_tag.cc",
@@ -79,6 +84,8 @@ static_library("symbols") {
     "function.cc",
     "function_type.cc",
     "identifier.cc",
+    "index.cc",
+    "index_node.cc",
     "inherited_from.cc",
     "lazy_symbol.cc",
     "line_details.cc",
@@ -89,8 +96,6 @@ static_library("symbols") {
     "location.cc",
     "member_ptr.cc",
     "modified_type.cc",
-    "module_symbol_index.cc",
-    "module_symbol_index_node.cc",
     "module_symbols.cc",
     "module_symbols_impl.cc",
     "module_symbols_impl.h",
@@ -103,10 +108,11 @@ static_library("symbols") {
     "system_symbols.cc",
     "target_symbols.cc",
     "type.cc",
-    "type_utils.cc",
     "value.cc",
     "variable.cc",
     "variable_location.cc",
+    "variant.cc",
+    "variant_part.cc",
     "visit_scopes.cc",
   ]
 
@@ -123,7 +129,17 @@ static_library("symbols") {
   deps = [
     "//garnet/third_party/llvm:LLVMDebugInfoDWARF",
     "//src/lib/elflib",
+
+    # TODO(brettw) include this when googletest rolls:
+    # "//third_party/googletest:gtest_prod",
   ]
+
+  # Temporary workaround for lack of "gtest_prod" target in current googletest
+  # repo.
+  # TODO(brettw) Remove when "gtest_prod" target above can be used.
+  configs += [ "//third_party/googletest:gtest_config" ]
+  sources +=
+      [ "//third_party/googletest/googletest/include/gtest/gtest_prod.h" ]
 }
 
 static_library("test_support") {
@@ -149,6 +165,7 @@ static_library("test_support") {
   deps = [
     ":symbols",
     "//garnet/third_party/llvm:LLVMDebugInfoDWARF",
+    "//src/developer/debug/zxdb/common:test_support",
   ]
 }
 
@@ -199,6 +216,7 @@ source_set("tests") {
   sources = [
     "build_id_index_unittest.cc",
     "code_block_unittest.cc",
+    "collection_unittest.cc",
     "dwarf_expr_eval_unittest.cc",
     "dwarf_symbol_factory_unittest.cc",
     "dwarf_test_util.cc",
@@ -206,18 +224,17 @@ source_set("tests") {
     "find_line_unittest.cc",
     "function_type_unittest.cc",
     "identifier_unittest.cc",
+    "index_node_unittest.cc",
+    "index_unittest.cc",
     "loaded_module_symbols_unittest.cc",
     "member_ptr_unittest.cc",
     "mock_symbol_data_provider_unittest.cc",
     "modified_type_unittest.cc",
-    "module_symbol_index_node_unittest.cc",
-    "module_symbol_index_unittest.cc",
     "module_symbols_impl_unittest.cc",
     "process_symbols_unittest.cc",
     "symbol_utils_unittest.cc",
     "target_symbols_unittest.cc",
     "test_symbol_module.cc",
-    "type_utils_unittest.cc",
     "variable_location_unittest.cc",
     "visit_scopes_unittest.cc",
   ]
@@ -244,7 +261,7 @@ source_set("perf_tests") {
   testonly = true
 
   sources = [
-    "module_symbol_index_perftest.cc",
+    "index_perftest.cc",
   ]
 
   deps = [

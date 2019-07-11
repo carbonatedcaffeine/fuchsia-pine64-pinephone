@@ -247,8 +247,7 @@ bool ImagePipeSurfaceDisplay::CreateImage(
     return false;
   }
   fuchsia::sysmem::BufferCollectionConstraints constraints{};
-  // Use - 1 because vulkan assumes it's allocating an image by default.
-  constraints.min_buffer_count_for_camping = image_count - 1;
+  constraints.min_buffer_count = image_count;
   // Used because every constraints need to have a usage.
   constraints.usage.display = fuchsia::sysmem::displayUsageLayer;
   status = sysmem_collection->SetConstraints(true, constraints);
@@ -276,9 +275,15 @@ bool ImagePipeSurfaceDisplay::CreateImage(
   }
 
   for (uint32_t i = 0; i < image_count; ++i) {
+    VkExternalMemoryImageCreateInfo external_image_create_info = {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+        .pNext = nullptr,
+        .handleTypes =
+            VK_EXTERNAL_MEMORY_HANDLE_TYPE_TEMP_ZIRCON_VMO_BIT_FUCHSIA,
+    };
     VkBufferCollectionImageCreateInfoFUCHSIA image_format_fuchsia = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_COLLECTION_IMAGE_CREATE_INFO_FUCHSIA,
-        .pNext = nullptr,
+        .pNext = &external_image_create_info,
         .collection = collection,
         .index = i};
     image_create_info.pNext = &image_format_fuchsia;

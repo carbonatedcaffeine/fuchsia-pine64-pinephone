@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_BIN_MEDIA_WAV_RECORDER_WAV_RECORDER_H_
-#define GARNET_BIN_MEDIA_WAV_RECORDER_WAV_RECORDER_H_
+#ifndef SRC_MEDIA_AUDIO_TOOLS_WAV_RECORDER_WAV_RECORDER_H_
+#define SRC_MEDIA_AUDIO_TOOLS_WAV_RECORDER_WAV_RECORDER_H_
 
 #include <fuchsia/media/cpp/fidl.h>
 #include <lib/fit/function.h>
@@ -19,8 +19,7 @@ namespace media::tools {
 class WavRecorder {
  public:
   WavRecorder(fxl::CommandLine cmd_line, fit::closure quit_callback)
-      : cmd_line_(std::move(cmd_line)),
-        quit_callback_(std::move(quit_callback)) {
+      : cmd_line_(std::move(cmd_line)), quit_callback_(std::move(quit_callback)) {
     FXL_DCHECK(quit_callback_);
   }
 
@@ -68,4 +67,4 @@ class WavRecorder {
 
 }  // namespace media::tools
 
-#endif  // GARNET_BIN_MEDIA_WAV_RECORDER_WAV_RECORDER_H_
+#endif  // SRC_MEDIA_AUDIO_TOOLS_WAV_RECORDER_WAV_RECORDER_H_

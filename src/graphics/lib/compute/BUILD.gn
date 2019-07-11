@@ -2,11 +2,41 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("gn/testing.gni")
+
 group("compute") {
   deps = [
     "common",
     "common/vk",
     "hotsort",
+    "spinel",
+    "spinel-rs",
     "spinel/platforms/vk",
   ]
+}
+
+group("tests") {
+  testonly = true
+  public_deps = [
+    ":graphics_compute_unittests",
+    "hotsort:tests",
+    "spinel:tests",
+    "tests/vk/vk_subgroup_info",
+  ]
+  if (current_toolchain != host_toolchain && host_os == "linux") {
+    # Force generation of host tests on Linux.
+    deps = [
+      ":tests($host_toolchain)",
+    ]
+  }
+}
+
+# A target used to group all simple graphics compute unit-tests
+# (i.e. those that do not depend on Vulkan for now).
+#
+# IMPORTANT: Add this target to your universe_package_labels variable
+# in out/default/args.gn to be able to run this on a device.
+#
+graphics_compute_unittest_package("graphics_compute_unittests") {
+  tests = [ "common:common_unittests" ]
 }

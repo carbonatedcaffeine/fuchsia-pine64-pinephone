@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_MOCK_REMOTE_API_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_MOCK_REMOTE_API_H_
 
 #include "src/developer/debug/ipc/protocol.h"
 #include "src/developer/debug/zxdb/client/remote_api.h"
+#include "src/developer/debug/zxdb/common/mock_memory.h"
 
 namespace zxdb {
 
@@ -37,42 +39,37 @@ class MockRemoteAPI : public RemoteAPI {
   const debug_ipc::AddOrChangeBreakpointRequest& last_breakpoint_add() const {
     return last_breakpoint_add_;
   }
-  uint64_t last_breakpoint_id() const {
-    return last_breakpoint_add_.breakpoint.id;
-  }
+  uint64_t last_breakpoint_id() const { return last_breakpoint_add_.breakpoint.id; }
   uint64_t last_breakpoint_address() const {
     if (last_breakpoint_add_.breakpoint.locations.empty())
       return 0;
     return last_breakpoint_add_.breakpoint.locations[0].address;
   }
 
+  // Sets a memory value that will be returned when requested.
+  void AddMemory(uint64_t address, std::vector<uint8_t> data);
+
   const debug_ipc::WriteRegistersRequest& last_write_registers() const {
     return last_write_registers_;
   }
 
   // RemoteAPI implementation.
-  void Attach(
-      const debug_ipc::AttachRequest& request,
-      std::function<void(const Err&, debug_ipc::AttachReply)> cb) override;
+  void Attach(const debug_ipc::AttachRequest& request,
+              std::function<void(const Err&, debug_ipc::AttachReply)> cb) override;
   void AddOrChangeBreakpoint(
       const debug_ipc::AddOrChangeBreakpointRequest& request,
-      std::function<void(const Err&, debug_ipc::AddOrChangeBreakpointReply)> cb)
-      override;
+      std::function<void(const Err&, debug_ipc::AddOrChangeBreakpointReply)> cb) override;
   void RemoveBreakpoint(
       const debug_ipc::RemoveBreakpointRequest& request,
-      std::function<void(const Err&, debug_ipc::RemoveBreakpointReply)> cb)
-      override;
-  void ThreadStatus(
-      const debug_ipc::ThreadStatusRequest& request,
-      std::function<void(const Err&, debug_ipc::ThreadStatusReply)> cb)
-      override;
-  void Resume(
-      const debug_ipc::ResumeRequest& request,
-      std::function<void(const Err&, debug_ipc::ResumeReply)> cb) override;
-  void WriteRegisters(
-      const debug_ipc::WriteRegistersRequest& request,
-      std::function<void(const Err&, debug_ipc::WriteRegistersReply)> cb)
-      override;
+      std::function<void(const Err&, debug_ipc::RemoveBreakpointReply)> cb) override;
+  void ThreadStatus(const debug_ipc::ThreadStatusRequest& request,
+                    std::function<void(const Err&, debug_ipc::ThreadStatusReply)> cb) override;
+  void Resume(const debug_ipc::ResumeRequest& request,
+              std::function<void(const Err&, debug_ipc::ResumeReply)> cb) override;
+  void ReadMemory(const debug_ipc::ReadMemoryRequest& request,
+                  std::function<void(const Err&, debug_ipc::ReadMemoryReply)> cb) override;
+  void WriteRegisters(const debug_ipc::WriteRegistersRequest& request,
+                      std::function<void(const Err&, debug_ipc::WriteRegistersReply)> cb) override;
 
  private:
   debug_ipc::ThreadStatusReply thread_status_reply_;
@@ -83,6 +80,9 @@ class MockRemoteAPI : public RemoteAPI {
   int breakpoint_remove_count_ = 0;
   debug_ipc::AddOrChangeBreakpointRequest last_breakpoint_add_;
   debug_ipc::WriteRegistersRequest last_write_registers_;
+  MockMemory memory_;
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_MOCK_REMOTE_API_H_

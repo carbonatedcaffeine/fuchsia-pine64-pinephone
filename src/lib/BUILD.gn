@@ -11,7 +11,9 @@ group("lib") {
     "fidl_table_validation",
     "files",
     "icu_data",
+    "isolated_devmgr",
     "pkg_url",
+    "ui",
     "url",
     "uuid",
   ]
@@ -20,9 +22,13 @@ group("lib") {
 group("tests") {
   testonly = true
 
-  data_deps = [
+  deps = [
     "cobalt:tests",
     "containers/cpp:tests",
     "fidl_table_validation:tests",
+    "isolated_devmgr:tests",
+    "process_builder:tests",
+    "rust_backtrace:tests",
+    "ui:tests",
   ]
 }

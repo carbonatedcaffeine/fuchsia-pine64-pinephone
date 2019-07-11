@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_SYSTEM_SYMBOLS_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_SYSTEM_SYMBOLS_H_
 
 #include <map>
 #include <memory>
@@ -29,13 +30,10 @@ class SystemSymbols {
   // been destroyed.
   class ModuleRef : public fxl::RefCountedThreadSafe<ModuleRef> {
    public:
-    ModuleRef(SystemSymbols* system_symbols,
-              std::unique_ptr<ModuleSymbols> module_symbols);
+    ModuleRef(SystemSymbols* system_symbols, std::unique_ptr<ModuleSymbols> module_symbols);
 
     ModuleSymbols* module_symbols() { return module_symbols_.get(); }
-    const ModuleSymbols* module_symbols() const {
-      return module_symbols_.get();
-    }
+    const ModuleSymbols* module_symbols() const { return module_symbols_.get(); }
 
     // Notification from SystemSymbols that it's being deleted and no callbacks
     // should be issued on the pointer.
@@ -53,7 +51,8 @@ class SystemSymbols {
 
   class DownloadHandler {
    public:
-    virtual void RequestDownload(const std::string& build_id, bool quiet) = 0;
+    virtual void RequestDownload(const std::string& build_id, DebugSymbolFileType file_type,
+                                 bool quiet) = 0;
   };
 
   explicit SystemSymbols(DownloadHandler* download_handler);
@@ -69,8 +68,8 @@ class SystemSymbols {
   // Ownership of the symbols will be transferred to the returned refcounted
   // ModuleRef. As long as this is alive, the build id -> module mapping will
   // remain in the SystemSymbols object.
-  fxl::RefPtr<ModuleRef> InjectModuleForTesting(
-      const std::string& build_id, std::unique_ptr<ModuleSymbols> module);
+  fxl::RefPtr<ModuleRef> InjectModuleForTesting(const std::string& build_id,
+                                                std::unique_ptr<ModuleSymbols> module);
 
   // Retrieves the symbols for the module with the given build ID. If the
   // module's symbols have already been loaded, just puts an owning reference
@@ -78,14 +77,13 @@ class SystemSymbols {
   //
   // This function uses the build_id for loading symbols. The name is only
   // used for generating informational messages.
-  Err GetModule(const std::string& build_id, fxl::RefPtr<ModuleRef>* module);
+  //
+  // If download is set to true, downloads will be kicked off for any missing
+  // debug files.
+  Err GetModule(const std::string& build_id, fxl::RefPtr<ModuleRef>* module, bool download = true);
 
  private:
   friend ModuleRef;
-
-  // Request that the system arrange for symbols to be downloaded for a given
-  // build ID.
-  void RequestDownload(const std::string& build_id, bool quiet);
 
   // Notification from the ModuleRef that all references have been deleted and
   // the tracking information should be removed from the map.
@@ -107,3 +105,5 @@ class SystemSymbols {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_SYSTEM_SYMBOLS_H_

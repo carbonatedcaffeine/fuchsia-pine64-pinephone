@@ -4,7 +4,7 @@
 
 executable("devhost") {
   sources = [
-    "main.cpp",
+    "main.cc",
   ]
   deps = [
     ":driver",
@@ -15,22 +15,24 @@ source_set("common") {
   visibility = [ ":*" ]
 
   sources = [
-    "api.cpp",
-    "composite-device.cpp",
-    "connection-destroyer.cpp",
-    "core.cpp",
-    "devhost.cpp",
-    "proxy-iostate.cpp",
-    "rpc-server.cpp",
-    "scheduler_profile.cpp",
-    "tracing.cpp",
-    "zx-device.cpp",
+    "api.cc",
+    "composite-device.cc",
+    "connection-destroyer.cc",
+    "core.cc",
+    "devhost.cc",
+    "device-controller-connection.cc",
+    "proxy-iostate.cc",
+    "rpc-server.cc",
+    "scheduler_profile.cc",
+    "tracing.cc",
+    "zx-device.cc",
   ]
 
   public_deps = [
     "$zx/system/banjo/ddk.protocol.composite",
     "$zx/system/fidl/fuchsia-device:c",
     "$zx/system/fidl/fuchsia-device-manager:c",
+    "$zx/system/fidl/fuchsia-device-manager:llcpp",
     "$zx/system/fidl/fuchsia-io:c",
     "$zx/system/fidl/fuchsia-scheduler:c",
     "$zx/system/ulib/async:async-cpp.static",
@@ -38,29 +40,35 @@ source_set("common") {
     "$zx/system/ulib/async:static",
     "$zx/system/ulib/async-loop:async-loop-cpp.static",
     "$zx/system/ulib/ddk",
+    "$zx/system/ulib/ddktl",
     "$zx/system/ulib/fbl",
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/fidl",
     "$zx/system/ulib/fs:fs-for-driver",
     "$zx/system/ulib/sync",
     "$zx/system/ulib/trace:trace-driver",
-    "$zx/system/ulib/trace-provider:static",
+    "$zx/system/ulib/trace-provider:trace-provider-driver",
+    "$zx/system/ulib/trace-provider:trace-provider-fdio-connect",
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zircon-internal",
     "$zx/system/ulib/zx",
     "$zx/system/ulib/zxio",
     "../shared:env",
   ]
-  configs += [ "$zx/public/gn/config:static-libc++" ]
+
+  configs += [
+    "$zx/public/gn/config:static-libc++",
+    "$zx/public/gn/config:visibility_hidden",
+  ]
 }
 
 # "$zx/system/ulib/driver" is an alias for this.
 library("driver") {
   sdk = "shared"
+  sdk_publishable = true
   sdk_headers = []
   shared = true
   static = false
-  configs += [ "$zx/public/gn/config:visibility_hidden" ]
 
   sources = []
 
@@ -73,15 +81,29 @@ library("driver") {
   libs = [ "$zx/system/ulib/trace-engine/ddk-exports.ld" ]
 
   assert_no_deps = [ "$zx/system/ulib/trace-engine:trace-engine.shared" ]
+
+  metadata = {
+    # This library is on the allowlist for driver() shared library deps.
+    # It doesn't cause driver-denylist-check.sh to fail, and it prunes the
+    # metadata walk here so our own deps are not subject to the check.
+    driver_shlib_denylist = []
+    driver_shlib_denylist_barrier = []
+  }
 }
 
 test("devhost-test") {
   test_group = "ddk"
   sources = [
-    "proxy-iostate-test.cpp",
+    "device-api-test.cc",
+    "device-controller-connection-test.cc",
+    "device-controller-integration-test.cc",
+    "proxy-iostate-test.cc",
   ]
   deps = [
     ":common",
+    "$zx/system/fidl/fuchsia-device-test:c",
+    "$zx/system/ulib/devmgr-integration-test",
+    "$zx/system/ulib/driver-integration-test",
     "$zx/system/ulib/zxtest",
     "../shared:env",
   ]

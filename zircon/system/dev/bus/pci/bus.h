@@ -1,8 +1,7 @@
 // Copyright 2018 The Fuchsia Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-#ifndef ZIRCON_SYSTEM_DEV_BUS_PCI_BUS_H_
-#define ZIRCON_SYSTEM_DEV_BUS_PCI_BUS_H_
+#pragma once
 
 #include "bridge.h"
 #include "config.h"
@@ -14,7 +13,6 @@
 #include <ddktl/device.h>
 #include <ddktl/protocol/pciroot.h>
 #include <fbl/intrusive_wavl_tree.h>
-#include <fbl/unique_ptr.h>
 #include <fbl/vector.h>
 #include <list>
 
@@ -79,20 +77,18 @@ private:
     // Scan a specific bus
     void ScanBus(BusScanEntry entry, std::list<BusScanEntry>* scan_list);
     // Creates a Config object for accessing the config space of the device at |bdf|.
-    zx_status_t MakeConfig(pci_bdf_t bdf, fbl::RefPtr<Config>* config);
+    zx_status_t MakeConfig(pci_bdf_t bdf, std::unique_ptr<Config>* config);
 
     // members
     ddk::PcirootProtocolClient pciroot_;
     pci_platform_info_t info_;
     std::optional<ddk::MmioBuffer> ecam_;
-    bool has_ecam_;
     fbl::unique_ptr<PciRoot> root_;
     mutable fbl::Mutex dev_list_lock_;
 
-    // Devices are keyed by BDF so they should not experience any collisions.
+    // All devices downstream of this bus are held here. Devices are keyed by
+    // BDF so they will not experience any collisions.
     pci::DeviceList device_list_;
 };
 
 } // namespace pci
-
-#endif // ZIRCON_SYSTEM_DEV_BUS_PCI_BUS_H_

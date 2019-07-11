@@ -77,14 +77,14 @@ struct BufferCollectionConstraints {
     /// accounted for in min_buffer_count_for_camping.
     uint32 min_buffer_count_for_shared_slack;
 
-    // A particularly-picky participant may unfortunately need to demand a tight
-    // range of buffer_count, or even a specific buffer_count.  This field
-    // should remain 0 unless a participant really must set this field to
-    // constrain the overall BufferCollectionInfo_2.buffer_count.  Any such
-    // participant should still fill out the min_buffer_count_for_* fields
-    // above.
+    /// A particularly-picky participant may unfortunately need to demand a tight
+    /// range of buffer_count, or even a specific buffer_count.  This field
+    /// should remain 0 unless a participant really must set this field to
+    /// constrain the overall BufferCollectionInfo_2.buffer_count.  Any such
+    /// participant should still fill out the min_buffer_count_for_* fields
+    /// above.
     uint32 min_buffer_count;
-    // 0 is treated as 0xFFFFFFFF.
+    /// 0 is treated as 0xFFFFFFFF.
     uint32 max_buffer_count;
 
     /// Constraints on BufferCollectionSettings.buffer_settings.
@@ -109,44 +109,44 @@ struct BufferCollectionConstraints {
 };
 
 struct VmoBuffer {
-    // The same VMO can be used by more than one CodecBuffer (only of the same
-    // buffer_lifetime_ordinal), but each vmo_handle must be a separate handle.
-    //
-    // The vmo field can be 0 if this is a VmoBuffer in BufferCollectionInfo_2
-    // that's at or beyond BufferCollectionInfo_2.buffer_count.
+    /// The same VMO can be used by more than one CodecBuffer (only of the same
+    /// buffer_lifetime_ordinal), but each vmo_handle must be a separate handle.
+    ///
+    /// The vmo field can be 0 if this is a VmoBuffer in BufferCollectionInfo_2
+    /// that's at or beyond BufferCollectionInfo_2.buffer_count.
     handle<vmo>? vmo;
 
-    // Offset within the VMO of the first usable byte.  Must be < the VMO's size
-    // in bytes, and leave sufficient room for BufferMemorySettings.size_bytes
-    // before the end of the VMO.
+    /// Offset within the VMO of the first usable byte.  Must be < the VMO's size
+    /// in bytes, and leave sufficient room for BufferMemorySettings.size_bytes
+    /// before the end of the VMO.
     uint64 vmo_usable_start;
 };
 
-// Information about a buffer collection and its buffers.
+/// Information about a buffer collection and its buffers.
 // TODO(ZX-2260): change struct to table
 struct BufferCollectionInfo_2 {
-    // If this is the initial buffer collection allocation, this is the total
-    // number of buffers.  If this is a single buffer allocation, this is zero,
-    // and the rest of the fields only apply to the single buffer.
+    /// If this is the initial buffer collection allocation, this is the total
+    /// number of buffers.  If this is a single buffer allocation, this is zero,
+    /// and the rest of the fields only apply to the single buffer.
     uint32 buffer_count;
 
-    // These settings apply to all the buffers in the inital buffer allocation.
+    /// These settings apply to all the buffers in the inital buffer allocation.
     SingleBufferSettings settings;
 
-    // VMO handles (and vmo_usable_start offset) for each buffer in the
-    // collection.
-    //
-    // If present, all the VMOs at or after index |buffer_count| are invalid (0)
-    // handles.
-    //
-    // All buffer VMO handles have identical size and access rights.  The size
-    // is in settings.buffer_settings.size_bytes.
-    //
-    // The VMO access rights are determined based on the usages which the
-    // client specified when allocating the buffer collection.  For example,
-    // a client which expressed a read-only usage will receive VMOs without
-    // write rights.  In addition, the rights can be attenuated by the parameter
-    // to BufferCollectionToken.Duplicate() calls.
+    /// VMO handles (and vmo_usable_start offset) for each buffer in the
+    /// collection.
+    ///
+    /// If present, all the VMOs at or after index `buffer_count` are invalid (0)
+    /// handles.
+    ///
+    /// All buffer VMO handles have identical size and access rights.  The size
+    /// is in settings.buffer_settings.size_bytes.
+    ///
+    /// The VMO access rights are determined based on the usages which the
+    /// client specified when allocating the buffer collection.  For example,
+    /// a client which expressed a read-only usage will receive VMOs without
+    /// write rights.  In addition, the rights can be attenuated by the parameter
+    /// to BufferCollectionToken.Duplicate() calls.
     array<VmoBuffer>:64 buffers;
 };
 
@@ -155,10 +155,10 @@ struct SingleBufferInfo {
     VmoBuffer buffer;
 };
 
-// After the initial buffer allocation, it's allowed to close old buffers and
-// allocate new buffers.  When a new buffer is allocated its settings can differ
-// from the rest of the buffers in the collection, and the single buffer's
-// settings are delivered via OnSingleBufferAllocated() using this struct:
+/// After the initial buffer allocation, it's allowed to close old buffers and
+/// allocate new buffers.  When a new buffer is allocated its settings can differ
+/// from the rest of the buffers in the collection, and the single buffer's
+/// settings are delivered via OnSingleBufferAllocated() using this struct:
 struct SingleBufferSettings {
     BufferMemorySettings buffer_settings;
 
@@ -172,6 +172,19 @@ struct SingleBufferSettings {
     ImageFormatConstraints image_format_constraints;
 };
 
+/// Known heap types.
+/// Device specific types should have bit 60 set. Top order bit is reserved
+/// and should not be set.
+enum HeapType : uint64 {
+    SYSTEM_RAM = 0x0000000000000000;
+
+    /// Heap used for amlogic protected memory.
+    AMLOGIC_SECURE = 0x1000000000010000;
+
+    /// Heap used by goldfish vulkan for device-local memory.
+    GOLDFISH_DEVICE_LOCAL = 0x1000000000020000;
+};
+
 struct BufferMemoryConstraints {
     uint32 min_size_bytes = 0;
     uint32 max_size_bytes = 0xFFFFFFFF;
@@ -183,12 +196,6 @@ struct BufferMemoryConstraints {
     /// When aggregating BufferCollectionConstraints, these values boolean-OR.
     bool secure_required = false;
 
-    /// If false, at least one participant can't handle secure memory.  All
-    /// participants that can handle secure memory must specify true here.
-    ///
-    /// When aggregating BufferCollectionConstraints, these values boolean-AND.
-    bool secure_permitted = false;
-
     /// By default, participants must ensure the CPU can read or write data to
     /// the buffer without cache operations. If they support using the RAM
     /// domain, data must be available in RAM (with CPU cache state such that
@@ -198,11 +205,25 @@ struct BufferMemoryConstraints {
     /// zero stale "clean" cache lines)
     bool ram_domain_supported = false;
     bool cpu_domain_supported = true;
+    bool inaccessible_domain_supported = false;
+
+    /// Optional heap constraints. Participants that don't care which heap
+    /// memory is allocated on should leave this field 0.
+    uint32 heap_permitted_count;
+    array<HeapType>:32 heap_permitted;
 };
 
+/// Inaccessible is only for cases where there is no CPU-based access to the
+/// buffers.  A secure_required buffer can still have CoherencyDomain Cpu or
+/// Ram even if the secure_required buffer can only be accessed by the CPU when
+/// the CPU is running in secure mode (or similar).  In contrast, device-local
+/// memory that isn't reachable from the CPU is CoherencyDomain Inaccessible,
+/// even if it's possible to cause a device (physical or virtual) to copy the
+/// data from the Inaccessible buffers to buffers that are visible to the CPU.
 enum CoherencyDomain {
-    Cpu = 0;
-    Ram = 1;
+    CPU = 0;
+    RAM = 1;
+    INACCESSIBLE = 2;
 };
 
 struct BufferMemorySettings {
@@ -210,6 +231,9 @@ struct BufferMemorySettings {
     bool is_physically_contiguous;
     bool is_secure;
     CoherencyDomain coherency_domain;
+    /// The specific heap from which buffers are allocated.
+    /// See above in this file for heap identifier values.
+    HeapType heap;
 };
 
 /// Describes constraints on layout of image data in buffers.
@@ -349,21 +373,21 @@ struct ImageFormat_2 {
     /// Color space.
     ColorSpace color_space;
 
-    // The pixel_aspect_ratio_width : pixel_aspect_ratio_height is the
-    // pixel aspect ratio (AKA sample aspect ratio aka SAR) for the luma
-    // (AKA Y) samples. A pixel_aspect_ratio of 1:1 mean square pixels. A
-    // pixel_aspect_ratio of 2:1 would mean pixels that are displayed twice
-    // as wide as they are tall. Codec implementation should ensure these
-    // two values are relatively prime by reducing the fraction (dividing
-    // both by GCF) if necessary.
-    //
-    // When has_pixel_aspect_ratio == false, pixel_aspect_ratio_width and
-    // pixel_aspect_ratio_height will both be 1, but in that case the
-    // pixel_aspect_ratio_width : pixel_aspect_ratio_height of 1:1 is just
-    // a very weak suggestion re. reasonable-ish handling, not in any way
-    // authoritative. In this case (or in any case really) the receiver of
-    // this message may have other OOB means to determine the actual
-    // pixel_aspect_ratio.
+    /// The pixel_aspect_ratio_width : pixel_aspect_ratio_height is the
+    /// pixel aspect ratio (AKA sample aspect ratio aka SAR) for the luma
+    /// (AKA Y) samples. A pixel_aspect_ratio of 1:1 mean square pixels. A
+    /// pixel_aspect_ratio of 2:1 would mean pixels that are displayed twice
+    /// as wide as they are tall. Codec implementation should ensure these
+    /// two values are relatively prime by reducing the fraction (dividing
+    /// both by GCF) if necessary.
+    ///
+    /// When has_pixel_aspect_ratio == false, pixel_aspect_ratio_width and
+    /// pixel_aspect_ratio_height will both be 1, but in that case the
+    /// pixel_aspect_ratio_width : pixel_aspect_ratio_height of 1:1 is just
+    /// a very weak suggestion re. reasonable-ish handling, not in any way
+    /// authoritative. In this case (or in any case really) the receiver of
+    /// this message may have other OOB means to determine the actual
+    /// pixel_aspect_ratio.
     bool has_pixel_aspect_ratio = false;
     uint32 pixel_aspect_ratio_width = 1;
     uint32 pixel_aspect_ratio_height = 1;

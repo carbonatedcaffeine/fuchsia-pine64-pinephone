@@ -4,11 +4,11 @@
 
 test("time") {
   sources = [
-    "time_test.cpp",
+    "time_test.cc",
   ]
   deps = [
     "$zx/system/ulib/fdio",
-    "$zx/system/ulib/unittest",
     "$zx/system/ulib/zircon",
+    "$zx/system/ulib/zxtest",
   ]
 }

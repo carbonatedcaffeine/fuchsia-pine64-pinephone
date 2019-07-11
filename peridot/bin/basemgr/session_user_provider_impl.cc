@@ -132,6 +132,7 @@ void SessionUserProviderImpl::AddUser(
   account_manager_->ProvisionFromAuthProvider(
       authentication_context_provider_binding_.NewBinding(),
       MapIdentityProviderToAuthProviderType(identity_provider),
+      fuchsia::auth::account::Lifetime::PERSISTENT,
       [callback = std::move(callback)](
           fuchsia::auth::account::Status status,
           std::unique_ptr<fuchsia::auth::account::LocalAccountId>
@@ -246,6 +247,7 @@ void SessionUserProviderImpl::RemoveAllUsers(fit::function<void()> callback) {
         // We only expect there to be one account at most.
         account_manager_->RemoveAccount(
             account_ids.at(0),
+            true, /* Force account removal */
             [callback = std::move(callback)](fuchsia::auth::account::Status) {
               callback();
             });

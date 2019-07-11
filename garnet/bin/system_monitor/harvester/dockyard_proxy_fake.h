@@ -37,15 +37,24 @@ class DockyardProxyFake : public DockyardProxy {
 
   // Get the value (or string) for a given dockyard path. Used for testing.
   // Returns true if the value was sent at all; false if it wasn't sent.
+  bool CheckJsonSent(const std::string& dockyard_path, std::string* json) const;
   bool CheckValueSent(const std::string& dockyard_path,
                       dockyard::SampleValue* value) const;
   bool CheckStringSent(const std::string& dockyard_path,
                        std::string* string) const;
+  bool CheckStringPrefixSent(const std::string& dockyard_path_prefix,
+                             std::string* string) const;
 
  private:
   std::map<std::string, dockyard::SampleValue> sent_values_;
   std::map<std::string, std::string> sent_strings_;
+  std::map<std::string, std::string> sent_json_;
+
+  friend std::ostream& operator<<(std::ostream& out,
+                                  const DockyardProxyFake& dockyard);
 };
+
+std::ostream& operator<<(std::ostream& out, const DockyardProxyFake& dockyard);
 
 }  // namespace harvester
 

@@ -45,6 +45,9 @@ declare_args() {
 
   # Targets that will be built as IMG vulkan ICDS.
   build_libvulkan_img_rgx = []
+
+  # Board files can set this to true if they have a package with a mali libvulkan VCD.
+  board_has_libvulkan_arm_mali = false
 }
 
 have_prebuilt_libvulkan_arm = prebuilt_libvulkan_arm_path != ""
@@ -55,8 +58,20 @@ have_libvulkan = build_libvulkan != [] || have_prebuilt_libvulkan_arm
 # Target environments with an Intel GPU.
 intel_gpu_envs = [ nuc_env ]
 
+# Target environments with an ARM Mali GPU.
+arm_gpu_envs = [
+  astro_env,
+  vim2_env,
+]
+
 # General hardware environments for magma tests to target.
-magma_hardware_envs = intel_gpu_envs
+magma_hardware_envs = intel_gpu_envs + arm_gpu_envs
+
+magma_libvulkan_hardware_envs = intel_gpu_envs
+if (build_libvulkan_arm_mali != [] || have_prebuilt_libvulkan_arm ||
+    board_has_libvulkan_arm_mali) {
+  magma_libvulkan_hardware_envs += arm_gpu_envs
+}
 
 template("magma_pci_entry") {
   source_set(target_name) {

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <vector>
+
 #include "src/connectivity/overnet/lib/environment/timer.h"
 #include "src/connectivity/overnet/lib/environment/trace.h"
 #include "src/connectivity/overnet/lib/packet_protocol/windowed_filter.h"
@@ -77,6 +78,10 @@ class BBR final {
   }
 
   TimeDelta rtt() const { return rtprop_; }
+
+  uint64_t bandwidth_delay_product() const {
+    return bottleneck_bandwidth().BytesSentForTime(rtt());
+  }
 
   // Reporter should have a Put(name, value) method.
   // ... much like CsvWriter, but we don't include that here so that we can keep

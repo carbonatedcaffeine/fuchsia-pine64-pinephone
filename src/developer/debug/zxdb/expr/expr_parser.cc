@@ -44,8 +44,8 @@ namespace {
 // prefix when used in casts and math expressions: "(a + b)" "a + (b + c)" but
 // infix when used for function calls: "foo(bar)".
 using PrefixFunc = fxl::RefPtr<ExprNode> (ExprParser::*)(const ExprToken&);
-using InfixFunc = fxl::RefPtr<ExprNode> (ExprParser::*)(
-    fxl::RefPtr<ExprNode> left, const ExprToken& token);
+using InfixFunc = fxl::RefPtr<ExprNode> (ExprParser::*)(fxl::RefPtr<ExprNode> left,
+                                                        const ExprToken& token);
 
 // Precedence constants used in DispatchInfo. Note that these aren't
 // contiguous. At least need to do every-other-one to handle the possible
@@ -127,12 +127,9 @@ ExprParser::DispatchInfo ExprParser::kDispatchInfo[] = {
 // static
 const ExprToken ExprParser::kInvalidToken;
 
-ExprParser::ExprParser(std::vector<ExprToken> tokens,
-                       NameLookupCallback name_lookup)
-    : name_lookup_callback_(std::move(name_lookup)),
-      tokens_(std::move(tokens)) {
-  static_assert(arraysize(ExprParser::kDispatchInfo) ==
-                    static_cast<int>(ExprTokenType::kNumTypes),
+ExprParser::ExprParser(std::vector<ExprToken> tokens, NameLookupCallback name_lookup)
+    : name_lookup_callback_(std::move(name_lookup)), tokens_(std::move(tokens)) {
+  static_assert(arraysize(ExprParser::kDispatchInfo) == static_cast<int>(ExprTokenType::kNumTypes),
                 "kDispatchInfo needs updating to match ExprTokenType");
 }
 
@@ -155,26 +152,32 @@ fxl::RefPtr<ExprNode> ExprParser::Parse() {
 }
 
 // static
-std::pair<Err, Identifier> ExprParser::ParseIdentifier(
-    const std::string& input) {
+Err ExprParser::ParseIdentifier(const std::string& input, Identifier* output) {
+  ParsedIdentifier parsed;
+  Err err = ParseIdentifier(input, &parsed);
+  if (err.has_error())
+    return err;
+  *output = ToIdentifier(parsed);
+  return Err();
+}
+
+// static
+Err ExprParser::ParseIdentifier(const std::string& input, ParsedIdentifier* output) {
   ExprTokenizer tokenizer(input);
   if (!tokenizer.Tokenize())
-    return std::make_pair(tokenizer.err(), Identifier());
+    return tokenizer.err();
 
   ExprParser parser(tokenizer.TakeTokens());
   auto root = parser.Parse();
   if (!root)
-    return std::make_pair(parser.err(), Identifier());
+    return parser.err();
 
   auto identifier_node = root->AsIdentifier();
-  if (!identifier_node) {
-    return std::make_pair(Err("Input did not parse as an identifier."),
-                          Identifier());
-  }
+  if (!identifier_node)
+    return Err("Input did not parse as an identifier.");
 
-  return std::make_pair(
-      Err(),
-      const_cast<IdentifierExprNode*>(identifier_node)->TakeIdentifier());
+  *output = const_cast<IdentifierExprNode*>(identifier_node)->TakeIdentifier();
+  return Err();
 }
 
 fxl::RefPtr<ExprNode> ExprParser::ParseExpression(int precedence) {
@@ -185,8 +188,7 @@ fxl::RefPtr<ExprNode> ExprParser::ParseExpression(int precedence) {
   PrefixFunc prefix = DispatchForToken(token).prefix;
 
   if (!prefix) {
-    SetError(token, fxl::StringPrintf("Unexpected token '%s'.",
-                                      token.value().c_str()));
+    SetError(token, fxl::StringPrintf("Unexpected token '%s'.", token.value().c_str()));
     return nullptr;
   }
 
@@ -198,8 +200,7 @@ fxl::RefPtr<ExprNode> ExprParser::ParseExpression(int precedence) {
     const ExprToken& next_token = Consume();
     InfixFunc infix = DispatchForToken(next_token).infix;
     if (!infix) {
-      SetError(next_token, fxl::StringPrintf("Unexpected token '%s'.",
-                                             next_token.value().c_str()));
+      SetError(next_token, fxl::StringPrintf("Unexpected token '%s'.", next_token.value().c_str()));
       return nullptr;
     }
     left = (this->*infix)(std::move(left), next_token);
@@ -257,8 +258,7 @@ ExprParser::ParseNameResult ExprParser::ParseName(bool expand_types) {
     switch (token.type()) {
       case ExprTokenType::kColonColon: {
         // "::" can only follow nothing, a namespace or type name.
-        if (mode != kBegin && mode != kNamespace && mode != kType &&
-            mode != kAnything) {
+        if (mode != kBegin && mode != kNamespace && mode != kType && mode != kAnything) {
           SetError(token,
                    "Could not identify thing to the left of '::' as a type or "
                    "namespace.");
@@ -267,7 +267,7 @@ ExprParser::ParseNameResult ExprParser::ParseName(bool expand_types) {
 
         mode = kColonColon;
         if (result.ident.empty())  // Globally qualified (starts with "::").
-          result.ident = Identifier(IdentifierQualification::kGlobal);
+          result.ident = ParsedIdentifier(IdentifierQualification::kGlobal);
         result.type = nullptr;  // No longer a type.
         break;
       }
@@ -296,8 +296,7 @@ ExprParser::ParseNameResult ExprParser::ParseName(bool expand_types) {
         prev_token = &Consume();  // Eat the "<".
 
         // Extract the contents of the template.
-        std::vector<std::string> list =
-            ParseTemplateList(ExprTokenType::kGreater);
+        std::vector<std::string> list = ParseTemplateList(ExprTokenType::kGreater);
         if (has_error())
           return ParseNameResult();
 
@@ -308,12 +307,13 @@ ExprParser::ParseNameResult ExprParser::ParseName(bool expand_types) {
 
         // Construct a replacement for the last component of the identifier
         // with the template arguments added.
-        IdentifierComponent& back = result.ident.components().back();
-        back = IdentifierComponent(back.name(), std::move(list));
+        ParsedIdentifierComponent& back = result.ident.components().back();
+        back = ParsedIdentifierComponent(back.name(), std::move(list));
 
         // The thing we just made is either a type or a name, look it up.
         if (name_lookup_callback_) {
-          FoundName lookup = name_lookup_callback_(result.ident);
+          FoundName lookup =
+              name_lookup_callback_(result.ident, FindNameOptions(FindNameOptions::kAllKinds));
           switch (lookup.kind()) {
             case FoundName::kType:
               mode = kType;
@@ -343,15 +343,13 @@ ExprParser::ParseNameResult ExprParser::ParseName(bool expand_types) {
         if (mode == kType) {
           // Normally in C++ a name can follow a type, so make a special error
           // for this case.
-          SetError(token,
-                   "This looks like a declaration which is not supported.");
+          SetError(token, "This looks like a declaration which is not supported.");
           return ParseNameResult();
         } else if (mode == kBegin) {
           // Found an identifier name with nothing before it.
-          result.ident = Identifier(token.value());
+          result.ident = ParsedIdentifier(token.value());
         } else if (mode == kColonColon) {
-          result.ident.AppendComponent(
-              IdentifierComponent(cur_token().value()));
+          result.ident.AppendComponent(ParsedIdentifierComponent(cur_token().value()));
         } else {
           // Anything else like "std::vector foo" or "foo bar".
           SetError(token, "Unexpected identifier, did you forget an operator?");
@@ -360,7 +358,8 @@ ExprParser::ParseNameResult ExprParser::ParseName(bool expand_types) {
 
         // Decode what adding the name just generated.
         if (name_lookup_callback_) {
-          FoundName lookup = name_lookup_callback_(result.ident);
+          FoundName lookup =
+              name_lookup_callback_(result.ident, FindNameOptions(FindNameOptions::kAllKinds));
           switch (lookup.kind()) {
             case FoundName::kNamespace:
               mode = kNamespace;
@@ -462,9 +461,8 @@ fxl::RefPtr<Type> ExprParser::ParseType(fxl::RefPtr<Type> optional_base) {
       return nullptr;
     if (!parse_result.type) {
       SetError(first_name_token,
-               fxl::StringPrintf(
-                   "Expected a type name but could not find a type named '%s'.",
-                   parse_result.ident.GetFullName().c_str()));
+               fxl::StringPrintf("Expected a type name but could not find a type named '%s'.",
+                                 parse_result.ident.GetFullName().c_str()));
       return nullptr;
     }
     type = std::move(parse_result.type);
@@ -482,11 +480,10 @@ fxl::RefPtr<Type> ExprParser::ParseType(fxl::RefPtr<Type> optional_base) {
     // Read the operator.
     const ExprToken& token = cur_token();
     if (token.type() == ExprTokenType::kStar) {
-      type = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType,
-                                               LazySymbol(std::move(type)));
+      type = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol(std::move(type)));
     } else if (token.type() == ExprTokenType::kAmpersand) {
-      type = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kReferenceType,
-                                               LazySymbol(std::move(type)));
+      type =
+          fxl::MakeRefCounted<ModifiedType>(DwarfTag::kReferenceType, LazySymbol(std::move(type)));
     } else if (token.type() == ExprTokenType::kDoubleAnd) {
       type = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kRvalueReferenceType,
                                                LazySymbol(std::move(type)));
@@ -509,8 +506,7 @@ fxl::RefPtr<Type> ExprParser::ParseType(fxl::RefPtr<Type> optional_base) {
 
 // A list is any sequence of comma-separated types. We don't parse the types
 // (this is hard) but instead skip over them.
-std::vector<std::string> ExprParser::ParseTemplateList(
-    ExprTokenType stop_before) {
+std::vector<std::string> ExprParser::ParseTemplateList(ExprTokenType stop_before) {
   std::vector<std::string> result;
 
   bool first_time = true;
@@ -530,9 +526,8 @@ std::vector<std::string> ExprParser::ParseTemplateList(
     TemplateTypeResult type_result = ExtractTemplateType(tokens_, cur_);
     if (!type_result.success) {
       SetError(tokens_[type_result.unmatched_error_token],
-               fxl::StringPrintf(
-                   "Unmatched '%s'.",
-                   tokens_[type_result.unmatched_error_token].value().c_str()));
+               fxl::StringPrintf("Unmatched '%s'.",
+                                 tokens_[type_result.unmatched_error_token].value().c_str()));
       return {};
     } else if (cur_ == type_result.end_token) {
       SetError(cur_token(), "Expected template parameter.");
@@ -548,8 +543,7 @@ std::vector<std::string> ExprParser::ParseTemplateList(
 // Currently these are all known in advance so this simple manual parsing will
 // do. A more general approach would implement a comma infix which constructs a
 // new type of ExprNode.
-std::vector<fxl::RefPtr<ExprNode>> ExprParser::ParseExpressionList(
-    ExprTokenType stop_before) {
+std::vector<fxl::RefPtr<ExprNode>> ExprParser::ParseExpressionList(ExprTokenType stop_before) {
   std::vector<fxl::RefPtr<ExprNode>> result;
 
   bool first_time = true;
@@ -589,14 +583,12 @@ fxl::RefPtr<ExprNode> ExprParser::BinaryOpInfix(fxl::RefPtr<ExprNode> left,
   const DispatchInfo& dispatch = DispatchForToken(token);
   fxl::RefPtr<ExprNode> right = ParseExpression(dispatch.precedence);
   if (!has_error() && !right) {
-    SetError(token, fxl::StringPrintf("Expected expression after '%s'.",
-                                      token.value().c_str()));
+    SetError(token, fxl::StringPrintf("Expected expression after '%s'.", token.value().c_str()));
   }
   if (has_error())
     return nullptr;
 
-  return fxl::MakeRefCounted<BinaryOpExprNode>(std::move(left), token,
-                                               std::move(right));
+  return fxl::MakeRefCounted<BinaryOpExprNode>(std::move(left), token, std::move(right));
 }
 
 fxl::RefPtr<ExprNode> ExprParser::DotOrArrowInfix(fxl::RefPtr<ExprNode> left,
@@ -604,16 +596,15 @@ fxl::RefPtr<ExprNode> ExprParser::DotOrArrowInfix(fxl::RefPtr<ExprNode> left,
   // These are left-associative so use the same precedence as the token.
   fxl::RefPtr<ExprNode> right = ParseExpression(kPrecedenceCallAccess);
   if (!right || !right->AsIdentifier()) {
-    SetError(token, fxl::StringPrintf(
-                        "Expected identifier for right-hand-side of \"%s\".",
-                        token.value().c_str()));
+    SetError(token, fxl::StringPrintf("Expected identifier for right-hand-side of \"%s\".",
+                                      token.value().c_str()));
     return nullptr;
   }
 
   // Use the name from the right-hand-side identifier, we don't need a full
   // expression for that. If we add function calls it will be necessary.
-  return fxl::MakeRefCounted<MemberAccessExprNode>(
-      std::move(left), token, right->AsIdentifier()->ident());
+  return fxl::MakeRefCounted<MemberAccessExprNode>(std::move(left), token,
+                                                   right->AsIdentifier()->ident());
 }
 
 fxl::RefPtr<ExprNode> ExprParser::LeftParenPrefix(const ExprToken& token) {
@@ -640,7 +631,7 @@ fxl::RefPtr<ExprNode> ExprParser::LeftParenPrefix(const ExprToken& token) {
     if (has_error())
       return nullptr;
 
-    fxl::RefPtr<TypeExprNode> type_ref(const_cast<TypeExprNode*>(type_expr));
+    fxl::RefPtr<TypeExprNode> type_ref = RefPtrTo(type_expr);
     return fxl::MakeRefCounted<CastExprNode>(CastType::kC, std::move(type_ref),
                                              std::move(cast_expr));
   }
@@ -659,20 +650,17 @@ fxl::RefPtr<ExprNode> ExprParser::LeftParenInfix(fxl::RefPtr<ExprNode> left,
   }
   // Const cast is required because the type conversions only have const
   // versions, although our object is not const.
-  Identifier name =
-      const_cast<IdentifierExprNode*>(left_ident_node)->TakeIdentifier();
+  ParsedIdentifier name = const_cast<IdentifierExprNode*>(left_ident_node)->TakeIdentifier();
 
   // Read the function parameters.
-  std::vector<fxl::RefPtr<ExprNode>> args =
-      ParseExpressionList(ExprTokenType::kRightParen);
+  std::vector<fxl::RefPtr<ExprNode>> args = ParseExpressionList(ExprTokenType::kRightParen);
   if (has_error())
     return nullptr;
   Consume(ExprTokenType::kRightParen, "Expected ')' to match.", token);
   if (has_error())
     return nullptr;
 
-  return fxl::MakeRefCounted<FunctionCallExprNode>(std::move(name),
-                                                   std::move(args));
+  return fxl::MakeRefCounted<FunctionCallExprNode>(std::move(name), std::move(args));
 }
 
 fxl::RefPtr<ExprNode> ExprParser::LeftSquareInfix(fxl::RefPtr<ExprNode> left,
@@ -684,12 +672,10 @@ fxl::RefPtr<ExprNode> ExprParser::LeftSquareInfix(fxl::RefPtr<ExprNode> left,
     Consume(ExprTokenType::kRightSquare, "Expected ']' to match.", token);
   if (has_error())
     return nullptr;
-  return fxl::MakeRefCounted<ArrayAccessExprNode>(std::move(left),
-                                                  std::move(inner));
+  return fxl::MakeRefCounted<ArrayAccessExprNode>(std::move(left), std::move(inner));
 }
 
-fxl::RefPtr<ExprNode> ExprParser::LessInfix(fxl::RefPtr<ExprNode> left,
-                                            const ExprToken& token) {
+fxl::RefPtr<ExprNode> ExprParser::LessInfix(fxl::RefPtr<ExprNode> left, const ExprToken& token) {
   SetError(token, "Comparisons not supported yet.");
   return nullptr;
 }
@@ -698,8 +684,7 @@ fxl::RefPtr<ExprNode> ExprParser::LiteralPrefix(const ExprToken& token) {
   return fxl::MakeRefCounted<LiteralExprNode>(token);
 }
 
-fxl::RefPtr<ExprNode> ExprParser::GreaterInfix(fxl::RefPtr<ExprNode> left,
-                                               const ExprToken& token) {
+fxl::RefPtr<ExprNode> ExprParser::GreaterInfix(fxl::RefPtr<ExprNode> left, const ExprToken& token) {
   SetError(token, "Comparisons not supported yet.");
   return nullptr;
 }
@@ -726,8 +711,7 @@ fxl::RefPtr<ExprNode> ExprParser::NamePrefix(const ExprToken& token) {
   FXL_DCHECK(cur_ > 0);
   cur_--;
 
-  if (token.type() == ExprTokenType::kConst ||
-      token.type() == ExprTokenType::kVolatile ||
+  if (token.type() == ExprTokenType::kConst || token.type() == ExprTokenType::kVolatile ||
       token.type() == ExprTokenType::kRestrict) {
     // These start a type name, force type parsing mode.
     fxl::RefPtr<Type> type = ParseType(fxl::RefPtr<Type>());
@@ -755,13 +739,11 @@ fxl::RefPtr<ExprNode> ExprParser::StarPrefix(const ExprToken& token) {
 }
 
 fxl::RefPtr<ExprNode> ExprParser::CastPrefix(const ExprToken& token) {
-  CastType cast_type = token.type() == ExprTokenType::kReinterpretCast
-                           ? CastType::kReinterpret
-                           : CastType::kStatic;
+  CastType cast_type =
+      token.type() == ExprTokenType::kReinterpretCast ? CastType::kReinterpret : CastType::kStatic;
 
   // "<" after reinterpret_cast.
-  ExprToken left_angle =
-      Consume(ExprTokenType::kLess, "Expected '< >' after cast.");
+  ExprToken left_angle = Consume(ExprTokenType::kLess, "Expected '< >' after cast.");
   if (has_error())
     return nullptr;
 
@@ -776,8 +758,7 @@ fxl::RefPtr<ExprNode> ExprParser::CastPrefix(const ExprToken& token) {
     return nullptr;
 
   // "(" containing expression.
-  ExprToken left_paren =
-      Consume(ExprTokenType::kLeftParen, "Expected '(' for cast.");
+  ExprToken left_paren = Consume(ExprTokenType::kLeftParen, "Expected '(' for cast.");
   if (has_error())
     return nullptr;
 
@@ -792,14 +773,12 @@ fxl::RefPtr<ExprNode> ExprParser::CastPrefix(const ExprToken& token) {
     return nullptr;
 
   return fxl::MakeRefCounted<CastExprNode>(
-      cast_type, fxl::MakeRefCounted<TypeExprNode>(std::move(dest_type)),
-      std::move(expr));
+      cast_type, fxl::MakeRefCounted<TypeExprNode>(std::move(dest_type)), std::move(expr));
 }
 
 fxl::RefPtr<ExprNode> ExprParser::SizeofPrefix(const ExprToken& token) {
   // "(" containing expression.
-  ExprToken left_paren =
-      Consume(ExprTokenType::kLeftParen, "Expected '(' for cast.");
+  ExprToken left_paren = Consume(ExprTokenType::kLeftParen, "Expected '(' for cast.");
   if (has_error())
     return nullptr;
 
@@ -832,17 +811,14 @@ const ExprToken& ExprParser::Consume(ExprTokenType type, const char* error_msg,
                                      const ExprToken& error_token) {
   FXL_DCHECK(!has_error());  // Should have error-checked before calling.
   if (at_end()) {
-    SetError(error_token,
-             std::string(error_msg) + " Hit the end of input instead.");
+    SetError(error_token, std::string(error_msg) + " Hit the end of input instead.");
     return kInvalidToken;
   }
 
   if (cur_token().type() == type)
     return Consume();
 
-  SetError(
-      error_token.type() == ExprTokenType::kInvalid ? cur_token() : error_token,
-      error_msg);
+  SetError(error_token.type() == ExprTokenType::kInvalid ? cur_token() : error_token, error_msg);
   return kInvalidToken;
 }
 
@@ -864,8 +840,8 @@ void ExprParser::ConsumeCVQualifier(std::vector<DwarfTag>* qual) {
 
     // Can't have duplicates.
     if (std::find(qual->begin(), qual->end(), tag) != qual->end()) {
-      SetError(token, fxl::StringPrintf("Duplicate '%s' type qualification.",
-                                        token.value().c_str()));
+      SetError(token,
+               fxl::StringPrintf("Duplicate '%s' type qualification.", token.value().c_str()));
       return;
     }
 
@@ -874,15 +850,14 @@ void ExprParser::ConsumeCVQualifier(std::vector<DwarfTag>* qual) {
   }
 }
 
-fxl::RefPtr<Type> ExprParser::ApplyQualifiers(
-    fxl::RefPtr<Type> input, const std::vector<DwarfTag>& qual) {
+fxl::RefPtr<Type> ExprParser::ApplyQualifiers(fxl::RefPtr<Type> input,
+                                              const std::vector<DwarfTag>& qual) {
   fxl::RefPtr<Type> type = std::move(input);
 
   // Apply the qualifiers in reverse order so the rightmost one is applied
   // first.
   for (auto iter = qual.rbegin(); iter != qual.rend(); ++iter) {
-    type =
-        fxl::MakeRefCounted<ModifiedType>(*iter, LazySymbol(std::move(type)));
+    type = fxl::MakeRefCounted<ModifiedType>(*iter, LazySymbol(std::move(type)));
   }
   return type;
 }
@@ -893,8 +868,7 @@ void ExprParser::SetError(const ExprToken& token, std::string msg) {
 }
 
 // static
-const ExprParser::DispatchInfo& ExprParser::DispatchForToken(
-    const ExprToken& token) {
+const ExprParser::DispatchInfo& ExprParser::DispatchForToken(const ExprToken& token) {
   size_t index = static_cast<size_t>(token.type());
   FXL_DCHECK(index < arraysize(kDispatchInfo));
   return kDispatchInfo[index];

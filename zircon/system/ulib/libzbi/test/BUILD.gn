@@ -11,7 +11,7 @@ group("test") {
 
 test("zbi") {
   sources = [
-    "zbi.cpp",
+    "zbi.cc",
   ]
   deps = [
     "$zx/system/ulib/fbl",
@@ -21,6 +21,9 @@ test("zbi") {
   ]
 
   if (is_fuchsia) {
-    deps += [ "$zx/system/ulib/fdio" ]
+    deps += [
+      "$zx/system/ulib/fdio",
+      "$zx/system/ulib/zx",
+    ]
   }
 }

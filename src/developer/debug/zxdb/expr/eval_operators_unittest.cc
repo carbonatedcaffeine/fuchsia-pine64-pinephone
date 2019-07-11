@@ -3,11 +3,12 @@
 // found in the LICENSE file.
 
 #include "src/developer/debug/zxdb/expr/eval_operators.h"
+
 #include "gtest/gtest.h"
 #include "src/developer/debug/zxdb/common/err.h"
 #include "src/developer/debug/zxdb/common/test_with_loop.h"
 #include "src/developer/debug/zxdb/expr/expr_value.h"
-#include "src/developer/debug/zxdb/expr/mock_expr_eval_context.h"
+#include "src/developer/debug/zxdb/expr/mock_eval_context.h"
 #include "src/developer/debug/zxdb/expr/mock_expr_node.h"
 #include "src/developer/debug/zxdb/symbols/base_type.h"
 #include "src/developer/debug/zxdb/symbols/type_test_support.h"
@@ -18,13 +19,13 @@ namespace {
 
 class EvalOperators : public TestWithLoop {
  public:
-  EvalOperators() : eval_context_(fxl::MakeRefCounted<MockExprEvalContext>()) {}
+  EvalOperators() : eval_context_(fxl::MakeRefCounted<MockEvalContext>()) {}
   ~EvalOperators() = default;
 
-  fxl::RefPtr<MockExprEvalContext>& eval_context() { return eval_context_; }
+  fxl::RefPtr<MockEvalContext>& eval_context() { return eval_context_; }
 
  private:
-  fxl::RefPtr<MockExprEvalContext> eval_context_;
+  fxl::RefPtr<MockEvalContext> eval_context_;
 };
 
 void QuitNow() { debug_ipc::MessageLoop::Current()->QuitNow(); }
@@ -49,14 +50,13 @@ TEST_F(EvalOperators, Assignment) {
   bool called = false;
   Err out_err;
   ExprValue out_value;
-  EvalBinaryOperator(
-      eval_context(), dest_node, assign, source_node,
-      [&called, &out_err, &out_value](const Err& err, ExprValue value) {
-        called = true;
-        out_err = err;
-        out_value = value;
-        QuitNow();
-      });
+  EvalBinaryOperator(eval_context(), dest_node, assign, source_node,
+                     [&called, &out_err, &out_value](const Err& err, ExprValue value) {
+                       called = true;
+                       out_err = err;
+                       out_value = value;
+                       QuitNow();
+                     });
 
   EXPECT_FALSE(called);
   loop().Run();

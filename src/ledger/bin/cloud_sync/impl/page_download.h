@@ -12,19 +12,18 @@
 #include <lib/fidl/cpp/binding.h>
 #include <lib/fit/function.h>
 
-#include "peridot/lib/commit_pack/commit_pack.h"
 #include "src/ledger/bin/cloud_sync/impl/batch_download.h"
 #include "src/ledger/bin/cloud_sync/public/sync_state_watcher.h"
 #include "src/ledger/bin/encryption/public/encryption_service.h"
 #include "src/ledger/bin/storage/public/page_sync_delegate.h"
+#include "src/ledger/lib/commit_pack/commit_pack.h"
 #include "src/lib/fxl/macros.h"
 #include "src/lib/fxl/memory/ref_ptr.h"
 
 namespace cloud_sync {
 // PageDownload handles all the download operations (commits and objects) for a
 // page.
-class PageDownload : public cloud_provider::PageCloudWatcher,
-                     public storage::PageSyncDelegate {
+class PageDownload : public cloud_provider::PageCloudWatcher, public storage::PageSyncDelegate {
  public:
   // Delegate ensuring coordination between PageDownload and the class that owns
   // it.
@@ -34,8 +33,7 @@ class PageDownload : public cloud_provider::PageCloudWatcher,
     virtual void SetDownloadState(DownloadSyncState sync_state) = 0;
   };
 
-  PageDownload(callback::ScopedTaskRunner* task_runner,
-               storage::PageStorage* storage,
+  PageDownload(callback::ScopedTaskRunner* task_runner, storage::PageStorage* storage,
                storage::PageSyncClient* sync_client,
                encryption::EncryptionService* encryption_service,
                cloud_provider::PageCloudPtr* page_cloud, Delegate* delegate,
@@ -53,7 +51,7 @@ class PageDownload : public cloud_provider::PageCloudWatcher,
  private:
   // cloud_provider::PageCloudWatcher:
   void OnNewCommits(cloud_provider::CommitPack commits,
-                    cloud_provider::Token position_token,
+                    cloud_provider::PositionToken position_token,
                     OnNewCommitsCallback callback) override;
 
   void OnNewObject(std::vector<uint8_t> id, fuchsia::mem::Buffer data,
@@ -69,30 +67,24 @@ class PageDownload : public cloud_provider::PageCloudWatcher,
 
   // Downloads the given batch of commits.
   void DownloadBatch(std::vector<cloud_provider::CommitPackEntry> entries,
-                     std::unique_ptr<cloud_provider::Token> position_token,
+                     std::unique_ptr<cloud_provider::PositionToken> position_token,
                      fit::closure on_done);
 
   // storage::PageSyncDelegate:
-  void GetObject(
-      storage::ObjectIdentifier object_identifier,
-      fit::function<void(storage::Status, storage::ChangeSource,
-                         storage::IsObjectSynced,
-                         std::unique_ptr<storage::DataSource::DataChunk>)>
-          callback) override;
+  void GetObject(storage::ObjectIdentifier object_identifier,
+                 fit::function<void(ledger::Status, storage::ChangeSource, storage::IsObjectSynced,
+                                    std::unique_ptr<storage::DataSource::DataChunk>)>
+                     callback) override;
 
   void DecryptObject(
-      storage::ObjectIdentifier object_identifier,
-      std::unique_ptr<storage::DataSource> content,
-      fit::function<void(storage::Status, storage::ChangeSource,
-                         storage::IsObjectSynced,
+      storage::ObjectIdentifier object_identifier, std::unique_ptr<storage::DataSource> content,
+      fit::function<void(ledger::Status, storage::ChangeSource, storage::IsObjectSynced,
                          std::unique_ptr<storage::DataSource::DataChunk>)>
           callback);
 
   void HandleGetObjectError(
-      storage::ObjectIdentifier object_identifier, bool is_permanent,
-      const char error_name[],
-      fit::function<void(storage::Status, storage::ChangeSource,
-                         storage::IsObjectSynced,
+      storage::ObjectIdentifier object_identifier, bool is_permanent, const char error_name[],
+      fit::function<void(ledger::Status, storage::ChangeSource, storage::IsObjectSynced,
                          std::unique_ptr<storage::DataSource::DataChunk>)>
           callback);
 
@@ -121,7 +113,7 @@ class PageDownload : public cloud_provider::PageCloudWatcher,
   std::unique_ptr<BatchDownload> batch_download_;
   // Pending remote commits to download.
   std::vector<cloud_provider::CommitPackEntry> commits_to_download_;
-  std::unique_ptr<cloud_provider::Token> position_token_;
+  std::unique_ptr<cloud_provider::PositionToken> position_token_;
   // Container for in-progress datasource.
   callback::ManagedContainer managed_container_;
 

@@ -114,6 +114,7 @@ template("c_toolchain") {
     use_goma = invoker.use_goma
   }
   if (use_goma) {
+    goma_dir = rebase_path(goma_dir)
     compiler_prefix = "$goma_dir/gomacc "
   } else {
     if (defined(invoker.use_ccache)) {
@@ -221,8 +222,8 @@ template("c_toolchain") {
     dir_prefix = rebase_path(tc.tool_dir, root_build_dir) + "/"
   }
 
-  cc = "$compiler_prefix$dir_prefix${tc.cc}"
-  cxx = "$compiler_prefix$dir_prefix${tc.cxx}"
+  cc = "$dir_prefix${tc.cc}"
+  cxx = "$dir_prefix${tc.cxx}"
   ld = cxx
   ar = "$dir_prefix${tc.tool_prefix}ar"
 
@@ -330,6 +331,7 @@ template("c_toolchain") {
         description = "ASM {{output}}"
         forward_variables_from(_compile_common, "*")
         command = "$cc $switches {{asmflags}} -c {{source}}"
+        command_launcher = compiler_prefix
       },
 
       {
@@ -337,6 +339,7 @@ template("c_toolchain") {
         description = "CC {{output}}"
         forward_variables_from(_compile_common, "*")
         command = "$cc $switches {{cflags}} {{cflags_c}} -c {{source}}"
+        command_launcher = compiler_prefix
       },
 
       {
@@ -344,6 +347,7 @@ template("c_toolchain") {
         description = "CXX {{output}}"
         forward_variables_from(_compile_common, "*")
         command = "$cxx $switches {{cflags}} {{cflags_cc}} -c {{source}}"
+        command_launcher = compiler_prefix
       },
 
       {
@@ -351,6 +355,7 @@ template("c_toolchain") {
         description = "OBJC {{output}}"
         forward_variables_from(_compile_common, "*")
         command = "$cc $switches {{cflags}} {{cflags_c}} {{cflags_objc}} -c {{source}}"
+        command_launcher = compiler_prefix
       },
 
       {
@@ -358,6 +363,7 @@ template("c_toolchain") {
         description = "OBJCXX {{output}}"
         forward_variables_from(_compile_common, "*")
         command = "$cxx $switches {{cflags}} {{cflags_cc}} {{cflags_objcc}} -c {{source}}"
+        command_launcher = compiler_prefix
       },
 
       {
@@ -480,6 +486,9 @@ template("c_toolchain") {
         } else {
           executable_extension = ""
         }
+
+        # The invoker can override.  See toolchain_runtime_deps().
+        runtime_deps_cflags = []
 
         if (defined(invoker.toolchain_vars)) {
           forward_variables_from(invoker.toolchain_vars, "*")

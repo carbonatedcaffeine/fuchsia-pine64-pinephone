@@ -10,7 +10,7 @@ Write into the given process's address space.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_status_t zx_process_write_memory(zx_handle_t handle,
@@ -52,7 +52,8 @@ bytes written to *buffer* is undefined.
 
 ## ERRORS
 
-**ZX_ERR_ACCESS_DENIED**  *handle* does not have the **ZX_RIGHT_WRITE** right.
+**ZX_ERR_ACCESS_DENIED**  *handle* does not have the **ZX_RIGHT_WRITE** right or
+the address range to write falls into a protected area like the vDSO.
 
 **ZX_ERR_BAD_HANDLE**  *handle* is not a valid handle.
 
@@ -70,5 +71,8 @@ requested address.
 
 ## SEE ALSO
 
+ - [`zx_process_read_memory()`]
 
-[process_read_memory](process_read_memory.md).
+<!-- References updated by update-docs-from-abigen, do not edit. -->
+
+[`zx_process_read_memory()`]: process_read_memory.md

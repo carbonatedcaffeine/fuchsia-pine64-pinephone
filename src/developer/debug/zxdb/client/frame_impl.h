@@ -10,21 +10,21 @@
 
 #include "src/developer/debug/ipc/records.h"
 #include "src/developer/debug/zxdb/client/frame.h"
+#include "src/developer/debug/zxdb/client/register.h"
 #include "src/developer/debug/zxdb/symbols/location.h"
 #include "src/lib/fxl/memory/ref_counted.h"
 
 namespace zxdb {
 
 class DwarfExprEval;
+class EvalContextImpl;
 class FrameSymbolDataProvider;
-class SymbolEvalContext;
 class Thread;
 
 // A frame is lazily symbolized.
 class FrameImpl final : public Frame {
  public:
-  FrameImpl(Thread* thread, const debug_ipc::StackFrame& stack_frame,
-            Location location);
+  FrameImpl(Thread* thread, const debug_ipc::StackFrame& stack_frame, Location location);
   ~FrameImpl() override;
 
   // Frame implementation.
@@ -33,11 +33,13 @@ class FrameImpl final : public Frame {
   const Frame* GetPhysicalFrame() const override;
   const Location& GetLocation() const override;
   uint64_t GetAddress() const override;
+  const std::vector<Register>& GetGeneralRegisters() const override;
   std::optional<uint64_t> GetBasePointer() const override;
   void GetBasePointerAsync(std::function<void(uint64_t bp)> cb) override;
   uint64_t GetStackPointer() const override;
+  uint64_t GetCanonicalFrameAddress() const override;
   fxl::RefPtr<SymbolDataProvider> GetSymbolDataProvider() const override;
-  fxl::RefPtr<ExprEvalContext> GetExprEvalContext() const override;
+  fxl::RefPtr<EvalContext> GetEvalContext() const override;
   bool IsAmbiguousInlineLocation() const override;
 
  private:
@@ -52,16 +54,16 @@ class FrameImpl final : public Frame {
 
   Thread* thread_;
 
-  // This stack frame contains the base pointer computed by the backend which
-  // is not necessarily the frame base (see GetBasePointer() declaration).
-  debug_ipc::StackFrame stack_frame_;
+  uint64_t sp_;
+  uint64_t cfa_;
+  std::vector<Register> registers_;
 
-  mutable Location location_;  // Lazily symbolized.
+  mutable Location location_;                                          // Lazily symbolized.
   mutable fxl::RefPtr<FrameSymbolDataProvider> symbol_data_provider_;  // Lazy.
-  mutable fxl::RefPtr<SymbolEvalContext> symbol_eval_context_;         // Lazy.
+  mutable fxl::RefPtr<EvalContextImpl> symbol_eval_context_;           // Lazy.
 
   // The lazily computed frame base. This will be from DW_AT_frame_base on the
-  // function if there is one, or the BP from the stack_frame_ if not.
+  // function if there is one.
   std::optional<uint64_t> computed_base_pointer_;
 
   // Non-null when evaluating a frame base pointer expression.

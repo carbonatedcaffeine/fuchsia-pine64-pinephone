@@ -53,7 +53,7 @@ async fn main() -> Result<(), Error> {
     let index_vec: Vec<String> = index_string.lines().map(|l| l.to_string()).collect();
     let index = Arc::new(index_vec);
 
-    fs.dir("public").add_fidl_service(IncomingServices::ComponentIndex);
+    fs.dir("svc").add_fidl_service(IncomingServices::ComponentIndex);
     fs.take_and_serve_directory_handle()?;
 
     const MAX_CONCURRENT: usize = 10_000;
@@ -108,6 +108,23 @@ mod tests {
         }
         test_parse_false => {
             needle = "foo bar",
+            accept = false,
+        }
+        test_parse_url => {
+            // colon is invalid character
+            needle = "fuchsia-pkg://",
+            accept = false,
+        }
+        test_parse_bang => {
+            needle = "hello!",
+            accept = false,
+        }
+        test_parse_shebang => {
+            needle = "#!/etc/bin",
+            accept = false,
+        }
+        test_parse_hash => {
+            needle = "package#foo.cmx",
             accept = false,
         }
     }

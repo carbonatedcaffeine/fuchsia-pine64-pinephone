@@ -192,11 +192,8 @@ void Adapter::ShutDown() {
   CleanUp();
 }
 
-bool Adapter::AddBondedPeer(PeerId identifier, const DeviceAddress& address,
-                            const sm::PairingData& le_bond_data,
-                            const std::optional<sm::LTK>& link_key) {
-  return peer_cache()->AddBondedPeer(identifier, address, le_bond_data,
-                                     link_key);
+bool Adapter::AddBondedPeer(BondingData bonding_data) {
+  return peer_cache()->AddBondedPeer(bonding_data);
 }
 
 void Adapter::SetPairingDelegate(fxl::WeakPtr<PairingDelegate> delegate) {
@@ -606,7 +603,8 @@ uint64_t Adapter::BuildEventMask() {
 #define ENABLE_EVT(event) \
   event_mask |= static_cast<uint64_t>(hci::EventMask::event)
 
-  // Enable events that are needed for basic functionality.
+  // Enable events that are needed for basic functionality. (alphabetic)
+  ENABLE_EVT(kAuthenticationCompleteEvent);
   ENABLE_EVT(kConnectionCompleteEvent);
   ENABLE_EVT(kConnectionRequestEvent);
   ENABLE_EVT(kDisconnectionCompleteEvent);
@@ -654,6 +652,11 @@ uint64_t Adapter::BuildLEEventMask() {
 void Adapter::CleanUp() {
   ZX_DEBUG_ASSERT(thread_checker_.IsCreationThreadCurrent());
 
+  if (init_state_ == State::kNotInitialized) {
+    bt_log(TRACE, "gap", "clean up: not initialized");
+    return;
+  }
+
   init_state_ = State::kNotInitialized;
   state_ = AdapterState();
   transport_closed_cb_ = nullptr;
@@ -672,7 +675,10 @@ void Adapter::CleanUp() {
   le_address_manager_ = nullptr;
 
   // Clean up the data domain as it gets initialized by the Adapter.
-  data_domain_->ShutDown();
+  if (data_domain_) {
+    data_domain_->ShutDown();
+    data_domain_ = nullptr;
+  }
 
   // TODO(armansito): hci::Transport::ShutDown() should send a shutdown message
   // to the bt-hci device, which would be responsible for sending HCI_Reset upon

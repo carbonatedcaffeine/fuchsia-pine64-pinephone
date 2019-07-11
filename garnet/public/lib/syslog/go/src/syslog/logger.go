@@ -6,10 +6,13 @@ package syslog
 
 import (
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall/zx"
 	"unicode/utf8"
@@ -57,8 +60,31 @@ const (
 	FatalLevel
 )
 
+var _ flag.Value = (*LogLevel)(nil)
+
+// Set implements the flag.Value interface.
+func (ll *LogLevel) Set(s string) error {
+	s = strings.ToUpper(s)
+	for sev := TraceLevel; sev <= FatalLevel; sev++ {
+		if s == sev.String() {
+			*ll = sev
+			return nil
+		}
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return err
+	}
+	*ll = LogLevel(v)
+	return nil
+}
+
 func (ll LogLevel) String() string {
 	switch ll {
+	case TraceLevel:
+		return "TRACE"
+	case DebugLevel:
+		return "DEBUG"
 	case InfoLevel:
 		return "INFO"
 	case WarningLevel:
@@ -354,7 +380,14 @@ func (l *Logger) VLogTf(verbosity int, tag, format string, a ...interface{}) err
 	return l.logf(2, LogLevel(-verbosity), tag, format, a...)
 }
 
-var defaultLogger *Logger
+var defaultLogger = &Logger{
+	options: LogInitOptions{
+		LogLevel:                      InfoLevel,
+		MinSeverityForFileAndLineInfo: ErrorLevel,
+		Writer: os.Stderr,
+	},
+	pid: uint64(os.Getpid()),
+}
 
 func logf(callDepth int, logLevel LogLevel, tag string, format string, a ...interface{}) error {
 	if l := GetDefaultLogger(); l != nil {

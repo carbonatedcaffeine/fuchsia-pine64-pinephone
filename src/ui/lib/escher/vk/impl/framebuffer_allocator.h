@@ -13,14 +13,10 @@ namespace escher {
 namespace impl {
 
 // FramebufferAllocator wraps HashCache to provide a frame-based cache for
-// Vulkan framebuffers.  The eviction semantics are the same as a HashCache
-// with FramesUntilEviction == 4.
+// Vulkan framebuffers.
 class FramebufferAllocator {
  public:
-  static constexpr uint32_t kFramesUntilEviction = 4;
-
-  FramebufferAllocator(ResourceRecycler* recycler,
-                       impl::RenderPassCache* render_pass_cache);
+  FramebufferAllocator(ResourceRecycler* recycler, impl::RenderPassCache* render_pass_cache);
   const impl::FramebufferPtr& ObtainFramebuffer(const RenderPassInfo& info);
 
   void BeginFrame() { framebuffer_cache_.BeginFrame(); }
@@ -33,8 +29,11 @@ class FramebufferAllocator {
 
   ResourceRecycler* const recycler_;
   impl::RenderPassCache* const render_pass_cache_;
-  HashCache<CacheItem, DefaultObjectPoolPolicy<CacheItem>, kFramesUntilEviction>
-      framebuffer_cache_;
+
+  // If this template is changed to have a non-default FramesUntilEviction
+  // value, be sure to change all other HashCaches used by the Frame class
+  // (e.g., DescriptorSetAllocator).
+  HashCache<CacheItem, DefaultObjectPoolPolicy<CacheItem>> framebuffer_cache_;
 };
 
 }  // namespace impl

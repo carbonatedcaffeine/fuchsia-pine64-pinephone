@@ -32,9 +32,19 @@ struct IfaceListItem {
 };
 
 struct QueryIfaceResponse {
+    /// The role the iface is currently operating in, e.g., client role.
     fuchsia.wlan.device.MacRole role;
+    /// The iface's global ID.
     uint16 id;
+    /// Iface's PHY ID.
+    uint16 phy_id;
+    /// Local ID assigned by this iface's PHY.
+    uint16 phy_assigned_id;
+    /// The iface's device path.
+    /// Note: This field is deprecated.
+    /// Ifaces will soon have no device path.
     string dev_path;
+    /// The iface's MAC.
     array<uint8>:6 mac_addr;
 };
 
@@ -52,8 +62,12 @@ struct CreateIfaceResponse {
 };
 
 struct DestroyIfaceRequest {
-    uint16 phy_id;
     uint16 iface_id;
+};
+
+struct SetCountryRequest {
+    uint16 phy_id;
+    array<byte>:2 alpha2;
 };
 
 protocol DeviceWatcher {
@@ -86,4 +100,5 @@ protocol DeviceService {
         -> (int32 status, fuchsia.wlan.minstrel.Peer? peer);
 
     WatchDevices(request<DeviceWatcher> watcher);
+    SetCountry(SetCountryRequest req) -> (int32 status);
 };

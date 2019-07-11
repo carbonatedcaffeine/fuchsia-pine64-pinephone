@@ -3,15 +3,14 @@
 // found in the LICENSE file.
 
 #include <lib/async/cpp/operation.h>
-
-#include <utility>
-
 #include <lib/async/cpp/task.h>
 #include <lib/async/default.h>
 #include <lib/fit/bridge.h>
 #include <lib/fit/defer.h>
 #include <src/lib/fxl/logging.h>
 #include <trace/event.h>
+
+#include <utility>
 
 namespace modular {
 
@@ -25,11 +24,14 @@ OperationContainer::~OperationContainer() = default;
 
 void OperationContainer::Add(std::unique_ptr<OperationBase> o) {
   FXL_DCHECK(o != nullptr);
+
   o->SetOwner(this);
   Hold(std::move(o));  // Takes ownership.
 }
 
-void OperationContainer::Schedule(OperationBase* const o) { o->Schedule(); }
+void OperationContainer::Schedule(OperationBase* const o) {
+  o->Schedule();
+}
 
 void OperationContainer::InvalidateWeakPtrs(OperationBase* const o) {
   o->InvalidateWeakPtrs();

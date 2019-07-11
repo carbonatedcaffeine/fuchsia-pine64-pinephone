@@ -24,31 +24,27 @@ using ::testing::IsEmpty;
 
 class FakeDelegate : public PageEvictionManager::Delegate {
  public:
-  void PageIsClosedAndSynced(
-      fxl::StringView /*ledger_name*/, storage::PageIdView /*page_id*/,
-      fit::function<void(storage::Status, PagePredicateResult)> callback)
-      override {
+  void PageIsClosedAndSynced(fxl::StringView /*ledger_name*/, storage::PageIdView /*page_id*/,
+                             fit::function<void(Status, PagePredicateResult)> callback) override {
     callback(page_closed_and_synced_status, closed_and_synced);
   }
 
   void PageIsClosedOfflineAndEmpty(
       fxl::StringView ledger_name, storage::PageIdView page_id,
-      fit::function<void(storage::Status, PagePredicateResult)> callback)
-      override {
-    callback(storage::Status::OK, closed_and_empty);
+      fit::function<void(Status, PagePredicateResult)> callback) override {
+    callback(Status::OK, closed_and_empty);
   }
 
-  void DeletePageStorage(
-      fxl::StringView /*ledger_name*/, storage::PageIdView page_id,
-      fit::function<void(storage::Status)> callback) override {
+  void DeletePageStorage(fxl::StringView /*ledger_name*/, storage::PageIdView page_id,
+                         fit::function<void(Status)> callback) override {
     deleted_pages.push_back(page_id.ToString());
-    callback(storage::Status::OK);
+    callback(Status::OK);
   }
 
   std::vector<storage::PageId> deleted_pages;
 
   PagePredicateResult closed_and_synced = PagePredicateResult::YES;
-  storage::Status page_closed_and_synced_status = storage::Status::OK;
+  Status page_closed_and_synced_status = Status::OK;
 
   PagePredicateResult closed_and_empty = PagePredicateResult::YES;
 };
@@ -57,10 +53,9 @@ class PageEvictionManagerTest : public TestWithEnvironment {
  public:
   PageEvictionManagerTest()
       : db_factory_(environment_.dispatcher()),
-        page_eviction_manager_(&environment_, &db_factory_,
-                               DetachedPath(tmpfs_.root_fd())),
-        policy_(NewLeastRecentyUsedPolicy(environment_.coroutine_service(),
-                                          &page_eviction_manager_)) {}
+        page_eviction_manager_(&environment_, &db_factory_, DetachedPath(tmpfs_.root_fd())),
+        policy_(
+            NewLeastRecentyUsedPolicy(environment_.coroutine_service(), &page_eviction_manager_)) {}
 
   // TestWithEnvironment:
   void SetUp() override {
@@ -83,15 +78,14 @@ class PageEvictionManagerTest : public TestWithEnvironment {
 
 TEST_F(PageEvictionManagerTest, NoEvictionWithoutPages) {
   bool called;
-  storage::Status status;
+  Status status;
 
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
 
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
 }
 
@@ -109,14 +103,13 @@ TEST_F(PageEvictionManagerTest, AtLeastOneEvictionWhenPossible) {
   RunLoopUntilIdle();
 
   bool called;
-  storage::Status status;
+  Status status;
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
 
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_FALSE(delegate_.deleted_pages.empty());
 }
 
@@ -135,14 +128,13 @@ TEST_F(PageEvictionManagerTest, DontEvictUnsyncedNotEmptyPages) {
   RunLoopUntilIdle();
 
   bool called;
-  storage::Status status;
+  Status status;
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
 
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
 }
 
@@ -156,14 +148,13 @@ TEST_F(PageEvictionManagerTest, DontEvictOpenPages) {
   RunLoopUntilIdle();
 
   bool called;
-  storage::Status status;
+  Status status;
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
 
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
 
   // Close the page. It can now be evicted.
@@ -171,12 +162,11 @@ TEST_F(PageEvictionManagerTest, DontEvictOpenPages) {
   RunLoopUntilIdle();
 
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
 
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_THAT(delegate_.deleted_pages, ElementsAre(page));
 }
 
@@ -191,24 +181,22 @@ TEST_F(PageEvictionManagerTest, DontEvictAnEvictedPage) {
   RunLoopUntilIdle();
 
   bool called;
-  storage::Status status;
+  Status status;
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
 
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_THAT(delegate_.deleted_pages, ElementsAre(page));
 
   delegate_.deleted_pages.clear();
   // Try to clean up again. We shouldn't be able to evict any pages.
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
 }
 
@@ -222,17 +210,16 @@ TEST_F(PageEvictionManagerTest, PageNotFoundIsNotAnError) {
   page_eviction_manager_.MarkPageClosed(ledger_name, page);
   RunLoopUntilIdle();
 
-  delegate_.page_closed_and_synced_status = storage::Status::PAGE_NOT_FOUND;
+  delegate_.page_closed_and_synced_status = Status::PAGE_NOT_FOUND;
 
   bool called;
-  storage::Status status;
+  Status status;
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
 
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
 }
 
@@ -251,14 +238,13 @@ TEST_F(PageEvictionManagerTest, EvictUnsyncedButEmptyPages) {
   RunLoopUntilIdle();
 
   bool called;
-  storage::Status status;
+  Status status;
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
 
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_THAT(delegate_.deleted_pages, ElementsAre(page1));
 }
 
@@ -277,14 +263,13 @@ TEST_F(PageEvictionManagerTest, EvictSyncedAndNotEmptyPages) {
   RunLoopUntilIdle();
 
   bool called;
-  storage::Status status;
+  Status status;
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
 
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_THAT(delegate_.deleted_pages, ElementsAre(page1));
 }
 
@@ -306,14 +291,13 @@ TEST_F(PageEvictionManagerTest, DontEvictIfPageWasOpenedDuringQuery) {
   RunLoopUntilIdle();
 
   bool called;
-  storage::Status status;
+  Status status;
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
 
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
   delegate_.deleted_pages.clear();
 
@@ -327,12 +311,11 @@ TEST_F(PageEvictionManagerTest, DontEvictIfPageWasOpenedDuringQuery) {
   RunLoopUntilIdle();
 
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
 
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
 }
 
@@ -365,16 +348,15 @@ TEST_F(PageEvictionManagerTest, IsEmpty) {
   EXPECT_TRUE(on_empty_called);
 
   bool called;
-  storage::Status status;
+  Status status;
   on_empty_called = false;
   page_eviction_manager_.TryEvictPages(
-      policy_.get(),
-      callback::Capture(callback::SetWhenCalled(&called), &status));
+      policy_.get(), callback::Capture(callback::SetWhenCalled(&called), &status));
   EXPECT_FALSE(page_eviction_manager_.IsEmpty());
   EXPECT_FALSE(on_empty_called);
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_TRUE(page_eviction_manager_.IsEmpty());
   EXPECT_TRUE(on_empty_called);
 }
@@ -389,15 +371,14 @@ TEST_F(PageEvictionManagerTest, TryEvictPage) {
   delegate_.closed_and_synced = PagePredicateResult::NO;
 
   bool called;
-  storage::Status status;
+  Status status;
   PageWasEvicted was_evicted;
   page_eviction_manager_.TryEvictPage(
       ledger_name, page, PageEvictionCondition::IF_POSSIBLE,
-      callback::Capture(callback::SetWhenCalled(&called), &status,
-                        &was_evicted));
+      callback::Capture(callback::SetWhenCalled(&called), &status, &was_evicted));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_FALSE(was_evicted);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
 
@@ -407,11 +388,10 @@ TEST_F(PageEvictionManagerTest, TryEvictPage) {
   delegate_.closed_and_synced = PagePredicateResult::YES;
   page_eviction_manager_.TryEvictPage(
       ledger_name, page, PageEvictionCondition::IF_POSSIBLE,
-      callback::Capture(callback::SetWhenCalled(&called), &status,
-                        &was_evicted));
+      callback::Capture(callback::SetWhenCalled(&called), &status, &was_evicted));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_FALSE(was_evicted);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
 
@@ -421,11 +401,10 @@ TEST_F(PageEvictionManagerTest, TryEvictPage) {
   delegate_.closed_and_synced = PagePredicateResult::PAGE_OPENED;
   page_eviction_manager_.TryEvictPage(
       ledger_name, page, PageEvictionCondition::IF_POSSIBLE,
-      callback::Capture(callback::SetWhenCalled(&called), &status,
-                        &was_evicted));
+      callback::Capture(callback::SetWhenCalled(&called), &status, &was_evicted));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_FALSE(was_evicted);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
 
@@ -435,11 +414,10 @@ TEST_F(PageEvictionManagerTest, TryEvictPage) {
   delegate_.closed_and_synced = PagePredicateResult::NO;
   page_eviction_manager_.TryEvictPage(
       ledger_name, page, PageEvictionCondition::IF_POSSIBLE,
-      callback::Capture(callback::SetWhenCalled(&called), &status,
-                        &was_evicted));
+      callback::Capture(callback::SetWhenCalled(&called), &status, &was_evicted));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_TRUE(was_evicted);
   EXPECT_THAT(delegate_.deleted_pages, ElementsAre(page));
 
@@ -449,11 +427,10 @@ TEST_F(PageEvictionManagerTest, TryEvictPage) {
   delegate_.closed_and_synced = PagePredicateResult::YES;
   page_eviction_manager_.TryEvictPage(
       ledger_name, page, PageEvictionCondition::IF_POSSIBLE,
-      callback::Capture(callback::SetWhenCalled(&called), &status,
-                        &was_evicted));
+      callback::Capture(callback::SetWhenCalled(&called), &status, &was_evicted));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_TRUE(was_evicted);
   EXPECT_THAT(delegate_.deleted_pages, ElementsAre(page));
 }
@@ -467,15 +444,14 @@ TEST_F(PageEvictionManagerTest, EvictEmptyPage) {
   delegate_.closed_and_empty = PagePredicateResult::NO;
 
   bool called;
-  storage::Status status;
+  Status status;
   PageWasEvicted was_evicted;
   page_eviction_manager_.TryEvictPage(
       ledger_name, page, PageEvictionCondition::IF_EMPTY,
-      callback::Capture(callback::SetWhenCalled(&called), &status,
-                        &was_evicted));
+      callback::Capture(callback::SetWhenCalled(&called), &status, &was_evicted));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_FALSE(was_evicted);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
 
@@ -484,11 +460,10 @@ TEST_F(PageEvictionManagerTest, EvictEmptyPage) {
   delegate_.closed_and_empty = PagePredicateResult::PAGE_OPENED;
   page_eviction_manager_.TryEvictPage(
       ledger_name, page, PageEvictionCondition::IF_EMPTY,
-      callback::Capture(callback::SetWhenCalled(&called), &status,
-                        &was_evicted));
+      callback::Capture(callback::SetWhenCalled(&called), &status, &was_evicted));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_FALSE(was_evicted);
   EXPECT_THAT(delegate_.deleted_pages, IsEmpty());
 
@@ -497,11 +472,10 @@ TEST_F(PageEvictionManagerTest, EvictEmptyPage) {
   delegate_.closed_and_empty = PagePredicateResult::YES;
   page_eviction_manager_.TryEvictPage(
       ledger_name, page, PageEvictionCondition::IF_EMPTY,
-      callback::Capture(callback::SetWhenCalled(&called), &status,
-                        &was_evicted));
+      callback::Capture(callback::SetWhenCalled(&called), &status, &was_evicted));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(storage::Status::OK, status);
+  EXPECT_EQ(Status::OK, status);
   EXPECT_TRUE(was_evicted);
   EXPECT_THAT(delegate_.deleted_pages, ElementsAre(page));
 }

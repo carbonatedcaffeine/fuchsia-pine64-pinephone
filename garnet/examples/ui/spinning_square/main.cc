@@ -10,12 +10,11 @@
 
 int main(int argc, const char** argv) {
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
-  trace::TraceProvider trace_provider(loop.dispatcher());
+  trace::TraceProviderWithFdio trace_provider(loop.dispatcher());
 
   scenic::ViewProviderComponent component(
       [](scenic::ViewContext context) {
-        return std::make_unique<examples::SpinningSquareView>(
-            std::move(context));
+        return std::make_unique<examples::SpinningSquareView>(std::move(context));
       },
       &loop);
 

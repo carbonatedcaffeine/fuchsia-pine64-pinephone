@@ -63,9 +63,6 @@ int fdio_ns_opendir(fdio_ns_t* ns);
 // chdir to / in the provided namespace
 zx_status_t fdio_ns_chdir(fdio_ns_t* ns);
 
-// Replace the fdio "global" namespace with the provided namespace
-zx_status_t fdio_ns_install(fdio_ns_t* ns);
-
 // Retrieve the fdio "global" namespace (if any).
 zx_status_t fdio_ns_get_installed(fdio_ns_t** ns);
 
@@ -92,14 +89,6 @@ zx_status_t fdio_ns_export_root(fdio_flat_namespace_t** out);
 // no ".." or "." or empty segments.
 zx_status_t fdio_ns_connect(fdio_ns_t* ns, const char* path,
                             uint32_t zxflags, zx_handle_t h);
-
-// Attempt a pipelined open through a namespace.
-// Success only indicates that the open was sent.
-// If the remote fails, the returned handle's peer will be closed.
-// The path must be an absolute path starting with / and containing
-// no ".." or "." or empty segments.
-zx_status_t fdio_ns_open(fdio_ns_t* ns, const char* path,
-                         uint32_t zxflags, zx_handle_t* out);
 
 // Frees a flat namespace.
 // Closes all handles contained within |ns|.

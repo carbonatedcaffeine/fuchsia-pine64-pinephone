@@ -10,8 +10,9 @@
 #include "src/developer/debug/shared/message_loop.h"
 #include "src/developer/debug/zxdb/client/frame.h"
 #include "src/developer/debug/zxdb/client/frame_fingerprint.h"
+#include "src/developer/debug/zxdb/client/register.h"
 #include "src/developer/debug/zxdb/common/err.h"
-#include "src/developer/debug/zxdb/expr/expr_eval_context.h"
+#include "src/developer/debug/zxdb/expr/eval_context.h"
 #include "src/developer/debug/zxdb/symbols/function.h"
 #include "src/lib/fxl/logging.h"
 #include "src/lib/fxl/macros.h"
@@ -28,9 +29,7 @@ class InlineFrame final : public Frame {
   // The physical_frame must outlive this class. Normally both are owned by the
   // Stack and have the same lifetime.
   InlineFrame(Frame* physical_frame, Location loc)
-      : Frame(physical_frame->session()),
-        physical_frame_(physical_frame),
-        location_(loc) {}
+      : Frame(physical_frame->session()), physical_frame_(physical_frame), location_(loc) {}
   ~InlineFrame() override = default;
 
   // Frame implementation.
@@ -39,20 +38,24 @@ class InlineFrame final : public Frame {
   const Frame* GetPhysicalFrame() const override { return physical_frame_; }
   const Location& GetLocation() const override { return location_; }
   uint64_t GetAddress() const override { return location_.address(); }
+  const std::vector<Register>& GetGeneralRegisters() const override {
+    return physical_frame_->GetGeneralRegisters();
+  }
   std::optional<uint64_t> GetBasePointer() const override {
     return physical_frame_->GetBasePointer();
   }
   void GetBasePointerAsync(std::function<void(uint64_t bp)> cb) override {
     return physical_frame_->GetBasePointerAsync(std::move(cb));
   }
-  uint64_t GetStackPointer() const override {
-    return physical_frame_->GetStackPointer();
+  uint64_t GetCanonicalFrameAddress() const override {
+    return physical_frame_->GetCanonicalFrameAddress();
   }
+  uint64_t GetStackPointer() const override { return physical_frame_->GetStackPointer(); }
   fxl::RefPtr<SymbolDataProvider> GetSymbolDataProvider() const override {
     return physical_frame_->GetSymbolDataProvider();
   }
-  fxl::RefPtr<ExprEvalContext> GetExprEvalContext() const override {
-    return physical_frame_->GetExprEvalContext();
+  fxl::RefPtr<EvalContext> GetEvalContext() const override {
+    return physical_frame_->GetEvalContext();
   }
   bool IsAmbiguousInlineLocation() const override {
     const Location& loc = GetLocation();
@@ -68,8 +71,7 @@ class InlineFrame final : public Frame {
 
     // There could be multiple code ranges for the inlined function, consider
     // any of them as being a candidate.
-    for (const auto& cur :
-         function->GetAbsoluteCodeRanges(loc.symbol_context())) {
+    for (const auto& cur : function->GetAbsoluteCodeRanges(loc.symbol_context())) {
       if (loc.address() == cur.begin())
         return true;
     }
@@ -89,9 +91,8 @@ class InlineFrame final : public Frame {
 //
 // The main_location is the location returned by symbol lookup for the
 // current address.
-Location LocationForInlineFrameChain(
-    const std::vector<const Function*>& inline_chain, size_t chain_index,
-    const Location& main_location) {
+Location LocationForInlineFrameChain(const std::vector<const Function*>& inline_chain,
+                                     size_t chain_index, const Location& main_location) {
   // The file/line is the call location of the next (into the future) inlined
   // function. Fall back on the file/line from the main lookup.
   const FileLine* new_line = &main_location.file_line();
@@ -104,8 +105,7 @@ Location LocationForInlineFrameChain(
     }
   }
 
-  return Location(main_location.address(), *new_line, new_column,
-                  main_location.symbol_context(),
+  return Location(main_location.address(), *new_line, new_column, main_location.symbol_context(),
                   LazySymbol(inline_chain[chain_index]));
 }
 
@@ -136,8 +136,7 @@ size_t Stack::InlineDepthForIndex(size_t index) const {
   return 0;
 }
 
-std::optional<FrameFingerprint> Stack::GetFrameFingerprint(
-    size_t virtual_frame_index) const {
+FrameFingerprint Stack::GetFrameFingerprint(size_t virtual_frame_index) const {
   size_t frame_index = virtual_frame_index + hide_ambiguous_inline_frame_count_;
 
   // Should reference a valid index in the array.
@@ -150,76 +149,7 @@ std::optional<FrameFingerprint> Stack::GetFrameFingerprint(
   // index to the current physical frame.
   size_t inline_count = InlineDepthForIndex(frame_index);
 
-  // The stack pointer we want is the one from right before the current
-  // physical frame (see frame_fingerprint.h).
-  size_t before_physical_frame_index = frame_index + inline_count + 1;
-  if (before_physical_frame_index == frames_.size()) {
-    if (!has_all_frames())
-      return std::nullopt;  // Not synchronously available.
-
-    // For the bottom frame, this returns the frame base pointer instead which
-    // will at least identify the frame in some ways, and can be used to see if
-    // future frames are younger.
-    return FrameFingerprint(frames_[frame_index]->GetStackPointer(), 0);
-  }
-
-  return FrameFingerprint(
-      frames_[before_physical_frame_index]->GetStackPointer(), inline_count);
-}
-
-void Stack::GetFrameFingerprint(
-    size_t virtual_frame_index,
-    std::function<void(const Err&, FrameFingerprint)> cb) {
-  size_t frame_index = virtual_frame_index + hide_ambiguous_inline_frame_count_;
-  FXL_DCHECK(frame_index < frames_.size());
-
-  // Identify the frame in question across the async call by its combination of
-  // IP, SP, and inline nesting count. If anything changes we don't want to
-  // issue the callback.
-  uint64_t ip = frames_[frame_index]->GetAddress();
-  uint64_t sp = frames_[frame_index]->GetStackPointer();
-  size_t inline_count = InlineDepthForIndex(frame_index);
-
-  // This callback is issued when the full stack is available.
-  auto on_full_stack = [weak_stack = GetWeakPtr(), frame_index, ip, sp,
-                        inline_count, cb = std::move(cb)](const Err& err) {
-    if (err.has_error()) {
-      cb(err, FrameFingerprint());
-      return;
-    }
-    if (!weak_stack) {
-      cb(Err("Thread destroyed."), FrameFingerprint());
-      return;
-    }
-    const auto& frames = weak_stack->frames_;
-
-    if (frame_index >= frames.size() ||
-        frames[frame_index]->GetAddress() != ip ||
-        frames[frame_index]->GetStackPointer() != sp ||
-        weak_stack->InlineDepthForIndex(frame_index) != inline_count) {
-      // Something changed about this stack item since the original call.
-      // Count the request as invalid.
-      cb(Err("Stack changed across queries."), FrameFingerprint());
-      return;
-    }
-
-    // Should always have a fingerprint after syncing the stack.
-    auto found_fingerprint = weak_stack->GetFrameFingerprint(frame_index);
-    FXL_DCHECK(found_fingerprint);
-    cb(Err(), *found_fingerprint);
-  };
-
-  if (has_all_frames()) {
-    // All frames are available, don't force a recomputation of the stack. But
-    // the caller still expects an async response. Calling the full callback
-    // is important for the checking in case the frames changed while the
-    // async task is pending.
-    debug_ipc::MessageLoop::Current()->PostTask(
-        FROM_HERE,
-        [on_full_stack = std::move(on_full_stack)]() { on_full_stack(Err()); });
-  } else {
-    SyncFrames(std::move(on_full_stack));
-  }
+  return FrameFingerprint(frames_[frame_index]->GetCanonicalFrameAddress(), inline_count);
 }
 
 size_t Stack::GetAmbiguousInlineFrameCount() const {
@@ -247,6 +177,13 @@ void Stack::SyncFrames(std::function<void(const Err&)> callback) {
 
 void Stack::SetFrames(debug_ipc::ThreadRecord::StackAmount amount,
                       const std::vector<debug_ipc::StackFrame>& new_frames) {
+#ifndef NDEBUG
+  // Validate the CFAs are consistent with the previous frames' SP.
+  for (int i = 0; i < static_cast<int>(new_frames.size()) - 1; i++) {
+    FXL_DCHECK(new_frames[i].cfa == new_frames[i + 1].sp);
+  }
+#endif
+
   // See if the new frames are an extension of the existing frames or are a
   // replacement.
   size_t appending_from = 0;  // First index in new_frames to append.
@@ -276,8 +213,7 @@ void Stack::SetFrames(debug_ipc::ThreadRecord::StackAmount amount,
   has_all_frames_ = amount == debug_ipc::ThreadRecord::StackAmount::kFull;
 }
 
-void Stack::SetFramesForTest(std::vector<std::unique_ptr<Frame>> frames,
-                             bool has_all) {
+void Stack::SetFramesForTest(std::vector<std::unique_ptr<Frame>> frames, bool has_all) {
   frames_ = std::move(frames);
   has_all_frames_ = has_all;
   hide_ambiguous_inline_frame_count_ = 0;
@@ -328,15 +264,13 @@ void Stack::AppendFrame(const debug_ipc::StackFrame& record) {
   // Need to make the base "physical" frame first because all of the inline
   // frames refer to it.
   auto physical_frame = delegate_->MakeFrameForStack(
-      record, LocationForInlineFrameChain(inline_chain, inline_chain.size() - 1,
-                                          inner_loc));
+      record, LocationForInlineFrameChain(inline_chain, inline_chain.size() - 1, inner_loc));
 
   // Add inline functions (skipping the last which is the physical frame
   // made above).
   for (size_t i = 0; i < inline_chain.size() - 1; i++) {
     auto inline_frame = std::make_unique<InlineFrame>(
-        physical_frame.get(),
-        LocationForInlineFrameChain(inline_chain, i, inner_loc));
+        physical_frame.get(), LocationForInlineFrameChain(inline_chain, i, inner_loc));
 
     // Only add ambiguous inline frames when they correspond to the top
     // physical frame of the stack. The reason is that the instruction pointer

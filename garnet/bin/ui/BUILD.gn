@@ -5,20 +5,17 @@
 import("//build/package.gni")
 import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
-import("//third_party/vulkan_loader_and_validation_layers/layers/layers.gni")
+import("//src/graphics/lib/vulkan/layers.gni")
 
 group("ui") {
   testonly = true
   deps = [
-    ":ime_service",
-    ":ime_service_tests",
     ":root_presenter",
     ":scenic",
     ":scenic_tests",
     ":set_renderer_params",
     "benchmarks",
     "gltf_export",
-    "ime",
     "input",
     "input_reader",
     "present_view",
@@ -28,10 +25,11 @@ group("ui") {
     "scenic",
     "screencap",
     "set_renderer_params_HACK",
-    "sketchy",
     "snapshot",
     "tests",
     "text",
+    "//src/ui/bin/ime:ime_service",
+    "//src/ui/bin/ime:ime_test",
   ]
 }
 
@@ -47,6 +45,7 @@ test_package("scenic_tests") {
     "presentation_mode/tests",
     "root_presenter/tests",
     "//garnet/lib/ui/gfx/tests",
+    "//garnet/lib/ui/gfx/util/tests",
     "//garnet/lib/ui/input/tests",
     "//garnet/lib/ui/scenic/tests",
     "//garnet/public/lib/ui/geometry/cpp:tests",
@@ -67,6 +66,10 @@ test_package("scenic_tests") {
     },
     {
       name = "gfx_unittests"
+      environments = basic_envs
+    },
+    {
+      name = "gfx_util_unittests"
       environments = basic_envs
     },
     {
@@ -94,7 +97,7 @@ test_package("scenic_tests") {
       environments = basic_envs
     },
     {
-      name = "root_presenter_unittests"
+      name = "root_presenter_tests"
       environments = basic_envs
     },
     {
@@ -130,40 +133,6 @@ package("root_presenter") {
     {
       path = rebase_path("root_presenter/meta/root_presenter.cmx")
       dest = "root_presenter.cmx"
-    },
-  ]
-}
-
-package("ime_service") {
-  deps = [
-    "ime",
-  ]
-
-  binaries = [
-    {
-      name = "ime_service"
-    },
-  ]
-
-  meta = [
-    {
-      path = rebase_path("ime/meta/ime_service.cmx")
-      dest = "ime_service.cmx"
-    },
-  ]
-}
-
-test_package("ime_service_tests") {
-  deps = [
-    "ime",
-    "//garnet/bin/ui/text/test_suite:test_suite",
-  ]
-
-  tests = [
-    {
-      name = "ime_service_bin_test"
-      dest = "ime_service_unittests"
-      environments = basic_envs
     },
   ]
 }

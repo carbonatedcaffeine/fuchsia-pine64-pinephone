@@ -10,7 +10,7 @@ Detaches a vmo from a pager.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_status_t zx_pager_detach_vmo(zx_handle_t pager, zx_handle_t vmo);
@@ -22,7 +22,7 @@ Detaching *vmo* from *pager* causes the kernel to stop queuing page requests for
 accesses which would have generated page requests will instead fail.
 
 No new **ZX_PAGER_VMO_READ** requests will be generated after detaching, but some requests may
-still be in flight. The pager service is free to ignore these requets, as the kernel will resume and
+still be in flight. The pager service is free to ignore these requests, as the kernel will resume and
 fault the threads which generated these requests. The final request the pager service will
 receive is a **ZX_PAGER_VMO_COMPLETE** request.
 

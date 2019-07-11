@@ -20,8 +20,8 @@
 #include "garnet/lib/ui/gfx/resources/resource_context.h"
 #include "garnet/lib/ui/scenic/event_reporter.h"
 #include "garnet/lib/ui/scenic/util/error_reporter.h"
-#include "src/ui/lib/escher/flib/fence_set_listener.h"
 #include "src/lib/fxl/memory/weak_ptr.h"
+#include "src/ui/lib/escher/flib/fence_set_listener.h"
 
 namespace scenic_impl {
 namespace gfx {
@@ -57,17 +57,13 @@ class Session {
   // Apply the operation to the current session state.  Return true if
   // successful, and false if the op is somehow invalid.  In the latter case,
   // the Session is left unchanged.
-  bool ApplyCommand(CommandContext* command_context,
-                    fuchsia::ui::gfx::Command command) {
-    return GfxCommandApplier::ApplyCommand(this, command_context,
-                                           std::move(command));
+  bool ApplyCommand(CommandContext* command_context, fuchsia::ui::gfx::Command command) {
+    return GfxCommandApplier::ApplyCommand(this, command_context, std::move(command));
   }
 
   SessionId id() const { return id_; }
 
-  const fxl::WeakPtr<Session> GetWeakPtr() {
-    return weak_factory_.GetWeakPtr();
-  }
+  const fxl::WeakPtr<Session> GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
   const SessionContext& session_context() const { return session_context_; }
   const ResourceContext& resource_context() const { return resource_context_; }
 
@@ -88,16 +84,13 @@ class Session {
 
   // Called by SessionHandler::Present().  Stashes the arguments without
   // applying them; they will later be applied by ApplyScheduledUpdates().
-  bool ScheduleUpdate(uint64_t presentation_time,
-                      std::vector<::fuchsia::ui::gfx::Command> commands,
-                      std::vector<zx::event> acquire_fences,
-                      std::vector<zx::event> release_fences,
+  bool ScheduleUpdate(uint64_t presentation_time, std::vector<::fuchsia::ui::gfx::Command> commands,
+                      std::vector<zx::event> acquire_fences, std::vector<zx::event> release_fences,
                       PresentCallback callback);
 
   // Called by ImagePipe::PresentImage(). Stashes the arguments without
   // applying them; they will later be applied by ApplyScheduledUpdates().
-  void ScheduleImagePipeUpdate(uint64_t presentation_time,
-                               ImagePipePtr image_pipe);
+  void ScheduleImagePipeUpdate(uint64_t presentation_time, ImagePipePtr image_pipe);
 
   // Called by Engine() when it is notified by the FrameScheduler that
   // a frame should be rendered for the specified |actual_presentation_time|.
@@ -109,12 +102,8 @@ class Session {
   // like to be scheduled for, and is used for tracing.
   // |presentation_interval| is the estimated time until next frame and is
   // returned to the client.
-  // |needs_render_id| is the id given for starting a trace flow that hooks to
-  // RenderFrame event for this Session if it is setting
-  // ApplyUpdateResult::needs_render.
   ApplyUpdateResult ApplyScheduledUpdates(CommandContext* command_context,
-                                          uint64_t target_presentation_time,
-                                          uint64_t needs_render_id);
+                                          uint64_t target_presentation_time);
 
   // Convenience.  Forwards an event to the EventReporter.
   void EnqueueEvent(::fuchsia::ui::gfx::Event event);
@@ -158,8 +147,7 @@ class Session {
     }
   };
   // The least element should be on top.
-  std::priority_queue<ImagePipeUpdate, std::vector<ImagePipeUpdate>,
-                      std::greater<ImagePipeUpdate>>
+  std::priority_queue<ImagePipeUpdate, std::vector<ImagePipeUpdate>, std::greater<ImagePipeUpdate>>
       scheduled_image_pipe_updates_;
 
   const SessionId id_;

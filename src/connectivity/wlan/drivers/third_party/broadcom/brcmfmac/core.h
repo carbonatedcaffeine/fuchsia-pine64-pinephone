@@ -21,13 +21,13 @@
 #ifndef BRCMFMAC_CORE_H
 #define BRCMFMAC_CORE_H
 
+#include <threads.h>
+#include <atomic>
+
 #include <ddk/protocol/ethernet.h>
 #include <netinet/if_ether.h>
 #include <lib/sync/completion.h>
 #include <wlan/protocol/if-impl.h>
-
-#include <stdatomic.h>
-#include <threads.h>
 
 #include "fweh.h"
 #include "linuxisms.h"
@@ -143,12 +143,11 @@ struct brcmf_pub {
     uint32_t chip_quirks;
 
     struct brcmf_rev_info revinfo;
-#ifdef DEBUG
+#if !defined(NDEBUG)
     zx_handle_t dbgfs_dir;
-#endif
+#endif  // !defined(NDEBUG)
 
     struct notifier_block inetaddr_notifier;
-    struct notifier_block inet6addr_notifier;
     struct brcmf_mp_device* settings;
 
     uint8_t clmver[BRCMF_DCMD_SMLEN];
@@ -206,7 +205,7 @@ struct brcmf_if {
     uint8_t netif_stop;
     struct wlanif_bss_description bss;
     //spinlock_t netif_stop_lock;
-    atomic_int pend_8021x_cnt;
+    std::atomic<int> pend_8021x_cnt;
     sync_completion_t pend_8021x_wait;
     struct in6_addr ipv6_addr_tbl[NDOL_MAX_ENTRIES];
     uint8_t ipv6addr_idx;
@@ -218,6 +217,7 @@ void brcmf_netdev_wait_pend8021x(struct brcmf_if* ifp);
 const char* brcmf_ifname(struct brcmf_if* ifp);
 struct brcmf_if* brcmf_get_ifp(struct brcmf_pub* drvr, int ifidx);
 void brcmf_configure_arp_nd_offload(struct brcmf_if* ifp, bool enable);
+void brcmf_netdev_set_multicast_list(struct net_device* ndev);
 zx_status_t brcmf_net_attach(struct brcmf_if* ifp, bool rtnl_locked);
 zx_status_t brcmf_add_if(struct brcmf_pub* drvr, int32_t bsscfgidx, int32_t ifidx, bool is_p2pdev,
                          const char* name, uint8_t* mac_addr, struct brcmf_if** if_out);
@@ -228,6 +228,6 @@ void brcmf_netif_rx(struct brcmf_if* ifp, struct brcmf_netbuf* netbuf);
 void brcmf_net_setcarrier(struct brcmf_if* ifp, bool on);
 zx_status_t brcmf_core_init(zx_device_t* dev);
 void brcmf_core_exit(void);
-void brcmf_netdev_start_xmit(struct net_device* ndev, ethmac_netbuf_t* netbuf);
+void brcmf_netdev_start_xmit(struct net_device* ndev, ethernet_netbuf_t* netbuf);
 
 #endif /* BRCMFMAC_CORE_H */

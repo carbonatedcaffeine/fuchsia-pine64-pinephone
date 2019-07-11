@@ -1,0 +1,84 @@
+# Copyright 2019 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# These rules are only used by the Fuchsia host build
+# (i.e. generating host executables for testing with the Fuchsia build system).
+
+import("build_settings.gni")
+
+# A target providing access to Vulkan at compile time when added to deps.
+# TODO(SPN-14): Change this to a more recent upstream.
+graphics_compute_vulkan_loader_target = "${graphics_compute_dir}/gn/host:vulkan"
+
+# Generate an executable for the graphics compute project.
+# This also generates a Fuchsia package for it, using a default .cmx file
+# that can be overriden by providing a "meta" argument.
+#
+# Expect all variables supported by the Fuchsia package() template.
+#
+template("graphics_compute_executable") {
+  executable(target_name) {
+    forward_variables_from(invoker,
+                           "*",
+                           [
+                             "loadable_modules",
+                             "meta",
+                             "resources",
+                             "target_name",
+                           ])
+    output_name = invoker.target_name
+
+    # Ignore Fuchsia package specific variables.
+    assert(defined(resources) || !defined(resources))
+    assert(defined(loadable_modules) || !defined(loadable_modules))
+    assert(defined(meta) || !defined(meta))
+  }
+}
+
+# Generate a Vulkan-based executable for the graphics compute project.
+# Compared to graphics_compute_executable(), this adds Vulkan dependencies
+# automatically to the executable and its Fuchsia package.
+#
+template("graphics_compute_vulkan_executable") {
+  graphics_compute_executable(target_name) {
+    forward_variables_from(invoker, "*")
+    if (!defined(deps)) {
+      deps = []
+    }
+    deps += [ graphics_compute_vulkan_loader_target ]
+  }
+}
+
+# Used to generate an executable that depends on GoogleTest and statically
+# links a gtest_main library appropriate for the host. DO NOT CALL DIRECTLY,
+# Use graphics_compute_unittest_package() instead.
+template("graphics_compute_unittest_package_rule") {
+  if (defined(invoker.package_name)) {
+    _package_name = invoker.package_name
+  } else {
+    _package_name = target_name
+  }
+  executable(_package_name) {
+    testonly = true
+    forward_variables_from(invoker,
+                           "*",
+                           [
+                             "package_name",
+                             "target_name",
+                             "tests",
+                           ])
+    if (!defined(deps)) {
+      deps = []
+    }
+    deps += invoker.tests
+    deps += [ "//third_party/googletest:gtest_main" ]
+  }
+  if (defined(invoker.package_name) && _package_name != target_name) {
+    group(target_name) {
+      deps = [
+        ":${_package_name}",
+      ]
+    }
+  }
+}

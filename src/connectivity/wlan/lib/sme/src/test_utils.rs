@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 use crate::{DeviceInfo, MacAddr};
-use bytes::Bytes;
 use fidl_fuchsia_wlan_common as fidl_common;
 use fidl_fuchsia_wlan_mlme as fidl_mlme;
 use wlan_common::ie::rsn::{
@@ -43,35 +42,43 @@ pub fn wpa2_psk_ccmp_rsne_with_caps(caps: RsnCapabilities) -> Rsne {
 
 pub fn rsne_as_bytes(s_rsne: Rsne) -> Vec<u8> {
     let mut buf = Vec::with_capacity(s_rsne.len());
-    s_rsne.as_bytes(&mut buf);
+    s_rsne.write_into(&mut buf).expect("error writing RSNE into buffer");
     buf
 }
 
 fn make_cipher(suite_type: u8) -> cipher::Cipher {
-    cipher::Cipher { oui: Bytes::from(&OUI[..]), suite_type }
+    cipher::Cipher { oui: OUI, suite_type }
 }
 
 fn make_akm(suite_type: u8) -> akm::Akm {
-    akm::Akm { oui: Bytes::from(&OUI[..]), suite_type }
+    akm::Akm { oui: OUI, suite_type }
 }
 
-pub fn eapol_key_frame_bytes() -> Vec<u8> {
+pub fn eapol_key_frame() -> eapol::KeyFrameBuf {
     // Content doesn't matter; we just need a valid EAPOL key frame to test our code path
-    vec![
-        0x01, 0x03, 0x00, 0x5f, 0x02, 0x00, 0x8a, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x01, 0x39, 0x5c, 0xc7, 0x6e, 0x1a, 0xe9, 0x9f, 0xa0, 0xb1, 0x22, 0x79, 0xfe, 0xc3,
-        0xb9, 0xa9, 0x9e, 0x1d, 0x9a, 0x21, 0xb8, 0x47, 0x51, 0x38, 0x98, 0x25, 0xf8, 0xc7, 0xca,
-        0x55, 0x86, 0xbc, 0xda, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x01, 0x02, 0x03,
-    ]
-}
-
-pub fn eapol_key_frame() -> eapol::KeyFrame {
-    eapol::key_frame_from_bytes(&eapol_key_frame_bytes(), 16)
-        .to_full_result()
-        .expect("expect valid eapol key frame")
+    let nonce: [u8; 32] = [
+        0x39, 0x5c, 0xc7, 0x6e, 0x1a, 0xe9, 0x9f, 0xa0, 0xb1, 0x22, 0x79, 0xfe, 0xc3, 0xb9, 0xa9,
+        0x9e, 0x1d, 0x9a, 0x21, 0xb8, 0x47, 0x51, 0x38, 0x98, 0x25, 0xf8, 0xc7, 0xca, 0x55, 0x86,
+        0xbc, 0xda,
+    ];
+    let iv = [0u8; 16];
+    let data: Vec<u8> = vec![0x01, 0x02, 0x03];
+    let new_frame = eapol::KeyFrameTx::new(
+        eapol::ProtocolVersion::IEEE802DOT1X2001,
+        eapol::KeyFrameFields::new(
+            eapol::KeyDescriptor::IEEE802DOT11,
+            eapol::KeyInformation(0x008a),
+            16,
+            1,
+            nonce,
+            iv,
+            0,
+        ),
+        data,
+        16,
+    )
+    .serialize();
+    new_frame.finalize_without_mic().expect("failed to construct dummy eapol keyframe")
 }
 
 pub fn ptk() -> Ptk {
@@ -89,15 +96,15 @@ pub fn gtk_bytes() -> Vec<u8> {
 }
 
 pub fn gtk() -> Gtk {
-    Gtk::from_gtk(gtk_bytes(), 2, cipher()).expect("failed creating GTK")
+    Gtk::from_gtk(gtk_bytes(), 2, cipher(), 0).expect("failed creating GTK")
 }
 
 pub fn akm() -> Akm {
-    Akm { oui: Bytes::from(&OUI[..]), suite_type: akm::PSK }
+    Akm { oui: OUI, suite_type: akm::PSK }
 }
 
 pub fn cipher() -> Cipher {
-    Cipher { oui: Bytes::from(&OUI[..]), suite_type: cipher::CCMP_128 }
+    Cipher { oui: OUI, suite_type: cipher::CCMP_128 }
 }
 
 pub fn fake_ht_cap_chanwidth(chanwidth: fidl_mlme::ChanWidthSet) -> fidl_mlme::HtCapabilities {

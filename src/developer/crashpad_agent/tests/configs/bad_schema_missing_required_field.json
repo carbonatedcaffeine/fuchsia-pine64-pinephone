@@ -1,3 +1,5 @@
 {
-    "local_crashpad_database_path": "/data/crashes"
+    "crashpad_database": {
+        "path": "/foo/crashes"
+    }
 }

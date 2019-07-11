@@ -3,7 +3,8 @@
 # found in the LICENSE file.
 
 group("tests") {
+  testonly = true
   public_deps = [
-    "hotsort_vk_bench"
+    "hotsort_vk_bench",
   ]
 }

@@ -4,7 +4,7 @@
 
 driver("focaltech") {
   sources = [
-    "ft_device.cpp",
+    "ft_device.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.composite",
@@ -13,6 +13,7 @@ driver("focaltech") {
     "$zx/system/banjo/ddk.protocol.i2c",
     "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/banjo/ddk.protocol.test",
+    "$zx/system/dev/lib/device-protocol-i2c",
     "$zx/system/dev/lib/focaltech",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",
@@ -23,4 +24,7 @@ driver("focaltech") {
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",
   ]
+
+  # TODO(ZX-2863): This driver violates the allowed shlib deps policy.
+  deprecated_inhibit_driver_shlib_allowlist = true
 }

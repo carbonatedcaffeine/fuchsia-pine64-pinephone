@@ -85,11 +85,11 @@ hsg_macros(struct hsg_config const * const config, FILE * file)
           "#version 460                                    \n"
           "#extension GL_GOOGLE_include_directive : require\n"
           "                                                \n"
-          "// target-specific config                       \n"
+          "// generated target-specific config             \n"
           "#include \"hs_config.h\"                        \n"
           "                                                \n"
-          "// vendor<arch<target-specific macros           \n"
-          "#include \"hs_glsl_macros_vendor.h\"            \n"
+          "// predefined config-specific macros            \n"
+          "#include \"hs_glsl_macros_config.h\"            \n"
           "                                                \n"
           "//                                              \n"
           "//                                              \n"
@@ -113,46 +113,40 @@ hsg_target_header_and_module(struct hsg_config const * const config)
     hsg_copyright(file);
 
     fprintf(file,
-            "#pragma once                                              \n"
-            "                                                          \n"
-            "//                                                        \n"
-            "//                                                        \n"
-            "//                                                        \n"
-            "                                                          \n"
-            "#include \"hotsort_vk_target.h\"                          \n"
-            "                                                          \n"
-            "//                                                        \n"
-            "//                                                        \n"
-            "//                                                        \n"
-            "                                                          \n"
-            "#undef  HS_TARGET_NAME                                    \n"
-            "#define HS_TARGET_NAME %s                                 \n"
-            "                                                          \n"
-            "//                                                        \n"
-            "//                                                        \n"
-            "//                                                        \n"
-            "                                                          \n"
-            "#ifdef __cplusplus                                        \n"
-            "extern \"C\" {                                            \n"
-            "#endif                                                    \n"
-            "                                                          \n"
-            "//                                                        \n"
-            "//                                                        \n"
-            "//                                                        \n"
-            "                                                          \n"
-            "extern struct hotsort_vk_target const HS_TARGET_NAME;     \n"
-            "                                                          \n"
-            "//                                                        \n"
-            "//                                                        \n"
-            "//                                                        \n"
-            "                                                          \n"
-            "#ifdef __cplusplus                                        \n"
-            "}                                                         \n"
-            "#endif                                                    \n"
-            "                                                          \n"
-            "//                                                        \n"
-            "//                                                        \n"
-            "//                                                        \n",
+            "#pragma once                                                  \n"
+            "                                                              \n"
+            "//                                                            \n"
+            "//                                                            \n"
+            "//                                                            \n"
+            "                                                              \n"
+            "#undef  HS_TARGET_NAME                                        \n"
+            "#define HS_TARGET_NAME %s                                     \n"
+            "                                                              \n"
+            "//                                                            \n"
+            "//                                                            \n"
+            "//                                                            \n"
+            "                                                              \n"
+            "#ifdef __cplusplus                                            \n"
+            "extern \"C\" {                                                \n"
+            "#endif                                                        \n"
+            "                                                              \n"
+            "//                                                            \n"
+            "//                                                            \n"
+            "//                                                            \n"
+            "                                                              \n"
+            "extern struct hotsort_vk_target const * const HS_TARGET_NAME; \n"
+            "                                                              \n"
+            "//                                                            \n"
+            "//                                                            \n"
+            "//                                                            \n"
+            "                                                              \n"
+            "#ifdef __cplusplus                                            \n"
+            "}                                                             \n"
+            "#endif                                                        \n"
+            "                                                              \n"
+            "//                                                            \n"
+            "//                                                            \n"
+            "//                                                            \n",
             config->define.lower);
 
     fclose(file);
@@ -172,36 +166,40 @@ hsg_target_header_and_module(struct hsg_config const * const config)
     hsg_copyright(file);
 
     fprintf(file,
-            "//                                                   \n"
-            "//                                                   \n"
-            "//                                                   \n"
-            "                                                     \n"
-            "#include \"hs_target.h\"                             \n"
-            "#include \"hs_config.h\"                             \n"
-            "                                                     \n"
-            "//                                                   \n"
-            "//                                                   \n"
-            "//                                                   \n"
-            "                                                     \n"
-            "struct hotsort_vk_target const HS_TARGET_NAME =      \n"
-            "{                                                    \n"
-            "  .config = {                                        \n"
-            "#include \"hs_target_config_init.inl\"               \n"
-            "  },                                                 \n"
-            "                                                     \n"
-            "  .modules = {                                       \n"
-            "#include \"hs_modules.inl\"                          \n"
-            "#ifdef HS_DUMP                                       \n"
-            "    0                                                \n"
-            "#endif                                               \n"
-            "  }                                                  \n"
-            "};                                                   \n"
-            "                                                     \n"
-            "#include \"hs_target_modules_dump.inl\"              \n"
-            "                                                     \n"
-            "//                                                   \n"
-            "//                                                   \n"
-            "//                                                   \n");
+            "//                                                              \n"
+            "//                                                              \n"
+            "//                                                              \n"
+            "                                                                \n"
+            "#include \"hs_target.h\"                                        \n"
+            "#include \"hs_config.h\"                                        \n"
+            "                                                                \n"
+            "#include \"hotsort_vk_target.h\"                                \n"
+            "                                                                \n"
+            "//                                                              \n"
+            "//                                                              \n"
+            "//                                                              \n"
+            "                                                                \n"
+            "static struct hotsort_vk_target const target =                  \n"
+            "{                                                               \n"
+            "  .config = {                                                   \n"
+            "#include \"hs_target_config_init.inl\"                          \n"
+            "  },                                                            \n"
+            "                                                                \n"
+            "  .modules = {                                                  \n"
+            "#include \"hs_modules.inl\"                                     \n"
+            "#ifdef HS_DUMP                                                  \n"
+            "    0                                                           \n"
+            "#endif                                                          \n"
+            "  }                                                             \n"
+            "};                                                              \n"
+            "                                                                \n"
+            "struct hotsort_vk_target const * const HS_TARGET_NAME = &target;\n"
+            "                                                                \n"
+            "#include \"hs_target_modules_dump.inl\"                         \n"
+            "                                                                \n"
+            "//                                                              \n"
+            "//                                                              \n"
+            "//                                                              \n");
 
     fclose(file);
 
@@ -334,8 +332,8 @@ hsg_target_glsl(struct hsg_target * const       target,
           for (uint32_t ii = 1; ii <= config->warp.lanes_log2; ii++)
             fprintf(target->state->header, "  HS_TRANSPOSE_STAGE( %u )                  \\\n", ii);
 
-          struct hsg_transpose_state state[1] = {
-            {.header = target->state->header, .config = config}};
+          struct hsg_transpose_state state[1] = { { .header = target->state->header,
+                                                    .config = config } };
 
           hsg_transpose(config->warp.lanes_log2,
                         config->thread.regs,
@@ -418,7 +416,7 @@ hsg_target_glsl(struct hsg_target * const       target,
         break;
 
         case HSG_OP_TYPE_TRANSPOSE_KERNEL_PREAMBLE: {
-          fprintf(target->state->source, "HS_SUBGROUP_PREAMBLE();\n");
+          fprintf(target->state->source, "HS_SUBGROUP_PREAMBLE()\n");
 
           fprintf(target->state->source, "HS_SLAB_GLOBAL_IDX_OUT();\n");
         }
@@ -437,7 +435,7 @@ hsg_target_glsl(struct hsg_target * const       target,
 
           fprintf(target->state->modules, "hs_bs_%u\n", msb);
 
-          char filename[] = {"comp/hs_bs_XX.comp"};
+          char filename[] = { "comp/hs_bs_XX.comp" };
           sprintf(filename, "comp/hs_bs_%u.comp", msb);
 
           target->state->source = fopen(filename, "wb");
@@ -459,7 +457,7 @@ hsg_target_glsl(struct hsg_target * const       target,
         break;
 
         case HSG_OP_TYPE_BS_KERNEL_PREAMBLE: {
-          fprintf(target->state->source, "HS_SUBGROUP_PREAMBLE();\n");
+          fprintf(target->state->source, "HS_SUBGROUP_PREAMBLE()\n");
 
           fprintf(target->state->source, "HS_SLAB_GLOBAL_IDX_IN_OUT();\n");
         }
@@ -472,7 +470,7 @@ hsg_target_glsl(struct hsg_target * const       target,
 
           fprintf(target->state->modules, "hs_bc_%u\n", msb);
 
-          char filename[] = {"comp/hs_bc_XX.comp"};
+          char filename[] = { "comp/hs_bc_XX.comp" };
           sprintf(filename, "comp/hs_bc_%u.comp", msb);
 
           target->state->source = fopen(filename, "wb");
@@ -503,7 +501,7 @@ hsg_target_glsl(struct hsg_target * const       target,
         case HSG_OP_TYPE_FM_KERNEL_PROTO: {
           fprintf(target->state->modules, "hs_fm_%u_%u\n", ops->a, ops->b);
 
-          char filename[] = {"comp/hs_fm_X_XX.comp"};
+          char filename[] = { "comp/hs_fm_X_XX.comp" };
           sprintf(filename, "comp/hs_fm_%u_%u.comp", ops->a, ops->b);
 
           target->state->source = fopen(filename, "wb");
@@ -526,7 +524,7 @@ hsg_target_glsl(struct hsg_target * const       target,
         case HSG_OP_TYPE_HM_KERNEL_PROTO: {
           fprintf(target->state->modules, "hs_hm_%u\n", ops->a);
 
-          char filename[] = {"comp/hs_hm_X.comp"};
+          char filename[] = { "comp/hs_hm_X.comp" };
           sprintf(filename, "comp/hs_hm_%u.comp", ops->a);
 
           target->state->source = fopen(filename, "wb");

@@ -13,16 +13,18 @@ rustc_binary("bin") {
   edition = "2018"
 
   deps = [
+    "//garnet/lib/rust/fidl_fuchsia_amber_ext",
     "//garnet/lib/rust/fidl_fuchsia_pkg_ext",
     "//garnet/lib/rust/files_async",
-    "//garnet/lib/rust/fuchsia_uri",
-    "//garnet/lib/rust/fuchsia_uri_rewrite",
     "//garnet/public/lib/fidl/rust/fidl",
     "//garnet/public/rust/fdio",
     "//garnet/public/rust/fuchsia-async",
     "//garnet/public/rust/fuchsia-component",
+    "//garnet/public/rust/fuchsia-inspect",
     "//garnet/public/rust/fuchsia-syslog",
     "//garnet/public/rust/fuchsia-zircon",
+    "//src/sys/lib/fuchsia_url:fuchsia_url",
+    "//src/sys/lib/fuchsia_url_rewrite",
 
     # "//garnet/public/rust/tuf", FIXME re-enable once tuf is on futures alpha 13
     "//sdk/fidl/fuchsia.amber:fuchsia.amber-rustc",
@@ -30,11 +32,9 @@ rustc_binary("bin") {
     "//sdk/fidl/fuchsia.pkg.rewrite:fuchsia.pkg.rewrite-rustc",
     "//third_party/rust_crates:failure",
     "//third_party/rust_crates:futures-preview",
-    "//third_party/rust_crates:lazy_static",
     "//third_party/rust_crates:log",
     "//third_party/rust_crates:maplit",
     "//third_party/rust_crates:parking_lot",
-    "//third_party/rust_crates:regex",
     "//third_party/rust_crates:serde",
     "//third_party/rust_crates:serde_json",
     "//third_party/rust_crates:tempfile",
@@ -42,6 +42,7 @@ rustc_binary("bin") {
   ]
 }
 
+# Ensure the contents of this package stay in sync with //garnet/tests/amberctl:amberctl-tests
 package("pkg_resolver") {
   deps = [
     ":bin",
@@ -62,7 +63,7 @@ package("pkg_resolver") {
 
 test_package("pkg_resolver_tests") {
   deps = [
-    ":bin",
+    ":bin_test",
   ]
 
   tests = [

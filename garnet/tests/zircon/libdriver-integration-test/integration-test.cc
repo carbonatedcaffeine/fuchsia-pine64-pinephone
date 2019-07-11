@@ -19,7 +19,6 @@
 namespace libdriver_integration_test {
 
 IntegrationTest::IsolatedDevmgr IntegrationTest::devmgr_;
-const zx::duration IntegrationTest::kDefaultTimeout = zx::sec(5);
 
 void IntegrationTest::SetUpTestCase() {
     DoSetup(false /* should_create_composite */);
@@ -59,10 +58,7 @@ void IntegrationTest::DoSetup(bool should_create_composite) {
     };
 
     zx_status_t status = IsolatedDevmgr::Create(std::move(args), &IntegrationTest::devmgr_);
-    if (status != ZX_OK) {
-        printf("libdriver-integration-tests: failed to create isolated devmgr\n");
-        return;
-    }
+    ASSERT_EQ(status, ZX_OK) << "failed to create IsolatedDevmgr";
 }
 
 void IntegrationTest::TearDownTestCase() {
@@ -72,22 +68,20 @@ void IntegrationTest::TearDownTestCase() {
 IntegrationTest::IntegrationTest()
     : loop_(&kAsyncLoopConfigNoAttachToThread),
       devmgr_exception_(this, devmgr_.containing_job().get(), 0) {
+}
 
+void IntegrationTest::SetUp() {
+    // We do this in SetUp() rather than the ctor, since gtest cannot assert in
+    // ctors.
     zx_status_t status = devmgr_exception_.Bind(loop_.dispatcher());
-    if (status != ZX_OK) {
-        printf("libdriver-integration-tests: failed to watch isolated devmgr for crashes: %s\n",
-               zx_status_get_string(status));
-        return;
-    }
+    ASSERT_EQ(status, ZX_OK) << "failed to watch isolated devmgr for crashes: " <<
+               zx_status_get_string(status);
 
     fdio_t* io = fdio_unsafe_fd_to_io(IntegrationTest::devmgr_.devfs_root().get());
     status = devfs_.Bind(zx::channel(fdio_service_clone(fdio_unsafe_borrow_channel(io))),
                          loop_.dispatcher());
     fdio_unsafe_release(io);
-    if (status != ZX_OK) {
-        printf("libdriver-integration-tests: failed to connect to devfs\n");
-        return;
-    }
+    ASSERT_EQ(status, ZX_OK) << "failed to connect to devfs";
 }
 
 IntegrationTest::~IntegrationTest() = default;
@@ -102,10 +96,6 @@ void IntegrationTest::DevmgrException(async_dispatcher_t* dispatcher,
 }
 
 void IntegrationTest::RunPromise(Promise<void> promise) {
-    RunPromise(std::move(promise), zx::deadline_after(kDefaultTimeout));
-}
-
-void IntegrationTest::RunPromise(Promise<void> promise, zx::time deadline) {
     async::Executor executor(loop_.dispatcher());
 
     auto new_promise = promise.then([&](Promise<void>::result_type& result) {
@@ -118,7 +108,7 @@ void IntegrationTest::RunPromise(Promise<void> promise, zx::time deadline) {
 
     executor.schedule_task(std::move(new_promise));
 
-    zx_status_t status = loop_.Run(deadline);
+    zx_status_t status = loop_.Run();
     ASSERT_EQ(status, ZX_ERR_CANCELED);
 }
 
@@ -248,8 +238,9 @@ namespace {
 
 class AsyncWatcher {
 public:
-    AsyncWatcher(std::string path, zx::channel watcher)
+    AsyncWatcher(std::string path, zx::channel watcher, fidl::InterfacePtr<fuchsia::io::Node> node)
             : path_(std::move(path)), watcher_(std::move(watcher)),
+              connections_{std::move(node), {}},
               wait_(watcher_.get(), ZX_CHANNEL_READABLE | ZX_CHANNEL_PEER_CLOSED,
                     fit::bind_member(this, &AsyncWatcher::WatcherChanged)) {}
 
@@ -261,9 +252,20 @@ public:
         completer_ = std::move(completer);
         return wait_.Begin(dispatcher);
     }
+
+    // Directory handle to keep alive for the lifetime of the AsyncWatcher, if
+    // necessary.
+    struct Connections {
+        fidl::InterfacePtr<fuchsia::io::Node> node;
+        fidl::InterfacePtr<fuchsia::io::Directory> directory;
+    };
+
+    Connections& connections() { return connections_; }
 private:
     std::string path_;
     zx::channel watcher_;
+    Connections connections_;
+
     async::Wait wait_;
     fit::completer<void, IntegrationTest::Error> completer_;
 };
@@ -305,9 +307,39 @@ void WaitForPath(const fidl::InterfacePtr<fuchsia::io::Directory>& dir,
     zx::channel watcher, remote;
     ASSERT_EQ(zx::channel::create(0, &watcher, &remote), ZX_OK);
 
-    auto async_watcher = std::make_unique<AsyncWatcher>(std::move(path), std::move(watcher));
+    fidl::InterfacePtr<fuchsia::io::Node> last_dir;
+    std::string filename;
 
-    dir->Watch(fuchsia::io::WATCH_MASK_ADDED | fuchsia::io::WATCH_MASK_EXISTING, 0,
+    size_t last_slash = path.find_last_of('/');
+    if (last_slash != std::string::npos) {
+        std::string prefix(path, 0, last_slash);
+
+        dir->Open(fuchsia::io::OPEN_FLAG_DIRECTORY | fuchsia::io::OPEN_FLAG_DESCRIBE |
+                  fuchsia::io::OPEN_RIGHT_READABLE | fuchsia::io::OPEN_RIGHT_WRITABLE,
+                  0, prefix, last_dir.NewRequest(dispatcher));
+        filename = path.substr(last_slash + 1);
+    } else {
+        dir->Clone(fuchsia::io::CLONE_FLAG_SAME_RIGHTS | fuchsia::io::OPEN_FLAG_DESCRIBE,
+                   last_dir.NewRequest(dispatcher));
+        filename = path;
+    }
+
+    auto async_watcher = std::make_unique<AsyncWatcher>(std::move(filename), std::move(watcher),
+                                                        std::move(last_dir));
+    auto& events = async_watcher->connections().node.events();
+    events.OnOpen =
+            [dispatcher, async_watcher=std::move(async_watcher),
+            completer=std::move(completer), remote=std::move(remote)]
+                    (zx_status_t status, std::unique_ptr<fuchsia::io::NodeInfo> info) mutable {
+        if (status != ZX_OK) {
+            completer.complete_error("Failed to open directory");
+            return;
+        }
+
+        auto& dir = async_watcher->connections().directory;
+        dir.Bind(async_watcher->connections().node.Unbind().TakeChannel(), dispatcher);
+
+        dir->Watch(fuchsia::io::WATCH_MASK_ADDED | fuchsia::io::WATCH_MASK_EXISTING, 0,
                std::move(remote),
                [dispatcher, async_watcher=std::move(async_watcher),
                 completer=std::move(completer)](zx_status_t status) mutable {
@@ -321,15 +353,12 @@ void WaitForPath(const fidl::InterfacePtr<fuchsia::io::Directory>& dir,
                    }
                    completer.complete_error("watcher failed");
                });
+    };
 }
 
 } // namespace
 
 IntegrationTest::Promise<void> IntegrationTest::DoWaitForPath(const std::string& path) {
-    if (path.find('/') != std::string::npos) {
-        return fit::make_error_promise(
-                std::string("DoWaitForPath with directories not yet supported"));
-    }
     fit::bridge<void, Error> bridge;
     WaitForPath(devfs_, loop_.dispatcher(), path, std::move(bridge.completer));
     return bridge.consumer.promise_or(::fit::error("WaitForPath abandoned"));

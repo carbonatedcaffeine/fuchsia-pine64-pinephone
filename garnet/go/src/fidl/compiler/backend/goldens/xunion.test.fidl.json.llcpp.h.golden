@@ -12,6 +12,8 @@
 #include <lib/fit/function.h>
 #include <zircon/fidl.h>
 
+namespace llcpp {
+
 namespace test {
 namespace name {
 
@@ -21,7 +23,7 @@ struct NewerSimpleUnion;
 extern "C" const fidl_type_t test_name_OlderSimpleUnionTable;
 
 struct OlderSimpleUnion {
-  OlderSimpleUnion() : ordinal_(Tag::kUnknown), padding_{}, envelope_{} {}
+  OlderSimpleUnion() : ordinal_(Tag::kUnknown), envelope_{} {}
 
   enum class Tag : fidl_xunion_tag_t {
     kUnknown = 0,
@@ -64,15 +66,14 @@ struct OlderSimpleUnion {
  private:
   static void SizeAndOffsetAssertionHelper();
   Tag ordinal_;
-  [[maybe_unused]]
-  uint32_t padding_;
+  FIDL_ALIGNDECL
   fidl_envelope_t envelope_;
 };
 
 extern "C" const fidl_type_t test_name_NewerSimpleUnionTable;
 
 struct NewerSimpleUnion {
-  NewerSimpleUnion() : ordinal_(Tag::kUnknown), padding_{}, envelope_{} {}
+  NewerSimpleUnion() : ordinal_(Tag::kUnknown), envelope_{} {}
 
   enum class Tag : fidl_xunion_tag_t {
     kUnknown = 0,
@@ -128,22 +129,22 @@ struct NewerSimpleUnion {
  private:
   static void SizeAndOffsetAssertionHelper();
   Tag ordinal_;
-  [[maybe_unused]]
-  uint32_t padding_;
+  FIDL_ALIGNDECL
   fidl_envelope_t envelope_;
 };
 
 }  // namespace name
 }  // namespace test
+}  // namespace llcpp
 
 namespace fidl {
 
 template <>
-struct IsFidlType<::test::name::OlderSimpleUnion> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::test::name::OlderSimpleUnion>);
+struct IsFidlType<::llcpp::test::name::OlderSimpleUnion> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::test::name::OlderSimpleUnion>);
 
 template <>
-struct IsFidlType<::test::name::NewerSimpleUnion> : public std::true_type {};
-static_assert(std::is_standard_layout_v<::test::name::NewerSimpleUnion>);
+struct IsFidlType<::llcpp::test::name::NewerSimpleUnion> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::test::name::NewerSimpleUnion>);
 
 }  // namespace fidl

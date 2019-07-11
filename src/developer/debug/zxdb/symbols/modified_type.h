@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_MODIFIED_TYPE_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_MODIFIED_TYPE_H_
 
 #include "src/developer/debug/zxdb/symbols/type.h"
 
@@ -24,7 +25,7 @@ class ModifiedType final : public Type {
  public:
   // Type/Symbol overrides.
   const ModifiedType* AsModifiedType() const override;
-  const Type* GetConcreteType() const override;
+  const Type* StripCVT() const override;
 
   // The underlying modified type. Note that there is no setter for this, it
   // must be supplied in the constructor since the setter will decode the
@@ -48,8 +49,11 @@ class ModifiedType final : public Type {
 
   // Symbol protected overrides.
   std::string ComputeFullName() const override;
+  Identifier ComputeIdentifier() const override;
 
   LazySymbol modified_;
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_MODIFIED_TYPE_H_

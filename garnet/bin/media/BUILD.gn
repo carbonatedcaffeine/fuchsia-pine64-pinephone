@@ -8,9 +8,10 @@ group("media") {
   testonly = true
   deps = [
     ":codec_factory",
+    ":codec_runner_sw_aac",
     ":codec_runner_sw_ffmpeg",
+    ":codec_runner_sw_sbc",
     ":services",
-    "camera_manager",
     "codec_factory",
     "codecs",
   ]
@@ -42,6 +43,26 @@ package("codec_factory") {
 }
 
 # This package is only really expected to be used by the codec_factory package.
+package("codec_runner_sw_aac") {
+  meta = [
+    {
+      path = rebase_path("codecs/meta/codec_runner_sw_aac.cmx")
+      dest = "codec_runner_sw_aac.cmx"
+    },
+  ]
+
+  deps = [
+    "//garnet/bin/media/codecs/sw/aac:codec_runner_sw_aac",
+  ]
+
+  binaries = [
+    {
+      name = "codec_runner_sw_aac"
+    },
+  ]
+}
+
+# This package is only really expected to be used by the codec_factory package.
 package("codec_runner_sw_ffmpeg") {
   meta = [
     {
@@ -57,6 +78,26 @@ package("codec_runner_sw_ffmpeg") {
   binaries = [
     {
       name = "codec_runner_sw_ffmpeg"
+    },
+  ]
+}
+
+# This package is only really expected to be used by the codec_factory package.
+package("codec_runner_sw_sbc") {
+  meta = [
+    {
+      path = rebase_path("codecs/meta/codec_runner_sw_sbc.cmx")
+      dest = "codec_runner_sw_sbc.cmx"
+    },
+  ]
+
+  deps = [
+    "//garnet/bin/media/codecs/sw/sbc:codec_runner_sw_sbc",
+  ]
+
+  binaries = [
+    {
+      name = "codec_runner_sw_sbc"
     },
   ]
 }

@@ -17,12 +17,16 @@
 namespace zxdb {
 
 StepThreadController::StepThreadController(StepMode mode) : step_mode_(mode) {}
+
+StepThreadController::StepThreadController(const FileLine& line)
+    : step_mode_(StepMode::kSourceLine), file_line_(line) {}
+
 StepThreadController::StepThreadController(AddressRanges ranges)
     : step_mode_(StepMode::kAddressRange), current_ranges_(ranges) {}
+
 StepThreadController::~StepThreadController() = default;
 
-void StepThreadController::InitWithThread(Thread* thread,
-                                          std::function<void(const Err&)> cb) {
+void StepThreadController::InitWithThread(Thread* thread, std::function<void(const Err&)> cb) {
   set_thread(thread);
 
   const Stack& stack = thread->GetStack();
@@ -34,28 +38,29 @@ void StepThreadController::InitWithThread(Thread* thread,
   uint64_t ip = top_frame->GetAddress();
 
   if (step_mode_ == StepMode::kSourceLine) {
-    // Always take the file/line from the stack rather than the line table.
-    // The stack will have been fixed up and may reference the calling line
-    // for an inline routine, while the line table will reference the inlined
-    // source that generated the instructions.
-    file_line_ = top_frame->GetLocation().file_line();
+    if (!file_line_) {
+      // Always take the file/line from the stack rather than the line table.
+      // The stack will have been fixed up and may reference the calling line
+      // for an inline routine, while the line table will reference the inlined
+      // source that generated the instructions.
+      file_line_ = top_frame->GetLocation().file_line();
+    }
 
-    LineDetails line_details =
-        thread->GetProcess()->GetSymbols()->LineDetailsForAddress(ip);
-    if (line_details.file_line() == file_line_) {
+    LineDetails line_details = thread->GetProcess()->GetSymbols()->LineDetailsForAddress(ip);
+    if (line_details.file_line() == *file_line_) {
       // When the stack and the line details match up, the range from the line
       // table is usable.
       current_ranges_ = AddressRanges(line_details.GetExtent());
-      Log("Stepping in %s:%d %s", file_line_.file().c_str(), file_line_.line(),
+      Log("Stepping in %s:%d %s", file_line_->file().c_str(), file_line_->line(),
           current_ranges_.ToString().c_str());
     } else {
-      // Otherwise keep the current range empty to cause a
-      // step into inline routine or potentially a single step.
+      // Otherwise keep the current range empty to cause a step into inline
+      // routine or potentially a single step.
       current_ranges_ = AddressRanges();
-      Log("Stepping in empty range, likely to step into an inline routine.");
+      Log("Stepping in empty range.");
     }
 
-    original_frame_fingerprint_ = *thread->GetStack().GetFrameFingerprint(0);
+    original_frame_fingerprint_ = thread->GetStack().GetFrameFingerprint(0);
   } else {
     // In the "else" cases, the range will already have been set up.
     Log("Stepping in %s", current_ranges_.ToString().c_str());
@@ -104,8 +109,7 @@ ThreadController::StopOp StepThreadController::OnThreadStop(
     const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) {
   if (finish_unsymolized_function_) {
     Log("Trying to step out of unsymbolized function.");
-    if (finish_unsymolized_function_->OnThreadStop(
-            stop_type, hit_breakpoints) == kContinue) {
+    if (finish_unsymolized_function_->OnThreadStop(stop_type, hit_breakpoints) == kContinue) {
       finish_unsymolized_function_->Log("Reported continue.");
       return kContinue;
     }
@@ -183,8 +187,7 @@ ThreadController::StopOp StepThreadController::OnThreadStop(
     // As in InitWithThread(), always use the stack's file/line over the result
     // from the line table.
     const Location& top_location = top_frame->GetLocation();
-    if (top_location.file_line().line() == 0 ||
-        top_location.file_line() == file_line_) {
+    if (top_location.file_line().line() == 0 || top_location.file_line() == *file_line_) {
       // Still on the same line.
       if (top_location.file_line() == line_details.file_line()) {
         // Can use the range from the line table.
@@ -224,8 +227,7 @@ ThreadController::StopOp StepThreadController::OnThreadStop(
     // stepping in because we could have just stepped out of a frame to an
     // inline function starting immediately after the call. We always want to at
     // the oldest possible inline call.
-    stack.SetHideAmbiguousInlineFrameCount(
-        stack.GetAmbiguousInlineFrameCount());
+    stack.SetHideAmbiguousInlineFrameCount(stack.GetAmbiguousInlineFrameCount());
   }
   return kStopDone;
 }
@@ -254,8 +256,7 @@ bool StepThreadController::TrySteppingIntoInline(StepIntoInline command) {
   }
 
   // Examine the closest hidden frame.
-  const Frame* frame =
-      stack.FrameAtIndexIncludingHiddenInline(hidden_frame_count - 1);
+  const Frame* frame = stack.FrameAtIndexIncludingHiddenInline(hidden_frame_count - 1);
   if (!frame->IsAmbiguousInlineLocation())
     return false;  // No inline or not ambiguous.
 
@@ -269,8 +270,7 @@ bool StepThreadController::TrySteppingIntoInline(StepIntoInline command) {
   return true;
 }
 
-ThreadController::StopOp
-StepThreadController::OnThreadStopOnUnsymbolizedCode() {
+ThreadController::StopOp StepThreadController::OnThreadStopOnUnsymbolizedCode() {
   Log("Stepped into code with no symbols.");
 
   const Stack& stack = thread()->GetStack();
@@ -314,7 +314,7 @@ StepThreadController::OnThreadStopOnUnsymbolizedCode() {
     return kContinue;
   }
 
-  if (FrameFingerprint::Newer(*thread()->GetStack().GetFrameFingerprint(0),
+  if (FrameFingerprint::Newer(thread()->GetStack().GetFrameFingerprint(0),
                               original_frame_fingerprint_)) {
     // Called a new stack frame that has no symbols. We need to "finish" to
     // step over the unsymbolized code to automatically step over the

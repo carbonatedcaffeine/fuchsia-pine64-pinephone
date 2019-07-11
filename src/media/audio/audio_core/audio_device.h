@@ -11,19 +11,14 @@
 #include <fbl/ref_counted.h>
 #include <fbl/ref_ptr.h>
 #include <fuchsia/media/cpp/fidl.h>
+#include <lib/media/cpp/timeline_function.h>
 #include <zircon/device/audio.h>
 
-#include <deque>
 #include <memory>
-#include <set>
-#include <thread>
 
-#include "lib/media/timeline/timeline_function.h"
 #include "src/lib/fxl/synchronization/thread_annotations.h"
-#include "src/lib/fxl/time/time_point.h"
 #include "src/media/audio/audio_core/audio_device_settings.h"
 #include "src/media/audio/audio_core/audio_object.h"
-#include "src/media/audio/audio_core/audio_renderer_impl.h"
 #include "src/media/audio/audio_core/fwd_decls.h"
 
 namespace media::audio {
@@ -31,8 +26,7 @@ namespace media::audio {
 class AudioDriver;
 class DriverRingBuffer;
 
-class AudioDevice : public AudioObject,
-                    public fbl::WAVLTreeContainable<fbl::RefPtr<AudioDevice>> {
+class AudioDevice : public AudioObject, public fbl::WAVLTreeContainable<fbl::RefPtr<AudioDevice>> {
  public:
   // Wakeup
   //
@@ -69,8 +63,7 @@ class AudioDevice : public AudioObject,
   //
   // TODO(johngro) : Remove this once device driver format selection is under
   // control of the policy manager layer instead of here.
-  virtual void NotifyDestFormatPreference(
-      const fuchsia::media::AudioStreamTypePtr& fmt)
+  virtual void NotifyDestFormatPreference(const fuchsia::media::AudioStreamTypePtr& fmt)
       FXL_LOCKS_EXCLUDED(mix_domain_->token()) {}
 
   // GetSourceFormatPreference
@@ -82,19 +75,16 @@ class AudioDevice : public AudioObject,
   // the policy manager to know what inputs and outputs exist, what formats they
   // support, and to express a desired device routing. "Preference" of an audio
   // device is not a concept which belongs in the mixer.
-  virtual fuchsia::media::AudioStreamTypePtr GetSourceFormatPreference() {
-    return nullptr;
-  }
+  virtual fuchsia::media::AudioStreamTypePtr GetSourceFormatPreference() { return nullptr; }
 
   // Accessor set gain. Limits the gain command to what the hardware allows, and
   // wakes up the device in the event of a meaningful change in gain settings.
   //
   // Only called by AudioDeviceManager, and only after the device is activated.
-  void SetGainInfo(const ::fuchsia::media::AudioGainInfo& info,
-                   uint32_t set_flags);
+  void SetGainInfo(const fuchsia::media::AudioGainInfo& info, uint32_t set_flags);
 
   // Device info used during device enumeration and add-notifications.
-  void GetDeviceInfo(::fuchsia::media::AudioDeviceInfo* out_info) const;
+  void GetDeviceInfo(fuchsia::media::AudioDeviceInfo* out_info) const;
 
  protected:
   friend class fbl::RefPtr<AudioDevice>;
@@ -130,8 +120,7 @@ class AudioDevice : public AudioObject,
   // Modify the contents of a user request to change the gain state to reflect
   // the actual gain that we are going to end up setting.  This may differ from
   // the requested gain due to hardware limitations or general policy.
-  virtual void ApplyGainLimits(::fuchsia::media::AudioGainInfo* in_out_info,
-                               uint32_t set_flags) = 0;
+  virtual void ApplyGainLimits(fuchsia::media::AudioGainInfo* in_out_info, uint32_t set_flags) = 0;
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -146,8 +135,7 @@ class AudioDevice : public AudioObject,
   // Called in response to someone from outside the domain poking the
   // mix_wakeup_ WakeupEvent.  At a minimum, the framework will call this once
   // at startup to get the output running.
-  virtual void OnWakeup()
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()) = 0;
+  virtual void OnWakeup() FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()) = 0;
 
   // ActivateSelf
   //
@@ -165,9 +153,7 @@ class AudioDevice : public AudioObject,
 
   // Check the shutting down flag.  We are in the process of shutting down when
   // we have become deactivated at the dispatcher framework level.
-  inline bool is_shutting_down() const {
-    return (!mix_domain_ || mix_domain_->deactivated());
-  }
+  inline bool is_shutting_down() const { return (!mix_domain_ || mix_domain_->deactivated()); }
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -175,17 +161,13 @@ class AudioDevice : public AudioObject,
   //
   // Hooks used by encapsulated AudioDriver instances to notify AudioDevices
   // about internal state machine changes.
-  virtual void OnDriverInfoFetched()
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()){};
+  virtual void OnDriverInfoFetched() FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()){};
 
-  virtual void OnDriverConfigComplete()
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()){};
+  virtual void OnDriverConfigComplete() FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()){};
 
-  virtual void OnDriverStartComplete()
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()){};
+  virtual void OnDriverStartComplete() FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()){};
 
-  virtual void OnDriverStopComplete()
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()){};
+  virtual void OnDriverStopComplete() FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()){};
 
   virtual void OnDriverPlugStateChange(bool plugged, zx_time_t plug_time)
       FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()){};
@@ -216,8 +198,8 @@ class AudioDevice : public AudioObject,
 
   // State used to manage asynchronous processing using the dispatcher
   // framework.
-  fbl::RefPtr<::dispatcher::ExecutionDomain> mix_domain_;
-  fbl::RefPtr<::dispatcher::WakeupEvent> mix_wakeup_;
+  fbl::RefPtr<dispatcher::ExecutionDomain> mix_domain_;
+  fbl::RefPtr<dispatcher::WakeupEvent> mix_wakeup_;
 
   // This object manages most interactions with the low-level driver for us.
   std::unique_ptr<AudioDriver> driver_;
@@ -267,9 +249,7 @@ class AudioDevice : public AudioObject,
   // Note: it is certainly possible for AudioDeviceManager to simply access the
   // device_settings_ pointer directly. Code should use this accessor instead,
   // however, to avoid accidentally releasing the device_settings object.
-  const fbl::RefPtr<AudioDeviceSettings>& device_settings() const {
-    return device_settings_;
-  }
+  const fbl::RefPtr<AudioDeviceSettings>& device_settings() const { return device_settings_; }
 
   bool system_gain_dirty = true;
 

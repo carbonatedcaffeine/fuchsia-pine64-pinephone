@@ -127,15 +127,12 @@ table SessionmgrConfig {
     /// A map of agents to the arguments they should be started with.
     8: vector<AppConfig> component_args;
 
-    /// When set to true, stories will share a runner provided by the parent
-    /// environment. When set to false, new runners will be started in the
-    /// environment for stories.
-    /// Default: false
+    /// Deprecated
     9: bool use_parent_runner_for_story_realm;
 
     /// A list of supported services and the URL of the agent known to provide
     /// that service. Used by the Session Manager to implement
-    /// |ComponentContext| method ConnectToAgentService().
+    /// `ComponentContext` method ConnectToAgentService().
     10: vector<AgentServiceIndexEntry> agent_service_index;
 };
 

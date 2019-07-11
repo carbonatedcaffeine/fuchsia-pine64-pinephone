@@ -10,6 +10,7 @@
 #include <string>
 
 #include "peridot/lib/convert/convert.h"
+#include "src/ledger/bin/public/status.h"
 #include "src/lib/fxl/compiler_specific.h"
 #include "src/lib/fxl/strings/string_view.h"
 
@@ -83,8 +84,7 @@ enum class KeyPriority {
 class ObjectIdentifier {
  public:
   ObjectIdentifier();
-  ObjectIdentifier(uint32_t key_index, uint32_t deletion_scope_id,
-                   ObjectDigest object_digest);
+  ObjectIdentifier(uint32_t key_index, uint32_t deletion_scope_id, ObjectDigest object_digest);
 
   ObjectIdentifier(const ObjectIdentifier&);
   ObjectIdentifier& operator=(const ObjectIdentifier&);
@@ -113,8 +113,7 @@ std::ostream& operator<<(std::ostream& os, const ObjectIdentifier& e);
 // For a given object |A|, contains a pair (|B|, |priority|) for every reference
 // from |A| to |B| with the associated |priority|. Object digests must never
 // represent inline pieces.
-using ObjectReferencesAndPriority =
-    std::set<std::pair<ObjectDigest, KeyPriority>>;
+using ObjectReferencesAndPriority = std::set<std::pair<ObjectDigest, KeyPriority>>;
 
 // An entry in a commit.
 struct Entry {
@@ -153,30 +152,15 @@ enum class IsObjectSynced : bool { NO, YES };
 
 enum class JournalContainsClearOperation { NO, YES };
 
-enum class FXL_WARN_UNUSED_RESULT Status {
-  // User visible status.
-  OK,
-  IO_ERROR,
-  PAGE_NOT_FOUND,
-  KEY_NOT_FOUND,
-  REFERENCE_NOT_FOUND,
+using Status = ledger::Status;
 
-  // Internal status.
-  FORMAT_ERROR,
-  ILLEGAL_STATE,
-  INTERNAL_NOT_FOUND,
-  INTERNAL_ERROR,
-  INTERRUPTED,
-  NETWORK_ERROR,
-  NO_SUCH_CHILD,
-  OBJECT_DIGEST_MISMATCH,
-
-  // Temporary status or status for tests.
-  NOT_IMPLEMENTED,
+enum class CommitPruningPolicy {
+  // Commits are never prunied.
+  NEVER,
+  // Commits are pruned as soon as possible, based on the local state only. Do not use this policy
+  // if the device is synchronizing with other devices.
+  LOCAL_IMMEDIATE,
 };
-
-fxl::StringView StatusToString(Status status);
-std::ostream& operator<<(std::ostream& os, Status status);
 
 }  // namespace storage
 #endif  // SRC_LEDGER_BIN_STORAGE_PUBLIC_TYPES_H_

@@ -2,36 +2,34 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_SHARED_WORKER_POOL_H_
+#define SRC_DEVELOPER_DEBUG_SHARED_WORKER_POOL_H_
 
 #include <functional>
 #include <mutex>
 #include <thread>
 #include <vector>
 
+#include "src/lib/containers/cpp/circular_deque.h"
 #include "src/lib/fxl/macros.h"
 #include "src/lib/fxl/synchronization/thread_annotations.h"
-#include "src/lib/containers/cpp/circular_deque.h"
 
 namespace debug_ipc {
 
 // Multi-threaded arbitrary task queue.
 //
-// This queue is meant for tasks that are independent of each other (ie. they
-// don't need ordering between each other). The queue will spawn up workers as
-// needed and will shut them down upon destruction.
+// This queue is meant for tasks that are independent of each other (ie. they don't need ordering
+// between each other). The queue will spawn up workers as needed and will shut them down upon
+// destruction.
 //
-// NOTE: When shutting down, the pool will wait for all workers to be done.
-//       Before that, it will prevent any new work being started but any tasks
-//       that are being run at that moment will finish and block, either upon
-//       calling Shutdown or on the destructor.
+// NOTE: When shutting down, the pool will wait for all workers to be done. Before that, it will
+//       prevent any new work being started but any tasks that are being run at that moment will
+//       finish and block, either upon calling Shutdown or on the destructor.
 //
-// NOTE2: The thread annotations are (mostly) commented out because the C++
-//        condition variables requires a taken std::unique_lock<std::mutex> to
-//        work, but clang's thread annotation analysis does not recognize them
-//        as valid, as opposing std::lock_guard<std::mutex>. This means that
-//        this queue won't compile if the actual thread annotations were set in
-//        place.
+// NOTE2: The thread annotations are (mostly) commented out because the C++ condition variables
+//        requires a taken std::unique_lock<std::mutex> to work, but clang's thread annotation
+//        analysis does not recognize them as valid, as opposing std::lock_guard<std::mutex>. This
+//        means that this queue won't compile if the actual thread annotations were set in place.
 class WorkerPool {
  public:
   using Task = std::function<void()>;
@@ -68,8 +66,8 @@ class WorkerPool {
 
   bool ShouldCreateWorker();  // REQUIRES(mutex_)
 
-  // This requires |lock| to be taken, but will unlock it for the actual worker
-  // thread creation, and retake it after that work is done.
+  // This requires |lock| to be taken, but will unlock it for the actual worker thread creation, and
+  // retake it after that work is done.
   void CreateWorker(std::unique_lock<std::mutex>* lock);  // REQUIRES(mutex_)
 
   void SignalWork() FXL_LOCKS_EXCLUDED(mutex_);
@@ -83,22 +81,22 @@ class WorkerPool {
   ::containers::circular_deque<Task> tasks_;      // GUARDED_BY(mutex_)
 
   // Counters.
-  int waiting_workers_ = 0;   // GUARDED_BY(mutex_)
+  int waiting_workers_ = 0;  // GUARDED_BY(mutex_)
 
   // State machine.
 
   // Cannot use thread safety analysis because we use std::unique_lock.
-  bool running_  = false;         // GUARDED_BY(mutex_)
-  bool shutting_down_ = false;    // GUARDED_BY(mutex_)
+  bool running_ = false;        // GUARDED_BY(mutex_)
+  bool shutting_down_ = false;  // GUARDED_BY(mutex_)
 
   // Whether we're creating a worker.
   // The new worker, upon startup, will switch off this flag.
-  volatile bool creating_worker_  = false;  // GUARDED_BY(mutex_)
+  volatile bool creating_worker_ = false;  // GUARDED_BY(mutex_)
 
   mutable std::mutex mutex_;
 
-  std::condition_variable worker_created_cv_;   // REQUIRES(mutex_)
-  std::condition_variable work_available_cv_;   // REQUIRES(mutex_)
+  std::condition_variable worker_created_cv_;  // REQUIRES(mutex_)
+  std::condition_variable work_available_cv_;  // REQUIRES(mutex_)
 
   Observer* observer_ = nullptr;
 
@@ -106,3 +104,5 @@ class WorkerPool {
 };
 
 }  // namespace debug_ipc
+
+#endif  // SRC_DEVELOPER_DEBUG_SHARED_WORKER_POOL_H_

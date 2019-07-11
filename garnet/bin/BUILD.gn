@@ -5,11 +5,9 @@
 group("bin") {
   testonly = true
   deps = [
-    "a11y",
     "appmgr",
     "catapult_converter",
     "chrealm",
-    "cmc",
     "cpuperf",
     "cpuperf_provider",
     "cs",
@@ -24,7 +22,6 @@ group("bin") {
     "glob",
     "http",
     "insntrace",
-    "installer",
     "iquery",
     "kms",
     "ktrace_provider",
@@ -35,7 +32,6 @@ group("bin") {
     "net-cli",
     "net_ctl",
     "netcfg",
-    "netconnector",
     "network-speed-test",
     "network_settings_server",
     "network_time",
@@ -44,7 +40,6 @@ group("bin") {
     "pkg_cache",
     "pkg_ctl",
     "pkg_resolver",
-    "power_manager",
     "rolldice",
     "run",
     "run_test_component",

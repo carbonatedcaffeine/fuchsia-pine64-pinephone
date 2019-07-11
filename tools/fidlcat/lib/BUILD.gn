@@ -8,6 +8,7 @@ static_library("lib") {
   friend = [ ":tests" ]
 
   public = [
+    "display_options.h",
     "library_loader.h",
     "memory_helpers.h",
     "message_decoder.h",
@@ -35,20 +36,25 @@ if (current_toolchain == host_toolchain) {
   static_library("host_lib") {
     public = [
       "interception_workflow.h",
-      "zx_channel_params.h",
+      "syscall_decoder.h",
+      "syscall_decoder_dispatcher.h",
     ]
 
     sources = [
       "interception_workflow.cc",
-      "zx_channel_params.cc",
+      "syscall_decoder.cc",
+      "syscall_decoder_dispatcher.cc",
     ]
 
     deps = [
+      ":lib",
       "//src/developer/debug/ipc:client",
       "//src/developer/debug/zxdb/client",
       "//src/developer/debug/zxdb/common",
       "//src/developer/debug/zxdb/console",
       "//src/lib/fxl",
+      "//third_party/rapidjson",
+      "//zircon/public/lib/fidl_base",
       "//zircon/public/lib/fit",
     ]
   }
@@ -65,6 +71,8 @@ if (current_toolchain == host_toolchain) {
       "//src/developer/debug/ipc:client",
       "//src/developer/debug/zxdb/client:test_support",
       "//third_party/googletest:gtest",
+      "//third_party/rapidjson",
+      "//zircon/public/lib/fidl_base",
       "//zircon/system/public",
     ]
   }
@@ -74,6 +82,7 @@ source_set("tests") {
   testonly = true
   sources = [
     "library_loader_test.cc",
+    "message_decoder_test.cc",
     "wire_parser_test.cc",
   ]
 
@@ -84,8 +93,8 @@ source_set("tests") {
     "//sdk/fidl/fuchsia.sys",
     "//sdk/lib/fidl/cpp:test_support",
     "//sdk/lib/fidl/cpp/test",
+    "//src/lib/fxl/test:gtest_main",
     "//third_party/googletest:gtest",
-    "//third_party/googletest:gtest_main",
     "//third_party/rapidjson",
     "//zircon/public/lib/async-loop-cpp",
   ]

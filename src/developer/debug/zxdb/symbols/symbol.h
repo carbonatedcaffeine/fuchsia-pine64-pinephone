@@ -2,14 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_SYMBOL_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_SYMBOL_H_
 
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "src/lib/fxl/memory/ref_counted.h"
+#include "src/developer/debug/zxdb/common/ref_ptr_to.h"
+#include "src/developer/debug/zxdb/symbols/dwarf_lang.h"
 #include "src/developer/debug/zxdb/symbols/dwarf_tag.h"
+#include "src/developer/debug/zxdb/symbols/identifier.h"
 #include "src/developer/debug/zxdb/symbols/lazy_symbol.h"
+#include "src/lib/fxl/memory/ref_counted.h"
 
 namespace zxdb {
 
@@ -17,6 +22,7 @@ class ArrayType;
 class BaseType;
 class CodeBlock;
 class Collection;
+class CompileUnit;
 class DataMember;
 class Enumeration;
 class Function;
@@ -28,6 +34,8 @@ class Namespace;
 class Type;
 class Value;
 class Variable;
+class Variant;
+class VariantPart;
 
 // Represents the type of a variable. This is a deserialized version of the
 // various DWARF DIEs ("Debug Information Entry" -- a record in the DWARF file)
@@ -95,16 +103,45 @@ class Symbol : public fxl::RefCountedThreadSafe<Symbol> {
   virtual const std::string& GetAssignedName() const;
 
   // Returns the fully-qualified user-visible name for this symbol. This will
-  // include all namespace and struct qualifications.
+  // include all namespace and struct qualifications, and will include things
+  // like const and "*" qualifiers on modified types.
   //
   // This implements caching. Derived classes override ComputeFullName() to
   // control how the full name is presented.
+  //
+  // See also GetIdentifier().
   const std::string& GetFullName() const;
+
+  // Returns the name of this symbol as an identifier if possible.
+  //
+  // Many symbols have identifier names, this normally includes anything with
+  // an assigned name: functions, structs, typedefs and base types.
+  //
+  // Some things don't have names that can be made into identifiers, this
+  // includes modified types such as "const Foo*" since the "const" and the "*"
+  // don't fit into the normal identifier scheme. These types will report an
+  // empty Identifier for GetIdentifier().
+  //
+  // See also GetFullName(). GetFullName() will work for the modified type
+  // cases above since it just returns a string, but it's not parseable.
+  const Identifier& GetIdentifier() const;
+
+  // Returns the CompileUnit that this symbol is associated with. Returns null
+  // on failure.
+  const CompileUnit* GetCompileUnit() const;
+
+  // Computes and returns the language associated with this symbol. This will
+  // be kNone if the language is not known or unset.
+  //
+  // This requires decoding the compile unit so is not super efficient to
+  // get.
+  DwarfLang GetLanguage() const;
 
   // Manual RTTI.
   virtual const ArrayType* AsArrayType() const;
   virtual const BaseType* AsBaseType() const;
   virtual const CodeBlock* AsCodeBlock() const;
+  virtual const CompileUnit* AsCompileUnit() const;
   virtual const DataMember* AsDataMember() const;
   virtual const Enumeration* AsEnumeration() const;
   virtual const Function* AsFunction() const;
@@ -117,62 +154,59 @@ class Symbol : public fxl::RefCountedThreadSafe<Symbol> {
   virtual const Type* AsType() const;
   virtual const Value* AsValue() const;
   virtual const Variable* AsVariable() const;
+  virtual const Variant* AsVariant() const;
+  virtual const VariantPart* AsVariantPart() const;
 
   // Non-const manual RTTI wrappers.
   ArrayType* AsArrayType() {
-    return const_cast<ArrayType*>(
-        const_cast<const Symbol*>(this)->AsArrayType());
+    return const_cast<ArrayType*>(const_cast<const Symbol*>(this)->AsArrayType());
   }
   BaseType* AsBaseType() {
     return const_cast<BaseType*>(const_cast<const Symbol*>(this)->AsBaseType());
   }
   CodeBlock* AsCodeBlock() {
-    return const_cast<CodeBlock*>(
-        const_cast<const Symbol*>(this)->AsCodeBlock());
+    return const_cast<CodeBlock*>(const_cast<const Symbol*>(this)->AsCodeBlock());
+  }
+  CompileUnit* AsCompileUnit() {
+    return const_cast<CompileUnit*>(const_cast<const Symbol*>(this)->AsCompileUnit());
   }
   DataMember* AsDataMember() {
-    return const_cast<DataMember*>(
-        const_cast<const Symbol*>(this)->AsDataMember());
+    return const_cast<DataMember*>(const_cast<const Symbol*>(this)->AsDataMember());
   }
   Enumeration* AsEnumeration() {
-    return const_cast<Enumeration*>(
-        const_cast<const Symbol*>(this)->AsEnumeration());
+    return const_cast<Enumeration*>(const_cast<const Symbol*>(this)->AsEnumeration());
   }
   Function* AsFunction() {
     return const_cast<Function*>(const_cast<const Symbol*>(this)->AsFunction());
   }
   FunctionType* AsFunctionType() {
-    return const_cast<FunctionType*>(
-        const_cast<const Symbol*>(this)->AsFunctionType());
+    return const_cast<FunctionType*>(const_cast<const Symbol*>(this)->AsFunctionType());
   }
   InheritedFrom* AsInheritedFrom() {
-    return const_cast<InheritedFrom*>(
-        const_cast<const Symbol*>(this)->AsInheritedFrom());
+    return const_cast<InheritedFrom*>(const_cast<const Symbol*>(this)->AsInheritedFrom());
   }
   MemberPtr* AsMemberPtr() {
-    return const_cast<MemberPtr*>(
-        const_cast<const Symbol*>(this)->AsMemberPtr());
+    return const_cast<MemberPtr*>(const_cast<const Symbol*>(this)->AsMemberPtr());
   }
   ModifiedType* AsModifiedType() {
-    return const_cast<ModifiedType*>(
-        const_cast<const Symbol*>(this)->AsModifiedType());
+    return const_cast<ModifiedType*>(const_cast<const Symbol*>(this)->AsModifiedType());
   }
   Namespace* AsNamespace() {
-    return const_cast<Namespace*>(
-        const_cast<const Symbol*>(this)->AsNamespace());
+    return const_cast<Namespace*>(const_cast<const Symbol*>(this)->AsNamespace());
   }
   Collection* AsCollection() {
-    return const_cast<Collection*>(
-        const_cast<const Symbol*>(this)->AsCollection());
+    return const_cast<Collection*>(const_cast<const Symbol*>(this)->AsCollection());
   }
-  Type* AsType() {
-    return const_cast<Type*>(const_cast<const Symbol*>(this)->AsType());
-  }
-  Value* AsValue() {
-    return const_cast<Value*>(const_cast<const Symbol*>(this)->AsValue());
-  }
+  Type* AsType() { return const_cast<Type*>(const_cast<const Symbol*>(this)->AsType()); }
+  Value* AsValue() { return const_cast<Value*>(const_cast<const Symbol*>(this)->AsValue()); }
   Variable* AsVariable() {
     return const_cast<Variable*>(const_cast<const Symbol*>(this)->AsVariable());
+  }
+  Variant* AsVariant() {
+    return const_cast<Variant*>(const_cast<const Symbol*>(this)->AsVariant());
+  }
+  VariantPart* AsVariantPart() {
+    return const_cast<VariantPart*>(const_cast<const Symbol*>(this)->AsVariantPart());
   }
 
  protected:
@@ -184,21 +218,28 @@ class Symbol : public fxl::RefCountedThreadSafe<Symbol> {
   explicit Symbol(DwarfTag tag);
   virtual ~Symbol();
 
-  // Computes the full name. Used by GetFullName() which adds a caching layer.
-  // Derived classes should override this to control how the name is presented.
-  // This implementation returns the scope prefix (namespaces, structs) +
-  // assigned name.
+  // Computes the full name and identifier. Used by GetFullName() and
+  // GetIdentifier() which add a caching layer.
+  //
+  // Derived classes should override these to control how the name is
+  // presented. The default implementation of ComputeIdentifier() returns the
+  // scope prefix (namespaces, structs) + the assigned name. The default
+  // implementation of ComputeFullName() returns the stringified version of the
+  // identifier.
   virtual std::string ComputeFullName() const;
+  virtual Identifier ComputeIdentifier() const;
 
  private:
   DwarfTag tag_ = DwarfTag::kNone;
 
   LazySymbol parent_;
 
-  // Lazily computed full symbol name.
-  // TODO(brettw) use std::optional when we can use C++17.
-  mutable bool computed_full_name_ = false;
-  mutable std::string full_name_;
+  // Lazily computed full symbol name and identifier name.
+  mutable std::optional<std::string> full_name_;
+  mutable std::optional<Identifier> identifier_;
+  mutable std::optional<DwarfLang> language_;
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_SYMBOL_H_

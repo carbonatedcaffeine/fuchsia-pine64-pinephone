@@ -8,12 +8,12 @@ pub(crate) mod arp;
 pub(crate) mod ethernet;
 pub(crate) mod ndp;
 
-use std::collections::HashMap;
 use std::fmt::{self, Debug, Display, Formatter};
 
 use log::debug;
 use packet::{MtuError, Serializer};
 
+use crate::data_structures::{IdMap, IdMapCollectionKey};
 use crate::device::ethernet::{EthernetDeviceState, Mac};
 use crate::ip::{ext, AddrSubnet, IpAddress, Ipv4Addr, Ipv6Addr};
 use crate::{Context, EventDispatcher};
@@ -21,18 +21,18 @@ use crate::{Context, EventDispatcher};
 /// An ID identifying a device.
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct DeviceId {
-    id: u64,
+    id: usize,
     protocol: DeviceProtocol,
 }
 
 impl DeviceId {
     /// Construct a new `DeviceId` for an Ethernet device.
-    pub(crate) fn new_ethernet(id: u64) -> DeviceId {
+    pub(crate) fn new_ethernet(id: usize) -> DeviceId {
         DeviceId { id, protocol: DeviceProtocol::Ethernet }
     }
 
     #[allow(missing_docs)]
-    pub fn id(self) -> u64 {
+    pub fn id(self) -> usize {
         self.id
     }
 }
@@ -46,6 +46,20 @@ impl Display for DeviceId {
 impl Debug for DeviceId {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         Display::fmt(self, f)
+    }
+}
+
+impl IdMapCollectionKey for DeviceId {
+    const VARIANT_COUNT: usize = 1;
+
+    fn get_variant(&self) -> usize {
+        match self.protocol {
+            DeviceProtocol::Ethernet => 0,
+        }
+    }
+
+    fn get_id(&self) -> usize {
+        self.id as usize
     }
 }
 
@@ -79,18 +93,14 @@ pub(crate) enum FrameDestination {
 
 impl FrameDestination {
     /// Is this `FrameDestination::Broadcast`?
-    pub(crate) fn is_broadcast(&self) -> bool {
-        *self == FrameDestination::Broadcast
+    pub(crate) fn is_broadcast(self) -> bool {
+        self == FrameDestination::Broadcast
     }
 }
 
 /// The state associated with the device layer.
 pub(crate) struct DeviceLayerState {
-    // Invariant: even though each protocol has its own hash map, IDs (used as
-    // keys in the hash maps) are unique across all hash maps. This is
-    // guaranteed by allocating IDs sequentially, and never re-using an ID.
-    next_id: u64,
-    ethernet: HashMap<u64, EthernetDeviceState>,
+    ethernet: IdMap<EthernetDeviceState>,
 }
 
 impl DeviceLayerState {
@@ -100,16 +110,9 @@ impl DeviceLayerState {
     /// MTU. The MTU will be taken as a limit on the size of Ethernet payloads -
     /// the Ethernet header is not counted towards the MTU.
     pub(crate) fn add_ethernet_device(&mut self, mac: Mac, mtu: u32) -> DeviceId {
-        let id = self.allocate_id();
-        self.ethernet.insert(id, EthernetDeviceState::new(mac, mtu));
+        let id = self.ethernet.push(EthernetDeviceState::new(mac, mtu));
         debug!("adding Ethernet device with ID {} and MTU {}", id, mtu);
         DeviceId::new_ethernet(id)
-    }
-
-    fn allocate_id(&mut self) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
     }
 }
 
@@ -117,12 +120,12 @@ impl DeviceLayerState {
 // interface, which does not allow for IDs of zero.
 impl Default for DeviceLayerState {
     fn default() -> DeviceLayerState {
-        DeviceLayerState { next_id: 1, ethernet: HashMap::new() }
+        DeviceLayerState { ethernet: IdMap::new() }
     }
 }
 
 /// The identifier for timer events in the device layer.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub(crate) enum DeviceLayerTimerId {
     /// A timer event in the ARP layer with a protocol type of IPv4
     ArpIpv4(arp::ArpTimerId<Ipv4Addr>),

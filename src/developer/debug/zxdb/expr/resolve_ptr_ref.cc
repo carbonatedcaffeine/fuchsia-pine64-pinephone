@@ -4,14 +4,14 @@
 
 #include "src/developer/debug/zxdb/expr/resolve_ptr_ref.h"
 
-#include "src/lib/fxl/strings/string_printf.h"
 #include "src/developer/debug/zxdb/common/err.h"
+#include "src/developer/debug/zxdb/expr/eval_context.h"
 #include "src/developer/debug/zxdb/expr/expr_value.h"
 #include "src/developer/debug/zxdb/symbols/arch.h"
 #include "src/developer/debug/zxdb/symbols/modified_type.h"
 #include "src/developer/debug/zxdb/symbols/symbol_data_provider.h"
 #include "src/developer/debug/zxdb/symbols/type.h"
-#include "src/developer/debug/zxdb/symbols/type_utils.h"
+#include "src/lib/fxl/strings/string_printf.h"
 
 namespace zxdb {
 
@@ -29,55 +29,49 @@ Err GetPointerValue(const ExprValue& value, TargetPointer* pointer_value) {
 
 }  // namespace
 
-void ResolvePointer(fxl::RefPtr<SymbolDataProvider> data_provider,
-                    uint64_t address, fxl::RefPtr<Type> type,
+void ResolvePointer(fxl::RefPtr<EvalContext> eval_context, uint64_t address, fxl::RefPtr<Type> type,
                     std::function<void(const Err&, ExprValue)> cb) {
-  if (!type) {
+  // We need to be careful to construct the return type with the original type given since it may
+  // have const qualifiers, etc., but to use the concrete one (no const, with forward-definitions
+  // resolved) for size computation.
+  fxl::RefPtr<Type> concrete = eval_context->GetConcreteType(type.get());
+  if (!concrete) {
     cb(Err("Missing pointer type."), ExprValue());
     return;
   }
 
-  uint32_t type_size = type->byte_size();
-  data_provider->GetMemoryAsync(
+  uint32_t type_size = concrete->byte_size();
+  eval_context->GetDataProvider()->GetMemoryAsync(
       address, type_size,
-      [type = std::move(type), address, cb = std::move(cb)](
-          const Err& err, std::vector<uint8_t> data) {
+      [type = std::move(type), address, type_size, cb = std::move(cb)](const Err& err,
+                                                                       std::vector<uint8_t> data) {
+        // Watch out, "type" may be non-concrete (we need to preserve "const", etc.). Use
+        // "type_size" for the concrete size.
         if (err.has_error()) {
           cb(err, ExprValue());
-        } else if (data.size() != type->byte_size()) {
+        } else if (data.size() != type_size) {
           // Short read, memory is invalid.
-          cb(Err(fxl::StringPrintf("Invalid pointer 0x%" PRIx64, address)),
-             ExprValue());
+          cb(Err(fxl::StringPrintf("Invalid pointer 0x%" PRIx64, address)), ExprValue());
         } else {
-          cb(Err(), ExprValue(std::move(type), std::move(data),
-                              ExprValueSource(address)));
+          cb(Err(), ExprValue(std::move(type), std::move(data), ExprValueSource(address)));
         }
       });
 }
 
-void ResolvePointer(fxl::RefPtr<SymbolDataProvider> data_provider,
-                    const ExprValue& pointer,
+void ResolvePointer(fxl::RefPtr<EvalContext> eval_context, const ExprValue& pointer,
                     std::function<void(const Err&, ExprValue)> cb) {
-  const Type* pointed_to = nullptr;
-  Err err = GetPointedToType(pointer.type(), &pointed_to);
-  if (err.has_error()) {
-    cb(err, ExprValue());
-    return;
-  }
+  fxl::RefPtr<Type> pointed_to;
+  if (Err err = GetPointedToType(eval_context, pointer.type(), &pointed_to); err.has_error())
+    return cb(err, ExprValue());
 
   TargetPointer pointer_value = 0;
-  err = GetPointerValue(pointer, &pointer_value);
-  if (err.has_error()) {
-    cb(err, ExprValue());
-  } else {
-    ResolvePointer(std::move(data_provider), pointer_value,
-                   fxl::RefPtr<Type>(const_cast<Type*>(pointed_to)),
-                   std::move(cb));
-  }
+  if (Err err = GetPointerValue(pointer, &pointer_value); err.has_error())
+    return cb(err, ExprValue());
+
+  ResolvePointer(std::move(eval_context), pointer_value, std::move(pointed_to), std::move(cb));
 }
 
-void EnsureResolveReference(fxl::RefPtr<SymbolDataProvider> data_provider,
-                            ExprValue value,
+void EnsureResolveReference(const fxl::RefPtr<EvalContext>& eval_context, ExprValue value,
                             std::function<void(const Err&, ExprValue)> cb) {
   Type* type = value.type();
   if (!type) {
@@ -87,7 +81,8 @@ void EnsureResolveReference(fxl::RefPtr<SymbolDataProvider> data_provider,
     return;
   }
 
-  const Type* concrete = type->GetConcreteType();  // Strip "const", etc.
+  // Strip "const", etc. and check type.
+  fxl::RefPtr<Type> concrete = eval_context->GetConcreteType(type);
   if (concrete->tag() != DwarfTag::kReferenceType &&
       concrete->tag() != DwarfTag::kRvalueReferenceType) {
     // Not a reference, nothing to do.
@@ -105,10 +100,30 @@ void EnsureResolveReference(fxl::RefPtr<SymbolDataProvider> data_provider,
   if (err.has_error()) {
     cb(err, ExprValue());
   } else {
-    ResolvePointer(std::move(data_provider), pointer_value,
-                   fxl::RefPtr<Type>(const_cast<Type*>(underlying_type)),
+    ResolvePointer(std::move(eval_context), pointer_value, RefPtrTo(underlying_type),
                    std::move(cb));
   }
+}
+
+Err GetPointedToType(const fxl::RefPtr<EvalContext>& eval_context, const Type* input,
+                     fxl::RefPtr<Type>* pointed_to) {
+  if (!input)
+    return Err("No type information.");
+
+  // Convert to a pointer. GetConcreteType() here is more theoretical since current C compilers
+  // won't forward-declare pointer types. But it's nice to be sure and this will also strip
+  // CV-qualifiers which we do need.
+  fxl::RefPtr<Type> input_concrete = eval_context->GetConcreteType(input);
+  const ModifiedType* mod_type = input_concrete->AsModifiedType();
+  if (!mod_type || mod_type->tag() != DwarfTag::kPointerType) {
+    return Err(fxl::StringPrintf("Attempting to dereference '%s' which is not a pointer.",
+                                 input->GetFullName().c_str()));
+  }
+
+  *pointed_to = fxl::RefPtr<Type>(const_cast<Type*>(mod_type->modified().Get()->AsType()));
+  if (!*pointed_to)
+    return Err("Missing pointer type info, please file a bug with a repro.");
+  return Err();
 }
 
 }  // namespace zxdb

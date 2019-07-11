@@ -80,7 +80,6 @@ source_set("testing") {
   testonly = true
 
   sources = [
-    "//src/lib/fxl",
     "fake_connection.cc",
     "fake_connection.h",
     "fake_local_address_delegate.cc",
@@ -90,6 +89,14 @@ source_set("testing") {
   public_deps = [
     ":hci",
   ]
+
+  deps = [
+    "//src/lib/fxl",
+  ]
+}
+
+config("allow_unused_capture") {
+  cflags_cc = [ "-Wno-unused-lambda-capture" ]
 }
 
 source_set("tests") {
@@ -115,4 +122,6 @@ source_set("tests") {
     "//src/connectivity/bluetooth/core/bt-host/testing",
     "//third_party/googletest:gtest",
   ]
+
+  configs += [ ":allow_unused_capture" ]
 }

@@ -2,24 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "mock_netstack.h"
+
+#include <lib/fit/defer.h>
 #include <netinet/icmp6.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
-
-#include <lib/fit/defer.h>
 #include <src/lib/fxl/logging.h>
 #include <zircon/device/ethernet.h>
-
-#include "mock_netstack.h"
 
 static constexpr size_t kMtu = 1500;
 static constexpr size_t kVmoSize = kMtu * 2;
 
-static constexpr uint8_t kHostMacAddress[ETH_ALEN] = {0x02, 0x1a, 0x11,
-                                                      0x00, 0x00, 0x00};
-static constexpr uint8_t kGuestMacAddress[ETH_ALEN] = {0x02, 0x1a, 0x11,
-                                                       0x00, 0x01, 0x00};
+static constexpr uint8_t kHostMacAddress[ETH_ALEN] = {0x02, 0x1a, 0x11, 0x00, 0x00, 0x00};
+static constexpr uint8_t kGuestMacAddress[ETH_ALEN] = {0x02, 0x1a, 0x11, 0x00, 0x01, 0x00};
 
 static constexpr uint8_t kHostIpv4Address[4] = {192, 168, 0, 1};
 static constexpr uint8_t kGuestIpv4Address[4] = {192, 168, 0, 10};
@@ -31,12 +28,10 @@ static constexpr uint16_t kTestPort = 4242;
 static constexpr uint32_t kMockNicId = 0;
 
 void MockNetstack::AddEthernetDevice(
-    std::string topological_path,
-    fuchsia::netstack::InterfaceConfig interfaceConfig,
+    std::string topological_path, fuchsia::netstack::InterfaceConfig interfaceConfig,
     fidl::InterfaceHandle<::fuchsia::hardware::ethernet::Device> device,
     AddEthernetDeviceCallback callback) {
-  auto deferred =
-      fit::defer([callback = std::move(callback)]() { callback(kMockNicId); });
+  auto deferred = fit::defer([callback = std::move(callback)]() { callback(kMockNicId); });
   eth_device_ = device.BindSync();
 
   zx_status_t status;
@@ -49,15 +44,14 @@ void MockNetstack::AddEthernetDevice(
   rx_ = std::move(fifos->rx);
   tx_ = std::move(fifos->tx);
 
-  status = zx::vmo::create(kVmoSize, ZX_VMO_NON_RESIZABLE, &vmo_);
+  status = zx::vmo::create(kVmoSize, 0, &vmo_);
   if (status != ZX_OK) {
     FXL_LOG(ERROR) << "Failed to create vmo: " << status;
     return;
   }
 
   zx::vmo vmo_dup;
-  status =
-      vmo_.duplicate(ZX_RIGHTS_IO | ZX_RIGHT_MAP | ZX_RIGHT_TRANSFER, &vmo_dup);
+  status = vmo_.duplicate(ZX_RIGHTS_IO | ZX_RIGHT_MAP | ZX_RIGHT_TRANSFER, &vmo_dup);
   if (status != ZX_OK) {
     FXL_LOG(ERROR) << "Failed to duplicate vmo: " << status;
     return;
@@ -70,8 +64,7 @@ void MockNetstack::AddEthernetDevice(
   }
 
   status = zx::vmar::root_self()->map(
-      0, vmo_, 0, kVmoSize,
-      ZX_VM_PERM_READ | ZX_VM_PERM_WRITE | ZX_VM_REQUIRE_NON_RESIZABLE,
+      0, vmo_, 0, kVmoSize, ZX_VM_PERM_READ | ZX_VM_PERM_WRITE | ZX_VM_REQUIRE_NON_RESIZABLE,
       &io_addr_);
   if (status != ZX_OK) {
     FXL_LOG(ERROR) << "Failed to map vmo: " << status;
@@ -96,10 +89,8 @@ void MockNetstack::AddEthernetDevice(
   }
 }
 
-void MockNetstack::SetInterfaceAddress(uint32_t nicid,
-                                       fuchsia::net::IpAddress addr,
-                                       uint8_t prefixLen,
-                                       SetInterfaceAddressCallback callback) {
+void MockNetstack::SetInterfaceAddress(uint32_t nicid, fuchsia::net::IpAddress addr,
+                                       uint8_t prefixLen, SetInterfaceAddressCallback callback) {
   fuchsia::netstack::NetErr err;
 
   if (nicid != kMockNicId) {
@@ -128,8 +119,7 @@ static uint16_t checksum(const void* _data, size_t len, uint16_t _sum) {
   return ~sum;
 }
 
-static size_t make_ip_header(uint8_t packet_type, size_t length,
-                             uint8_t* data) {
+static size_t make_ip_header(uint8_t packet_type, size_t length, uint8_t* data) {
   // First construct the ethernet header.
   ethhdr* eth = reinterpret_cast<ethhdr*>(data);
   memcpy(eth->h_dest, kGuestMacAddress, ETH_ALEN);
@@ -206,8 +196,8 @@ zx_status_t MockNetstack::SendPacket(void* packet, size_t length) const {
   }
 
   zx_signals_t pending = 0;
-  status = tx_.wait_one(ZX_FIFO_READABLE | ZX_FIFO_PEER_CLOSED,
-                        zx::deadline_after(kTestTimeout), &pending);
+  status = tx_.wait_one(ZX_FIFO_READABLE | ZX_FIFO_PEER_CLOSED, zx::deadline_after(kTestTimeout),
+                        &pending);
   if (status != ZX_OK) {
     return status;
   } else if (pending & ZX_SOCKET_PEER_CLOSED) {
@@ -225,8 +215,7 @@ zx_status_t MockNetstack::SendPacket(void* packet, size_t length) const {
   return ZX_OK;
 }
 
-zx_status_t MockNetstack::ReceivePacket(void* packet, size_t length,
-                                        size_t* actual) const {
+zx_status_t MockNetstack::ReceivePacket(void* packet, size_t length, size_t* actual) const {
   eth_fifo_entry_t entry;
 
   zx_signals_t pending = 0;

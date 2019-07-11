@@ -13,10 +13,10 @@ schemas = [
   "cc_source_library.json",
   "common.json",
   "dart_library.json",
+  "device_profile.json",
   "documentation.json",
   "fidl_library.json",
   "host_tool.json",
-  "image.json",
   "loadable_module.json",
   "manifest.json",
   "sysroot.json",
@@ -38,7 +38,7 @@ sdk_documentation("meta") {
 }
 
 source_set("schemas") {
-  sources = schemas
+  inputs = schemas
 }
 
 rustc_library("rust") {

@@ -6,13 +6,19 @@
 
 #include <hid/hid.h>
 
+#include <unordered_set>
+
 #include "garnet/lib/ui/gfx/displays/display_manager.h"
+#include "garnet/lib/ui/gfx/id.h"
 #include "lib/fidl/cpp/clone.h"
 #include "lib/gtest/test_loop_fixture.h"
 #include "lib/ui/input/cpp/formatting.h"
 #include "src/lib/fxl/logging.h"
 
 namespace lib_ui_input_tests {
+
+// Used to compare whether two values are nearly equal.
+constexpr float kEpsilon = 0.000001f;
 
 using InputCommand = fuchsia::ui::input::Command;
 using ScenicEvent = fuchsia::ui::scenic::Event;
@@ -26,6 +32,7 @@ using fuchsia::ui::input::PointerEventType;
 using fuchsia::ui::input::SendKeyboardInputCmd;
 using fuchsia::ui::input::SendPointerInputCmd;
 using fuchsia::ui::scenic::SessionListener;
+using scenic_impl::GlobalId;
 using scenic_impl::ResourceId;
 using scenic_impl::Scenic;
 using scenic_impl::gfx::DisplayManager;
@@ -42,6 +49,13 @@ void InputSystemTest::RequestToPresent(scenic::Session* session) {
   bool scene_presented = false;
   session->Present(/*presentation time*/ 0, [](auto) {});
   RunLoopFor(zx::msec(20));  // Schedule the render task.
+}
+
+std::string InputSystemTest::DumpScenes() {
+  std::ostringstream output;
+  std::unordered_set<GlobalId, GlobalId::Hash> visited_resources;
+  gfx_->engine()->DumpScenes(output, &visited_resources);
+  return output.str();
 }
 
 void InputSystemTest::TearDown() {
@@ -61,19 +75,17 @@ void InputSystemTest::InitializeScenic(Scenic* scenic) {
   display_manager->SetDefaultDisplayForTests(std::make_unique<TestDisplay>(
       /*id*/ 0, test_display_width_px(), test_display_height_px()));
   command_buffer_sequencer_ = std::make_unique<CommandBufferSequencer>();
-  gfx_ = scenic->RegisterSystem<GfxSystemForTest>(
-      std::move(display_manager), command_buffer_sequencer_.get());
+  gfx_ = scenic->RegisterSystem<GfxSystemForTest>(std::move(display_manager),
+                                                  command_buffer_sequencer_.get());
   input_ = scenic->RegisterSystem<InputSystem>(gfx_);
 }
 
 SessionWrapper::SessionWrapper(Scenic* scenic) {
   fuchsia::ui::scenic::SessionPtr session_ptr;
   fidl::InterfaceHandle<SessionListener> listener_handle;
-  fidl::InterfaceRequest<SessionListener> listener_request =
-      listener_handle.NewRequest();
+  fidl::InterfaceRequest<SessionListener> listener_request = listener_handle.NewRequest();
   scenic->CreateSession(session_ptr.NewRequest(), std::move(listener_handle));
-  session_ = std::make_unique<scenic::Session>(std::move(session_ptr),
-                                               std::move(listener_request));
+  session_ = std::make_unique<scenic::Session>(std::move(session_ptr), std::move(listener_request));
   root_node_ = std::make_unique<scenic::EntityNode>(session_.get());
 
   session_->set_event_handler([this](std::vector<ScenicEvent> events) {
@@ -98,15 +110,12 @@ void SessionWrapper::RunNow(
 }
 
 void SessionWrapper::ExamineEvents(
-    fit::function<void(const std::vector<InputEvent>& events)>
-        examine_events_callback) {
+    fit::function<void(const std::vector<InputEvent>& events)> examine_events_callback) {
   examine_events_callback(events_);
 }
 
-PointerCommandGenerator::PointerCommandGenerator(ResourceId compositor_id,
-                                                 uint32_t device_id,
-                                                 uint32_t pointer_id,
-                                                 PointerEventType type)
+PointerCommandGenerator::PointerCommandGenerator(ResourceId compositor_id, uint32_t device_id,
+                                                 uint32_t pointer_id, PointerEventType type)
     : compositor_id_(compositor_id) {
   blank_.device_id = device_id;
   blank_.pointer_id = pointer_id;
@@ -169,14 +178,12 @@ InputCommand PointerCommandGenerator::MakeInputCommand(PointerEvent event) {
   return input_cmd;
 }
 
-KeyboardCommandGenerator::KeyboardCommandGenerator(ResourceId compositor_id,
-                                                   uint32_t device_id)
+KeyboardCommandGenerator::KeyboardCommandGenerator(ResourceId compositor_id, uint32_t device_id)
     : compositor_id_(compositor_id) {
   blank_.device_id = device_id;
 }
 
-InputCommand KeyboardCommandGenerator::Pressed(uint32_t hid_usage,
-                                               uint32_t modifiers) {
+InputCommand KeyboardCommandGenerator::Pressed(uint32_t hid_usage, uint32_t modifiers) {
   KeyboardEvent event;
   fidl::Clone(blank_, &event);
   event.phase = KeyboardEventPhase::PRESSED;
@@ -185,8 +192,7 @@ InputCommand KeyboardCommandGenerator::Pressed(uint32_t hid_usage,
   return MakeInputCommand(event);
 }
 
-InputCommand KeyboardCommandGenerator::Released(uint32_t hid_usage,
-                                                uint32_t modifiers) {
+InputCommand KeyboardCommandGenerator::Released(uint32_t hid_usage, uint32_t modifiers) {
   KeyboardEvent event;
   fidl::Clone(blank_, &event);
   event.phase = KeyboardEventPhase::RELEASED;
@@ -195,8 +201,7 @@ InputCommand KeyboardCommandGenerator::Released(uint32_t hid_usage,
   return MakeInputCommand(event);
 }
 
-InputCommand KeyboardCommandGenerator::Cancelled(uint32_t hid_usage,
-                                                 uint32_t modifiers) {
+InputCommand KeyboardCommandGenerator::Cancelled(uint32_t hid_usage, uint32_t modifiers) {
   KeyboardEvent event;
   fidl::Clone(blank_, &event);
   event.phase = KeyboardEventPhase::CANCELLED;
@@ -205,8 +210,7 @@ InputCommand KeyboardCommandGenerator::Cancelled(uint32_t hid_usage,
   return MakeInputCommand(event);
 }
 
-InputCommand KeyboardCommandGenerator::Repeat(uint32_t hid_usage,
-                                              uint32_t modifiers) {
+InputCommand KeyboardCommandGenerator::Repeat(uint32_t hid_usage, uint32_t modifiers) {
   KeyboardEvent event;
   fidl::Clone(blank_, &event);
   event.phase = KeyboardEventPhase::REPEAT;
@@ -217,11 +221,10 @@ InputCommand KeyboardCommandGenerator::Repeat(uint32_t hid_usage,
 
 InputCommand KeyboardCommandGenerator::MakeInputCommand(KeyboardEvent event) {
   // Typically code point is inferred this same way by DeviceState.
-  event.code_point =
-      hid_map_key(event.hid_usage,
-                  event.modifiers & (fuchsia::ui::input::kModifierShift |
-                                     fuchsia::ui::input::kModifierCapsLock),
-                  qwerty_map);
+  event.code_point = hid_map_key(event.hid_usage,
+                                 event.modifiers & (fuchsia::ui::input::kModifierShift |
+                                                    fuchsia::ui::input::kModifierCapsLock),
+                                 qwerty_map);
 
   SendKeyboardInputCmd keyboard_cmd;
   keyboard_cmd.compositor_id = compositor_id_;
@@ -233,8 +236,8 @@ InputCommand KeyboardCommandGenerator::MakeInputCommand(KeyboardEvent event) {
   return input_cmd;
 }
 
-bool PointerMatches(const PointerEvent& event, uint32_t pointer_id,
-                    PointerEventPhase phase, float x, float y) {
+bool PointerMatches(const PointerEvent& event, uint32_t pointer_id, PointerEventPhase phase,
+                    float x, float y) {
   using fuchsia::ui::input::operator<<;
 
   if (event.pointer_id != pointer_id) {
@@ -245,11 +248,11 @@ bool PointerMatches(const PointerEvent& event, uint32_t pointer_id,
     FXL_LOG(ERROR) << "  Actual: " << event.phase;
     FXL_LOG(ERROR) << "Expected: " << phase;
     return false;
-  } else if (event.x != x) {
+  } else if (fabs(event.x - x) > kEpsilon) {
     FXL_LOG(ERROR) << "  Actual: " << event.x;
     FXL_LOG(ERROR) << "Expected: " << x;
     return false;
-  } else if (event.y != y) {
+  } else if (fabs(event.y - y) > kEpsilon) {
     FXL_LOG(ERROR) << "  Actual: " << event.y;
     FXL_LOG(ERROR) << "Expected: " << y;
     return false;

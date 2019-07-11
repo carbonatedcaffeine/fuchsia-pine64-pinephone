@@ -11,12 +11,23 @@
 #include <map>
 #include <string>
 
-#include <fuchsia/tracelink/cpp/fidl.h>
+#include <fuchsia/tracing/provider/cpp/fidl.h>
 
 namespace tracing {
 
 struct TraceProviderBundle {
-  fuchsia::tracelink::ProviderPtr provider;
+  TraceProviderBundle(fuchsia::tracing::provider::ProviderPtr provider,
+                      uint32_t id, zx_koid_t pid, const std::string& name);
+  ~TraceProviderBundle() = default;
+
+  TraceProviderBundle(const TraceProviderBundle& value) = delete;
+  TraceProviderBundle& operator=(const TraceProviderBundle&) = delete;
+
+  TraceProviderBundle(const TraceProviderBundle&& value) = delete;
+  TraceProviderBundle& operator=(const TraceProviderBundle&&) = delete;
+
+  fuchsia::tracing::provider::ProviderPtr provider;
+
   uint32_t id;
   zx_koid_t pid;
   const std::string name;

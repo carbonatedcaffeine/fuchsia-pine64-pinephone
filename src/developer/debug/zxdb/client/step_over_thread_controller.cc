@@ -11,15 +11,14 @@
 #include "src/developer/debug/zxdb/client/thread.h"
 #include "src/developer/debug/zxdb/common/address_ranges.h"
 #include "src/developer/debug/zxdb/common/err.h"
-#include "src/lib/fxl/logging.h"
 #include "src/developer/debug/zxdb/symbols/line_details.h"
 #include "src/developer/debug/zxdb/symbols/process_symbols.h"
+#include "src/lib/fxl/logging.h"
 
 namespace zxdb {
 
 StepOverThreadController::StepOverThreadController(StepMode mode)
-    : step_mode_(mode),
-      step_into_(std::make_unique<StepThreadController>(mode)) {
+    : step_mode_(mode), step_into_(std::make_unique<StepThreadController>(mode)) {
   FXL_DCHECK(mode != StepMode::kAddressRange);
 }
 
@@ -29,8 +28,7 @@ StepOverThreadController::StepOverThreadController(AddressRanges range)
 
 StepOverThreadController::~StepOverThreadController() = default;
 
-void StepOverThreadController::InitWithThread(
-    Thread* thread, std::function<void(const Err&)> cb) {
+void StepOverThreadController::InitWithThread(Thread* thread, std::function<void(const Err&)> cb) {
   set_thread(thread);
 
   if (thread->GetStack().empty()) {
@@ -41,7 +39,7 @@ void StepOverThreadController::InitWithThread(
   // Save the info for the frame we're stepping inside of for future possible
   // stepping out.
   Stack& stack = thread->GetStack();
-  frame_fingerprint_ = *stack.GetFrameFingerprint(0);
+  frame_fingerprint_ = stack.GetFrameFingerprint(0);
   if (step_mode_ == StepMode::kSourceLine) {
     // Always take the file/line from the frame rather than from LineDetails.
     // In the case of ambiguous inline locations, the LineDetails will contain
@@ -67,8 +65,7 @@ ThreadController::StopOp StepOverThreadController::OnThreadStop(
     const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) {
   if (finish_) {
     // Currently trying to step out of a sub-frame.
-    if (auto op = finish_->OnThreadStop(stop_type, hit_breakpoints);
-        op != kStopDone) {
+    if (auto op = finish_->OnThreadStop(stop_type, hit_breakpoints); op != kStopDone) {
       // Not done stepping out, keep working on it.
       Log("Still not done stepping out of sub-frame.");
       return op;
@@ -80,7 +77,7 @@ ThreadController::StopOp StepOverThreadController::OnThreadStop(
     finish_.reset();
   } else {
     if (auto op = step_into_->OnThreadStop(stop_type, {}); op != kStopDone) {
-      Log("Still in range after stepping out.");
+      Log("Still in range after stepping.");
       return op;
     }
   }
@@ -89,26 +86,24 @@ ThreadController::StopOp StepOverThreadController::OnThreadStop(
   // line as we started on and the user expects "step over" to keep going in
   // that case.
   Stack& stack = thread()->GetStack();
-  FrameFingerprint current_fingerprint =
-      *thread()->GetStack().GetFrameFingerprint(0);
-  if (step_mode_ == StepMode::kSourceLine &&
-      current_fingerprint == frame_fingerprint_ &&
-      file_line_ == stack[0]->GetLocation().file_line()) {
-    // Same stack frame and same line number, do "step into" again.
-    Log("Same line, doing a new StepController to keep going.");
-    step_into_ = std::make_unique<StepThreadController>(StepMode::kSourceLine);
+  FrameFingerprint current_fingerprint = thread()->GetStack().GetFrameFingerprint(0);
+  if (step_mode_ == StepMode::kSourceLine && current_fingerprint == frame_fingerprint_) {
+    // Same stack frame, do "step into" for the line again. This doesn't check
+    // the current line itself since there is some special handling for things
+    // like "line 0" which we keep encapsulated in the StepThreadController.
+    Log("Doing a new StepController to keep going.");
+    step_into_ = std::make_unique<StepThreadController>(file_line_);
     step_into_->InitWithThread(thread(), [](const Err&) {});
     // Pass no exception type or breakpoints because we just want the step
     // controller to evaluate the current position regardless of how we got
     // here.
-    if (auto op = step_into_->OnThreadStop(
-            debug_ipc::NotifyException::Type::kNone, {});
+    if (auto op = step_into_->OnThreadStop(debug_ipc::NotifyException::Type::kNone, {});
         op != kStopDone)
       return op;
 
     // The step controller may have tweaked the stack, recompute the current
     // fingerprint.
-    current_fingerprint = *thread()->GetStack().GetFrameFingerprint(0);
+    current_fingerprint = thread()->GetStack().GetFrameFingerprint(0);
   }
 
   // If we get here the thread is no longer in range but could be in a sub-

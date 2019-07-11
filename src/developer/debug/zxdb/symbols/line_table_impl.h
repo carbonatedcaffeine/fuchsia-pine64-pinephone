@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_LINE_TABLE_IMPL_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_LINE_TABLE_IMPL_H_
 
 #include "src/developer/debug/zxdb/symbols/line_table.h"
 
@@ -18,10 +19,8 @@ class LineTableImpl : public LineTable {
   // LineTable implementation.
   size_t GetNumFileNames() const override;
   const std::vector<llvm::DWARFDebugLine::Row>& GetRows() const override;
-  std::optional<std::string> GetFileNameByIndex(
-      uint64_t file_id) const override;
-  llvm::DWARFDie GetSubroutineForRow(
-      const llvm::DWARFDebugLine::Row& row) const override;
+  std::optional<std::string> GetFileNameByIndex(uint64_t file_id) const override;
+  llvm::DWARFDie GetSubroutineForRow(const llvm::DWARFDebugLine::Row& row) const override;
 
  private:
   llvm::DWARFUnit* unit_;
@@ -32,3 +31,5 @@ class LineTableImpl : public LineTable {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_LINE_TABLE_IMPL_H_

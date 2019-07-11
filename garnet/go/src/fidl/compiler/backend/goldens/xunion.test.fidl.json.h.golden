@@ -41,7 +41,7 @@ class OlderSimpleUnion {
   }
   
   const int64_t& i() const { return i_; }
-  void set_i(int64_t value);
+  OlderSimpleUnion& set_i(int64_t value);
 
   bool is_f() const { return tag_ == Tag::kF; }
   
@@ -51,16 +51,13 @@ class OlderSimpleUnion {
   }
   
   const float& f() const { return f_; }
-  void set_f(float value);
+  OlderSimpleUnion& set_f(float value);
 
   Tag Which() const { return Tag(tag_); }
 
   friend ::fidl::Equality<::test::name::OlderSimpleUnion>;
 
  private:
-#ifdef FIDL_OPERATOR_EQUALS
-  friend bool operator==(const OlderSimpleUnion& lhs, const OlderSimpleUnion& rhs);
-#endif
   void Destroy();
   void EnsureStorageInitialized(::fidl_xunion_tag_t tag);
 
@@ -70,13 +67,6 @@ class OlderSimpleUnion {
     float f_;
   };
 };
-
-#ifdef FIDL_OPERATOR_EQUALS
-bool operator==(const OlderSimpleUnion& lhs, const OlderSimpleUnion& rhs);
-inline bool operator!=(const OlderSimpleUnion& lhs, const OlderSimpleUnion& rhs) {
-  return !(lhs == rhs);
-}
-#endif
 
 inline zx_status_t Clone(const ::test::name::OlderSimpleUnion& value,
                          ::test::name::OlderSimpleUnion* result) {
@@ -116,7 +106,7 @@ class NewerSimpleUnion {
   }
   
   const int64_t& i() const { return i_; }
-  void set_i(int64_t value);
+  NewerSimpleUnion& set_i(int64_t value);
 
   bool is_s() const { return tag_ == Tag::kS; }
   
@@ -126,7 +116,7 @@ class NewerSimpleUnion {
   }
   
   const ::std::string& s() const { return s_; }
-  void set_s(::std::string value);
+  NewerSimpleUnion& set_s(::std::string value);
 
   bool is_v() const { return tag_ == Tag::kV; }
   
@@ -136,16 +126,13 @@ class NewerSimpleUnion {
   }
   
   const ::std::vector<::std::string>& v() const { return v_; }
-  void set_v(::std::vector<::std::string> value);
+  NewerSimpleUnion& set_v(::std::vector<::std::string> value);
 
   Tag Which() const { return Tag(tag_); }
 
   friend ::fidl::Equality<::test::name::NewerSimpleUnion>;
 
  private:
-#ifdef FIDL_OPERATOR_EQUALS
-  friend bool operator==(const NewerSimpleUnion& lhs, const NewerSimpleUnion& rhs);
-#endif
   void Destroy();
   void EnsureStorageInitialized(::fidl_xunion_tag_t tag);
 
@@ -156,13 +143,6 @@ class NewerSimpleUnion {
     ::std::vector<::std::string> v_;
   };
 };
-
-#ifdef FIDL_OPERATOR_EQUALS
-bool operator==(const NewerSimpleUnion& lhs, const NewerSimpleUnion& rhs);
-inline bool operator!=(const NewerSimpleUnion& lhs, const NewerSimpleUnion& rhs) {
-  return !(lhs == rhs);
-}
-#endif
 
 inline zx_status_t Clone(const ::test::name::NewerSimpleUnion& value,
                          ::test::name::NewerSimpleUnion* result) {
@@ -193,12 +173,13 @@ struct CodingTraits<std::unique_ptr<::test::name::OlderSimpleUnion>> {
   }
 
   static void Decode(Decoder* decoder, std::unique_ptr<::test::name::OlderSimpleUnion>* value, size_t offset) {
-    value->reset(new ::test::name::OlderSimpleUnion);
-
     fidl_xunion_t* encoded = decoder->GetPtr<fidl_xunion_t>(offset);
     if (encoded->tag == 0) {
+      value->reset(nullptr);
       return;
     }
+
+    value->reset(new ::test::name::OlderSimpleUnion);
 
     ::test::name::OlderSimpleUnion::Decode(decoder, value->get(), offset);
   }
@@ -247,12 +228,13 @@ struct CodingTraits<std::unique_ptr<::test::name::NewerSimpleUnion>> {
   }
 
   static void Decode(Decoder* decoder, std::unique_ptr<::test::name::NewerSimpleUnion>* value, size_t offset) {
-    value->reset(new ::test::name::NewerSimpleUnion);
-
     fidl_xunion_t* encoded = decoder->GetPtr<fidl_xunion_t>(offset);
     if (encoded->tag == 0) {
+      value->reset(nullptr);
       return;
     }
+
+    value->reset(new ::test::name::NewerSimpleUnion);
 
     ::test::name::NewerSimpleUnion::Decode(decoder, value->get(), offset);
   }

@@ -19,15 +19,14 @@
 #include "src/lib/fxl/memory/weak_ptr.h"
 
 namespace ledger {
-class PageManager;
+class ActivePageManager;
 class MergeStrategy;
 
 // MergeResolver watches a page and resolves conflicts as they appear using the
 // provided merge strategy.
 class MergeResolver : public storage::CommitWatcher {
  public:
-  MergeResolver(fit::closure on_destroyed, Environment* environment,
-                storage::PageStorage* storage,
+  MergeResolver(fit::closure on_destroyed, Environment* environment, storage::PageStorage* storage,
                 std::unique_ptr<backoff::Backoff> backoff);
   ~MergeResolver() override;
 
@@ -45,12 +44,11 @@ class MergeResolver : public storage::CommitWatcher {
   // Changes the current merge strategy. Any pending merge will be cancelled.
   void SetMergeStrategy(std::unique_ptr<MergeStrategy> strategy);
 
-  void SetPageManager(PageManager* page_manager);
+  void SetActivePageManager(ActivePageManager* active_page_manager);
 
   // Adds an action to perform when all the pending conflicts are resolved
   // (once).
-  void RegisterNoConflictCallback(
-      fit::function<void(ConflictResolutionWaitStatus)> callback);
+  void RegisterNoConflictCallback(fit::function<void(ConflictResolutionWaitStatus)> callback);
 
  private:
   class MergeCandidates;
@@ -79,62 +77,54 @@ class MergeResolver : public storage::CommitWatcher {
   };
 
   // storage::CommitWatcher:
-  void OnNewCommits(
-      const std::vector<std::unique_ptr<const storage::Commit>>& commits,
-      storage::ChangeSource source) override;
+  void OnNewCommits(const std::vector<std::unique_ptr<const storage::Commit>>& commits,
+                    storage::ChangeSource source) override;
 
   void PostCheckConflicts(DelayedStatus delayed_status);
   void CheckConflicts(DelayedStatus delayed_status);
-  void ResolveConflicts(DelayedStatus delayed_status,
-                        std::unique_ptr<const storage::Commit> head1,
+  void ResolveConflicts(DelayedStatus delayed_status, std::unique_ptr<const storage::Commit> head1,
                         std::unique_ptr<const storage::Commit> head2);
 
   // Does recursive merging, stops when one commit has been produced.
-  void RecursiveMergeOneStep(
-      std::unique_ptr<const storage::Commit> left_commit,
-      std::unique_ptr<const storage::Commit> right_commit,
-      fit::closure on_successful_merge);
+  void RecursiveMergeOneStep(std::unique_ptr<const storage::Commit> left_commit,
+                             std::unique_ptr<const storage::Commit> right_commit,
+                             fit::closure on_successful_merge);
 
-  storage::Status MergeCommitsToContentOfLeftSync(
-      coroutine::CoroutineHandler* handler,
-      std::unique_ptr<const storage::Commit> left_commit,
-      std::unique_ptr<const storage::Commit> right_commit);
+  Status MergeCommitsToContentOfLeftSync(coroutine::CoroutineHandler* handler,
+                                         std::unique_ptr<const storage::Commit> left_commit,
+                                         std::unique_ptr<const storage::Commit> right_commit);
 
   // Synchronously gets the commit with id |commit_id|. Uses |candidate| if it
   // has the right id, otherwise fetches it from storage.
-  storage::Status GetCommitSync(
-      coroutine::CoroutineHandler* handler, storage::CommitIdView commit_id,
-      std::unique_ptr<const storage::Commit> candidate,
-      std::unique_ptr<const storage::Commit>* result);
+  Status GetCommitSync(coroutine::CoroutineHandler* handler, storage::CommitIdView commit_id,
+                       std::unique_ptr<const storage::Commit> candidate,
+                       std::unique_ptr<const storage::Commit>* result);
 
   // Requests the merges of |right_commit| and any element of |left_commits|,
   // and return them in |merges|.
-  storage::Status FindMergesSync(
-      coroutine::CoroutineHandler* handler,
-      const std::vector<storage::CommitId>& left_commits,
-      storage::CommitId right_commit, std::vector<storage::CommitId>* merges);
+  Status FindMergesSync(coroutine::CoroutineHandler* handler,
+                        const std::vector<storage::CommitId>& left_commits,
+                        storage::CommitId right_commit, std::vector<storage::CommitId>* merges);
 
   // Tries to build a merge of all commits in |ancestors|. Either the merge
   // already exists and is returned in |final_merge| or one intermediate merge
   // is constructed before returning.
-  storage::Status MergeSetSync(
-      coroutine::CoroutineHandler* handler,
-      std::vector<std::unique_ptr<const storage::Commit>> ancestors,
-      std::unique_ptr<const storage::Commit>* final_merge);
+  Status MergeSetSync(coroutine::CoroutineHandler* handler,
+                      std::vector<std::unique_ptr<const storage::Commit>> ancestors,
+                      std::unique_ptr<const storage::Commit>* final_merge);
 
   // Does one step of recursive merging: tries to merge |left| and |right| and
   // either produces a merge commit, or calls itself recursively to merge some
   // common ancestors. Assumes that |left| is older than |right| according to
   // |storage::Commit::TimestampOrdered|.
-  storage::Status RecursiveMergeSync(
-      coroutine::CoroutineHandler* handler,
-      std::unique_ptr<const storage::Commit> left,
-      std::unique_ptr<const storage::Commit> right);
+  Status RecursiveMergeSync(coroutine::CoroutineHandler* handler,
+                            std::unique_ptr<const storage::Commit> left,
+                            std::unique_ptr<const storage::Commit> right);
 
   coroutine::CoroutineService* coroutine_service_;
   storage::PageStorage* const storage_;
   std::unique_ptr<backoff::Backoff> backoff_;
-  PageManager* page_manager_ = nullptr;
+  ActivePageManager* active_page_manager_ = nullptr;
   std::unique_ptr<MergeStrategy> strategy_;
   std::unique_ptr<MergeStrategy> next_strategy_;
   bool has_next_strategy_ = false;
@@ -154,8 +144,7 @@ class MergeResolver : public storage::CommitWatcher {
   std::unique_ptr<MergeCandidates> merge_candidates_;
   fit::closure on_empty_callback_;
   fit::closure on_destroyed_;
-  std::vector<fit::function<void(ConflictResolutionWaitStatus)>>
-      no_conflict_callbacks_;
+  std::vector<fit::function<void(ConflictResolutionWaitStatus)>> no_conflict_callbacks_;
 
   // ScopedTaskRunner must be the last member of the class.
   callback::ScopedTaskRunner task_runner_;

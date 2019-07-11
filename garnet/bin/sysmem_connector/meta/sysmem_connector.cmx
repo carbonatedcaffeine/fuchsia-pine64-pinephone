@@ -7,7 +7,7 @@
             "class/sysmem"
         ],
         "services": [
-            "fuchsia.tracelink.Registry"
+            "fuchsia.tracing.provider.Registry"
         ]
     }
 }

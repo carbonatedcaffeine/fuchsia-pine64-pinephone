@@ -32,8 +32,7 @@ class JournalImpl : public Journal {
   class Token;
 
  public:
-  JournalImpl(Token token, ledger::Environment* environment,
-              PageStorageImpl* page_storage,
+  JournalImpl(Token token, ledger::Environment* environment, PageStorageImpl* page_storage,
               std::unique_ptr<const Commit> base);
   ~JournalImpl() override;
 
@@ -49,14 +48,13 @@ class JournalImpl : public Journal {
                                         std::unique_ptr<const Commit> other);
 
   // Commits the changes of this |Journal|. Trying to update entries or rollback
-  // will fail after a successful commit. The callback will be called with the
-  // returned status and:
+  // will fail after a successful commit. |commit| will contain:
   // - the new commit if a new commit object has been created.
   // - a null commit if the operation is a no-op.
-  // This Journal object should not be deleted before |callback| is called.
-  void Commit(
-      fit::function<void(Status, std::unique_ptr<const storage::Commit>)>
-          callback);
+  // This Journal object should not be deleted during the operation.
+  Status Commit(coroutine::CoroutineHandler* handler,
+                std::unique_ptr<const storage::Commit>* commit,
+                std::vector<ObjectIdentifier>* objects_to_sync);
 
   // Journal:
   void Put(convert::ExtendedStringView key, ObjectIdentifier object_identifier,
@@ -73,17 +71,17 @@ class JournalImpl : public Journal {
 
   // Creates a new commit. The commit parents are |parents|. The content of the
   // commit is built by executing |changes| over the content pointed by
-  // |root_identifier|.
-  void CreateCommitFromChanges(
-      std::vector<std::unique_ptr<const storage::Commit>> parents,
-      ObjectIdentifier root_identifier, std::vector<EntryChange> changes,
-      fit::function<void(Status, std::unique_ptr<const storage::Commit>)>
-          callback);
+  // |root_identifier|. |commit| will contain:
+  // - the new commit if a new commit object has been created.
+  // - a null commit if the operation is a no-op.
+  Status CreateCommitFromChanges(coroutine::CoroutineHandler* handler,
+                                 std::vector<std::unique_ptr<const storage::Commit>> parents,
+                                 ObjectIdentifier root_identifier, std::vector<EntryChange> changes,
+                                 std::unique_ptr<const storage::Commit>* commit,
+                                 std::vector<ObjectIdentifier>* objects_to_sync);
 
   void GetObjectsToSync(
-      fit::function<void(Status status,
-                         std::vector<ObjectIdentifier> objects_to_sync)>
-          callback);
+      fit::function<void(Status status, std::vector<ObjectIdentifier> objects_to_sync)> callback);
 
   ledger::Environment* const environment_;
   PageStorageImpl* const page_storage_;

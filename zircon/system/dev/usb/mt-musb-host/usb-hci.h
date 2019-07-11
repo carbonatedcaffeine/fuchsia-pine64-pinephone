@@ -9,14 +9,14 @@
 
 #include <array>
 #include <ddktl/device.h>
-#include <ddktl/pdev.h>
-#include <ddktl/protocol/usb/hci.h>
 #include <ddktl/protocol/usb/bus.h>
+#include <ddktl/protocol/usb/hci.h>
+#include <lib/device-protocol/pdev.h>
 #include <lib/mmio/mmio.h>
 #include <lib/zx/interrupt.h>
 #include <memory>
 #include <optional>
-#include <threads.h>
+#include <thread>
 
 namespace mt_usb_hci {
 
@@ -34,9 +34,12 @@ using DeviceType = ddk::Device<UsbHci, ddk::Unbindable>;
 // UsbHci provides the USB-HCI implementation.
 class UsbHci : public DeviceType, public ddk::UsbHciProtocol<UsbHci, ddk::base_protocol> {
 public:
-    explicit UsbHci(zx_device_t* parent)
+    explicit UsbHci(zx_device_t* parent, ddk::MmioBuffer&& usb_mmio, ddk::MmioBuffer&& phy_mmio,
+                    zx_handle_t irq)
         : DeviceType(parent),
-          pdev_(parent) {}
+          usb_mmio_(std::move(usb_mmio)),
+          phy_mmio_(std::move(phy_mmio)),
+          irq_(irq) {}
 
     ~UsbHci() = default;
 
@@ -44,7 +47,7 @@ public:
     UsbHci(UsbHci&&) = delete;
     UsbHci& operator=(UsbHci&&) = delete;
 
-    static zx_status_t Create(zx_device_t* parent);
+    static zx_status_t Create(void* ctx, zx_device_t* parent);
 
     // Device protocol implementation.
     void DdkUnbind();
@@ -68,18 +71,19 @@ public:
     zx_status_t UsbHciCancelAll(uint32_t device_id, uint8_t ep_address);
     size_t UsbHciGetRequestSize();
 
-private:
-    ddk::MmioBuffer* usb_mmio() { return &usb_mmio_.value(); }
-    ddk::MmioBuffer* phy_mmio() { return &phy_mmio_.value(); }
-    UsbRootHub* root_hub() { return static_cast<UsbRootHub*>(device_[kRootHubId].get()); }
-
+protected:
     // Initialize the USB HCI.
     zx_status_t Init();
+
+private:
+    ddk::MmioBuffer* usb_mmio() { return &usb_mmio_; }
+    ddk::MmioBuffer* phy_mmio() { return &phy_mmio_; }
+    UsbRootHub* root_hub() { return static_cast<UsbRootHub*>(device_[kRootHubId].get()); }
 
     // Initialize the given USB HCI sub-components.
     zx_status_t InitPhy();
     zx_status_t InitRootHub();
-    zx_status_t InitFifo();
+    zx_status_t InitEndpointControllers();
 
     // Start a USB session.
     void StartSession();
@@ -91,20 +95,17 @@ private:
     void HandleEndpoint(uint8_t ep);
     int IrqThread();
 
-    // The zircon DDK platform device.
-    ddk::PDev pdev_;
-
     // The usb register mmio.
-    std::optional<ddk::MmioBuffer> usb_mmio_;
+    ddk::MmioBuffer usb_mmio_;
 
     // The usb phy register mmio.
-    std::optional<ddk::MmioBuffer> phy_mmio_;
+    ddk::MmioBuffer phy_mmio_;
 
     // The system USB-common interrupt.  See MUSBMHDRC section 13.2.
     zx::interrupt irq_;
 
     // An async. thread responding to USB-common interrupt events.
-    thrd_t irq_thread_;
+    std::thread irq_thread_;
 
     // The USB-bus device, used to announce new physical devices to the upper USB stack.
     ddk::UsbBusInterfaceProtocolClient bus_;
@@ -113,6 +114,10 @@ private:
     // reserved and should not be used.  Additionally, device_[128] is reserved for the logical usb
     // root-hub device.
     std::array<std::unique_ptr<UsbDevice>, kMaxDevices> device_;
+
+    // The count of supported RX/TX endpoints in the design.
+    int rx_ep_count_;
+    int tx_ep_count_;
 };
 
 } // namespace mt_usb_hci

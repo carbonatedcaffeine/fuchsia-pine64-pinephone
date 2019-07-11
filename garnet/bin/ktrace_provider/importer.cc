@@ -6,11 +6,11 @@
 
 #include <fbl/algorithm.h>
 #include <fbl/string_printf.h>
+#include <src/lib/fxl/logging.h>
+#include <src/lib/fxl/time/time_point.h>
 #include <zircon/syscalls.h>
 
 #include "garnet/bin/ktrace_provider/reader.h"
-#include "src/lib/fxl/logging.h"
-#include "src/lib/fxl/time/time_point.h"
 
 namespace ktrace_provider {
 namespace {
@@ -18,6 +18,20 @@ namespace {
 constexpr uint64_t ToUInt64(uint32_t lo, uint32_t hi) {
   return (static_cast<uint64_t>(hi) << 32) | lo;
 }
+
+// Note: Even through priority inheritance chain events are instantaneous, we
+// need to make them into durations in order to have them link-able with flow.
+// We fudge this for now by making them very short duration events.
+//
+// TODO(PT-152): Use the appropriate async event when ready.
+constexpr trace_ticks_t kInheritPriorityDurationWidth = 50;
+constexpr trace_ticks_t kInheritPriorityFlowOffset = 10;
+
+// Synthetic width for the futex events.
+constexpr trace_ticks_t kFutexOpPriorityDurationWidth = 50;
+
+// Synthetic width for the kernel mutex events.
+constexpr trace_ticks_t kKernelMutexOpPriorityDurationWidth = 50;
 
 // The kernel reports different thread state values through ktrace.
 // These values must line up with those in "kernel/include/kernel/thread.h".
@@ -74,6 +88,36 @@ Importer::Importer(trace_context_t* context)
       exit_address_name_ref_(MAKE_STRING("exit_address")),
       arg0_name_ref_(MAKE_STRING("arg0")),
       arg1_name_ref_(MAKE_STRING("arg1")),
+      // Priority inheritance related strings.
+      inherit_prio_name_ref_(MAKE_STRING("inherit_prio")),
+      inherit_prio_old_ip_name_ref_(MAKE_STRING("old_inherited_prio")),
+      inherit_prio_new_ip_name_ref_(MAKE_STRING("new_inherited_prio")),
+      inherit_prio_old_ep_name_ref_(MAKE_STRING("old_effective_prio")),
+      inherit_prio_new_ep_name_ref_(MAKE_STRING("new_effective_prio")),
+      // Futex operation related strings
+      futex_wait_name_ref_(MAKE_STRING("futex_wait")),
+      futex_woke_name_ref_(MAKE_STRING("Thread_woke_from_futex_wait")),
+      futex_wake_name_ref_(MAKE_STRING("futex_wake")),
+      futex_requeue_name_ref_(MAKE_STRING("futex_requeue")),
+      futex_id_name_ref_(MAKE_STRING("futex_id")),
+      futex_owner_name_ref_(MAKE_STRING("new_owner_TID")),
+      futex_wait_res_name_ref_(MAKE_STRING("wait_result")),
+      futex_count_name_ref_(MAKE_STRING("count")),
+      futex_was_requeue_name_ref_(MAKE_STRING("was_requeue")),
+      futex_was_active_name_ref_(MAKE_STRING("futex_was_active")),
+      // Kernel Mutex operation related strings
+      kernel_mutex_acquire_name_ref_(MAKE_STRING("kernel_mutex_acquire")),
+      kernel_mutex_block_name_ref_(MAKE_STRING("kernel_mutex_block")),
+      kernel_mutex_release_name_ref_(MAKE_STRING("kernel_mutex_release")),
+      kernel_mutex_mutex_id_name_ref_(MAKE_STRING("mutex_id")),
+      kernel_mutex_tid_name_ref_(MAKE_STRING("tid")),
+      kernel_mutex_tid_type_ref_(MAKE_STRING("tid_type")),
+      kernel_mutex_tid_type_user_ref_(MAKE_STRING("user_mode")),
+      kernel_mutex_tid_type_kernel_ref_(MAKE_STRING("kernel_mode")),
+      kernel_mutex_tid_type_none_ref_(MAKE_STRING("none")),
+      kernel_mutex_waiter_count_name_ref_(MAKE_STRING("waiter_count")),
+      // misc strings
+      misc_unknown_name_ref_(MAKE_STRING("unknown")),
       kUnknownThreadRef(trace_make_unknown_thread_ref()) {}
 
 #undef MAKE_STRING
@@ -89,7 +133,7 @@ bool Importer::Import(Reader& reader) {
   while (true) {
     if (auto record = reader.ReadNextRecord()) {
       if (!ImportRecord(record, KTRACE_LEN(record->tag))) {
-        FXL_VLOG(2) << "Skipped ktrace record, tag=0x" << std::hex
+        FXL_VLOG(5) << "Skipped ktrace record, tag=0x" << std::hex
                     << record->tag;
       }
     } else {
@@ -150,7 +194,7 @@ bool Importer::ImportRecord(const ktrace_header_t* record, size_t record_size) {
 
 bool Importer::ImportBasicRecord(const ktrace_header_t* record,
                                  const TagInfo& tag_info) {
-  FXL_VLOG(2) << "BASIC: tag=0x" << std::hex << record->tag << " ("
+  FXL_VLOG(5) << "BASIC: tag=0x" << std::hex << record->tag << " ("
               << tag_info.name << "), tid=" << std::dec << record->tid
               << ", timestamp=" << record->ts;
 
@@ -172,13 +216,14 @@ bool Importer::ImportBasicRecord(const ktrace_header_t* record,
 
 bool Importer::ImportQuadRecord(const ktrace_rec_32b_t* record,
                                 const TagInfo& tag_info) {
-  FXL_VLOG(2) << "QUAD: tag=0x" << std::hex << record->tag << " ("
+  FXL_VLOG(5) << "QUAD: tag=0x" << std::hex << record->tag << " ("
               << tag_info.name << "), tid=" << std::dec << record->tid
               << ", timestamp=" << record->ts << ", a=0x" << std::hex
               << record->a << ", b=0x" << record->b << ", c=0x" << record->c
               << ", d=0x" << record->d;
 
-  switch (KTRACE_EVENT(record->tag)) {
+  const uint32_t event_id = KTRACE_EVENT(record->tag);
+  switch (event_id) {
     case KTRACE_EVENT(TAG_VERSION):
       version_ = record->a;
       return true;
@@ -210,6 +255,80 @@ bool Importer::ImportQuadRecord(const ktrace_rec_32b_t* record,
                                  outgoing_thread_priority,
                                  incoming_thread_priority, record->tid,
                                  record->c, record->a, record->d);
+    }
+
+    case KTRACE_EVENT(TAG_INHERIT_PRIORITY_START):
+      return HandleInheritPriorityStart(
+          record->ts, record->a,
+          static_cast<trace_cpu_number_t>(record->d & 0xFF));
+
+    case KTRACE_EVENT(TAG_INHERIT_PRIORITY): {
+      int old_effective_prio = static_cast<int8_t>(record->c & 0xFF);
+      int new_effective_prio = static_cast<int8_t>((record->c >> 8) & 0xFF);
+      int old_inherited_prio = static_cast<int8_t>((record->c >> 16) & 0xFF);
+      int new_inherited_prio = static_cast<int8_t>((record->c >> 24) & 0xFF);
+
+      return HandleInheritPriority(record->ts, record->a, record->b, record->d,
+                                   old_inherited_prio, new_inherited_prio,
+                                   old_effective_prio, new_effective_prio);
+    }
+    case KTRACE_EVENT(TAG_FUTEX_WAIT): {
+      auto cpu = static_cast<trace_cpu_number_t>(record->d &
+                                                 KTRACE_FLAGS_FUTEX_CPUID_MASK);
+      uint32_t owner_tid = record->c;
+      uint64_t futex_id = (static_cast<uint64_t>(record->b) << 32) | record->a;
+
+      return HandleFutexWait(record->ts, futex_id, owner_tid, cpu);
+    }
+    case KTRACE_EVENT(TAG_FUTEX_WOKE): {
+      auto cpu = static_cast<trace_cpu_number_t>(record->d &
+                                                 KTRACE_FLAGS_FUTEX_CPUID_MASK);
+      uint64_t futex_id = (static_cast<uint64_t>(record->b) << 32) | record->a;
+      zx_status_t wait_result = static_cast<zx_status_t>(record->c);
+
+      return HandleFutexWoke(record->ts, futex_id, wait_result, cpu);
+    }
+    case KTRACE_EVENT(TAG_FUTEX_WAKE): {
+      uint64_t futex_id = (static_cast<uint64_t>(record->b) << 32) | record->a;
+      uint32_t owner_tid = record->c;
+      auto cpu = static_cast<trace_cpu_number_t>(record->d &
+                                                 KTRACE_FLAGS_FUTEX_CPUID_MASK);
+      uint32_t count = (record->d >> KTRACE_FLAGS_FUTEX_COUNT_SHIFT) &
+                       KTRACE_FLAGS_FUTEX_COUNT_MASK;
+      uint32_t flags = (record->d & KTRACE_FLAGS_FUTEX_FLAGS_MASK);
+
+      if (count == KTRACE_FLAGS_FUTEX_UNBOUND_COUNT_VAL) {
+        count = std::numeric_limits<uint32_t>::max();
+      }
+
+      return HandleFutexWake(record->ts, futex_id, owner_tid, count, flags,
+                             cpu);
+    }
+    case KTRACE_EVENT(TAG_FUTEX_REQUEUE): {
+      uint64_t futex_id = (static_cast<uint64_t>(record->b) << 32) | record->a;
+      uint32_t owner_tid = record->c;
+      auto cpu = static_cast<trace_cpu_number_t>(record->d &
+                                                 KTRACE_FLAGS_FUTEX_CPUID_MASK);
+      uint32_t count = (record->d >> KTRACE_FLAGS_FUTEX_COUNT_SHIFT) &
+                       KTRACE_FLAGS_FUTEX_COUNT_MASK;
+      uint32_t flags = (record->d & KTRACE_FLAGS_FUTEX_FLAGS_MASK);
+
+      if (count == KTRACE_FLAGS_FUTEX_UNBOUND_COUNT_VAL) {
+        count = std::numeric_limits<uint32_t>::max();
+      }
+
+      return HandleFutexRequeue(record->ts, futex_id, owner_tid, count, flags,
+                                cpu);
+    }
+    case KTRACE_EVENT(TAG_KERNEL_MUTEX_ACQUIRE):
+    case KTRACE_EVENT(TAG_KERNEL_MUTEX_RELEASE):
+    case KTRACE_EVENT(TAG_KERNEL_MUTEX_BLOCK): {
+      auto cpu = static_cast<trace_cpu_number_t>(
+          record->d & KTRACE_FLAGS_KERNEL_MUTEX_CPUID_MASK);
+      uint32_t flags = (record->d & KTRACE_FLAGS_KERNEL_MUTEX_FLAGS_MASK);
+
+      return HandleKernelMutexEvent(record->ts, event_id, record->a, record->b,
+                                    record->c, flags, cpu);
     }
     case KTRACE_EVENT(TAG_OBJECT_DELETE):
       return HandleObjectDelete(record->ts, record->tid, record->a);
@@ -266,7 +385,7 @@ bool Importer::ImportNameRecord(const ktrace_rec_name_t* record,
                                 const TagInfo& tag_info) {
   fbl::StringPiece name(record->name,
                         strnlen(record->name, ZX_MAX_NAME_LEN - 1));
-  FXL_VLOG(2) << "NAME: tag=0x" << std::hex << record->tag << " ("
+  FXL_VLOG(5) << "NAME: tag=0x" << std::hex << record->tag << " ("
               << tag_info.name << "), id=0x" << record->id << ", arg=0x"
               << record->arg << ", name='" << fbl::String(name).c_str() << "'";
 
@@ -304,7 +423,7 @@ bool Importer::ImportProbeRecord(const ktrace_header_t* record,
   if (record_size == 24) {
     const auto arg0 = reinterpret_cast<const uint32_t*>(record + 1)[0];
     const auto arg1 = reinterpret_cast<const uint32_t*>(record + 1)[1];
-    FXL_VLOG(2) << "PROBE: tag=0x" << std::hex << record->tag
+    FXL_VLOG(5) << "PROBE: tag=0x" << std::hex << record->tag
                 << ", event_name_id=0x" << event_name_id << ", tid=" << std::dec
                 << record->tid << ", ts=" << record->ts << ", arg0=0x"
                 << std::hex << arg0 << ", arg1=0x" << arg1;
@@ -313,7 +432,7 @@ bool Importer::ImportProbeRecord(const ktrace_header_t* record,
   } else if (record_size == 32) {
     const auto arg0 = reinterpret_cast<const uint64_t*>(record + 1)[0];
     const auto arg1 = reinterpret_cast<const uint64_t*>(record + 1)[1];
-    FXL_VLOG(2) << "PROBE: tag=0x" << std::hex << record->tag
+    FXL_VLOG(5) << "PROBE: tag=0x" << std::hex << record->tag
                 << ", event_name_id=0x" << event_name_id << ", tid=" << std::dec
                 << record->tid << ", ts=" << record->ts << ", arg0=0x"
                 << std::hex << arg0 << ", arg1=0x" << arg1;
@@ -321,7 +440,7 @@ bool Importer::ImportProbeRecord(const ktrace_header_t* record,
                        arg1);
   }
 
-  FXL_VLOG(2) << "PROBE: tag=0x" << std::hex << record->tag
+  FXL_VLOG(5) << "PROBE: tag=0x" << std::hex << record->tag
               << ", event_name_id=0x" << event_name_id << ", tid=" << std::dec
               << record->tid << ", ts=" << record->ts;
   return HandleProbe(record->ts, record->tid, event_name_id, cpu_trace);
@@ -394,7 +513,7 @@ bool Importer::ImportFlowRecord(const ktrace_header_t* record,
 
 bool Importer::ImportUnknownRecord(const ktrace_header_t* record,
                                    size_t record_size) {
-  FXL_VLOG(2) << "UNKNOWN: tag=0x" << std::hex << record->tag
+  FXL_VLOG(5) << "UNKNOWN: tag=0x" << std::hex << record->tag
               << ", size=" << std::dec << record_size;
   return false;
 }
@@ -565,6 +684,205 @@ bool Importer::HandleContextSwitch(
         &outgoing_thread_ref, &incoming_thread_ref, outgoing_thread_priority,
         incoming_thread_priority);
   }
+  return true;
+}
+
+bool Importer::HandleInheritPriorityStart(trace_ticks_t event_time, uint32_t id,
+                                          trace_cpu_number_t cpu_number) {
+  trace_thread_ref_t thread_ref = GetCpuCurrentThreadRef(cpu_number);
+
+  const trace_ticks_t start_time = event_time - kInheritPriorityDurationWidth;
+  const trace_ticks_t end_time = event_time;
+  const trace_ticks_t flow_time = event_time - kInheritPriorityFlowOffset;
+
+  trace_context_write_duration_event_record(
+      context_, start_time, end_time, &thread_ref, &sched_category_ref_,
+      &inherit_prio_name_ref_, nullptr, 0);
+
+  trace_context_write_flow_begin_event_record(
+      context_, flow_time, &thread_ref, &sched_category_ref_,
+      &inherit_prio_name_ref_, id, nullptr, 0);
+
+  return true;
+}
+
+bool Importer::HandleInheritPriority(trace_ticks_t event_time, uint32_t id,
+                                     uint32_t tid, uint32_t flags,
+                                     int old_inherited_prio,
+                                     int new_inherited_prio,
+                                     int old_effective_prio,
+                                     int new_effective_prio) {
+  trace_thread_ref_t thread_ref =
+      ((flags & KTRACE_FLAGS_INHERIT_PRIORITY_KERNEL_TID) != 0)
+          ? GetKernelThreadRef(tid)
+          : GetThreadRef(tid);
+
+  trace_arg_t args[] = {
+      trace_make_arg(inherit_prio_old_ip_name_ref_,
+                     trace_make_int32_arg_value(old_inherited_prio)),
+      trace_make_arg(inherit_prio_new_ip_name_ref_,
+                     trace_make_int32_arg_value(new_inherited_prio)),
+      trace_make_arg(inherit_prio_old_ep_name_ref_,
+                     trace_make_int32_arg_value(old_effective_prio)),
+      trace_make_arg(inherit_prio_new_ep_name_ref_,
+                     trace_make_int32_arg_value(new_effective_prio)),
+  };
+
+  const trace_ticks_t start_time = event_time;
+  const trace_ticks_t end_time = event_time + kInheritPriorityDurationWidth;
+  const trace_ticks_t flow_time = event_time + kInheritPriorityFlowOffset;
+
+  trace_context_write_duration_event_record(
+      context_, start_time, end_time, &thread_ref, &sched_category_ref_,
+      &inherit_prio_name_ref_, args, fbl::count_of(args));
+
+  auto trace_thunk = ((flags & KTRACE_FLAGS_INHERIT_PRIORITY_FINAL_EVT) != 0)
+                         ? trace_context_write_flow_end_event_record
+                         : trace_context_write_flow_step_event_record;
+
+  trace_thunk(context_, flow_time, &thread_ref, &sched_category_ref_,
+              &inherit_prio_name_ref_, id, nullptr, 0);
+
+  return true;
+}
+
+bool Importer::HandleFutexWait(trace_ticks_t event_time, uint64_t futex_id,
+                               uint32_t new_owner_tid,
+                               trace_cpu_number_t cpu_number) {
+  trace_thread_ref_t thread_ref = GetCpuCurrentThreadRef(cpu_number);
+  trace_arg_t args[] = {
+      trace_make_arg(futex_id_name_ref_, trace_make_uint64_arg_value(futex_id)),
+      trace_make_arg(futex_owner_name_ref_,
+                     trace_make_uint32_arg_value(new_owner_tid)),
+  };
+
+  const trace_ticks_t end_time = event_time + kFutexOpPriorityDurationWidth;
+
+  trace_context_write_duration_event_record(
+      context_, event_time, end_time, &thread_ref, &sched_category_ref_,
+      &futex_wait_name_ref_, args, fbl::count_of(args));
+
+  return true;
+}
+
+bool Importer::HandleFutexWoke(trace_ticks_t event_time, uint64_t futex_id,
+                               zx_status_t wait_result,
+                               trace_cpu_number_t cpu_number) {
+  trace_thread_ref_t thread_ref = GetCpuCurrentThreadRef(cpu_number);
+  trace_arg_t args[] = {
+      trace_make_arg(futex_id_name_ref_, trace_make_uint64_arg_value(futex_id)),
+      trace_make_arg(futex_wait_res_name_ref_,
+                     trace_make_int32_arg_value(wait_result)),
+  };
+
+  const trace_ticks_t end_time = event_time + kFutexOpPriorityDurationWidth;
+
+  trace_context_write_duration_event_record(
+      context_, event_time, end_time, &thread_ref, &sched_category_ref_,
+      &futex_woke_name_ref_, args, fbl::count_of(args));
+
+  return true;
+}
+
+bool Importer::HandleFutexWake(trace_ticks_t event_time, uint64_t futex_id,
+                               uint32_t new_owner_tid, uint32_t count,
+                               uint32_t flags, trace_cpu_number_t cpu_number) {
+  trace_thread_ref_t thread_ref = GetCpuCurrentThreadRef(cpu_number);
+  const bool was_requeue = (flags & KTRACE_FLAGS_FUTEX_WAS_REQUEUE_FLAG) != 0;
+  const bool was_active = (flags & KTRACE_FLAGS_FUTEX_WAS_ACTIVE_FLAG) != 0;
+
+  trace_arg_t args[] = {
+      trace_make_arg(futex_id_name_ref_, trace_make_uint64_arg_value(futex_id)),
+      trace_make_arg(futex_owner_name_ref_,
+                     trace_make_uint32_arg_value(new_owner_tid)),
+      trace_make_arg(futex_count_name_ref_, trace_make_uint32_arg_value(count)),
+      trace_make_arg(futex_was_requeue_name_ref_,
+                     trace_make_bool_arg_value(was_requeue)),
+      trace_make_arg(futex_was_active_name_ref_,
+                     trace_make_bool_arg_value(was_active)),
+  };
+
+  const trace_ticks_t end_time = event_time + kFutexOpPriorityDurationWidth;
+
+  trace_context_write_duration_event_record(
+      context_, event_time, end_time, &thread_ref, &sched_category_ref_,
+      &futex_wake_name_ref_, args, fbl::count_of(args));
+
+  return true;
+}
+
+bool Importer::HandleFutexRequeue(trace_ticks_t event_time, uint64_t futex_id,
+                                  uint32_t new_owner_tid, uint32_t count,
+                                  uint32_t flags,
+                                  trace_cpu_number_t cpu_number) {
+  trace_thread_ref_t thread_ref = GetCpuCurrentThreadRef(cpu_number);
+  const bool was_active = (flags & KTRACE_FLAGS_FUTEX_WAS_ACTIVE_FLAG) != 0;
+
+  trace_arg_t args[] = {
+      trace_make_arg(futex_id_name_ref_, trace_make_uint64_arg_value(futex_id)),
+      trace_make_arg(futex_owner_name_ref_,
+                     trace_make_uint32_arg_value(new_owner_tid)),
+      trace_make_arg(futex_count_name_ref_, trace_make_uint32_arg_value(count)),
+      trace_make_arg(futex_was_active_name_ref_,
+                     trace_make_bool_arg_value(was_active)),
+  };
+
+  const trace_ticks_t end_time = event_time + kFutexOpPriorityDurationWidth;
+
+  trace_context_write_duration_event_record(
+      context_, event_time, end_time, &thread_ref, &sched_category_ref_,
+      &futex_requeue_name_ref_, args, fbl::count_of(args));
+
+  return true;
+}
+
+bool Importer::HandleKernelMutexEvent(trace_ticks_t event_time,
+                                      uint32_t which_event, uint32_t mutex_id,
+                                      uint32_t tid, uint32_t waiter_count,
+                                      uint32_t flags,
+                                      trace_cpu_number_t cpu_number) {
+  trace_thread_ref_t thread_ref = GetCpuCurrentThreadRef(cpu_number);
+  auto tid_type = trace_make_string_arg_value(kernel_mutex_tid_type_none_ref_);
+  if (tid != 0) {
+    tid_type =
+        (flags & KTRACE_FLAGS_KERNEL_MUTEX_USER_MODE_TID)
+            ? trace_make_string_arg_value(kernel_mutex_tid_type_user_ref_)
+            : trace_make_string_arg_value(kernel_mutex_tid_type_kernel_ref_);
+  }
+
+  trace_arg_t args[] = {
+      trace_make_arg(kernel_mutex_mutex_id_name_ref_,
+                     trace_make_uint32_arg_value(mutex_id)),
+      trace_make_arg(kernel_mutex_tid_name_ref_,
+                     trace_make_uint32_arg_value(tid)),
+      trace_make_arg(kernel_mutex_tid_type_ref_, tid_type),
+      trace_make_arg(kernel_mutex_waiter_count_name_ref_,
+                     trace_make_uint32_arg_value(waiter_count)),
+  };
+
+  const trace_ticks_t end_time =
+      event_time + kKernelMutexOpPriorityDurationWidth;
+
+  const trace_string_ref_t* event_name = nullptr;
+  switch (which_event) {
+    case KTRACE_EVENT(TAG_KERNEL_MUTEX_ACQUIRE):
+      event_name = &kernel_mutex_acquire_name_ref_;
+      break;
+    case KTRACE_EVENT(TAG_KERNEL_MUTEX_RELEASE):
+      event_name = &kernel_mutex_release_name_ref_;
+      break;
+    case KTRACE_EVENT(TAG_KERNEL_MUTEX_BLOCK):
+      event_name = &kernel_mutex_block_name_ref_;
+      break;
+    default:
+      event_name = &misc_unknown_name_ref_;
+      break;
+  }
+
+  trace_context_write_duration_event_record(
+      context_, event_time, end_time, &thread_ref, &sched_category_ref_,
+      event_name, args, fbl::count_of(args));
+
   return true;
 }
 

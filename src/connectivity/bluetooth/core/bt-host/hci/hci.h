@@ -186,7 +186,6 @@ constexpr OpCode kDisconnect = LinkControlOpCode(0x0006);
 
 struct DisconnectCommandParams {
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -247,7 +246,7 @@ struct RejectConnectionRequestCommandParams {
 // Controller to indicate that this command has been completed. Instead, the
 // Connection Complete event will indicate that this command has been completed.
 
-// ====================================================
+// ==============================================
 // Link Key Request Reply Command (v1.1) (BR/EDR)
 constexpr OpCode kLinkKeyRequestReply = LinkControlOpCode(0x000B);
 
@@ -267,7 +266,7 @@ struct LinkKeyRequestReplyReturnParams {
   DeviceAddressBytes bd_addr;
 } __PACKED;
 
-// =============================================================
+// =======================================================
 // Link Key Request Negative Reply Command (v1.1) (BR/EDR)
 constexpr OpCode kLinkKeyRequestNegativeReply = LinkControlOpCode(0x000C);
 
@@ -283,6 +282,43 @@ struct LinkKeyRequestNegativeReplyReturnParams {
   // BD_ADDR of the device whose Link Key Request was denied.
   DeviceAddressBytes bd_addr;
 } __PACKED;
+
+// ================================================
+// Authentication Requested Command (v1.1) (BR/EDR)
+constexpr OpCode kAuthenticationRequested = LinkControlOpCode(0x0011);
+
+struct AuthenticationRequestedCommandParams {
+  // Connection_Handle (only the lower 12-bits are meaningful).
+  //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
+  // Must be the handle of a connected ACL-U logical link.
+  ConnectionHandle connection_handle;
+} __PACKED;
+
+// NOTE on ReturnParams: No Command Complete event will be sent by the
+// Controller to indicate that this command has been completed. Instead, the
+// Authentication Complete event will indicate that this command has been
+// completed.
+
+// =================================================
+// Set Connection Encryption Command (v1.1) (BR/EDR)
+constexpr OpCode kiSetConnectionEncryption = LinkControlOpCode(0x0013);
+
+struct SetConnectionEncryptionCommandParams {
+  // Connection_Handle (only the lower 12-bits are meaningful).
+  //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
+  // Must be the handle of a connected ACL-U logical link.
+  ConnectionHandle connection_handle;
+
+  // Whether Link level encryption should be turned on or off
+  // Valid values are:
+  // 0x00 - Turn Link Level Encryption OFF
+  // 0x01 - Turn Link Level Encryption ON
+  uint8_t encryption_enable;
+} __PACKED;
+
+// NOTE on ReturnParams: No Command Complete event will be sent by the
+// Controller to indicate that this command has been completed. Instead, the
+// Encryption Change event will indicate that this command has been completed.
 
 // ============================================================
 // Read Remote Version Information Command (v1.1) (BR/EDR & LE)
@@ -353,7 +389,6 @@ constexpr OpCode kReadRemoteVersionInfo = LinkControlOpCode(0x001D);
 
 struct ReadRemoteVersionInfoCommandParams {
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -394,13 +429,6 @@ struct IOCapabilityRequestReplyReturnParams {
   DeviceAddressBytes bd_addr;
 } __PACKED;
 
-// ======= Controller & Baseband Commands =======
-// Core Spec v5.0 Vol 2, Part E, Section 7.3
-constexpr uint8_t kControllerAndBasebandOGF = 0x03;
-constexpr OpCode ControllerAndBasebandOpCode(const uint16_t ocf) {
-  return DefineOpCode(kControllerAndBasebandOGF, ocf);
-}
-
 // =============================================================
 // User Confirmation Request Reply Command (v2.1 + EDR) (BR/EDR)
 constexpr OpCode kUserConfirmationRequestReply = LinkControlOpCode(0x002C);
@@ -419,6 +447,13 @@ struct UserConfirmationRequestNegativeReplyCommandParams {
   // The BD_ADDR of the remote device involved in the simple pairing process.
   DeviceAddressBytes bd_addr;
 } __PACKED;
+
+// ======= Controller & Baseband Commands =======
+// Core Spec v5.0 Vol 2, Part E, Section 7.3
+constexpr uint8_t kControllerAndBasebandOGF = 0x03;
+constexpr OpCode ControllerAndBasebandOpCode(const uint16_t ocf) {
+  return DefineOpCode(kControllerAndBasebandOGF, ocf);
+}
 
 // =============================
 // Set Event Mask Command (v1.1)
@@ -575,7 +610,6 @@ constexpr OpCode kReadTransmitPowerLevel = ControllerAndBasebandOpCode(0x002D);
 
 struct ReadTransmitPowerLevelCommandParams {
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -588,7 +622,6 @@ struct ReadTransmitPowerLevelReturnParams {
   StatusCode status;
 
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -748,7 +781,6 @@ constexpr OpCode kReadAuthenticatedPayloadTimeout =
 
 struct ReadAuthenticatedPayloadTimeoutCommandParams {
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -758,7 +790,6 @@ struct ReadAuthenticatedPayloadTimeoutReturnParams {
   StatusCode status;
 
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -776,7 +807,6 @@ constexpr OpCode kWriteAuthenticatedPayloadTimeout =
 
 struct WriteAuthenticatedPayloadTimeoutCommandParams {
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -792,7 +822,6 @@ struct WriteAuthenticatedPayloadTimeoutReturnParams {
   StatusCode status;
 
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -1004,7 +1033,6 @@ struct DisconnectionCompleteEventParams {
   StatusCode status;
 
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -1012,25 +1040,17 @@ struct DisconnectionCompleteEventParams {
   StatusCode reason;
 } __PACKED;
 
-// ============================================
-// Encryption Change Event (v1.1) (BR/EDR & LE)
-constexpr EventCode kEncryptionChangeEventCode = 0x08;
+// =============================================
+// Authentication Complete Event (v1.1) (BR/EDR)
+constexpr EventCode kAuthenticationCompleteEventCode = 0x06;
 
-struct EncryptionChangeEventParams {
-  // See enum StatusCode in hci_constants.h.
+struct AuthenticationCompleteEventParams {
+  // See enum StatusCode in hci_constants.h
   StatusCode status;
 
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
-
-  // TODO(armansito): Define an enum in hci_constants.h for this.
-  // 0x00: Link Level Encryption is OFF.
-  // 0x01: Link Level Encryption is ON with E0 for BR/EDR.
-  //       Link Level Encryption is ON with AES-CCM for LE.
-  // 0x02: Link Level Encryption is ON with AES-CCM for BR/EDR.
-  uint8_t encryption_enabled;
 } __PACKED;
 
 // ==================================================
@@ -1050,6 +1070,39 @@ struct RemoteNameRequestCompleteEventParams {
   // If the name is less than 248 characters, it is null terminated and
   // the remaining bytes are not valid.
   uint8_t remote_name[];
+} __PACKED;
+
+// ============================================
+// Encryption Change Event (v1.1) (BR/EDR & LE)
+constexpr EventCode kEncryptionChangeEventCode = 0x08;
+
+struct EncryptionChangeEventParams {
+  // See enum StatusCode in hci_constants.h.
+  StatusCode status;
+
+  // Connection_Handle (only the lower 12-bits are meaningful).
+  //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
+  ConnectionHandle connection_handle;
+
+  // TODO(armansito): Define an enum in hci_constants.h for this.
+  // 0x00: Link Level Encryption is OFF.
+  // 0x01: Link Level Encryption is ON with E0 for BR/EDR.
+  //       Link Level Encryption is ON with AES-CCM for LE.
+  // 0x02: Link Level Encryption is ON with AES-CCM for BR/EDR.
+  uint8_t encryption_enabled;
+} __PACKED;
+
+// =========================================================
+// Change Connection Link Key Complete Event (v1.1) (BR/EDR)
+constexpr EventCode kChangeConnectionLinkKeyCompleteEventCode = 0x09;
+
+struct ChangeConnectionLinkKeyCompleteEventParams {
+  // See enum StatusCode in hci_constants.h.
+  StatusCode status;
+
+  // Connection_Handle (only the lower 12-bits are meaningful).
+  //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
+  ConnectionHandle connection_handle;
 } __PACKED;
 
 // =============================================================
@@ -1078,7 +1131,6 @@ struct ReadRemoteVersionInfoCompleteEventParams {
   StatusCode status;
 
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -1156,7 +1208,7 @@ struct NumberOfCompletedPacketsEventParams {
   NumberOfCompletedPacketsEventData data[];
 } __PACKED;
 
-// ========================================
+// ======================================
 // Link Key Request Event (v1.1) (BR/EDR)
 constexpr EventCode kLinkKeyRequestEventCode = 0x17;
 
@@ -1165,7 +1217,7 @@ struct LinkKeyRequestParams {
   DeviceAddressBytes bd_addr;
 } __PACKED;
 
-// ========================================
+// ===========================================
 // Link Key Notification Event (v1.1) (BR/EDR)
 constexpr EventCode kLinkKeyNotificationEventCode = 0x18;
 
@@ -1217,7 +1269,7 @@ struct InquiryResultWithRSSIEventParams {
   InquiryResultRSSI responses[];
 } __PACKED;
 
-// =============================================================
+// ============================================================
 // Read Remote Extended Features Complete Event (v1.1) (BR/EDR)
 constexpr EventCode kReadRemoteExtendedFeaturesCompleteEventCode = 0x23;
 
@@ -1286,12 +1338,11 @@ struct EncryptionKeyRefreshCompleteEventParams {
   StatusCode status;
 
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
 
-// =============================================
+// =================================================
 // IO Capability Request Event (v2.1 + EDR) (BR/EDR)
 constexpr EventCode kIOCapabilityRequestEventCode = 0x31;
 
@@ -1300,7 +1351,7 @@ struct IOCapabilityRequestEventParams {
   DeviceAddressBytes bd_addr;
 } __PACKED;
 
-// =============================================
+// ==================================================
 // IO Capability Response Event (v2.1 + EDR) (BR/EDR)
 constexpr EventCode kIOCapabilityResponseEventCode = 0x32;
 
@@ -1330,9 +1381,17 @@ struct UserConfirmationRequestEventParams {
   // Address of the device involved in simple pairing process
   DeviceAddressBytes bd_addr;
 
-  // Numeric valud to be displayed.  Valid values are 0 - 999999
+  // Numeric value to be displayed. Valid values are 0 - 999999.
   uint32_t numeric_value;
 } __PACKED;
+
+// ================================================
+// User Passkey Request Event (v2.1 + EDR) (BR/EDR)
+constexpr EventCode kUserPasskeyRequestEventCode = 0x34;
+
+// =====================================================
+// User Passkey Notification Event (v2.1 + EDR) (BR/EDR)
+constexpr EventCode kUserPasskeyNotificationEventCode = 0x3B;
 
 // =========================
 // LE Meta Event (v4.0) (LE)
@@ -1357,7 +1416,6 @@ struct LEConnectionCompleteSubeventParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -1442,7 +1500,6 @@ struct LEConnectionUpdateCompleteSubeventParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -1468,7 +1525,6 @@ struct LEReadRemoteFeaturesCompleteSubeventParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -1482,7 +1538,6 @@ constexpr EventCode kLELongTermKeyRequestSubeventCode = 0x05;
 
 struct LELongTermKeyRequestSubeventParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -1498,7 +1553,6 @@ constexpr EventCode kLERemoteConnectionParameterRequestSubeventCode = 0x06;
 
 struct LERemoteConnectionParameterRequestSubeventParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -1522,7 +1576,6 @@ constexpr EventCode kLEDataLengthChangeSubeventCode = 0x07;
 
 struct LEDataLengthChangeSubeventParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -1569,7 +1622,6 @@ struct LEEnhancedConnectionCompleteSubeventParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -1647,7 +1699,6 @@ struct LEPHYUpdateCompleteSubeventParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -1852,7 +1903,6 @@ constexpr EventCode kLEChannelSelectionAlgorithmSubeventCode = 0x014;
 
 struct LEChannelSelectionAlgorithmSubeventParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -1887,7 +1937,6 @@ constexpr EventCode kAuthenticatedPayloadTimeoutExpiredEventCode = 0x57;
 
 struct AuthenticatedPayloadTimeoutExpiredEventParams {
   // Connection_Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -1906,7 +1955,6 @@ constexpr OpCode kReadRSSI = StatusParamsOpCode(0x0005);
 struct ReadRSSICommandParams {
   // The Handle for the connection for which the RSSI is to be read (only the
   // lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle handle;
 } __PACKED;
@@ -1917,7 +1965,6 @@ struct ReadRSSIReturnParams {
 
   // The Handle for the connection for which the RSSI has been read (only the
   // lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle handle;
 
@@ -2233,7 +2280,6 @@ constexpr OpCode kLEConnectionUpdate = LEControllerCommandOpCode(0x0013);
 
 struct LEConnectionUpdateCommandParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -2288,7 +2334,6 @@ constexpr OpCode kLEReadChannelMap = LEControllerCommandOpCode(0x0015);
 
 struct LEReadChannelMapCommandParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -2298,7 +2343,6 @@ struct LEReadChannelMapReturnParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -2323,7 +2367,6 @@ constexpr OpCode kLEReadRemoteFeatures = LEControllerCommandOpCode(0x0016);
 
 struct LEReadRemoteFeaturesCommandParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -2372,7 +2415,6 @@ constexpr OpCode kLEStartEncryption = LEControllerCommandOpCode(0x0019);
 // Section 2.4.4 "Encrypted Session Setup".
 struct LEStartEncryptionCommandParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -2397,7 +2439,6 @@ constexpr OpCode kLELongTermKeyRequestReply = LEControllerCommandOpCode(0x001A);
 
 struct LELongTermKeyRequestReplyCommandParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -2410,7 +2451,6 @@ struct LELongTermKeyRequestReplyReturnParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -2422,7 +2462,6 @@ constexpr OpCode kLELongTermKeyRequestNegativeReply =
 
 struct LELongTermKeyRequestNegativeReplyCommandParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -2432,7 +2471,6 @@ struct LELongTermKeyRequestNegativeReplyReturnParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -2496,7 +2534,6 @@ constexpr OpCode kLERemoteConnectionParameterRequestReply =
 
 struct LERemoteConnectionParameterRequestReplyCommandParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -2525,7 +2562,6 @@ struct LERemoteConnectionParameterRequestReplyReturnParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -2537,7 +2573,6 @@ constexpr OpCode kLERemoteConnectionParameterRequestNegativeReply =
 
 struct LERemoteConnectionParamReqNegativeReplyCommandParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -2550,7 +2585,6 @@ struct LERemoteConnectionParamReqNegativeReplyReturnParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -2561,7 +2595,6 @@ constexpr OpCode kLESetDataLength = LEControllerCommandOpCode(0x0022);
 
 struct LESetDataLengthCommandParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -2577,7 +2610,6 @@ struct LESetDataLengthReturnParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -2781,7 +2813,6 @@ constexpr OpCode kLEReadPHY = LEControllerCommandOpCode(0x0030);
 
 struct LEReadPHYCommandParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 } __PACKED;
@@ -2791,7 +2822,6 @@ struct LEReadPHYReturnParams {
   StatusCode status;
 
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 
@@ -2826,7 +2856,6 @@ constexpr OpCode kLESetPHY = LEControllerCommandOpCode(0x0032);
 
 struct LESetPHYCommandParams {
   // Connection Handle (only the lower 12-bits are meaningful).
-  //
   //   Range: 0x0000 to kConnectionHandleMax in hci_constants.h
   ConnectionHandle connection_handle;
 

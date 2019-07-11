@@ -66,6 +66,7 @@ and owner listed in the doc are added to the "Currently Used Features" section l
 below. This documentation must be checked in before the feature can be used.
 
 The current list of reviewers is as follows:
+
 - cramertj@google.com
 - etryzelaar@google.com
 - raggi@google.com
@@ -89,14 +90,6 @@ This list includes all of the unstable features currently used in Fuchsia.
       are no major additional stability risks (read: no major unresolved design decisions)
       introduced by these features. There are changes planned to the implementation, but they’re
       mostly polish, performance optimizations, and a few scattered bugfixes.
-    * Owner: cramertj@
-* `futures_api`
-    * Summary: This feature enables the `std::task` and `std::future` modules which provide the
-      `Future` interface for the standard library.
-    * Use in Fuchsia: Needed for `async_await`
-    * Remaining before stabilization: As in async/await, cramertj@ wrote the implementation of
-      this feature, and while its surface area is large, there aren’t significant planned
-      changes to it. cramertj@ will manage any necessary transition.
     * Owner: cramertj@
 
 [the edition guide]: https://rust-lang-nursery.github.io/edition-guide/editions/index.html

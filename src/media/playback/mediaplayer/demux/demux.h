@@ -24,10 +24,10 @@ namespace media_player {
 // produce one or more output streams.
 class Demux : public Node {
  public:
-  using SeekCallback = fit::closure;
-  using StatusCallback = fit::function<void(
-      int64_t duration_ns, bool can_seek, const Metadata& metadata,
-      const std::string& problem_type, const std::string& problem_details)>;
+  using SeekCallback = ::fit::closure;
+  using StatusCallback =
+      ::fit::function<void(int64_t duration_ns, bool can_seek, const Metadata& metadata,
+                           const std::string& problem_type, const std::string& problem_details)>;
 
   // Represents a stream produced by the demux.
   class DemuxStream {
@@ -67,8 +67,7 @@ class Demux : public Node {
 class DemuxFactory {
  public:
   // Creates a demux factory.
-  static std::unique_ptr<DemuxFactory> Create(
-      component::StartupContext* startup_context);
+  static std::unique_ptr<DemuxFactory> Create(component::StartupContext* startup_context);
 
   virtual ~DemuxFactory() {}
 

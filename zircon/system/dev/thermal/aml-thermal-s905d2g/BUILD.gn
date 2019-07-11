@@ -4,12 +4,12 @@
 
 driver("aml-thermal-s905d2g") {
   sources = [
-    "aml-cpufreq.cpp",
+    "aml-cpufreq.cc",
     "aml-fclk-rates.c",
-    "aml-pwm.cpp",
-    "aml-thermal.cpp",
-    "aml-tsensor.cpp",
-    "aml-voltage.cpp",
+    "aml-pwm.cc",
+    "aml-thermal.cc",
+    "aml-tsensor.cc",
+    "aml-voltage.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.clock",
@@ -18,6 +18,8 @@ driver("aml-thermal-s905d2g") {
     "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/banjo/ddk.protocol.scpi",
     "$zx/system/dev/lib/amlogic",
+    "$zx/system/dev/lib/device-protocol-pdev",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/fidl/fuchsia-hardware-thermal:c",
     "$zx/system/ulib/ddk",

@@ -1,0 +1,113 @@
+#!/bin/bash
+# Copyright 2019 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+### run fidlcat on given target.
+
+## Runs fidlcat in the given configuration; currently, fidlcat logs all FIDL
+## chatter from the given target executable.  Starts the debug agent on the
+## proposed target, and closes the debug agent on exit.
+##
+## CAUTION: This support is experimental, and invocation strategy is likely to
+## change.  The component launching configuration is *especially* likely to go
+## away over time.
+##
+## TROUBLESHOOTING TIPS:
+##
+## - Remember to use "fx set-device" when working with multiple devices.
+## - This scripts by default will mute the SSH connection stdout/stderr, so any
+##   errors triggered by it won't appear. Use the --debug-mode flag to see
+##   the debug log's from the debug agent and fidlcat.
+## - This scripts uses the tool "nc" for testing TCP connections. Check that it
+##   is in $PATH and that it works.
+##
+## Usage: fx fidlcat [--debug-mode] [(--port|-p) <PORT>] [--with-process-info]
+##                   [--remote-pid <pid>|--remote-name <names>|run <component URL>]
+##
+##    --port               Port the debug agent will be listening on. Will use 2345
+##                         by default.
+##    --debug-mode         Whether the debug agent's debug logs should be shown.
+##    --with-process-info  Display the process name, process id and thread id on
+##                         each line (useful for grep).
+##    --remote-pid         The koid of the remote process to trace
+##    --remote-name        A set of comma-separated regexes.  When a process
+##                         whose name matches one of the regexes starts, fidlcat
+##                         will trace it.  Can be provided multiple times for
+##                         multiple regexes.
+##    run                  a token indicating that you want to invoke and trace the
+##                         following component URL.
+##
+## Flags after -- are parsed by fidlcat.  Example usage:
+##
+## # Attaches to the process with the given pid on the target:
+## fx fidlcat --remote-pid 4755
+##
+## # Launches the echo client, and monitors its FIDL chatter:
+## fx fidlcat run fuchsia-pkg://fuchsia.com/echo_client_cpp#meta/echo_client_cpp.cmx
+##
+## # Will trace the next process that starts whose name contains "echo_client"
+## fx fidlcat --remote-name echo_client
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"/../lib/vars.sh || exit $?
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"/../contrib/lib/debug.sh || exit $?
+
+agent_out="/dev/null"
+debug_mode=
+with_process_info=
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help|-h)
+      fx-command-help
+      exit 0
+      ;;
+    --port|-p)
+      shift
+      port="$1"
+      ;;
+    --debug-mode)
+      agent_out="/dev/stdout"
+      debug_mode="--debug-mode"
+      ;;
+    --with-process-info)
+      with_process_info="--with-process-info"
+      ;;
+    --remote-pid)
+      break # Remaining flags are passed to fidlcat
+      ;;
+    --remote-name)
+      break # Remaining flags are passed to fidlcat
+      ;;
+    run)
+      break # Remaining flags are passed to fidlcat
+      ;;
+    --)
+      shift
+      break # Remaining flags are passed to fidlcat
+      ;;
+    *)
+      echo "Invalid flag $1"
+      exit 1
+  esac
+  shift
+done
+
+target=$(get-fuchsia-device-addr)
+
+if [[ -z "${port}" ]]; then
+  port=2345
+fi
+
+launch_debug_agent
+
+# We start the client with the flag that tells it to quit the agent when zxdb quits.
+"${FUCHSIA_BUILD_DIR}/tools/fidlcat" \
+  "--connect" "[${target}]:${port}" \
+  "--fidl-ir-path" @"${FUCHSIA_BUILD_DIR}"/all_fidl_json.txt \
+  "-s" "${FUCHSIA_BUILD_DIR}" \
+  "-s" "${ZIRCON_BUILDROOT}" \
+  "-s" "${BUILDTOOLS_CLANG_DIR}/lib/debug" \
+  --pretty-print \
+  ${with_process_info} \
+  $@

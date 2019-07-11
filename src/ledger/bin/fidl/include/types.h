@@ -23,22 +23,20 @@ using PageCloud = fuchsia::ledger::cloud::PageCloud;
 using PageCloudPtr = fuchsia::ledger::cloud::PageCloudPtr;
 using PageCloudWatcher = fuchsia::ledger::cloud::PageCloudWatcher;
 using PageCloudWatcherPtr = fuchsia::ledger::cloud::PageCloudWatcherPtr;
+using PositionToken = fuchsia::ledger::cloud::PositionToken;
+using ReferencePack = fuchsia::ledger::cloud::ReferencePack;
 using Status = fuchsia::ledger::cloud::Status;
-using Token = fuchsia::ledger::cloud::Token;
 }  // namespace cloud_provider
 
 namespace ledger {
 using BytesOrReference = fuchsia::ledger::BytesOrReference;
 using BytesOrReferencePtr = fuchsia::ledger::BytesOrReferencePtr;
-using ConflictResolutionWaitStatus =
-    fuchsia::ledger::ConflictResolutionWaitStatus;
+using ConflictResolutionWaitStatus = fuchsia::ledger::ConflictResolutionWaitStatus;
 using ConflictResolver = fuchsia::ledger::ConflictResolver;
 using ConflictResolverFactory = fuchsia::ledger::ConflictResolverFactory;
 using ConflictResolverFactoryPtr = fuchsia::ledger::ConflictResolverFactoryPtr;
 using ConflictResolverPtr = fuchsia::ledger::ConflictResolverPtr;
-using CreateReferenceStatus = fuchsia::ledger::CreateReferenceStatus;
 using DiffEntry = fuchsia::ledger::DiffEntry;
-using IterationStatus = fuchsia::ledger::IterationStatus;
 using Entry = fuchsia::ledger::Entry;
 using InlinedEntry = fuchsia::ledger::InlinedEntry;
 using InlinedValue = fuchsia::ledger::InlinedValue;
@@ -61,9 +59,7 @@ using PageWatcher = fuchsia::ledger::PageWatcher;
 using PageWatcherPtr = fuchsia::ledger::PageWatcherPtr;
 using Priority = fuchsia::ledger::Priority;
 using Reference = fuchsia::ledger::Reference;
-using ReferencePtr = fuchsia::ledger::ReferencePtr;
 using ResultState = fuchsia::ledger::ResultState;
-using Status = fuchsia::ledger::Status;
 using SyncState = fuchsia::ledger::SyncState;
 using SyncWatcher = fuchsia::ledger::SyncWatcher;
 using SyncWatcherPtr = fuchsia::ledger::SyncWatcherPtr;
@@ -78,10 +74,8 @@ using LedgerController = fuchsia::ledger::internal::LedgerController;
 using LedgerControllerPtr = fuchsia::ledger::internal::LedgerControllerPtr;
 using LedgerRepository = fuchsia::ledger::internal::LedgerRepository;
 using LedgerRepositoryPtr = fuchsia::ledger::internal::LedgerRepositoryPtr;
-using LedgerRepositoryFactory =
-    fuchsia::ledger::internal::LedgerRepositoryFactory;
-using LedgerRepositoryFactoryPtr =
-    fuchsia::ledger::internal::LedgerRepositoryFactoryPtr;
+using LedgerRepositoryFactory = fuchsia::ledger::internal::LedgerRepositoryFactory;
+using LedgerRepositoryFactoryPtr = fuchsia::ledger::internal::LedgerRepositoryFactoryPtr;
 }  // namespace ledger_internal
 
 #endif  // SRC_LEDGER_BIN_FIDL_INCLUDE_TYPES_H_

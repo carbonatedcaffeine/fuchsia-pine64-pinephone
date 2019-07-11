@@ -30,10 +30,16 @@ namespace testing {
 class FakeModule : public modular::testing::FakeComponent,
                    fuchsia::modular::IntentHandler {
  public:
+  FakeModule();
+
   // |on_intent_handled| will be invoked whenever HandleIntent() is called.
-  // If |on_intent_handled| is null, construction will fail.
   FakeModule(fit::function<void(fuchsia::modular::Intent)> on_intent_handled);
+
   ~FakeModule();
+
+  fuchsia::modular::ComponentContext* modular_component_context() {
+    return component_context_.get();
+  }
 
   // Returns the module's |module_context_|
   fuchsia::modular::ModuleContext* module_context() {
@@ -42,15 +48,17 @@ class FakeModule : public modular::testing::FakeComponent,
 
   static std::vector<std::string> GetSandboxServices();
 
- private:
+ protected:
   // |FakeComponent|
   void OnCreate(fuchsia::sys::StartupInfo startup_info) override;
 
+ private:
   // |IntentHandler|
   void HandleIntent(fuchsia::modular::Intent intent) override;
 
   // A callback to be executed when HandleIntent() is invoked.
   fit::function<void(fuchsia::modular::Intent)> on_intent_handled_;
+  fuchsia::modular::ComponentContextPtr component_context_;
   fuchsia::modular::ModuleContextPtr module_context_;
   fidl::BindingSet<fuchsia::modular::IntentHandler> bindings_;
 };

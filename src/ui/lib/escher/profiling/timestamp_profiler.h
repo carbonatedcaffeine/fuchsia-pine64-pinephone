@@ -30,19 +30,19 @@ class TimestampProfiler : public fxl::RefCountedThreadSafe<TimestampProfiler> {
   // NOTE: you should understand the caveats in the Vulkan spec regarding the
   // accuracy of these timestamps.  For example, many implementations will treat
   // any set of flags as equivalent to eBottomOfPipe.
-  void AddTimestamp(impl::CommandBuffer* cmd_buf,
-                    vk::PipelineStageFlagBits flags, const char* name);
+  void AddTimestamp(impl::CommandBuffer* cmd_buf, vk::PipelineStageFlagBits flags,
+                    const char* name);
 
   struct Result {
     uint64_t raw_nanoseconds;  // nanoseconds according to some timebase.
-    uint64_t time;     // microseconds elapsed since the first timestamp.
-    uint64_t elapsed;  // microseconds elapsed since the previous timestamp.
+    uint64_t time;             // microseconds elapsed since the first timestamp.
+    uint64_t elapsed;          // microseconds elapsed since the previous timestamp.
     const char* name;
   };
 
   struct TraceEvent {
-    uint64_t start_ticks;            // tick that the event(s) started
-    uint64_t end_ticks;              // tick that the event(s) ended
+    uint64_t start_elapsed_ticks;    // ticks elapsed from the first timestamp to start
+    uint64_t end_elapsed_ticks;      // ticks elapsed from the first timestamp to end
     std::vector<const char*> names;  // all trace event names for the time range
   };
 
@@ -54,18 +54,15 @@ class TimestampProfiler : public fxl::RefCountedThreadSafe<TimestampProfiler> {
   // for the trace system to use.
   //
   // NOTE: Currently only supported on Fuchsia.
-  static std::vector<TraceEvent> ProcessTraceEvents(
-      const std::vector<Result>& timestamps);
+  static std::vector<TraceEvent> ProcessTraceEvents(const std::vector<Result>& timestamps);
 
   // Uses VTHREAD trace macros to register all GPU work represented in
   // |trace_events|. |trace_events| should be returned from a call to
   // ProcessTraceEvents() |trace_literal| is the name that the event will take
   // and should be a string literal.
   static void TraceGpuQueryResults(const std::vector<TraceEvent>& trace_events,
-                                   uint64_t frame_number,
-                                   uint64_t escher_frame_number,
-                                   const char* trace_literal,
-                                   const char* gpu_vthread_literal,
+                                   uint64_t frame_number, uint64_t escher_frame_number,
+                                   const char* trace_literal, const char* gpu_vthread_literal,
                                    uint64_t gpu_vthread_id);
 
   static void LogGpuQueryResults(uint64_t escher_frame_number,

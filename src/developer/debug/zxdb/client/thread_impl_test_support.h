@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_THREAD_IMPL_TEST_SUPPORT_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_THREAD_IMPL_TEST_SUPPORT_H_
 
 // This file contains a test harness and helper classes for writing tests
 // involving lower-level thread control such as ThreadImpl itself, and
@@ -36,13 +37,10 @@ class TestThreadObserver : public ThreadObserver {
   bool got_stopped() const { return got_stopped_; }
   void set_got_stopped(bool s) { got_stopped_ = s; }
 
-  const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints() {
-    return hit_breakpoints_;
-  }
+  const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints() { return hit_breakpoints_; }
 
-  void OnThreadStopped(
-      Thread* thread, debug_ipc::NotifyException::Type type,
-      const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) override;
+  void OnThreadStopped(Thread* thread, debug_ipc::NotifyException::Type type,
+                       const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) override;
 
  private:
   Thread* thread_;
@@ -52,3 +50,5 @@ class TestThreadObserver : public ThreadObserver {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_THREAD_IMPL_TEST_SUPPORT_H_

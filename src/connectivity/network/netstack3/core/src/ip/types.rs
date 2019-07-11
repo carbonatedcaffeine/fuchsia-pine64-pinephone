@@ -83,7 +83,8 @@
 // `pub(crate) use` will prevent items from being accidentally re-exported).
 pub(crate) use self::internal::*;
 pub use self::internal::{
-    AddrSubnet, AddrSubnetEither, EntryDest, EntryEither, Ipv4Addr, Ipv6Addr, Subnet, SubnetEither,
+    AddrSubnet, AddrSubnetEither, EntryDest, EntryDestEither, EntryEither, IpAddr, Ipv4, Ipv4Addr,
+    Ipv6, Ipv6Addr, Subnet, SubnetEither,
 };
 
 mod internal {
@@ -98,6 +99,7 @@ mod internal {
 
     use crate::device::DeviceId;
     use crate::error::IpParseError;
+    use crate::types::{MulticastAddress, UnicastAddress};
     use crate::wire::ipv4::{Ipv4Packet, Ipv4PacketBuilder};
     use crate::wire::ipv6::{Ipv6Packet, Ipv6PacketBuilder};
 
@@ -128,6 +130,15 @@ mod internal {
             match addr {
                 net::IpAddr::V4(addr) => IpAddr::V4(addr.into()),
                 net::IpAddr::V6(addr) => IpAddr::V6(addr.into()),
+            }
+        }
+    }
+
+    impl From<IpAddr> for net::IpAddr {
+        fn from(addr: IpAddr) -> net::IpAddr {
+            match addr {
+                IpAddr::V4(addr) => net::IpAddr::V4(addr.into()),
+                IpAddr::V6(addr) => net::IpAddr::V6(addr.into()),
             }
         }
     }
@@ -350,13 +361,18 @@ mod internal {
             Self::Version::LOOPBACK_SUBNET.contains(*self)
         }
 
-        /// Is this a multicast address?
+        /// Is this a unicast address in the context of the given subnet?
         ///
-        /// `is_multicast` returns `true` if this address is a member of the
-        /// multicast subnet.
-        fn is_multicast(&self) -> bool {
-            Self::Version::MULTICAST_SUBNET.contains(*self)
-        }
+        /// `is_unicast_in_subnet` returns `true` if this address is none of:
+        /// - a multicast address
+        /// - the IPv4 global broadcast address
+        /// - the IPv4 subnet-specific broadcast address for the given `subnet`
+        ///
+        /// Note one exception to these rules: If `subnet` is an IPv4 /32, then
+        /// the single unicast address in the subnet is also technically the
+        /// subnet broadcast address. In this case, `is_unicast_in_subnet` will
+        /// return `true`.
+        fn is_unicast_in_subnet(&self, subnet: &Subnet<Self>) -> bool;
 
         // TODO(joshlf): Is this the right naming convention?
 
@@ -367,6 +383,12 @@ mod internal {
         /// Invoke a function on this address if it is an `Ipv6Address` or
         /// return `default` if it is an `Ipv4Address`.
         fn with_v6<O, F: Fn(Ipv6Addr) -> O>(&self, f: F, default: O) -> O;
+    }
+
+    impl<A: IpAddress> MulticastAddress for A {
+        fn is_multicast(&self) -> bool {
+            <Self as IpAddress>::Version::MULTICAST_SUBNET.contains(*self)
+        }
     }
 
     /// An IPv4 address.
@@ -429,6 +451,12 @@ mod internal {
             IpAddr::V4(self)
         }
 
+        fn is_unicast_in_subnet(&self, subnet: &Subnet<Self>) -> bool {
+            !self.is_multicast()
+                && !self.is_global_broadcast()
+                && (subnet.prefix() == 32 || *self != subnet.broadcast())
+        }
+
         fn with_v4<O, F: Fn(Ipv4Addr) -> O>(&self, f: F, default: O) -> O {
             f(*self)
         }
@@ -438,9 +466,21 @@ mod internal {
         }
     }
 
+    impl From<[u8; 4]> for Ipv4Addr {
+        fn from(bytes: [u8; 4]) -> Self {
+            Self(bytes)
+        }
+    }
+
     impl From<net::Ipv4Addr> for Ipv4Addr {
         fn from(ip: net::Ipv4Addr) -> Self {
             Ipv4Addr::new(ip.octets())
+        }
+    }
+
+    impl From<Ipv4Addr> for net::Ipv4Addr {
+        fn from(ip: Ipv4Addr) -> Self {
+            Self::from(ip.0)
         }
     }
 
@@ -539,6 +579,10 @@ mod internal {
             IpAddr::V6(self)
         }
 
+        fn is_unicast_in_subnet(&self, _subnet: &Subnet<Self>) -> bool {
+            !self.is_multicast()
+        }
+
         fn with_v4<O, F: Fn(Ipv4Addr) -> O>(&self, f: F, default: O) -> O {
             default
         }
@@ -548,9 +592,27 @@ mod internal {
         }
     }
 
+    impl UnicastAddress for Ipv6Addr {
+        fn is_unicast(&self) -> bool {
+            !self.is_multicast()
+        }
+    }
+
+    impl From<[u8; 16]> for Ipv6Addr {
+        fn from(bytes: [u8; 16]) -> Self {
+            Self(bytes)
+        }
+    }
+
     impl From<net::Ipv6Addr> for Ipv6Addr {
         fn from(ip: net::Ipv6Addr) -> Self {
             Ipv6Addr::new(ip.octets())
+        }
+    }
+
+    impl From<Ipv6Addr> for net::Ipv6Addr {
+        fn from(ip: Ipv6Addr) -> Self {
+            Self::from(ip.0)
         }
     }
 
@@ -663,15 +725,15 @@ mod internal {
         }
     }
 
-    impl<A: ext::IpAddress> Display for Subnet<A> {
+    impl<A: Display> Display for Subnet<A> {
         fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
             write!(f, "{}/{}", self.network, self.prefix)
         }
     }
 
-    impl<A: ext::IpAddress> Debug for Subnet<A> {
+    impl<A: Debug> Debug for Subnet<A> {
         fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-            write!(f, "{}/{}", self.network, self.prefix)
+            write!(f, "{:?}/{}", self.network, self.prefix)
         }
     }
 
@@ -699,6 +761,14 @@ mod internal {
                 IpAddr::V6(network) => SubnetEither::V6(Subnet::new(network, prefix)?),
             })
         }
+
+        /// Gets the network and prefix for this `SubnetEither`
+        pub fn into_net_prefix(self) -> (IpAddr, u8) {
+            match self {
+                SubnetEither::V4(v4) => (v4.network.into(), v4.prefix),
+                SubnetEither::V6(v6) => (v6.network.into(), v6.prefix),
+            }
+        }
     }
 
     impl<A: ext::IpAddress> From<Subnet<A>> for SubnetEither {
@@ -723,16 +793,31 @@ mod internal {
     ///
     /// `EntryDest` can either be a device or another network address.
     #[allow(missing_docs)]
-    #[derive(Copy, Clone, Eq, PartialEq)]
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
     pub enum EntryDest<A> {
         Local { device: DeviceId },
         Remote { next_hop: A },
     }
 
+    /// A local forwarding destination, or a remote forwarding destination that
+    /// can be an IPv4 or an IPv6 address.
+    pub type EntryDestEither = EntryDest<IpAddr>;
+
+    impl<A: ext::IpAddress> From<EntryDest<A>> for EntryDest<IpAddr> {
+        fn from(entry: EntryDest<A>) -> Self {
+            match entry {
+                EntryDest::Local { device } => EntryDest::Local { device },
+                EntryDest::Remote { next_hop } => {
+                    EntryDest::Remote { next_hop: next_hop.into_ip_addr() }
+                }
+            }
+        }
+    }
+
     /// A forwarding entry.
     ///
     /// `Entry` is a `Subnet` paired with an `EntryDest`.
-    #[derive(Copy, Clone, Eq, PartialEq)]
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
     pub struct Entry<A> {
         pub subnet: Subnet<A>,
         pub dest: EntryDest<A>,
@@ -740,10 +825,54 @@ mod internal {
 
     /// An IPv4 forwarding entry or an IPv6 forwarding entry.
     #[allow(missing_docs)]
-    #[derive(Copy, Clone, Eq, PartialEq)]
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
     pub enum EntryEither {
         V4(Entry<Ipv4Addr>),
         V6(Entry<Ipv6Addr>),
+    }
+
+    impl EntryEither {
+        /// Creates a new [`EntryEither`] with the given `subnet` and
+        /// `destination`.
+        ///
+        /// Returns `None` if `subnet` and `destination` are not the same IP
+        /// version (both `V4` or both `V6`) when `destination` is a remote
+        /// value.
+        pub fn new(subnet: SubnetEither, destination: EntryDestEither) -> Option<EntryEither> {
+            match destination {
+                EntryDest::Local { device } => match subnet {
+                    SubnetEither::V4(subnet) => {
+                        Some(EntryEither::V4(Entry { subnet, dest: EntryDest::Local { device } }))
+                    }
+                    SubnetEither::V6(subnet) => {
+                        Some(EntryEither::V6(Entry { subnet, dest: EntryDest::Local { device } }))
+                    }
+                },
+                EntryDest::Remote { next_hop } => match (subnet, next_hop) {
+                    (SubnetEither::V4(subnet), IpAddr::V4(next_hop)) => {
+                        Some(EntryEither::V4(Entry {
+                            subnet,
+                            dest: EntryDest::Remote { next_hop },
+                        }))
+                    }
+                    (SubnetEither::V6(subnet), IpAddr::V6(next_hop)) => {
+                        Some(EntryEither::V6(Entry {
+                            subnet,
+                            dest: EntryDest::Remote { next_hop },
+                        }))
+                    }
+                    _ => None,
+                },
+            }
+        }
+
+        /// Gets the subnet and destination for this [`EntryEither`].
+        pub fn into_subnet_dest(self) -> (SubnetEither, EntryDestEither) {
+            match self {
+                EntryEither::V4(entry) => (entry.subnet.into(), entry.dest.into()),
+                EntryEither::V6(entry) => (entry.subnet.into(), entry.dest.into()),
+            }
+        }
     }
 
     impl From<Entry<Ipv4Addr>> for EntryEither {
@@ -761,7 +890,8 @@ mod internal {
     /// An address and that address' subnet.
     ///
     /// An `AddrSubnet` is a pair of an address and a subnet which maintains the
-    /// invariant that the address is guaranteed to be in the subnet.
+    /// invariant that the address is guaranteed to be a unicast address in the
+    /// subnet.
     #[derive(Copy, Clone, Eq, PartialEq)]
     pub struct AddrSubnet<A> {
         addr: A,
@@ -775,12 +905,17 @@ mod internal {
         /// length. The network address of the subnet is taken to be the first
         /// `prefix` bits of the address. It returns `None` if `prefix` is
         /// longer than the number of bits in this type of IP address (32 for
-        /// IPv4 and 128 for IPv6).
+        /// IPv4 and 128 for IPv6) or if `addr` is not a unicast address in the
+        /// resulting subnet (see [`IpAddress::is_unicast_in_subnet`]).
         pub(crate) fn new(addr: A, prefix: u8) -> Option<AddrSubnet<A>> {
             if prefix > A::BYTES * 8 {
                 return None;
             }
-            Some(AddrSubnet { addr, subnet: Subnet { network: addr.mask(prefix), prefix } })
+            let subnet = Subnet { network: addr.mask(prefix), prefix };
+            if !addr.is_unicast_in_subnet(&subnet) {
+                return None;
+            }
+            Some(AddrSubnet { addr, subnet })
         }
 
         /// Get the address.
@@ -810,12 +945,24 @@ mod internal {
         }
     }
 
+    impl<A: Display> Display for AddrSubnet<A> {
+        fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+            write!(f, "{}/{}", self.addr, self.subnet.prefix)
+        }
+    }
+
+    impl<A: Display> Debug for AddrSubnet<A> {
+        fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+            write!(f, "{}/{}", self.addr, self.subnet.prefix)
+        }
+    }
+
     /// An address and that address' subnet, either IPv4 or IPv6.
     ///
     /// `AddrSubnetEither` is an enum of `AddrSubnet<Ipv4Addr>` and
     /// `AddrSubnet<Ipv6Addr>`.
     #[allow(missing_docs)]
-    #[derive(Copy, Clone)]
+    #[derive(Copy, Clone, Eq, PartialEq, Debug)]
     pub enum AddrSubnetEither {
         V4(AddrSubnet<Ipv4Addr>),
         V6(AddrSubnet<Ipv6Addr>),
@@ -834,6 +981,22 @@ mod internal {
                 IpAddr::V4(addr) => AddrSubnetEither::V4(AddrSubnet::new(addr, prefix)?),
                 IpAddr::V6(addr) => AddrSubnetEither::V6(AddrSubnet::new(addr, prefix)?),
             })
+        }
+
+        /// Gets the contained IP address and prefix in this `AddrSubnetEither`.
+        pub fn into_addr_prefix(self) -> (IpAddr, u8) {
+            match self {
+                AddrSubnetEither::V4(v4) => (v4.addr.into(), v4.subnet.prefix),
+                AddrSubnetEither::V6(v6) => (v6.addr.into(), v6.subnet.prefix),
+            }
+        }
+
+        /// Gets the IP address and subnet in this `AddrSubnetEither`.
+        pub fn into_addr_subnet(self) -> (IpAddr, SubnetEither) {
+            match self {
+                AddrSubnetEither::V4(v4) => (v4.addr.into(), SubnetEither::V4(v4.subnet)),
+                AddrSubnetEither::V6(v6) => (v6.addr.into(), SubnetEither::V6(v6.subnet)),
+            }
         }
     }
 
@@ -873,31 +1036,50 @@ mod internal {
         }
     );
 
-    /// An extension trait to the `Ip` trait adding an associated `Packet` type.
+    /// An extension trait to the `Ip` trait adding an associated `PacketBuilder` type.
     ///
-    /// `IpExt` extends the `Ip` trait, adding an associated `Packet` type. It
-    /// cannot be part of the `Ip` trait because it requires a `B: ByteSlice`
-    /// parameter (due to the requirements of `packet::ParsablePacket`).
-    pub(crate) trait IpExt<B: ByteSlice>: Ip {
-        type Packet: IpPacket<B, Self, Builder = Self::PacketBuilder>;
+    /// `IpExt` extends the `Ip` trait, adding an associated `PacketBuilder` type.
+    /// It is not part of the `Ip` trait because it contains associated types that are
+    /// not exported from this crate.
+    pub(crate) trait IpExt: Ip {
         type PacketBuilder: IpPacketBuilder<Self>;
     }
 
     // NOTE(joshlf): We know that this is safe because we seal the Ip trait to
     // only be implemented by Ipv4 and Ipv6.
-    impl<B: ByteSlice, I: Ip> IpExt<B> for I {
-        default type Packet = Never;
+    impl<I: Ip> IpExt for I {
         default type PacketBuilder = Never;
     }
 
-    impl<B: ByteSlice> IpExt<B> for Ipv4 {
-        type Packet = Ipv4Packet<B>;
+    impl IpExt for Ipv4 {
         type PacketBuilder = Ipv4PacketBuilder;
     }
 
-    impl<B: ByteSlice> IpExt<B> for Ipv6 {
-        type Packet = Ipv6Packet<B>;
+    impl IpExt for Ipv6 {
         type PacketBuilder = Ipv6PacketBuilder;
+    }
+
+    /// An extension trait to the `IpExt` trait adding an associated `Packet` type.
+    ///
+    /// `IpExtByteSlice` extends the `IpExt` trait, adding an associated `Packet` type.
+    /// It cannot be part of the `IpExt` trait because it requires a `B: ByteSlice`
+    /// parameter (due to the requirements of `packet::ParsablePacket`).
+    pub(crate) trait IpExtByteSlice<B: ByteSlice>: IpExt {
+        type Packet: IpPacket<B, Self, Builder = Self::PacketBuilder>;
+    }
+
+    // NOTE(joshlf): We know that this is safe because we seal the Ip trait to
+    // only be implemented by Ipv4 and Ipv6.
+    impl<B: ByteSlice, I: Ip> IpExtByteSlice<B> for I {
+        default type Packet = Never;
+    }
+
+    impl<B: ByteSlice> IpExtByteSlice<B> for Ipv4 {
+        type Packet = Ipv4Packet<B>;
+    }
+
+    impl<B: ByteSlice> IpExtByteSlice<B> for Ipv6 {
+        type Packet = Ipv6Packet<B>;
     }
 
     /// An IPv4 or IPv6 packet.
@@ -927,6 +1109,9 @@ mod internal {
         fn set_ttl(&mut self, ttl: u8)
         where
             B: ByteSliceMut;
+
+        /// Get the body.
+        fn body(&self) -> &[u8];
     }
 
     impl<B: ByteSlice> IpPacket<B, Ipv4> for Ipv4Packet<B> {
@@ -950,6 +1135,9 @@ mod internal {
         {
             Ipv4Packet::set_ttl(self, ttl)
         }
+        fn body(&self) -> &[u8] {
+            Ipv4Packet::body(self)
+        }
     }
 
     impl<B: ByteSlice> IpPacket<B, Ipv6> for Ipv6Packet<B> {
@@ -972,6 +1160,9 @@ mod internal {
             B: ByteSliceMut,
         {
             Ipv6Packet::set_hop_limit(self, ttl)
+        }
+        fn body(&self) -> &[u8] {
+            Ipv6Packet::body(self)
         }
     }
 
@@ -1000,13 +1191,13 @@ mod internal {
     /// An IPv4 header option comprises metadata about the option (which is
     /// stored in the kind byte) and the option itself. Note that all
     /// kind-byte-only options are handled by the utilities in
-    /// `wire::util::options`, so this type only supports options with
+    /// `wire::records::options`, so this type only supports options with
     /// variable-length data.
     ///
     /// See [Wikipedia] or [RFC 791] for more details.
     ///
-    /// [Wikipedia]: https://en.wikipedia.org/wiki/IPv4#Options [RFC 791]:
-    /// https://tools.ietf.org/html/rfc791#page-15
+    /// [Wikipedia]: https://en.wikipedia.org/wiki/IPv4#Options
+    /// [RFC 791]: https://tools.ietf.org/html/rfc791#page-15
     pub(crate) struct Ipv4Option<'a> {
         /// Whether this option needs to be copied into all fragments of a fragmented packet.
         pub(crate) copied: bool,
@@ -1047,10 +1238,32 @@ mod internal {
             // Network address has more than top 8 bits set
             assert_eq!(Subnet::new(Ipv4Addr::new([255, 255, 0, 0]), 8), None);
 
-            AddrSubnet::new(Ipv4Addr::new([255, 255, 255, 255]), 32).unwrap();
+            AddrSubnet::new(Ipv4Addr::new([1, 2, 3, 4]), 32).unwrap();
             // Prefix exceeds 32 bits (use assert, not assert_eq, because
             // AddrSubnet doesn't impl Debug)
-            assert!(AddrSubnet::new(Ipv4Addr::new([255, 255, 255, 255]), 33) == None);
+            assert!(AddrSubnet::new(Ipv4Addr::new([1, 2, 3, 4]), 33) == None);
+            // Global broadcast
+            assert!(AddrSubnet::new(Ipv4::GLOBAL_BROADCAST_ADDRESS, 16) == None);
+            // Subnet broadcast
+            assert!(AddrSubnet::new(Ipv4Addr::new([192, 168, 255, 255]), 16) == None);
+            // Multicast
+            assert!(AddrSubnet::new(Ipv4Addr::new([224, 0, 0, 1]), 16) == None);
+        }
+
+        #[test]
+        fn test_is_unicast_in_subnet() {
+            // Valid unicast in subnet
+            assert!(Ipv4Addr::new([1, 2, 3, 4])
+                .is_unicast_in_subnet(&Subnet::new(Ipv4Addr::new([1, 2, 0, 0]), 16).unwrap()));
+            // Global broadcast
+            assert!(!Ipv4::GLOBAL_BROADCAST_ADDRESS
+                .is_unicast_in_subnet(&Subnet::new(Ipv4Addr::new([255, 255, 0, 0]), 16).unwrap()));
+            // Subnet broadcast
+            assert!(!Ipv4Addr::new([1, 2, 255, 255])
+                .is_unicast_in_subnet(&Subnet::new(Ipv4Addr::new([1, 2, 0, 0]), 16).unwrap()));
+            // Multicast
+            assert!(!Ipv4Addr::new([224, 0, 0, 1])
+                .is_unicast_in_subnet(&Subnet::new(Ipv4Addr::new([224, 0, 0, 0]), 8).unwrap()));
         }
 
         macro_rules! add_mask_test {
@@ -1132,6 +1345,30 @@ mod internal {
             ]);
             assert!(multi.is_multicast());
             assert!(!multi.is_valid_unicast());
+        }
+
+        #[test]
+        fn test_entry_either() {
+            // check that trying to build an EntryEither with mismatching IpAddr
+            // fails, and with matching ones succeeds:
+            let subnet_v4 = Subnet::new(Ipv4Addr::new([192, 168, 0, 0]), 24).unwrap().into();
+            let subnet_v6 =
+                Subnet::new(Ipv6Addr::new([1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0]), 64)
+                    .unwrap()
+                    .into();
+            let entry_v4 = EntryDest::Remote { next_hop: Ipv4Addr::new([192, 168, 0, 1]) }.into();
+            let entry_v6 = EntryDest::Remote {
+                next_hop: Ipv6Addr::new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]),
+            }
+            .into();
+            assert!(EntryEither::new(subnet_v4, entry_v6).is_none());
+            assert!(EntryEither::new(subnet_v6, entry_v4).is_none());
+            let valid_v4 = EntryEither::new(subnet_v4, entry_v4).unwrap();
+            let valid_v6 = EntryEither::new(subnet_v6, entry_v6).unwrap();
+            // check that the split produces results requal to the generating
+            // parts:
+            assert_eq!((subnet_v4, entry_v4), valid_v4.into_subnet_dest());
+            assert_eq!((subnet_v6, entry_v6), valid_v6.into_subnet_dest());
         }
     }
 }

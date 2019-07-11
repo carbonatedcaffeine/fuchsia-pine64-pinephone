@@ -4,7 +4,6 @@
 package serve
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -177,12 +176,16 @@ func TestServer(t *testing.T) {
 			t.Errorf("got %q, want %q", got, want)
 		}
 
-		s := bufio.NewScanner(res.Body)
-		s.Scan()
-		// TODO: add some additional coverage for contents of the config file
-		if got, want := s.Text(), "{"; got[0:1] != want {
-			t.Errorf("got %q, want %q", got, want)
+		var config pmhttp.Config
+		if err := json.NewDecoder(res.Body).Decode(&config); err != nil {
+			t.Fatalf("failed to decode config: %s", err)
 		}
+
+		if len(config.RootKeys) != 1 {
+			t.Errorf("got %q, wanted 1", config.RootKeys)
+		}
+
+		// TODO: add some additional coverage for contents of the config file
 	})
 
 	t.Run("serves TUF jsons", func(t *testing.T) {
@@ -311,13 +314,8 @@ func hasTarget(baseURL, target string) bool {
 	if err := json.NewDecoder(res.Body).Decode(&m); err != nil {
 		panic(err)
 	}
-	// G1 -> G2 migration of TUF metadata.
-	for _, target := range []string{"/" + target, target} {
-		if _, found := m.Signed.Targets[target]; found {
-			return true
-		}
-	}
-	return false
+	_, found := m.Signed.Targets[target]
+	return found
 }
 
 // get a free port, with a very small chance of race

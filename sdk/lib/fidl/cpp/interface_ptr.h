@@ -5,13 +5,13 @@
 #ifndef LIB_FIDL_CPP_INTERFACE_PTR_H_
 #define LIB_FIDL_CPP_INTERFACE_PTR_H_
 
-#include <algorithm>
-#include <cstddef>
-#include <utility>
-
 #include <lib/fit/function.h>
 #include <lib/zx/channel.h>
 #include <zircon/assert.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <utility>
 
 #include "lib/fidl/cpp/interface_handle.h"
 #include "lib/fidl/cpp/interface_request.h"
@@ -110,12 +110,10 @@ class InterfacePtr final {
   //   database->OpenTable(table.NewRequest());
   //
   // The client can call methods on |table| immediately.
-  InterfaceRequest<Interface> NewRequest(
-      async_dispatcher_t* dispatcher = nullptr) {
+  InterfaceRequest<Interface> NewRequest(async_dispatcher_t* dispatcher = nullptr) {
     zx::channel h1;
     zx::channel h2;
-    if (zx::channel::create(0, &h1, &h2) != ZX_OK ||
-        Bind(std::move(h1), dispatcher) != ZX_OK)
+    if (zx::channel::create(0, &h1, &h2) != ZX_OK || Bind(std::move(h1), dispatcher) != ZX_OK)
       return nullptr;
     return InterfaceRequest<Interface>(std::move(h2));
   }
@@ -137,8 +135,7 @@ class InterfacePtr final {
   //
   // Returns an error if the binding was not able to be created (e.g., because
   // the |channel| lacks |ZX_RIGHT_WAIT|).
-  zx_status_t Bind(zx::channel channel,
-                   async_dispatcher_t* dispatcher = nullptr) {
+  zx_status_t Bind(zx::channel channel, async_dispatcher_t* dispatcher = nullptr) {
     return impl_->controller.reader().Bind(std::move(channel), dispatcher);
   }
 
@@ -159,8 +156,7 @@ class InterfacePtr final {
   //
   // Returns an error if the binding was not able to be created (e.g., because
   // the |channel| lacks |ZX_RIGHT_WAIT|).
-  zx_status_t Bind(InterfaceHandle<Interface> handle,
-                   async_dispatcher_t* dispatcher = nullptr) {
+  zx_status_t Bind(InterfaceHandle<Interface> handle, async_dispatcher_t* dispatcher = nullptr) {
     return Bind(handle.TakeChannel(), dispatcher);
   }
 
@@ -217,45 +213,6 @@ class InterfacePtr final {
   // Events for unbound callbacks are ignored.
   Proxy& events() const { return impl_->proxy; }
 
-#ifdef FIDL_ENABLE_LEGACY_WAIT_FOR_RESPONSE
-
-  // DEPRECATED: Using InterfaceSyncPtr instead. If used in a test, consider
-  // spinning the async::Loop instead.
-  //
-  // Blocks the calling thread until either a message arrives on the previously
-  // bound channel or an error occurs.
-  //
-  // Returns an error if waiting for the message, reading the message, or
-  // processing the message fails. If the error results in the channel being
-  // closed, the error handler will be called synchronously before this
-  // method returns.
-  //
-  // This method can be called only if this |InterfacePtr| is currently bound to
-  // a channel.
-  zx_status_t WaitForResponse() {
-    return WaitForResponseUntil(zx::time::infinite());
-  }
-
-  // DEPRECATED: Using InterfaceSyncPtr instead. If used in a test, consider
-  // spinning the async::Loop instead.
-  //
-  // Blocks the calling thread until either a message arrives on the previously
-  // bound channel, an error occurs, or the |deadline| is exceeded.
-  //
-  // Returns ZX_ERR_TIMED_OUT if the deadline is exceeded.
-  //
-  // Returns an error if waiting for the message, reading the message, or
-  // processing the message fails. If the error results in the channel being
-  // closed, the error handler will be called synchronously before this
-  // method returns.
-  //
-  // This method can be called only if this |InterfacePtr| is currently bound to
-  // a channel.
-  zx_status_t WaitForResponseUntil(zx::time deadline) {
-    return impl_->controller.reader().WaitAndDispatchOneMessageUntil(deadline);
-  }
-#endif
-
   // Sets an error handler that will be called if an error causes the underlying
   // channel to be closed.
   //
@@ -275,14 +232,10 @@ class InterfacePtr final {
   }
 
   // The underlying channel.
-  const zx::channel& channel() const {
-    return impl_->controller.reader().channel();
-  }
+  const zx::channel& channel() const { return impl_->controller.reader().channel(); }
 
   // The |async_dispatcher_t| to which this interface is bound, if any.
-  async_dispatcher_t* dispatcher() const {
-    return impl_->controller.reader().dispatcher();
-  }
+  async_dispatcher_t* dispatcher() const { return impl_->controller.reader().dispatcher(); }
 
  private:
   struct Impl;

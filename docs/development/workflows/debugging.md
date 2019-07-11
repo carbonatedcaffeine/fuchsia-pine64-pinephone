@@ -1,11 +1,10 @@
 # Debugging
 
-This document is a work-in-progress and provides various suggestions
-for debugging Fuchsia programs.
+## Native code debugging
 
-## The ZX debugger
+Fuchsia has a debugger for native code (C++ and Rust) called zxdb.
 
-For C/C++ code, try zxdb. See the [zxdb docs](/garnet/docs/debugger.md) for more details.
+Please see the [zxdb documentation](../debugger/README.md) for more details.
 
 ## Backtraces
 
@@ -88,3 +87,9 @@ void my_function() {
   ...
 }
 ```
+
+### Inspecting FIDL messages
+
+Fuchsia has a tool for viewing FIDL messages as they are sent and received. See
+details at [the doc page for fidl inspection](../fidl_inspecting/README.md).
+

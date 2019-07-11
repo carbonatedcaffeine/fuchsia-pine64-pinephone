@@ -9,6 +9,9 @@ using fuchsia.mem;
 // This file defines a cloud service that can be used by Ledger to power cloud
 // sync.
 
+// Constant for unbounded vectors.
+const uint32 NO_LINT = 4294967295;
+
 /// Response status for cloud provider operations.
 enum Status : int32 {
     OK = 0;
@@ -49,7 +52,7 @@ protocol DeviceSet {
     /// Adds the device fingerprint to the list of devices in the cloud.
     SetFingerprint(bytes fingerprint) -> (Status status);
 
-    /// Watches the given |fingerprint| in the cloud so that |watcher| is notified
+    /// Watches the given `fingerprint` in the cloud so that `watcher` is notified
     /// when the fingerprint is erased.
     ///
     /// At most one watcher can be set at any given time. If more than one watcher
@@ -86,27 +89,40 @@ protocol DeviceSetWatcher {
     OnError(Status status);
 };
 
-/// Contains a Buffer containing the FIDL serialization of a SerializedCommits.
+/// Contains a Buffer containing the FIDL serialization of Commits.
 struct CommitPack {
     fuchsia.mem.Buffer buffer;
 };
 
-/// A continuation token for paginated requests.
-struct Token {
+/// An opaque representation of a position in the stream of commits handled by
+/// a PageCloud instance.
+struct PositionToken {
     bytes opaque_id;
 };
 
 /// A commit as seen by the cloud.
-struct SerializedCommit {
+table Commit {
     // A unique commit id.
-    bytes id;
+    1: bytes id;
     // Opaque data stored by Ledger.
-    bytes data;
+    2: bytes data;
 };
 
 /// A list of commits for serialization in CommitPack.
-struct SerializedCommits {
-    vector<SerializedCommit> commits;
+struct Commits {
+    vector<Commit>:NO_LINT commits;
+};
+
+/// A list of references for serialization in ReferencePack.
+struct References {
+    vector<bytes:NO_LINT>:NO_LINT references;
+};
+
+/// Contains a Buffer containing the FIDL serialization of References.
+///
+/// If the Buffer is absent, the reference list is treated as empty.
+struct ReferencePack {
+    fuchsia.mem.Buffer? buffer;
 };
 
 /// Handler for cloud sync of a single page.
@@ -129,27 +145,28 @@ protocol PageCloud {
 
     /// Retrieves commits from the cloud.
     ///
-    /// All commits newer than |min_position_token| are guaranteed to be returned.
+    /// All commits newer than `min_position_token` are guaranteed to be returned.
     /// In addition to that, the response may include additional commits older
-    /// than or at |min_position_token|. Passing null |min_position_token|
+    /// than or at `min_position_token`. Passing null `min_position_token`
     /// retrieves all commits.
     ///
-    /// If the resulting |status| is |OK|, |commits| contains all matching commits
-    /// (might be empty) and |position_token| contains the position token of the
-    /// most recent of the |commits| (equivalent to |min_position_token| if
-    /// |commits| is empty).
-    GetCommits(Token? min_position_token)
-        -> (Status status, CommitPack? commits, Token? position_token);
+    /// If the resulting `status` is `OK`, `commits` contains all matching commits
+    /// (might be empty) and `position_token` contains the position token of the
+    /// most recent of the `commits` (equivalent to `min_position_token` if
+    /// `commits` is empty).
+    GetCommits(PositionToken? min_position_token)
+        -> (Status status, CommitPack? commits, PositionToken? position_token);
 
     /// Uploads the given object to the cloud under the given id.
     ///
     /// If the object already exists in the cloud this method returns OK.
-    AddObject(bytes id, fuchsia.mem.Buffer buffer) -> (Status status);
+    AddObject(bytes id, fuchsia.mem.Buffer buffer, ReferencePack references)
+        -> (Status status);
 
     /// Retrieves the object of the given id from the cloud.
     ///
-    /// If the resulting |status| is |OK|, |buffer| will contain the object
-    /// content. If the resulting |status| is not |OK|, |buffer| will be null.
+    /// If the resulting `status` is `OK`, `buffer` will contain the object
+    /// content. If the resulting `status` is not `OK`, `buffer` will be null.
     GetObject(bytes id)
         -> (Status status, fuchsia.mem.Buffer? buffer);
 
@@ -158,12 +175,12 @@ protocol PageCloud {
     /// At most one watcher can be set at any given time. If more than one watcher
     /// is set, only the one set most recently receives notifications.
     ///
-    /// All commits newer than |min_position_token| added to the cloud before or
-    /// after making this call are guaranteed to be delivered to |watcher|. In
-    /// addition to that, additional commits older than or at |min_position_token|
-    /// may be delivered to. If |min_position_token| is null, notifications for
+    /// All commits newer than `min_position_token` added to the cloud before or
+    /// after making this call are guaranteed to be delivered to `watcher`. In
+    /// addition to that, additional commits older than or at `min_position_token`
+    /// may be delivered to. If `min_position_token` is null, notifications for
     /// all commits are delivered.
-    SetWatcher(Token? min_position_token, PageCloudWatcher watcher)
+    SetWatcher(PositionToken? min_position_token, PageCloudWatcher watcher)
         -> (Status status);
 };
 
@@ -171,16 +188,16 @@ protocol PageCloud {
 protocol PageCloudWatcher {
     /// Called when new commits are added to the commit log in the cloud.
     ///
-    /// The method takes the list of new |commits| along with the |position_token|
+    /// The method takes the list of new `commits` along with the `position_token`
     /// of the most recent of them.
     ///
     /// No subsequent calls are made until the client calls the callback of the
     /// previous one.
-    OnNewCommits(CommitPack commits, Token position_token) -> ();
+    OnNewCommits(CommitPack commits, PositionToken position_token) -> ();
 
     /// Called when a new object is added to the cloud.
     ///
-    /// The method takes the |id| and the content of the new object.
+    /// The method takes the `id` and the content of the new object.
     ///
     /// No subsequent calls are made until the client calls the callback of the
     /// previous one.

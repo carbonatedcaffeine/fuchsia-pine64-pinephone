@@ -15,10 +15,11 @@ executable("ledger_lib_unittests") {
   testonly = true
 
   deps = [
+    "//src/ledger/lib/commit_pack:unittests",
     "//src/ledger/lib/coroutine:unittests",
     "//src/ledger/lib/coroutine/context:unittests",
     "//src/ledger/lib/firebase_auth:unittests",
     "//src/ledger/lib/firebase_auth/testing:unittests",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 }

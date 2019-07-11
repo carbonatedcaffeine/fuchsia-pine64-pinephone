@@ -3,7 +3,7 @@
 This document is a specification of the Fuchsia Interface Definition Language
 (**FIDL**) message format.
 
-See [Overview](../README.md) for more information about FIDL's overall
+See [Overview](../../README.md) for more information about FIDL's overall
 purpose, goals, and requirements, as well as links to related documents.
 
 [TOC]
@@ -592,6 +592,7 @@ The header has the following form:
         and responses.
 
 There are three kinds of transactional messages:
+
 * method requests,
 * method responses, and
 * event requests.
@@ -732,6 +733,7 @@ alignment.
 ##### Types
 
 Notes:
+
 1. **N** indicates the number of elements, whether stated explicity (as in
    `array<T>:N`, an array with **N** elements of type **T**) or implictly (a `table`
    consisting of 7 elements would have `N=7`).
@@ -793,7 +795,7 @@ Complex objects are arrays, vectors, structures, tables, unions, or xunions
 which contain pointers or handles which require fix-up.
 These are precisely the kinds of
 objects for which **encoding tables** must be generated. See [C
-Language Bindings](../../languages/c.md)
+Language Bindings](/docs/development/languages/fidl/tutorial/tutorial-c.md)
 for information about encoding
 tables. Therefore, limiting the nesting depth of complex objects has the effect
 of limiting the recursion depth for traversal of encoding tables.

@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_COMMON_ADDRESS_RANGE_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_COMMON_ADDRESS_RANGE_H_
 
 #include <stdint.h>
 
@@ -39,9 +40,7 @@ class AddressRange {
   bool operator==(const AddressRange& other) const {
     return begin_ == other.begin_ && end_ == other.end_;
   }
-  bool operator!=(const AddressRange& other) const {
-    return !operator==(other);
-  }
+  bool operator!=(const AddressRange& other) const { return !operator==(other); }
 
   // Returns a string representing this set of ranges for debugging purposes.
   std::string ToString() const;
@@ -65,9 +64,9 @@ struct AddressRangeBeginCmp {
 // using lower_bound address in a sorted list of ranges. Using this comparator,
 // lower_bound will find the element that contains the item if it exists.
 struct AddressRangeEndAddrCmp {
-  bool operator()(const AddressRange& range, uint64_t addr) const {
-    return range.end() < addr;
-  }
+  bool operator()(const AddressRange& range, uint64_t addr) const { return range.end() < addr; }
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_COMMON_ADDRESS_RANGE_H_

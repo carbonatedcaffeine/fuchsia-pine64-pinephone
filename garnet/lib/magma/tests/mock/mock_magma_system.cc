@@ -54,6 +54,12 @@ magma_status_t magma_query(int32_t fd, uint64_t id, uint64_t* value_out)
     return MAGMA_STATUS_INVALID_ARGS;
 }
 
+magma_status_t magma_query_returns_buffer(int32_t file_descriptor, uint64_t id,
+                                          uint32_t* handle_out)
+{
+    return MAGMA_STATUS_INVALID_ARGS;
+}
+
 void magma_create_context(magma_connection_t connection, uint32_t* context_id_out)
 {
     *context_id_out = static_cast<MockConnection*>(connection)->next_context_id();
@@ -112,6 +118,11 @@ magma_status_t magma_set_cache_policy(magma_buffer_t buffer, magma_cache_policy_
     return MAGMA_STATUS_OK;
 }
 
+magma_status_t magma_set_buffer_mapping_address_range(magma_buffer_t buffer, uint32_t handle)
+{
+    return MAGMA_STATUS_OK;
+}
+
 magma_status_t magma_create_command_buffer(magma_connection_t connection, uint64_t size,
                                            magma_buffer_t* buffer_out)
 {
@@ -133,6 +144,12 @@ void magma_submit_command_buffer(magma_connection_t connection, uint64_t command
 void magma_execute_immediate_commands(magma_connection_t connection, uint32_t context_id,
                                       uint64_t command_count,
                                       struct magma_system_inline_command_buffer* command_buffers)
+{
+}
+
+void magma_execute_immediate_commands2(magma_connection_t connection, uint32_t context_id,
+                                       uint64_t command_count,
+                                       struct magma_inline_command_buffer* command_buffers)
 {
 }
 
@@ -288,6 +305,14 @@ magma_status_t magma_get_buffer_format_plane_info(magma_buffer_format_descriptio
     return MAGMA_STATUS_UNIMPLEMENTED;
 }
 
+magma_status_t
+magma_get_buffer_format_plane_info_with_size(magma_buffer_format_description_t description,
+                                             uint32_t width, uint32_t height,
+                                             magma_image_plane_t* image_planes_out)
+{
+    return MAGMA_STATUS_UNIMPLEMENTED;
+}
+
 void magma_buffer_format_description_release(magma_buffer_format_description_t description) {}
 
 magma_status_t magma_get_buffer_format_modifier(magma_buffer_format_description_t description,
@@ -338,6 +363,28 @@ magma_status_t magma_get_buffer_is_mappable(magma_buffer_t buffer, uint32_t flag
 }
 
 magma_status_t magma_duplicate_handle(uint32_t buffer_handle, uint32_t* buffer_handle_out)
+{
+    return MAGMA_STATUS_UNIMPLEMENTED;
+}
+
+magma_status_t magma_release_buffer_handle(uint32_t buffer_handle)
+{
+    return MAGMA_STATUS_UNIMPLEMENTED;
+}
+
+magma_status_t magma_clean_cache(magma_buffer_t buffer, uint64_t offset, uint64_t size,
+                                 magma_cache_operation_t operation)
+{
+    return MAGMA_STATUS_UNIMPLEMENTED;
+}
+
+void magma_commit_buffer(magma_connection_t connection, magma_buffer_t buffer, uint64_t page_offset,
+                         uint64_t page_count)
+{
+}
+
+magma_status_t magma_map_specific(magma_connection_t connection, magma_buffer_t buffer,
+                                  uint64_t addr, uint64_t offset, uint64_t length)
 {
     return MAGMA_STATUS_UNIMPLEMENTED;
 }

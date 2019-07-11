@@ -5,13 +5,18 @@
 #ifndef TOOLS_FIDLCAT_LIB_MESSAGE_DECODER_H_
 #define TOOLS_FIDLCAT_LIB_MESSAGE_DECODER_H_
 
-#include <lib/fidl/cpp/message.h>
 #include <src/lib/fxl/logging.h>
 
+#include <cstdint>
 #include <memory>
+#include <ostream>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
+#include "lib/fidl/cpp/message.h"
+#include "tools/fidlcat/lib/display_options.h"
+#include "tools/fidlcat/lib/library_loader.h"
 #include "tools/fidlcat/lib/memory_helpers.h"
 
 namespace fidlcat {
@@ -21,14 +26,82 @@ class Object;
 class Struct;
 class Type;
 
+enum class Direction { kUnknown, kClient, kServer };
+
+constexpr int kTabSize = 2;
+
+struct Colors {
+  Colors(const char* new_reset, const char* new_red, const char* new_green, const char* new_blue,
+         const char* new_white_on_magenta)
+      : reset(new_reset),
+        red(new_red),
+        green(new_green),
+        blue(new_blue),
+        white_on_magenta(new_white_on_magenta) {}
+
+  const char* const reset;
+  const char* const red;
+  const char* const green;
+  const char* const blue;
+  const char* const white_on_magenta;
+};
+
+extern const Colors WithoutColors;
+extern const Colors WithColors;
+
+enum class SyscallFidlType {
+  kOutputMessage,  // A message (request or response which is written).
+  kInputMessage,   // A message (request or response which is read).
+  kOutputRequest,  // A request which is written (case of zx_channel_call).
+  kInputResponse   // A response which is read (case of zx_channel_call).
+};
+
+// Class which is able to decode all the messages received/sent.
+class MessageDecoderDispatcher {
+ public:
+  MessageDecoderDispatcher(LibraryLoader* loader, const DisplayOptions& display_options)
+      : loader_(loader),
+        display_options_(display_options),
+        colors_(display_options.needs_colors ? WithColors : WithoutColors) {}
+
+  LibraryLoader* loader() const { return loader_; }
+  const DisplayOptions& display_options() const { return display_options_; }
+  const Colors& colors() const { return colors_; }
+  bool with_process_info() const { return display_options_.with_process_info; }
+  std::map<std::tuple<zx_handle_t, uint64_t>, Direction>& handle_directions() {
+    return handle_directions_;
+  }
+
+  void AddLaunchedProcess(uint64_t process_koid) { launched_processes_.insert(process_koid); }
+
+  bool IsLaunchedProcess(uint64_t process_koid) {
+    return launched_processes_.find(process_koid) != launched_processes_.end();
+  }
+
+  bool DecodeMessage(uint64_t process_koid, zx_handle_t handle, const uint8_t* bytes,
+                     uint32_t num_bytes, const zx_handle_t* handles, uint32_t num_handles,
+                     SyscallFidlType type, std::ostream& os, std::string_view line_header = "",
+                     int tabs = 0);
+
+ private:
+  LibraryLoader* const loader_;
+  const DisplayOptions& display_options_;
+  const Colors& colors_;
+  std::unordered_set<uint64_t> launched_processes_;
+  std::map<std::tuple<zx_handle_t, uint64_t>, Direction> handle_directions_;
+};
+
 // Helper to decode a message (request or response). It generates an Object.
 class MessageDecoder {
  public:
-  MessageDecoder(const fidl::Message& message, bool output_errors = true);
-  MessageDecoder(const MessageDecoder* container, uint64_t num_bytes,
-                 uint64_t num_handles);
+  MessageDecoder(const uint8_t* bytes, uint32_t num_bytes, const zx_handle_t* handles,
+                 uint32_t num_handles, bool output_errors = false);
+  MessageDecoder(const MessageDecoder* container, uint64_t num_bytes_remaining,
+                 uint64_t num_handles_remaining);
 
   const uint8_t* byte_pos() const { return byte_pos_; }
+
+  const zx_handle_t* handle_pos() const { return handle_pos_; }
 
   size_t current_offset() const { return byte_pos_ - start_byte_pos_; }
 
@@ -52,10 +125,9 @@ class MessageDecoder {
   const uint8_t* GetAddress(uint64_t offset, uint64_t size) {
     if (byte_pos_ + offset + size > end_byte_pos_) {
       if (output_errors_) {
-        FXL_LOG(ERROR) << "not enough data to decode (needs " << size
-                       << " at offset "
-                       << ((byte_pos_ - start_byte_pos_) + offset)
-                       << ", remains " << (end_byte_pos_ - byte_pos_) << ")";
+        FXL_LOG(ERROR) << "not enough data to decode (needs " << size << " at offset "
+                       << ((byte_pos_ - start_byte_pos_) + offset) << ", remains "
+                       << (end_byte_pos_ - byte_pos_ - offset) << ")";
       }
       ++error_count_;
       return nullptr;
@@ -110,9 +182,11 @@ class MessageDecoder {
   std::unique_ptr<Field> DecodeField(std::string_view name, const Type* type);
 
  private:
+  // Iterates over the secondary objects and decodes them.
+  void ProcessSecondaryObjects();
+
   // The start of the message.
   const uint8_t* const start_byte_pos_;
-  const zx_handle_t* const start_handle_pos_;
 
   // The end of the message.
   const uint8_t* const end_byte_pos_;
@@ -139,10 +213,9 @@ template <typename T>
 bool MessageDecoder::GetValueAt(uint64_t offset, T* value) {
   if (byte_pos_ + offset + sizeof(T) > end_byte_pos_) {
     if (output_errors_) {
-      FXL_LOG(ERROR) << "not enough data to decode (needs " << sizeof(T)
-                     << " at offset "
+      FXL_LOG(ERROR) << "not enough data to decode (needs " << sizeof(T) << " at offset "
                      << ((byte_pos_ - start_byte_pos_) + offset) << ", remains "
-                     << (end_byte_pos_ - byte_pos_) << ")";
+                     << (end_byte_pos_ - byte_pos_ - offset) << ")";
     }
     ++error_count_;
     return false;

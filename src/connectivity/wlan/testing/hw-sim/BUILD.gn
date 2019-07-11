@@ -23,6 +23,7 @@ rustc_binary("bin") {
     "//garnet/public/rust/fuchsia-async",
     "//garnet/public/rust/fuchsia-component",
     "//garnet/public/rust/fuchsia-zircon",
+    "//garnet/public/rust/fuchsia-zircon/fuchsia-zircon-sys",
     "//sdk/fidl/fuchsia.wlan.common:fuchsia.wlan.common-rustc",
     "//sdk/fidl/fuchsia.wlan.mlme:fuchsia.wlan.mlme-rustc",
     "//sdk/fidl/fuchsia.wlan.service:fuchsia.wlan.service-rustc",
@@ -54,7 +55,7 @@ package("wlan-hw-sim") {
 
 test_package("wlan-hw-sim-tests") {
   deps = [
-    ":bin",
+    ":bin_test",
   ]
 
   tests = [

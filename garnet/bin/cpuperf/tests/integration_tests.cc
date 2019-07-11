@@ -4,7 +4,7 @@
 
 #include <gtest/gtest.h>
 #include <src/lib/fxl/command_line.h>
-#include <src/lib/fxl/log_settings_command_line.h>
+#include <src/lib/fxl/test/test_settings.h>
 
 #include "garnet/lib/perfmon/controller.h"
 
@@ -22,7 +22,8 @@ TEST(Cpuperf, FixedCounters) {
   RunAndVerify("/pkg/data/fixed_counters.cpspec");
 }
 
-TEST(Cpuperf, OsFlag) {
+// TODO(FLK-397): Re-enable.
+TEST(Cpuperf, DISABLED_OsFlag) {
   RunAndVerify("/pkg/data/os_flag.cpspec");
 }
 
@@ -60,7 +61,7 @@ TEST(Cpuperf, Tally) {
 // This is useful because our verbosity is passed on to each test.
 int main(int argc, char** argv) {
   auto cl = fxl::CommandLineFromArgcArgv(argc, argv);
-  if (!fxl::SetLogSettingsFromCommandLine(cl))
+  if (!fxl::SetTestSettings(cl))
     return EXIT_FAILURE;
 
   // Early exit if there is no perfmon device. We could be running on QEMU.

@@ -60,21 +60,33 @@ bool RealLoopFixture::RunLoopWithTimeout(zx::duration timeout) {
 bool RealLoopFixture::RunLoopWithTimeoutOrUntil(fit::function<bool()> condition,
                                                 zx::duration timeout,
                                                 zx::duration step) {
-  const zx::time deadline = zx::deadline_after(timeout);
-  while (zx::clock::get_monotonic() < deadline) {
+  const zx::time timeout_deadline = zx::deadline_after(timeout);
+
+  while (zx::clock::get_monotonic() < timeout_deadline &&
+         loop_.GetState() == ASYNC_LOOP_RUNNABLE) {
     if (condition()) {
+      loop_.ResetQuit();
       return true;
     }
-    RunGivenLoopWithTimeout(&loop_, step);
+
+    if (step == zx::duration::infinite()) {
+      // Performs a single unit of work, possibly blocking until there is work
+      // to do or the timeout deadline arrives.
+      loop_.Run(timeout_deadline, true);
+    } else {
+      // Performs work until the step deadline arrives.
+      RunGivenLoopWithTimeout(&loop_, step);
+    }
   }
+
+  loop_.ResetQuit();
   return condition();
 }
 
 void RealLoopFixture::RunLoopUntil(fit::function<bool()> condition,
                                    zx::duration step) {
-  while (!condition()) {
-    RunGivenLoopWithTimeout(&loop_, step);
-  }
+  RunLoopWithTimeoutOrUntil(std::move(condition), zx::duration::infinite(),
+                            step);
 }
 
 void RealLoopFixture::RunLoopUntilIdle() {

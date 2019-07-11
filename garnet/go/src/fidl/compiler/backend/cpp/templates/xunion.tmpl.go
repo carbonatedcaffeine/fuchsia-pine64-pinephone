@@ -50,7 +50,7 @@ class {{ .Name }} {
   //{{ . }}
   {{- end}}
   const {{ .Type.Decl }}& {{ .Name }}() const { return {{ .StorageName }}; }
-  void set_{{ .Name }}({{ .Type.Decl }} value);
+  {{ $.Name }}& set_{{ .Name }}({{ .Type.Decl }} value);
   {{- end }}
 
   Tag Which() const { return Tag(tag_); }
@@ -58,9 +58,6 @@ class {{ .Name }} {
   friend ::fidl::Equality<{{ .Namespace }}::{{ .Name }}>;
 
  private:
-#ifdef FIDL_OPERATOR_EQUALS
-  friend bool operator==(const {{ .Name }}& lhs, const {{ .Name }}& rhs);
-#endif
   void Destroy();
   void EnsureStorageInitialized(::fidl_xunion_tag_t tag);
 
@@ -71,13 +68,6 @@ class {{ .Name }} {
   {{- end }}
   };
 };
-
-#ifdef FIDL_OPERATOR_EQUALS
-bool operator==(const {{ .Name }}& lhs, const {{ .Name }}& rhs);
-inline bool operator!=(const {{ .Name }}& lhs, const {{ .Name }}& rhs) {
-  return !(lhs == rhs);
-}
-#endif
 
 inline zx_status_t Clone(const {{ .Namespace }}::{{ .Name }}& value,
                          {{ .Namespace }}::{{ .Name }}* result) {
@@ -214,32 +204,12 @@ zx_status_t {{ .Name }}::Clone({{ .Name }}* result) const {
   }
 }
 
-#ifdef FIDL_OPERATOR_EQUALS
-bool operator==(const {{ .Name }}& lhs, const {{ .Name }}& rhs) {
-  if (lhs.tag_ != rhs.tag_) {
-    return false;
-  }
-
-  {{ with $xunion := . -}}
-  switch (lhs.tag_) {
-    {{- range .Members }}
-    case {{ $xunion.Name }}::Tag::{{ .TagName }}:
-      return ::fidl::Equals(lhs.{{ .StorageName }}, rhs.{{ .StorageName }});
-    {{- end }}
-    case {{ $xunion.Name }}::Tag::Empty:
-      return true;
-    default:
-      return false;
-  }
-  {{end -}}
-}
-#endif
-
 {{- range $member := .Members }}
 
-void {{ $.Name }}::set_{{ .Name }}({{ .Type.Decl }} value) {
+{{ $.Name }}& {{ $.Name }}::set_{{ .Name }}({{ .Type.Decl }} value) {
   EnsureStorageInitialized(Tag::{{ .TagName }});
   {{ .StorageName }} = std::move(value);
+  return *this;
 }
 
 {{- end }}
@@ -305,12 +275,13 @@ struct CodingTraits<std::unique_ptr<{{ .Namespace }}::{{ .Name }}>> {
   }
 
   static void Decode(Decoder* decoder, std::unique_ptr<{{ .Namespace }}::{{ .Name }}>* value, size_t offset) {
-    value->reset(new {{ .Namespace }}::{{ .Name }});
-
     fidl_xunion_t* encoded = decoder->GetPtr<fidl_xunion_t>(offset);
     if (encoded->tag == 0) {
+      value->reset(nullptr);
       return;
     }
+
+    value->reset(new {{ .Namespace }}::{{ .Name }});
 
     {{ .Namespace }}::{{ .Name }}::Decode(decoder, value->get(), offset);
   }

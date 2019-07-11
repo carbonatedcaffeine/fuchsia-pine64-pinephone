@@ -4,15 +4,16 @@
 
 driver("amlogic-pcie") {
   sources = [
-    "aml-pcie-clk.cpp",
-    "aml-pcie-device.cpp",
-    "aml-pcie.cpp",
+    "aml-pcie-clk.cc",
+    "aml-pcie-device.cc",
+    "aml-pcie.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.clock",
     "$zx/system/banjo/ddk.protocol.gpio",
     "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/dev/lib/amlogic",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/dev/pci/designware",
     "$zx/system/ulib/ddk",

@@ -6,33 +6,34 @@ import("$zx/kernel/params.gni")
 
 source_set("kernel") {
   sources = [
-    "brwlock.cpp",
-    "cmdline.cpp",
-    "deadline.cpp",
-    "debug.cpp",
-    "dpc.cpp",
-    "event.cpp",
-    "init.cpp",
-    "mp.cpp",
-    "mutex.cpp",
-    "owned_wait_queue.cpp",
-    "percpu.cpp",
-    "thread.cpp",
-    "timer.cpp",
-    "wait.cpp",
+    "brwlock.cc",
+    "cmdline.cc",
+    "deadline.cc",
+    "debug.cc",
+    "dpc.cc",
+    "event.cc",
+    "init.cc",
+    "mp.cc",
+    "mutex.cc",
+    "owned_wait_queue.cc",
+    "percpu.cc",
+    "semaphore.cc",
+    "thread.cc",
+    "timer.cc",
+    "wait.cc",
   ]
 
   if (enable_fair_scheduler) {
-    sources += [ "fair_scheduler.cpp" ]
+    sources += [ "fair_scheduler.cc" ]
   } else {
-    sources += [ "sched.cpp" ]
+    sources += [ "sched.cc" ]
   }
 
   deps = [
+    ":tests",
     "$zx/kernel/dev/interrupt",
     "$zx/kernel/lib/console",
     "$zx/kernel/lib/counters",
-    "$zx/kernel/lib/debug",
     "$zx/kernel/lib/fbl",
     "$zx/kernel/lib/heap",
     "$zx/kernel/lib/libc",
@@ -42,5 +43,17 @@ source_set("kernel") {
     "$zx/kernel/vm",
     "$zx/system/ulib/explicit-memory",
     "$zx/system/ulib/zircon-internal",
+  ]
+}
+
+source_set("tests") {
+  # TODO: testonly = true
+  sources = [
+    "semaphore_tests.cc",
+    "thread_test.cc",
+  ]
+  deps = [
+    "$zx/kernel/lib/console",
+    "$zx/kernel/lib/unittest",
   ]
 }

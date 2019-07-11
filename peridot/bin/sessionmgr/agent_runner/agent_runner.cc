@@ -48,11 +48,6 @@ AgentRunner::AgentRunner(
 
 AgentRunner::~AgentRunner() = default;
 
-void AgentRunner::Connect(
-    fidl::InterfaceRequest<fuchsia::modular::AgentProvider> request) {
-  agent_provider_bindings_.AddBinding(this, std::move(request));
-}
-
 void AgentRunner::Teardown(fit::function<void()> callback) {
   // No new agents will be scheduled to run.
   *terminating_ = true;
@@ -149,8 +144,6 @@ void AgentRunner::RunAgent(const std::string& agent_url) {
     }
     run_agent_callbacks_.erase(agent_url);
   }
-
-  UpdateWatchers();
 }
 
 void AgentRunner::ConnectToAgent(
@@ -272,8 +265,6 @@ void AgentRunner::RemoveAgent(const std::string agent_url) {
     return;
   }
 
-  UpdateWatchers();
-
   // At this point, if there are pending requests to start the agent (because
   // the previous one was in a terminating state), we can start it up again.
   if (run_agent_callbacks_.find(agent_url) != run_agent_callbacks_.end()) {
@@ -297,7 +288,8 @@ void AgentRunner::ForwardConnectionsToAgent(const std::string& agent_url) {
 }
 
 void AgentRunner::ScheduleTask(const std::string& agent_url,
-                               fuchsia::modular::TaskInfo task_info) {
+                               fuchsia::modular::TaskInfo task_info,
+                               fit::function<void(bool)> done) {
   AgentRunnerStorage::TriggerInfo data;
   data.agent_url = agent_url;
   data.task_id = task_info.task_id;
@@ -320,9 +312,10 @@ void AgentRunner::ScheduleTask(const std::string& agent_url,
     // |AgentRunnerStorageImpl::WriteTask| eventually calls |AddedTask()|
     // after this trigger information has been added to the ledger via a
     // ledger page watching mechanism.
-    agent_runner_storage_->WriteTask(agent_url, data, [](bool) {});
+    agent_runner_storage_->WriteTask(agent_url, data, std::move(done));
   } else {
     AddedTask(MakeTriggerKey(agent_url, data.task_id), data);
+    done(true);
   }
 }
 
@@ -344,7 +337,6 @@ void AgentRunner::AddedTask(const std::string& key,
   }
 
   task_by_ledger_key_[key] = std::make_pair(data.agent_url, data.task_id);
-  UpdateWatchers();
 }
 
 void AgentRunner::DeletedTask(const std::string& key) {
@@ -358,7 +350,6 @@ void AgentRunner::DeletedTask(const std::string& key) {
   DeleteAlarmTask(data->second.first, data->second.second);
 
   task_by_ledger_key_.erase(key);
-  UpdateWatchers();
 }
 
 void AgentRunner::DeleteMessageQueueTask(const std::string& agent_url,
@@ -559,27 +550,6 @@ std::vector<std::string> AgentRunner::GetAllAgents() {
   }
 
   return agent_urls;
-}
-
-void AgentRunner::UpdateWatchers() {
-  if (*terminating_) {
-    return;
-  }
-
-  for (auto& watcher : agent_provider_watchers_.ptrs()) {
-    (*watcher)->OnUpdate(GetAllAgents());
-  }
-}
-
-void AgentRunner::Watch(
-    fidl::InterfaceHandle<fuchsia::modular::AgentProviderWatcher> watcher) {
-  auto ptr = watcher.Bind();
-  // 1. Send this watcher the current list of agents.
-  ptr->OnUpdate(GetAllAgents());
-
-  // 2. Add this watcher to a set that is updated when a new list of agents is
-  // available.
-  agent_provider_watchers_.AddInterfacePtr(std::move(ptr));
 }
 
 }  // namespace modular

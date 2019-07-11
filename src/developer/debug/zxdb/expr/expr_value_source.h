@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_VALUE_SOURCE_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_VALUE_SOURCE_H_
 
 #include <stdint.h>
 
@@ -23,8 +24,7 @@ class ExprValueSource {
   ExprValueSource() = default;
 
   // Initializes the source indicating a memory address.
-  explicit ExprValueSource(uint64_t address)
-      : type_(Type::kMemory), address_(address) {}
+  explicit ExprValueSource(uint64_t address) : type_(Type::kMemory), address_(address) {}
 
   Type type() const { return type_; }
 
@@ -42,9 +42,7 @@ class ExprValueSource {
   bool operator==(const ExprValueSource& other) const {
     return type_ == other.type_ && address_ == other.address_;
   }
-  bool operator!=(const ExprValueSource& other) const {
-    return !operator==(other);
-  }
+  bool operator!=(const ExprValueSource& other) const { return !operator==(other); }
 
  private:
   Type type_ = Type::kTemporary;
@@ -52,3 +50,5 @@ class ExprValueSource {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_VALUE_SOURCE_H_

@@ -5,14 +5,16 @@
 driver("gauss-tdm") {
   sources = [
     "gauss-tdm-out.c",
-    "gauss-tdm-stream.cpp",
-    "tas57xx.cpp",
+    "gauss-tdm-stream.cc",
+    "tas57xx.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.composite",
     "$zx/system/banjo/ddk.protocol.i2c",
     "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/dev/lib/amlogic",
+    "$zx/system/dev/lib/device-protocol-i2c",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/fidl/fuchsia-hardware-audio:c",
     "$zx/system/ulib/audio-driver-proto",

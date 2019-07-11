@@ -10,6 +10,17 @@
 #include <zircon/compiler.h>
 #include <stdint.h>
 #include <arch/x86.h>
+#include <arch/x86/idle_states.h>
+
+#ifdef __cplusplus
+
+namespace cpu_id {
+class CpuId;
+}  // cpu_id
+
+class MsrAccess;
+
+#endif  // __cplusplus
 
 __BEGIN_CDECLS
 
@@ -161,8 +172,10 @@ void x86_feature_debug(void);
 #define X86_FEATURE_PT                  X86_CPUID_BIT(0x7, 1, 25)
 #define X86_FEATURE_UMIP                X86_CPUID_BIT(0x7, 2, 2)
 #define X86_FEATURE_PKU                 X86_CPUID_BIT(0x7, 2, 3)
+#define X86_FEATURE_MD_CLEAR            X86_CPUID_BIT(0x7, 3, 10)
 #define X86_FEATURE_IBRS_IBPB           X86_CPUID_BIT(0x7, 3, 26)
 #define X86_FEATURE_STIBP               X86_CPUID_BIT(0x7, 3, 27)
+#define X86_FEATURE_L1D_FLUSH           X86_CPUID_BIT(0x7, 3, 28)
 #define X86_FEATURE_ARCH_CAPABILITIES   X86_CPUID_BIT(0x7, 3, 29)
 #define X86_FEATURE_SSBD                X86_CPUID_BIT(0x7, 3, 31)
 
@@ -275,7 +288,8 @@ enum x86_microarch_list {
     X86_MICROARCH_INTEL_HASWELL,
     X86_MICROARCH_INTEL_SKYLAKE,
     X86_MICROARCH_INTEL_KABYLAKE,
-    X86_MICROARCH_INTEL_SILVERMONT,
+    X86_MICROARCH_INTEL_SILVERMONT,  // Silvermont, Airmont
+    X86_MICROARCH_INTEL_GOLDMONT,  // Goldmont, Goldmont+
     X86_MICROARCH_AMD_BULLDOZER,
     X86_MICROARCH_AMD_JAGUAR,
     X86_MICROARCH_AMD_ZEN,
@@ -284,6 +298,7 @@ extern enum x86_microarch_list x86_microarch;
 
 extern bool g_x86_feature_fsgsbase;
 extern bool g_x86_feature_pcid_good;
+extern bool g_x86_feature_has_smap;
 
 enum x86_hypervisor_list {
     X86_HYPERVISOR_UNKNOWN,
@@ -306,6 +321,8 @@ typedef struct {
     x86_reboot_system_func_t reboot_system;
 
     bool disable_c1e;
+
+    x86_idle_states_t idle_states;
 } x86_microarch_config_t;
 
 static inline const x86_microarch_config_t* x86_get_microarch_config(void) {
@@ -316,9 +333,19 @@ static inline const x86_microarch_config_t* x86_get_microarch_config(void) {
 // Vendor-specific per-cpu init functions, in amd.cpp/intel.cpp
 void x86_amd_init_percpu(void);
 void x86_intel_init_percpu(void);
-bool x86_intel_cpu_has_meltdown(void);
-bool x86_intel_cpu_has_l1tf(void);
+#ifdef __cplusplus
+bool x86_intel_cpu_has_meltdown(const cpu_id::CpuId* cpuid, MsrAccess* msr);
+bool x86_intel_cpu_has_l1tf(const cpu_id::CpuId* cpuid, MsrAccess* msr);
+bool x86_intel_cpu_has_mds(const cpu_id::CpuId* cpuid, MsrAccess* msr);
+#endif
 uint32_t x86_amd_get_patch_level(void);
 uint32_t x86_intel_get_patch_level(void);
 
 __END_CDECLS
+
+#ifdef __cplusplus
+
+bool x86_intel_check_microcode_patch(cpu_id::CpuId* cpuid, MsrAccess* msr, struct iovec patch);
+void x86_intel_load_microcode_patch(cpu_id::CpuId* cpuid, MsrAccess* msr, struct iovec patch);
+
+#endif  // __cplusplus

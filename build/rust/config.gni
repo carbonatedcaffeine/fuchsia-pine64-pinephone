@@ -14,10 +14,10 @@ if (is_mac) {
 declare_args() {
   # Sets a custom base directory for `rustc` and `cargo`.
   # This can be used to test custom Rust toolchains.
-  rustc_prefix = "//buildtools/${host_platform}/rust/bin"
+  rustc_prefix = "//prebuilt/third_party/rust/${host_platform}/bin"
 
   # Sets the default LTO type for rustc bulids.
-  rust_lto = "unset"
+  rust_lto = ""
 
   # Sets the fuchsia toolchain target triple suffix (after arch)
   rust_toolchain_triple_suffix = "fuchsia"
@@ -25,6 +25,16 @@ declare_args() {
   # Sets whether Rust compiler warnings cause errors or not.
   # "deny" will make all warnings into errors, while "allow" will ignore warnings
   rust_warnings = "deny"
+
+  # Overrides the optimization level for all Rust builds, regardless of
+  # debug/release flags or the `force_opt` arg to the rustc_ templates.
+  # Valid values are 0-3, o, and z.
+  rust_override_opt = ""
+
+  # Overrides the LTO setting for all Rust builds, regardless of
+  # debug/release flags or the `with_lto` arg to the rustc_ templates.
+  # Valid values are "none", "thin", and "fat".
+  rust_override_lto = ""
 }
 
 _sysroot = sysroot
@@ -32,7 +42,6 @@ _sysroot_deps = []
 
 # TODO(BLD-230): sysroot.gni should provide the correct label and path to the Fuchsia sysroot.
 if (is_fuchsia) {
-  import("//build/config/fuchsia/zircon.gni")
   _sysroot_deps = [ "//sdk:zircon_sysroot_export" ]
   _sysroot = rebase_path(
           "$root_out_dir/sdk/exported/zircon_sysroot/arch/$target_cpu/sysroot")
@@ -72,12 +81,6 @@ if (current_os == "mac") {
   }
 }
 
-if (is_debug) {
-  _rust_opt_level = "0"
-} else {
-  _rust_opt_level = "z"
-}
-
 clang_prefix_rebased = rebase_path(clang_prefix, "", root_build_dir)
 
 clang_resource_dir = exec_script(rebase_path("$clang_prefix_rebased/clang"),
@@ -94,7 +97,7 @@ rust_build_args =
       "--rustc",
       rebase_path("$rustc_prefix/rustc"),
       "--cmake-dir",
-      rebase_path("//buildtools/cmake/bin"),
+      rebase_path("//prebuilt/third_party/cmake/${host_platform}/bin"),
       "--lib-dir",
       rebase_path(get_label_info(":any($shlib_toolchain)", "root_out_dir")),
       "--target",
@@ -105,8 +108,6 @@ rust_build_args =
       rebase_path(clang_prefix_rebased, "", root_build_dir),
       "--clang-resource-dir",
       clang_resource_dir,
-      "--opt-level",
-      _rust_opt_level,
       "--symbol-level",
       "$symbol_level",
     ] + _platform_args
@@ -118,4 +119,4 @@ rust_build_deps = _sysroot_deps + _std_deps
 # may not be compatible with newer ones.
 # To achieve this, we insert a build dependency on the rust version.
 rust_build_inputs =
-    [ "//buildtools/${host_platform}/rust/.versions/rust.cipd_version" ]
+    [ "//prebuilt/third_party/rust/${host_platform}/.versions/rust.cipd_version" ]

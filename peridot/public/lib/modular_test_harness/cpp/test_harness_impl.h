@@ -17,6 +17,8 @@
 #include <lib/sys/cpp/testing/enclosing_environment.h>
 #include <lib/vfs/cpp/pseudo_dir.h>
 
+#include <set>
+
 namespace modular::testing {
 
 // Provides the |TestHarness| service.
@@ -48,16 +50,16 @@ class TestHarnessImpl final : fuchsia::modular::testing::TestHarness {
   class InterceptedComponentImpl;
   class InterceptedSessionAgent;
 
-  // Services requested using |TestHarness.GetService()| are provided by a
+  // Services requested using |TestHarness.ConnectToService()| are provided by a
   // session agent which is started as part of the test harness' modular runtime
   // instance. This session agent is intercepted and implemented by the
   // |InterceptedSessionAgent| inner class. This struct holds state or the
   // intercepted session agent implementation.
   struct InterceptedSessionAgentInfo {
-    // Service requests from |TestHarness.GetService()| may be issued before the
-    // session agent, which provides these services, has been initialized. These
-    // service requests are buffered here until the session agent has been
-    // initialized.
+    // Service requests from |TestHarness.ConnectToService()| may be issued
+    // before the session agent, which provides these services, has been
+    // initialized. These service requests are buffered here until the session
+    // agent has been initialized.
     //
     // Flushed using FlushBufferedSessionAgentServices().
     struct BufferedServiceRequest {
@@ -68,7 +70,7 @@ class TestHarnessImpl final : fuchsia::modular::testing::TestHarness {
 
     // The session agent's intercepted state that we must keep around to keep
     // the component alive:
-    std::unique_ptr<component::StartupContext> component_context;
+    std::unique_ptr<sys::ComponentContext> component_context;
     std::unique_ptr<sys::testing::InterceptedComponent> intercepted_component;
     std::unique_ptr<::modular::AgentDriver<InterceptedSessionAgent>>
         agent_driver;
@@ -78,16 +80,16 @@ class TestHarnessImpl final : fuchsia::modular::testing::TestHarness {
   void Run(fuchsia::modular::testing::TestHarnessSpec spec) override;
 
   // |fuchsia::modular::testing::TestHarness|
-  void GetService(
-      fuchsia::modular::testing::TestHarnessService service) override;
-
-  // |fuchsia::modular::testing::TestHarness|
   void ConnectToModularService(
       fuchsia::modular::testing::ModularService service) override;
 
   // |fuchsia::modular::testing::TestHarness|
   void ConnectToEnvironmentService(std::string service_name,
                                    zx::channel request) override;
+
+  // |fuchsia::modular::testing::TestHarness|
+  void ParseConfig(std::string config, std::string config_path,
+                   ParseConfigCallback callback) override;
 
   [[nodiscard]] static std::unique_ptr<vfs::PseudoDir> MakeBasemgrConfigDir(
       const fuchsia::modular::testing::TestHarnessSpec& spec);
@@ -139,6 +141,28 @@ class TestHarnessImpl final : fuchsia::modular::testing::TestHarness {
   // Processes the service requests which are buffered from |GetService()|.
   void FlushBufferedSessionAgentServices();
 
+  // Populates the test harness environment with services described by
+  // |spec_.env_services|.
+  zx_status_t PopulateEnvServices(
+      sys::testing::EnvironmentServices* env_services);
+
+  // Injects services into the test harness environment according to
+  // |spec_.env_services.services_from_components| and
+  // |spec_.env_services_to_inject|.
+  //
+  // Injected service names are inserted into |added_svcs|.
+  zx_status_t PopulateEnvServicesWithComponents(
+      sys::testing::EnvironmentServices* env_services,
+      std::set<std::string>* added_svcs);
+
+  // Injects services into the test harness environment according to
+  // |spec_.env_services.service_dir|.
+  //
+  // Injected service names are inserted into |added_svcs|.
+  zx_status_t PopulateEnvServicesWithServiceDir(
+      sys::testing::EnvironmentServices* env_services,
+      std::set<std::string>* added_svcs);
+
   // The test harness environment is a child of |parent_env_|.
   const fuchsia::sys::EnvironmentPtr& parent_env_;  // Not owned.
 
@@ -147,9 +171,9 @@ class TestHarnessImpl final : fuchsia::modular::testing::TestHarness {
 
   fit::function<void()> on_disconnected_;
 
-  // This map manages InterceptedComponent bindings (and their implementations).
-  // When a |InterceptedComponent| connection is closed, it is automatically
-  // removed from this map (and its impl is deleted as well).
+  // This map manages InterceptedComponent bindings (and their
+  // implementations). When a |InterceptedComponent| connection is closed, it
+  // is automatically removed from this map (and its impl is deleted as well).
   //
   // The key is the raw-pointer backing the unique_ptr value.
   std::map<InterceptedComponentImpl*, std::unique_ptr<InterceptedComponentImpl>>
@@ -162,6 +186,8 @@ class TestHarnessImpl final : fuchsia::modular::testing::TestHarness {
   fuchsia::sys::ComponentControllerPtr basemgr_ctrl_;
 
   InterceptedSessionAgentInfo intercepted_session_agent_info_;
+
+  std::unique_ptr<sys::ServiceDirectory> env_service_dir_;
 
   friend class TestHarnessImplTest;
 };

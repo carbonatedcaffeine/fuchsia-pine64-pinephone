@@ -9,11 +9,11 @@
 #include <bitmap/raw-bitmap.h>
 #include <bitmap/storage.h>
 #include <ddk/platform-defs.h>
-#include <ddk/protocol/platform-device-lib.h>
+#include <lib/device-protocol/platform-device.h>
 #include <ddk/protocol/platform/bus.h>
 #include <ddk/protocol/platform/device.h>
 #include <ddktl/device.h>
-#include <ddktl/pdev.h>
+#include <lib/device-protocol/pdev.h>
 #include <ddktl/protocol/gpioimpl.h>
 #include <ddktl/protocol/platform/device.h>
 #include <fbl/array.h>

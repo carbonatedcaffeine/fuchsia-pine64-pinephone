@@ -213,6 +213,35 @@ TEST_F(GAP_AdapterTest, TransportClosedCallback) {
   EXPECT_TRUE(transport_closed_called());
 }
 
+// TODO(BT-919): Add a unit test for Adapter::ShutDown() and update
+// ShutDownDuringInitialize() with the same expectations.
+
+TEST_F(GAP_AdapterTest, ShutDownDuringInitialize) {
+  bool success;
+  int init_cb_count = 0;
+  auto init_cb = [&](bool result) {
+    success = result;
+    init_cb_count++;
+  };
+
+  FakeController::Settings settings;
+  settings.ApplyLEOnlyDefaults();
+  test_device()->set_settings(settings);
+
+  adapter()->Initialize(std::move(init_cb), [] {});
+  EXPECT_TRUE(adapter()->IsInitializing());
+  adapter()->ShutDown();
+
+  EXPECT_EQ(1, init_cb_count);
+  EXPECT_FALSE(success);
+  EXPECT_FALSE(adapter()->IsInitializing());
+  EXPECT_FALSE(adapter()->IsInitialized());
+
+  // Further calls to ShutDown() should have no effect.
+  adapter()->ShutDown();
+  RunLoopUntilIdle();
+}
+
 TEST_F(GAP_AdapterTest, SetNameError) {
   std::string kNewName = "something";
   bool success;
@@ -308,7 +337,8 @@ TEST_F(GAP_AdapterTest, LeAutoConnect) {
   // Mark the peer as bonded and advance the scan period.
   sm::PairingData pdata;
   pdata.ltk = sm::LTK();
-  adapter()->peer_cache()->AddBondedPeer(kPeerId, kTestAddr, pdata, {});
+  adapter()->peer_cache()->AddBondedPeer(
+      BondingData{kPeerId, kTestAddr, {}, pdata, {}});
   EXPECT_EQ(1u, adapter()->peer_cache()->count());
   RunLoopFor(kTestScanPeriod);
 
@@ -538,8 +568,10 @@ TEST_F(GAP_AdapterTest, LocalAddressDuringHangingConnect) {
 
   // The connection request should use a public address.
   hci::Status status;
-  auto connect_cb = [&](auto s, auto conn_ref) {
+  int connect_cb_calls = 0;
+  auto connect_cb = [&status, &connect_cb_calls](auto s, auto conn_ref) {
     status = s;
+    connect_cb_calls++;
     ASSERT_FALSE(conn_ref);
   };
   adapter()->le_connection_manager()->Connect(peer->identifier(), connect_cb);
@@ -557,6 +589,7 @@ TEST_F(GAP_AdapterTest, LocalAddressDuringHangingConnect) {
   // Let the connection request timeout.
   RunLoopFor(kTestTimeout);
   EXPECT_EQ(HostError::kTimedOut, status.error());
+  EXPECT_EQ(1, connect_cb_calls);
 
   // The peer should not have expired.
   ASSERT_EQ(peer, adapter()->peer_cache()->FindByAddress(kTestAddr));
@@ -574,9 +607,15 @@ TEST_F(GAP_AdapterTest, LocalAddressDuringHangingConnect) {
 
   ASSERT_EQ(peer, adapter()->peer_cache()->FindByAddress(kTestAddr));
 
-  // The address should refresh after the next connection attempt.
+  // The address should refresh after the pending request expires and before the
+  // next connection attempt.
   RunLoopFor(kTestDelay);
-  adapter()->le_connection_manager()->Connect(peer->identifier(), connect_cb);
+  ASSERT_EQ(2, connect_cb_calls);
+
+  // This will be notified when LowEnergyConnectionManager is destroyed.
+  auto noop_connect_cb = [](auto, auto) {};
+  adapter()->le_connection_manager()->Connect(peer->identifier(),
+                                              std::move(noop_connect_cb));
   RunLoopUntilIdle();
   EXPECT_NE(last_random_addr, *test_device()->le_random_address());
   EXPECT_EQ(hci::LEOwnAddressType::kRandom,

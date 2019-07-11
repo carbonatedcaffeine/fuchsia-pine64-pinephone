@@ -11,10 +11,13 @@
 #error Fuchsia-only Header
 #endif
 
-#include <string.h>
+#include <atomic>
+#include <cstring>
+#include <utility>
 
 #include <bitmap/raw-bitmap.h>
 #include <bitmap/rle-bitmap.h>
+#include <block-client/cpp/block-device.h>
 #include <block-client/cpp/client.h>
 #include <digest/digest.h>
 #include <fbl/algorithm.h>
@@ -26,7 +29,7 @@
 #include <fbl/vector.h>
 #include <fs/block-txn.h>
 #include <fs/managed-vfs.h>
-#include <fs/metrics.h>
+#include <fs/metrics/cobalt-metrics.h>
 #include <fs/trace.h>
 #include <fs/vfs.h>
 #include <fs/vnode.h>
@@ -35,7 +38,6 @@
 #include <fuchsia/io/c/fidl.h>
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/async/cpp/wait.h>
-#include <lib/fzl/fdio.h>
 #include <lib/fzl/owned-vmo-mapper.h>
 #include <lib/fzl/resizeable-vmo-mapper.h>
 #include <lib/zx/channel.h>
@@ -57,11 +59,9 @@
 #include <blobfs/node-reserver.h>
 #include <blobfs/writeback.h>
 
-#include <atomic>
-#include <utility>
-
 namespace blobfs {
 
+using block_client::BlockDevice;
 using digest::Digest;
 
 enum class Writability {
@@ -82,9 +82,7 @@ struct MountOptions {
     CachePolicy cache_policy = CachePolicy::EvictImmediately;
 };
 
-class Blobfs : public fs::ManagedVfs,
-               public fbl::RefCounted<Blobfs>,
-               public TransactionManager {
+class Blobfs : public fs::ManagedVfs, public fbl::RefCounted<Blobfs>, public TransactionManager {
 public:
     DISALLOW_COPY_ASSIGN_AND_MOVE(Blobfs);
 
@@ -110,7 +108,7 @@ public:
 
     zx_status_t Transaction(block_fifo_request_t* requests, size_t count) final {
         TRACE_DURATION("blobfs", "Blobfs::Transaction", "count", count);
-        return fifo_client_.Transaction(requests, count);
+        return block_device_->FifoTransaction(requests, count);
     }
 
     ////////////////
@@ -130,9 +128,7 @@ public:
     // Allows attaching VMOs, controlling the underlying volume, and sending transactions to the
     // underlying storage (optionally through the journal).
 
-    BlobfsMetrics& LocalMetrics() final {
-        return metrics_;
-    }
+    BlobfsMetrics& Metrics() final { return metrics_; }
     size_t WritebackCapacity() const final;
     zx_status_t CreateWork(fbl::unique_ptr<WritebackWork>* out, Blob* vnode) final;
     zx_status_t EnqueueWork(fbl::unique_ptr<WritebackWork> work, EnqueueType type) final;
@@ -160,18 +156,12 @@ public:
         return allocator_->ReserveNodes(num_nodes, out_node);
     }
 
-    static zx_status_t Create(fbl::unique_fd blockfd, const MountOptions& options,
-                              const Superblock* info, fbl::unique_ptr<Blobfs>* out);
+    static zx_status_t Create(std::unique_ptr<BlockDevice> device, MountOptions* options,
+                              std::unique_ptr<Blobfs>* out);
 
-    void CollectMetrics() {
-        collecting_metrics_ = true;
-        cobalt_metrics_.EnableMetrics(true);
-    }
-    bool CollectingMetrics() const { return cobalt_metrics_.IsEnabled(); }
-    void DisableMetrics() {
-        cobalt_metrics_.EnableMetrics(false);
-        collecting_metrics_ = false;
-    }
+    void CollectMetrics() { collecting_metrics_ = true; }
+    bool CollectingMetrics() const { return collecting_metrics_; }
+    void DisableMetrics() { collecting_metrics_ = false; }
     void DumpMetrics() const {
         if (collecting_metrics_) {
             metrics_.Dump();
@@ -194,18 +184,11 @@ public:
     // Acts as a special-case to bootstrap filesystem mounting.
     zx_status_t OpenRootNode(fbl::RefPtr<Directory>* out);
 
-    BlobCache& Cache() {
-        return blob_cache_;
-    }
+    BlobCache& Cache() { return blob_cache_; }
 
     zx_status_t Readdir(fs::vdircookie_t* cookie, void* dirents, size_t len, size_t* out_actual);
 
-    const zx::unowned_channel BlockDevice() const {
-        return zx::unowned_channel(block_device_.borrow_channel());
-    }
-    const fbl::unique_fd& BlockDeviceFd() const {
-        return block_device_.fd();
-    }
+    BlockDevice* Device() const { return block_device_.get(); }
 
     // Returns an unique identifier for this instance.
     uint64_t GetFsId() const { return fs_id_; }
@@ -232,16 +215,15 @@ public:
     // Adds reserved blocks to allocated bitmap and writes the bitmap out to disk.
     void PersistBlocks(WritebackWork* wb, const ReservedExtent& extent);
 
-    fs::VnodeMetrics* GetMutableVnodeMetrics() { return cobalt_metrics_.mutable_vnode_metrics(); }
-
     // Record the location and size of all non-free block regions.
     fbl::Vector<BlockRegion> GetAllocatedRegions() const {
         return allocator_->GetAllocatedRegions();
     }
+
 private:
     friend class BlobfsChecker;
 
-    Blobfs(fbl::unique_fd fd, const Superblock* info);
+    Blobfs(std::unique_ptr<BlockDevice> device, const Superblock* info);
 
     // Reloads metadata from disk. Useful when metadata on disk
     // may have changed due to journal playback.
@@ -283,10 +265,9 @@ private:
 
     BlobCache blob_cache_;
 
-    fzl::FdioCaller block_device_;
+    std::unique_ptr<BlockDevice> block_device_;
     fuchsia_hardware_block_BlockInfo block_info_ = {};
     std::atomic<groupid_t> next_group_ = {};
-    block_client::Client fifo_client_;
 
     fbl::unique_ptr<Allocator> allocator_;
 
@@ -300,14 +281,22 @@ private:
 
     fbl::Closure on_unmount_ = {};
 
-    // TODO(gevalentino): clean up old metrics and update this to inspect API.
-    fs::Metrics cobalt_metrics_;
+    // Loop for flushing the collector periodically.
     async::Loop flush_loop_ = async::Loop(&kAsyncLoopConfigNoAttachToThread);
 };
 
-zx_status_t Initialize(fbl::unique_fd blockfd, const MountOptions& options,
-                       fbl::unique_ptr<Blobfs>* out);
-zx_status_t Mount(async_dispatcher_t* dispatcher, fbl::unique_fd blockfd,
-                  const MountOptions& options, zx::channel root, fbl::Closure on_unmount);
+// Begins serving requests to the filesystem using |dispatch|, by parsing
+// the on-disk format using |device|, using |root| as a filesystem server.
+//
+// This function does not block, and instead serves requests on the dispatcher
+// asynchronously.
+//
+// Invokes |on_unmount| when the filesystem has been instructed to terminate.
+// After |on_unmount| completes, |dispatcher| will no longer be accessed.
+zx_status_t Mount(async_dispatcher_t* dispatcher, std::unique_ptr<BlockDevice> device,
+                  MountOptions* options, zx::channel root, fbl::Closure on_unmount);
+
+// Formats the underlying device with an empty Blobfs partition.
+zx_status_t FormatFilesystem(BlockDevice* device);
 
 } // namespace blobfs

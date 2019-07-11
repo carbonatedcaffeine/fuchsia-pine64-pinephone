@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_ARCH_INFO_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_ARCH_INFO_H_
 
 #include <memory>
 
@@ -48,12 +49,8 @@ class ArchInfo {
 
   const llvm::Target* target() const { return target_; }
   const llvm::MCInstrInfo* instr_info() const { return instr_info_.get(); }
-  const llvm::MCRegisterInfo* register_info() const {
-    return register_info_.get();
-  }
-  const llvm::MCSubtargetInfo* subtarget_info() const {
-    return subtarget_info_.get();
-  }
+  const llvm::MCRegisterInfo* register_info() const { return register_info_.get(); }
+  const llvm::MCSubtargetInfo* subtarget_info() const { return subtarget_info_.get(); }
   const llvm::MCAsmInfo* asm_info() const { return asm_info_.get(); }
 
  private:
@@ -76,3 +73,5 @@ class ArchInfo {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_ARCH_INFO_H_

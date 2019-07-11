@@ -48,6 +48,12 @@ template("banjo_cpp_library") {
         "$gen_dir/include/${banjo_library_path}-internal.h",
       ]
     },
+    {
+      backend = "cpp_mock"
+      sources = [
+        "$gen_dir/include/mock/${banjo_library_path}.h",
+      ]
+    },
   ]
   gen_deps = []
   gen_sources = []
@@ -109,6 +115,13 @@ template("banjo_cpp_library") {
         deps += [ "$dep.cpp" ]
         public_deps += [ "$dep.cpp.headers" ]
       }
+
+      # Generated headers have #include <ddktl/device-internal.h> and
+      # #include <ddk/driver.h> (and others).
+      public_deps += [
+        "$zx/system/ulib/ddk:headers",
+        "$zx/system/ulib/ddktl:headers",
+      ]
     }
 
     # Things normally depend on "banjo/foo:cpp" rather than "banjo/foo:foo.cpp".

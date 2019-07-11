@@ -4,7 +4,7 @@
 
 driver("aml-sd-emmc") {
   sources = [
-    "aml-sd-emmc.cpp",
+    "aml-sd-emmc.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.block",
@@ -13,10 +13,40 @@ driver("aml-sd-emmc") {
     "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/banjo/ddk.protocol.sdmmc",
     "$zx/system/dev/lib/amlogic",
+    "$zx/system/dev/lib/device-protocol-pdev",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",
+    "$zx/system/ulib/hwreg",
     "$zx/system/ulib/sync",
     "$zx/system/ulib/zircon",
+  ]
+}
+test("aml-sd-emmc-test") {
+  testonly = true
+  output_name = "aml-sd-emmc-test"
+  sources = [
+    "aml-sd-emmc-test.cc",
+    "aml-sd-emmc.cc",
+  ]
+  deps = [
+    "$zx/system/banjo/ddk.protocol.gpio",
+    "$zx/system/banjo/ddk.protocol.platform.bus",
+    "$zx/system/banjo/ddk.protocol.platform.device",
+    "$zx/system/banjo/ddk.protocol.sdmmc",
+    "$zx/system/dev/lib/amlogic",
+    "$zx/system/dev/lib/device-protocol-pdev",
+    "$zx/system/dev/lib/device-protocol-platform-device",
+    "$zx/system/dev/lib/fake_ddk",
+    "$zx/system/dev/lib/mmio",
+    "$zx/system/dev/lib/mock-mmio-reg",
+    "$zx/system/ulib/ddk",
+    "$zx/system/ulib/ddktl",
+    "$zx/system/ulib/hwreg",
+    "$zx/system/ulib/sync",
+    "$zx/system/ulib/zircon",
+    "$zx/system/ulib/zx",
+    "$zx/system/ulib/zxtest",
   ]
 }

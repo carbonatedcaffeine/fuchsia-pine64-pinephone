@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_BIN_DEBUG_AGENT_DEBUGGED_JOB_H_
-#define GARNET_BIN_DEBUG_AGENT_DEBUGGED_JOB_H_
+#ifndef SRC_DEVELOPER_DEBUG_DEBUG_AGENT_DEBUGGED_JOB_H_
+#define SRC_DEVELOPER_DEBUG_DEBUG_AGENT_DEBUGGED_JOB_H_
 
 #include <lib/zx/job.h>
 #include <lib/zx/process.h>
+
 #include <map>
 #include <memory>
 #include <vector>
@@ -14,7 +15,6 @@
 #include "src/developer/debug/shared/message_loop.h"
 #include "src/developer/debug/shared/regex.h"
 #include "src/developer/debug/shared/zircon_exception_watcher.h"
-
 #include "src/lib/fxl/macros.h"
 
 namespace debug_agent {
@@ -59,8 +59,8 @@ class DebuggedJob : public debug_ipc::ZirconExceptionWatcher {
 
  private:
   // ZirconExceptionWatcher implementation.
-  void OnProcessStarting(zx_koid_t job_koid, zx_koid_t process_koid,
-                         zx_koid_t thread_koid) override;
+  void OnProcessStarting(zx::exception exception_token,
+                         zx_exception_info_t exception_info) override;
 
   ProcessStartHandler* handler_;  // Non-owning.
   zx_koid_t koid_;
@@ -75,4 +75,4 @@ class DebuggedJob : public debug_ipc::ZirconExceptionWatcher {
 
 }  // namespace debug_agent
 
-#endif  // GARNET_BIN_DEBUG_AGENT_DEBUGGED_JOB_H_
+#endif  // SRC_DEVELOPER_DEBUG_DEBUG_AGENT_DEBUGGED_JOB_H_

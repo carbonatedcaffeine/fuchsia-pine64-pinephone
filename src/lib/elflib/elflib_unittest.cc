@@ -59,9 +59,9 @@ inline std::string GetTestFilePath(const std::string& rel_path) {
 // The test files will be copied over to this specific location at build time.
 constexpr char kRelativeTestDataPath[] = "test_data/elflib/";
 constexpr char kStrippedExampleFile[] = "stripped_example.elf";
-constexpr char kUnstrippedExampleFile[] = "unstripped_example.elf";
-constexpr char kUnstrippedExampleFileStripped[] =
-    "unstripped_example_stripped.elf";
+constexpr char kUnstrippedExampleFileBase[] = "unstripped_example";
+constexpr char kUnstrippedExampleFileStrippedBase[] =
+    "unstripped_example_stripped";
 
 inline std::string GetTestBinaryPath(const std::string& bin) {
   return GetTestFilePath(kRelativeTestDataPath) + bin;
@@ -69,7 +69,7 @@ inline std::string GetTestBinaryPath(const std::string& bin) {
 
 class TestData {
  public:
-  TestData() {
+  TestData(bool with_symbols) {
     PushData(Elf64_Ehdr{
         .e_ident = {0, 0, 0, 0, ELFCLASS64, ELFDATA2LSB, EV_CURRENT},
         .e_version = EV_CURRENT,
@@ -130,13 +130,17 @@ class TestData {
     });
     DataAt<Elf64_Ehdr>(0)->e_phoff = phnote_hdr;
 
-    DataAt<Elf64_Shdr>(shstrtab_hdr)->sh_offset =
-        PushData("\0.shstrtab\0.stuff\0.strtab\0.symtab\0.null\0.nobits\0", 48);
+    if (with_symbols) {
+      DataAt<Elf64_Shdr>(shstrtab_hdr)->sh_offset = PushData(
+          "\0.shstrtab\0.stuff\0.strtab\0.symtab\0.null\0.nobits\0", 48);
+    }
 
     DataAt<Elf64_Shdr>(stuff_hdr)->sh_offset = PushData("This is a test.", 15);
 
-    DataAt<Elf64_Shdr>(strtab_hdr)->sh_offset =
-        PushData("\0zx_frob_handle\0", 16);
+    if (with_symbols) {
+      DataAt<Elf64_Shdr>(strtab_hdr)->sh_offset =
+          PushData("\0zx_frob_handle\0", 16);
+    }
 
     DataAt<Elf64_Shdr>(symtab_hdr)->sh_offset = PushData(Elf64_Sym{
         .st_name = 1,
@@ -215,14 +219,14 @@ class TestData {
 }  // namespace
 
 TEST(ElfLib, Create) {
-  TestData t;
+  TestData t(/*with_symbols=*/true);
   std::unique_ptr<ElfLib> got;
 
   EXPECT_NE(ElfLib::Create(t.Data(), t.Size()).get(), nullptr);
 }
 
 TEST(ElfLib, GetSection) {
-  TestData t;
+  TestData t(/*with_symbols=*/true);
   std::unique_ptr<ElfLib> elf = ElfLib::Create(t.Data(), t.Size());
 
   ASSERT_NE(elf.get(), nullptr);
@@ -240,7 +244,7 @@ TEST(ElfLib, GetSection) {
 }
 
 TEST(ElfLib, GetSymbolValue) {
-  TestData t;
+  TestData t(/*with_symbols=*/true);
   std::unique_ptr<ElfLib> elf = ElfLib::Create(t.Data(), t.Size());
 
   ASSERT_NE(elf.get(), nullptr);
@@ -250,8 +254,22 @@ TEST(ElfLib, GetSymbolValue) {
   EXPECT_EQ(kSymbolPoison, data->st_value);
 }
 
+TEST(ElfLib, GetSymbolValueFromDebug) {
+  TestData t1(/*with_symbols=*/false);
+  TestData t2(/*with_symbols=*/true);
+  std::unique_ptr<ElfLib> elf = ElfLib::Create(t1.Data(), t1.Size());
+  std::unique_ptr<ElfLib> debug = ElfLib::Create(t2.Data(), t2.Size());
+  elf->SetDebugData(std::move(debug));
+
+  ASSERT_NE(elf.get(), nullptr);
+
+  auto data = elf->GetSymbol("zx_frob_handle");
+  ASSERT_TRUE(data);
+  EXPECT_EQ(kSymbolPoison, data->st_value);
+}
+
 TEST(ElfLib, GetAllSymbols) {
-  TestData t;
+  TestData t(/*with_symbols=*/true);
   std::unique_ptr<ElfLib> elf = ElfLib::Create(t.Data(), t.Size());
 
   ASSERT_NE(elf.get(), nullptr);
@@ -268,7 +286,7 @@ TEST(ElfLib, GetAllSymbols) {
 }
 
 TEST(ElfLib, GetNote) {
-  TestData t;
+  TestData t(/*with_symbols=*/true);
   std::unique_ptr<ElfLib> elf = ElfLib::Create(t.Data(), t.Size());
 
   ASSERT_NE(elf.get(), nullptr);
@@ -289,7 +307,7 @@ TEST(ElfLib, GetNote) {
 }
 
 TEST(ElfLib, MissingSections) {
-  TestData t;
+  TestData t(/*with_symbols=*/true);
   std::unique_ptr<ElfLib> elf = ElfLib::Create(t.Data(), t.Size());
 
   ASSERT_NE(elf.get(), nullptr);
@@ -301,7 +319,7 @@ TEST(ElfLib, MissingSections) {
 }
 
 TEST(ElfLib, GetIrregularNote) {
-  TestData t;
+  TestData t(/*with_symbols=*/true);
   std::unique_ptr<ElfLib> elf = ElfLib::Create(t.Data(), t.Size());
 
   ASSERT_NE(elf.get(), nullptr);
@@ -350,35 +368,76 @@ TEST(ElfLib, GetSymbolsFromStripped) {
 }
 
 TEST(ElfLib, GetPLTFromUnstripped) {
-  std::unique_ptr<ElfLib> elf =
-      ElfLib::Create(GetTestBinaryPath(kUnstrippedExampleFile));
+  std::string suffixes[] = {".elf", ".arm64.elf"};
+  for (auto suffix : suffixes) {
+    std::unique_ptr<ElfLib> elf = ElfLib::Create(
+        GetTestBinaryPath(std::string(kUnstrippedExampleFileBase) + suffix));
 
-  ASSERT_NE(elf.get(), nullptr);
+    ASSERT_NE(elf.get(), nullptr);
 
-  auto plt = elf->GetPLTOffsets();
+    auto plt = elf->GetPLTOffsets();
 
-  EXPECT_EQ(2U, plt.size());
+    EXPECT_EQ(2U, plt.size());
 
-  EXPECT_EQ(0x15d0U, plt["printf"]);
-  EXPECT_EQ(0x15e0U, plt["strlen"]);
+    if (suffix == ".elf") {
+      // x86
+      EXPECT_EQ(0x15d0U, plt["printf"]);
+      EXPECT_EQ(0x15e0U, plt["strlen"]);
+    } else {
+      // arm
+      EXPECT_EQ(0x107B0U, plt["printf"]);
+      EXPECT_EQ(0x107C0U, plt["strlen"]);
+    }
+  }
 }
 
 TEST(ElfLib, GetPLTFromStrippedDebug) {
-  std::unique_ptr<ElfLib> elf =
-      ElfLib::Create(GetTestBinaryPath(kUnstrippedExampleFileStripped));
-  std::unique_ptr<ElfLib> debug =
-      ElfLib::Create(GetTestBinaryPath(kUnstrippedExampleFile));
+  std::string suffixes[] = {".elf", ".arm64.elf"};
+  for (auto& suffix : suffixes) {
+    std::unique_ptr<ElfLib> elf = ElfLib::Create(GetTestBinaryPath(
+        std::string(kUnstrippedExampleFileStrippedBase) + suffix));
+    std::unique_ptr<ElfLib> debug = ElfLib::Create(
+        GetTestBinaryPath(std::string(kUnstrippedExampleFileBase) + suffix));
+
+    ASSERT_NE(elf.get(), nullptr);
+    ASSERT_NE(debug.get(), nullptr);
+
+    ASSERT_TRUE(elf->SetDebugData(std::move(debug)));
+
+    auto plt = elf->GetPLTOffsets();
+
+    EXPECT_EQ(2U, plt.size());
+
+    if (suffix == ".elf") {
+      // x86
+      EXPECT_EQ(0x15d0U, plt["printf"]);
+      EXPECT_EQ(0x15e0U, plt["strlen"]);
+    } else {
+      // arm
+      EXPECT_EQ(0x107B0U, plt["printf"]);
+      EXPECT_EQ(0x107C0U, plt["strlen"]);
+    }
+  }
+}
+
+TEST(ElfLib, DetectUnstripped) {
+  std::unique_ptr<ElfLib> elf = ElfLib::Create(
+      GetTestBinaryPath(std::string(kUnstrippedExampleFileBase) + ".elf"));
 
   ASSERT_NE(elf.get(), nullptr);
-  ASSERT_NE(debug.get(), nullptr);
 
-  ASSERT_TRUE(elf->SetDebugData(std::move(debug)));
-
-  auto plt = elf->GetPLTOffsets();
-
-  EXPECT_EQ(2U, plt.size());
-
-  EXPECT_EQ(0x15d0U, plt["printf"]);
-  EXPECT_EQ(0x15e0U, plt["strlen"]);
+  EXPECT_TRUE(elf->ProbeHasDebugInfo());
+  EXPECT_TRUE(elf->ProbeHasProgramBits());
 }
+
+TEST(ElfLib, DetectStripped) {
+  std::unique_ptr<ElfLib> elf = ElfLib::Create(GetTestBinaryPath(
+      std::string(kUnstrippedExampleFileStrippedBase) + ".elf"));
+
+  ASSERT_NE(elf.get(), nullptr);
+
+  EXPECT_FALSE(elf->ProbeHasDebugInfo());
+  EXPECT_TRUE(elf->ProbeHasProgramBits());
+}
+
 }  // namespace elflib

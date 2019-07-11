@@ -11,7 +11,7 @@
 #include "lib/fidl/cpp/clone.h"
 #include "lib/fidl/cpp/optional.h"
 #include "lib/fsl/io/fd.h"
-#include "lib/media/timeline/type_converters.h"
+#include "lib/media/cpp/type_converters.h"
 #include "src/lib/url/gurl.h"
 #include "src/media/playback/mediaplayer/graph/formatting.h"
 #include "src/media/playback/mediaplayer/test/mediaplayer_test_util_params.h"
@@ -24,18 +24,17 @@ namespace {
 constexpr int32_t kDefaultWidth = 640;
 constexpr int32_t kDefaultHeight = 100;
 
-constexpr float kBackgroundElevation = 0.f;
-constexpr float kVideoElevation = 1.0f;
-constexpr float kProgressBarElevation = 1.0f;
-constexpr float kProgressBarSliderElevation = 2.0f;
+constexpr float kBackgroundElevation = 0.0f;
+constexpr float kVideoElevation = -1.0f;
+constexpr float kProgressBarElevation = -1.0f;
+constexpr float kProgressBarSliderElevation = -2.0f;
 
 constexpr float kControlsGap = 12.0f;
 constexpr float kControlsHeight = 36.0f;
 
 // Determines whether the rectangle contains the point x,y.
 bool Contains(const fuchsia::math::RectF& rect, float x, float y) {
-  return rect.x <= x && rect.y <= y && rect.x + rect.width >= x &&
-         rect.y + rect.height >= y;
+  return rect.x <= x && rect.y <= y && rect.x + rect.width >= x && rect.y + rect.height >= y;
 }
 
 int64_t rand_less_than(int64_t limit) {
@@ -44,9 +43,9 @@ int64_t rand_less_than(int64_t limit) {
 
 }  // namespace
 
-MediaPlayerTestUtilView::MediaPlayerTestUtilView(
-    scenic::ViewContext view_context, fit::function<void(int)> quit_callback,
-    const MediaPlayerTestUtilParams& params)
+MediaPlayerTestUtilView::MediaPlayerTestUtilView(scenic::ViewContext view_context,
+                                                 fit::function<void(int)> quit_callback,
+                                                 const MediaPlayerTestUtilParams& params)
     : scenic::BaseView(std::move(view_context), "Media Player"),
       quit_callback_(std::move(quit_callback)),
       params_(params),
@@ -80,9 +79,7 @@ MediaPlayerTestUtilView::MediaPlayerTestUtilView(
   pixel_aspect_ratio_.height = 1;
 
   // Create a player from all that stuff.
-  player_ =
-      startup_context()
-          ->ConnectToEnvironmentService<fuchsia::media::playback::Player>();
+  player_ = startup_context()->ConnectToEnvironmentService<fuchsia::media::playback::Player>();
 
   // Create the video view.
   auto [view_token, view_holder_token] = scenic::ViewTokenPair::New();
@@ -90,18 +87,17 @@ MediaPlayerTestUtilView::MediaPlayerTestUtilView(
   player_->CreateView(std::move(view_token));
 
   video_host_node_.reset(new scenic::EntityNode(session()));
-  video_view_holder_.reset(new scenic::ViewHolder(
-      session(), std::move(view_holder_token), "video view"));
+  video_view_holder_.reset(
+      new scenic::ViewHolder(session(), std::move(view_holder_token), "video view"));
   video_host_node_->Attach(*video_view_holder_);
 
   root_node().AddChild(*video_host_node_);
 
   commands_.Init(player_.get());
 
-  player_.events().OnStatusChanged =
-      [this](fuchsia::media::playback::PlayerStatus status) {
-        HandleStatusChanged(status);
-      };
+  player_.events().OnStatusChanged = [this](fuchsia::media::playback::PlayerStatus status) {
+    HandleStatusChanged(status);
+  };
 
   // Seed the random number generator.
   std::srand(std::time(nullptr));
@@ -154,8 +150,7 @@ void MediaPlayerTestUtilView::ContinueTestSeek() {
 
   // For the start position, generate a number in the range [0..duration_ns_]
   // with a 10% chance of being zero.
-  int64_t seek_interval_start =
-      rand_less_than(duration_ns_ + duration_ns_ / 10);
+  int64_t seek_interval_start = rand_less_than(duration_ns_ + duration_ns_ / 10);
   if (seek_interval_start >= duration_ns_) {
     seek_interval_start = 0;
   }
@@ -170,8 +165,7 @@ void MediaPlayerTestUtilView::ContinueTestSeek() {
   commands_.Seek(seek_interval_start);
   commands_.Play();
   if (seek_interval_end >= duration_ns_) {
-    FXL_LOG(INFO) << "Seek interval: " << AsNs(seek_interval_start)
-                  << " to end";
+    FXL_LOG(INFO) << "Seek interval: " << AsNs(seek_interval_start) << " to end";
     commands_.WaitForEndOfStream();
   } else {
     FXL_LOG(INFO) << "Seek interval: " << AsNs(seek_interval_start) << " to "
@@ -209,15 +203,13 @@ void MediaPlayerTestUtilView::ScheduleNextUrl() {
 
 MediaPlayerTestUtilView::~MediaPlayerTestUtilView() {}
 
-void MediaPlayerTestUtilView::OnInputEvent(
-    fuchsia::ui::input::InputEvent event) {
+void MediaPlayerTestUtilView::OnInputEvent(fuchsia::ui::input::InputEvent event) {
   if (event.is_pointer()) {
     const auto& pointer = event.pointer();
     if (pointer.phase == fuchsia::ui::input::PointerEventPhase::DOWN) {
       if (duration_ns_ != 0 && Contains(controls_rect_, pointer.x, pointer.y)) {
         // User poked the progress bar...seek.
-        player_->Seek((pointer.x - controls_rect_.x) * duration_ns_ /
-                      controls_rect_.width);
+        player_->Seek((pointer.x - controls_rect_.x) * duration_ns_ / controls_rect_.width);
         if (state_ != State::kPlaying) {
           player_->Play();
         }
@@ -245,14 +237,14 @@ void MediaPlayerTestUtilView::OnInputEvent(
 
 void MediaPlayerTestUtilView::OnScenicEvent(fuchsia::ui::scenic::Event event) {
   switch (event.Which()) {
-    case ::fuchsia::ui::scenic::Event::Tag::kGfx:
+    case fuchsia::ui::scenic::Event::Tag::kGfx:
       switch (event.gfx().Which()) {
-        case ::fuchsia::ui::gfx::Event::Tag::kViewConnected: {
+        case fuchsia::ui::gfx::Event::Tag::kViewConnected: {
           auto& evt = event.gfx().view_connected();
           OnChildAttached(evt.view_holder_id);
           break;
         }
-        case ::fuchsia::ui::gfx::Event::Tag::kViewDisconnected: {
+        case fuchsia::ui::gfx::Event::Tag::kViewDisconnected: {
           auto& evt = event.gfx().view_disconnected();
           OnChildUnavailable(evt.view_holder_id);
           break;
@@ -265,14 +257,14 @@ void MediaPlayerTestUtilView::OnScenicEvent(fuchsia::ui::scenic::Event event) {
   }
 }
 
-void MediaPlayerTestUtilView::OnPropertiesChanged(
-    fuchsia::ui::gfx::ViewProperties old_properties) {
+void MediaPlayerTestUtilView::OnPropertiesChanged(fuchsia::ui::gfx::ViewProperties old_properties) {
   Layout();
 }
 
 void MediaPlayerTestUtilView::Layout() {
-  if (!has_logical_size())
+  if (!has_logical_size() || !video_view_holder_) {
     return;
+  }
 
   if (!scenic_ready_) {
     scenic_ready_ = true;
@@ -280,12 +272,11 @@ void MediaPlayerTestUtilView::Layout() {
   }
 
   // Make the background fill the space.
-  scenic::Rectangle background_shape(session(), logical_size().x,
-                                     logical_size().y);
+  scenic::Rectangle background_shape(session(), logical_size().x, logical_size().y);
   background_node_.SetShape(background_shape);
 
-  background_node_.SetTranslation(
-      logical_size().x * .5f, logical_size().y * .5f, -kBackgroundElevation);
+  background_node_.SetTranslation(logical_size().x * .5f, logical_size().y * .5f,
+                                  kBackgroundElevation);
 
   // Compute maximum size of video content after reserving space
   // for decorations.
@@ -295,14 +286,11 @@ void MediaPlayerTestUtilView::Layout() {
 
   // Shrink video to fit if needed.
   uint32_t video_width =
-      (video_size_.width == 0 ? kDefaultWidth : video_size_.width) *
-      pixel_aspect_ratio_.width;
+      (video_size_.width == 0 ? kDefaultWidth : video_size_.width) * pixel_aspect_ratio_.width;
   uint32_t video_height =
-      (video_size_.height == 0 ? kDefaultHeight : video_size_.height) *
-      pixel_aspect_ratio_.height;
+      (video_size_.height == 0 ? kDefaultHeight : video_size_.height) * pixel_aspect_ratio_.height;
 
-  if (max_content_size.width * video_height <
-      max_content_size.height * video_width) {
+  if (max_content_size.width * video_height < max_content_size.height * video_width) {
     content_rect_.width = max_content_size.width;
     content_rect_.height = video_height * max_content_size.width / video_width;
   } else {
@@ -312,9 +300,8 @@ void MediaPlayerTestUtilView::Layout() {
 
   // Position the video.
   content_rect_.x = (logical_size().x - content_rect_.width) / 2.0f;
-  content_rect_.y = (logical_size().y - content_rect_.height - kControlsHeight -
-                     kControlsGap) /
-                    2.0f;
+  content_rect_.y =
+      (logical_size().y - content_rect_.height - kControlsHeight - kControlsGap) / 2.0f;
 
   // Position the controls.
   controls_rect_.x = content_rect_.x;
@@ -323,26 +310,23 @@ void MediaPlayerTestUtilView::Layout() {
   controls_rect_.height = kControlsHeight;
 
   // Put the progress bar under the content.
-  scenic::Rectangle progress_bar_shape(session(), controls_rect_.width,
-                                       controls_rect_.height);
+  scenic::Rectangle progress_bar_shape(session(), controls_rect_.width, controls_rect_.height);
   progress_bar_node_.SetShape(progress_bar_shape);
-  progress_bar_node_.SetTranslation(
-      controls_rect_.x + controls_rect_.width * 0.5f,
-      controls_rect_.y + controls_rect_.height * 0.5f, -kProgressBarElevation);
+  progress_bar_node_.SetTranslation(controls_rect_.x + controls_rect_.width * 0.5f,
+                                    controls_rect_.y + controls_rect_.height * 0.5f,
+                                    kProgressBarElevation);
 
   // Put the progress bar slider on top of the progress bar.
   scenic::Rectangle progress_bar_slider_shape(session(), controls_rect_.width,
                                               controls_rect_.height);
   progress_bar_slider_node_.SetShape(progress_bar_slider_shape);
-  progress_bar_slider_node_.SetTranslation(
-      controls_rect_.x + controls_rect_.width * 0.5f,
-      controls_rect_.y + controls_rect_.height * 0.5f,
-      -kProgressBarSliderElevation);
+  progress_bar_slider_node_.SetTranslation(controls_rect_.x + controls_rect_.width * 0.5f,
+                                           controls_rect_.y + controls_rect_.height * 0.5f,
+                                           kProgressBarSliderElevation);
 
   // Ask the view to fill the space.
-  video_view_holder_->SetViewProperties(0, 0, 0, content_rect_.width,
-                                        content_rect_.height, 1000.f, 0, 0, 0,
-                                        0, 0, 0);
+  video_view_holder_->SetViewProperties(0, 0, 0, content_rect_.width, content_rect_.height, 1000.f,
+                                        0, 0, 0, 0, 0, 0);
 
   InvalidateScene();
 }
@@ -358,19 +342,16 @@ void MediaPlayerTestUtilView::OnSceneInvalidated(
     // video_host_node_->SetTranslation(
     //     content_rect_.x + content_rect_.width * 0.5f,
     //     content_rect_.y + content_rect_.height * 0.5f, kVideoElevation);
-    video_host_node_->SetTranslation(content_rect_.x, content_rect_.y,
-                                     -kVideoElevation);
+    video_host_node_->SetTranslation(content_rect_.x, content_rect_.y, kVideoElevation);
   }
 
-  float progress_bar_slider_width =
-      controls_rect_.width * normalized_progress();
-  scenic::Rectangle progress_bar_slider_shape(
-      session(), progress_bar_slider_width, controls_rect_.height);
+  float progress_bar_slider_width = controls_rect_.width * normalized_progress();
+  scenic::Rectangle progress_bar_slider_shape(session(), progress_bar_slider_width,
+                                              controls_rect_.height);
   progress_bar_slider_node_.SetShape(progress_bar_slider_shape);
-  progress_bar_slider_node_.SetTranslation(
-      controls_rect_.x + progress_bar_slider_width * 0.5f,
-      controls_rect_.y + controls_rect_.height * 0.5f,
-      -kProgressBarSliderElevation);
+  progress_bar_slider_node_.SetTranslation(controls_rect_.x + progress_bar_slider_width * 0.5f,
+                                           controls_rect_.y + controls_rect_.height * 0.5f,
+                                           kProgressBarSliderElevation);
 
   if (state_ == State::kPlaying) {
     InvalidateScene();
@@ -384,25 +365,23 @@ void MediaPlayerTestUtilView::OnChildAttached(uint32_t view_holder_id) {
 
 void MediaPlayerTestUtilView::OnChildUnavailable(uint32_t view_holder_id) {
   FXL_DCHECK(view_holder_id == video_view_holder_->id());
-  FXL_LOG(ERROR) << "Video view died unexpectedly";
+  FXL_LOG(ERROR) << "Video view died unexpectedly, quitting.";
 
   video_host_node_->Detach();
   video_host_node_.reset();
   video_view_holder_.reset();
 
-  Layout();
+  quit_callback_(0);
 }
 
 void MediaPlayerTestUtilView::HandleStatusChanged(
     const fuchsia::media::playback::PlayerStatus& status) {
   // Process status received from the player.
   if (status.timeline_function) {
-    timeline_function_ =
-        fidl::To<media::TimelineFunction>(*status.timeline_function);
+    timeline_function_ = fidl::To<media::TimelineFunction>(*status.timeline_function);
     state_ = status.end_of_stream
                  ? State::kEnded
-                 : (timeline_function_.subject_delta() == 0) ? State::kPaused
-                                                             : State::kPlaying;
+                 : (timeline_function_.subject_delta() == 0) ? State::kPaused : State::kPlaying;
   } else {
     state_ = State::kPaused;
   }
@@ -411,8 +390,7 @@ void MediaPlayerTestUtilView::HandleStatusChanged(
 
   if (status.problem) {
     if (!problem_shown_) {
-      FXL_LOG(ERROR) << "PROBLEM: " << status.problem->type << ", "
-                     << status.problem->details;
+      FXL_LOG(ERROR) << "PROBLEM: " << status.problem->type << ", " << status.problem->details;
       problem_shown_ = true;
     }
   } else {

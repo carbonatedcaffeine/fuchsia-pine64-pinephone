@@ -12,7 +12,6 @@ executable("msd_img_rgx_integration_tests_executable") {
   output_name = "msd_img_rgx_integration_tests"
 
   sources = [
-    "main.cc",
     "test_shutdown.cc",
   ]
 
@@ -23,6 +22,7 @@ executable("msd_img_rgx_integration_tests_executable") {
     "//garnet/lib/magma/src/magma_util",
     "//garnet/lib/magma/tests/helper:platform_device_helper",
     "//sdk/fidl/fuchsia.gpu.magma:fuchsia.gpu.magma_c",
+    "//src/lib/fxl/test:gtest_main",
     "//third_party/googletest:gtest",
   ]
 }
@@ -33,9 +33,11 @@ executable("msd_img_rgx_no_hardware_integration_tests_executable") {
 
   defines = [ "NO_HARDWARE" ]
   sources = [
-    "main.cc",
+    "test_query.cc",
     "test_shutdown.cc",
   ]
+
+  include_dirs = [ "//garnet/drivers/gpu/msd-img-rgx/no_hardware" ]
 
   public_deps = [
     "$zircon_build_root/public/lib/fdio",
@@ -44,6 +46,7 @@ executable("msd_img_rgx_no_hardware_integration_tests_executable") {
     "//garnet/lib/magma/src/magma_util",
     "//garnet/lib/magma/tests/helper:platform_device_helper",
     "//sdk/fidl/fuchsia.gpu.magma:fuchsia.gpu.magma_c",
+    "//src/lib/fxl/test:gtest_main",
     "//third_party/googletest:gtest",
   ]
 }

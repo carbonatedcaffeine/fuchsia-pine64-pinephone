@@ -157,8 +157,7 @@ func assertHasTestPackage(t *testing.T, repoDir string) {
 	if err != nil {
 		panic(err)
 	}
-	_, ok := dataFiles["/testpackage/0"]
-	if !ok {
+	if _, ok := dataFiles["testpackage/0"]; !ok {
 		t.Fatalf("package not found: %q in %#v", "testpackage", dataFiles)
 	}
 }

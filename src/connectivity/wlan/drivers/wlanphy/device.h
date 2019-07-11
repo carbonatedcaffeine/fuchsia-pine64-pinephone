@@ -5,8 +5,8 @@
 #pragma once
 
 #include <ddk/driver.h>
+#include <ddk/protocol/wlanphyimpl.h>
 #include <wlan/common/dispatcher.h>
-#include <wlan/protocol/phy-impl.h>
 
 #include <fuchsia/wlan/device/cpp/fidl.h>
 
@@ -20,8 +20,7 @@ class Device : public ::fuchsia::wlan::device::Phy {
     zx_status_t Bind();
 
     // zx_protocol_device_t
-    zx_status_t Ioctl(uint32_t op, const void* in_buf, size_t in_len, void* out_buf, size_t out_len,
-                      size_t* out_actual);
+    zx_status_t Message(fidl_msg_t* msg, fidl_txn_t* txn);
     void Release();
     void Unbind();
 
@@ -31,9 +30,11 @@ class Device : public ::fuchsia::wlan::device::Phy {
                              CreateIfaceCallback callback) override;
     virtual void DestroyIface(::fuchsia::wlan::device::DestroyIfaceRequest req,
                               DestroyIfaceCallback callback) override;
+    virtual void SetCountry(::fuchsia::wlan::device::SetCountryRequest req,
+                            SetCountryCallback callback) override;
 
    private:
-    zx_status_t Connect(const void* buf, size_t len);
+    zx_status_t Connect(zx::channel request);
 
     zx_device_t* parent_;
     zx_device_t* zxdev_;

@@ -6,7 +6,7 @@ use std::fmt;
 
 use serde_derive::{Deserialize, Serialize};
 
-use crate::common::TargetArchitecture;
+use crate::common::{ElementType, TargetArchitecture};
 use crate::json::JsonObject;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -16,22 +16,7 @@ pub struct Architectures {
     pub target: Vec<TargetArchitecture>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum ElementType {
-    BanjoLibrary,
-    CcPrebuiltLibrary,
-    CcSourceLibrary,
-    DartLibrary,
-    Documentation,
-    FidlLibrary,
-    HostTool,
-    Image,
-    LoadableModule,
-    Sysroot,
-}
-
-#[derive(Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, PartialOrd, Ord)]
 #[serde(deny_unknown_fields)]
 pub struct Part {
     pub meta: String,

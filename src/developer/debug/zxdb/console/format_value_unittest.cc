@@ -3,11 +3,12 @@
 // found in the LICENSE file.
 
 #include "src/developer/debug/zxdb/console/format_value.h"
+
 #include "gtest/gtest.h"
 #include "src/developer/debug/zxdb/common/test_with_loop.h"
-#include "src/developer/debug/zxdb/console/mock_format_value_process_context.h"
 #include "src/developer/debug/zxdb/console/output_buffer.h"
 #include "src/developer/debug/zxdb/expr/expr_value.h"
+#include "src/developer/debug/zxdb/expr/mock_eval_context.h"
 #include "src/developer/debug/zxdb/symbols/array_type.h"
 #include "src/developer/debug/zxdb/symbols/base_type.h"
 #include "src/developer/debug/zxdb/symbols/collection.h"
@@ -19,6 +20,7 @@
 #include "src/developer/debug/zxdb/symbols/member_ptr.h"
 #include "src/developer/debug/zxdb/symbols/mock_symbol_data_provider.h"
 #include "src/developer/debug/zxdb/symbols/modified_type.h"
+#include "src/developer/debug/zxdb/symbols/namespace.h"
 #include "src/developer/debug/zxdb/symbols/symbol_context.h"
 #include "src/developer/debug/zxdb/symbols/type_test_support.h"
 
@@ -27,8 +29,7 @@ namespace zxdb {
 namespace {
 
 fxl::RefPtr<BaseType> GetCharType() {
-  return fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsignedChar, 1,
-                                       "char");
+  return fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsignedChar, 1, "char");
 }
 
 fxl::RefPtr<BaseType> GetInt32Type() {
@@ -36,30 +37,24 @@ fxl::RefPtr<BaseType> GetInt32Type() {
 }
 
 fxl::RefPtr<ModifiedType> GetCharPointerType() {
-  return fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType,
-                                           LazySymbol(GetCharType()));
+  return fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol(GetCharType()));
 }
 
 class FormatValueTest : public TestWithLoop {
  public:
-  FormatValueTest()
-      : provider_(fxl::MakeRefCounted<MockSymbolDataProvider>()) {}
+  FormatValueTest() : eval_context_(fxl::MakeRefCounted<MockEvalContext>()) {}
 
-  MockFormatValueProcessContext& process_context() { return process_context_; }
-  MockSymbolDataProvider* provider() { return provider_.get(); }
+  fxl::RefPtr<MockEvalContext>& eval_context() { return eval_context_; }
+  MockSymbolDataProvider* provider() { return eval_context_->data_provider(); }
 
   // Synchronously calls FormatExprValue, returning the result.
-  std::string SyncFormatValue(const ExprValue& value,
-                              const FormatExprValueOptions& opts) {
+  std::string SyncFormatValue(const ExprValue& value, const FormatExprValueOptions& opts) {
     bool called = false;
     std::string output;
 
-    // Makes a heap-allocated copy of the ProcessContext for the formatter to
-    // manage.
-    auto formatter = fxl::MakeRefCounted<FormatValue>(
-        std::make_unique<MockFormatValueProcessContext>(process_context_));
+    auto formatter = fxl::MakeRefCounted<FormatValue>();
 
-    formatter->AppendValue(provider_, value, opts);
+    formatter->AppendValue(eval_context_, value, opts);
     formatter->Complete([&called, &output](OutputBuffer out) {
       called = true;
       output = out.AsString();
@@ -76,8 +71,7 @@ class FormatValueTest : public TestWithLoop {
   }
 
  private:
-  MockFormatValueProcessContext process_context_;
-  fxl::RefPtr<MockSymbolDataProvider> provider_;
+  fxl::RefPtr<MockEvalContext> eval_context_;
 };
 
 }  // namespace
@@ -91,20 +85,18 @@ TEST_F(FormatValueTest, Void) {
   EXPECT_EQ("void", SyncFormatValue(val_void, opts));
 
   // Void type with overridden name.
-  auto named_void_type =
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeNone, 0, "VOID");
+  auto named_void_type = fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeNone, 0, "VOID");
   ExprValue val_named_void(named_void_type, {});
   EXPECT_EQ("VOID", SyncFormatValue(val_named_void, opts));
 
   // Void pointer encoded as a pointer to a "none" BaseType.
-  auto void_ptr_type = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType,
-                                                         LazySymbol(void_type));
+  auto void_ptr_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol(void_type));
   ExprValue val_void_ptr(void_ptr_type, {8, 7, 6, 5, 4, 3, 2, 1});
   EXPECT_EQ("(void*) 0x102030405060708", SyncFormatValue(val_void_ptr, opts));
 
   // Void pointer encoded as a pointer to nothing.
-  auto void_ptr_type2 =
-      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol());
+  auto void_ptr_type2 = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol());
   ExprValue val_void_ptr2(void_ptr_type2, {8, 7, 6, 5, 4, 3, 2, 1});
   EXPECT_EQ("(void*) 0x102030405060708", SyncFormatValue(val_void_ptr2, opts));
 
@@ -119,33 +111,27 @@ TEST_F(FormatValueTest, Signed) {
   FormatExprValueOptions opts;
 
   // 8-bit.
-  ExprValue val_int8(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 1, "char"),
-      {123});
+  ExprValue val_int8(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 1, "char"), {123});
   EXPECT_EQ("123", SyncFormatValue(val_int8, opts));
 
   // 16-bit.
-  ExprValue val_int16(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 2, "short"),
-      {0xe0, 0xf0});
+  ExprValue val_int16(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 2, "short"),
+                      {0xe0, 0xf0});
   EXPECT_EQ("-3872", SyncFormatValue(val_int16, opts));
 
   // 32-bit.
-  ExprValue val_int32(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 4, "int"),
-      {0x01, 0x02, 0x03, 0x04});
+  ExprValue val_int32(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 4, "int"),
+                      {0x01, 0x02, 0x03, 0x04});
   EXPECT_EQ("67305985", SyncFormatValue(val_int32, opts));
 
   // 64-bit.
-  ExprValue val_int64(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 8, "long long"),
-      {0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff});
+  ExprValue val_int64(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 8, "long long"),
+                      {0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff});
   EXPECT_EQ("-2", SyncFormatValue(val_int64, opts));
 
   // Force a 32-bit float to an int.
-  ExprValue val_float(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeFloat, 4, "float"),
-      {0x04, 0x03, 0x02, 0x01});
+  ExprValue val_float(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeFloat, 4, "float"),
+                      {0x04, 0x03, 0x02, 0x01});
   opts.num_format = FormatExprValueOptions::NumFormat::kSigned;
   EXPECT_EQ("16909060", SyncFormatValue(val_float, opts));
 }
@@ -154,33 +140,27 @@ TEST_F(FormatValueTest, Unsigned) {
   FormatExprValueOptions opts;
 
   // 8-bit.
-  ExprValue val_int8(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 1, "char"),
-      {123});
+  ExprValue val_int8(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 1, "char"), {123});
   EXPECT_EQ("123", SyncFormatValue(val_int8, opts));
 
   // 16-bit.
-  ExprValue val_int16(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 1, "short"),
-      {0xe0, 0xf0});
+  ExprValue val_int16(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 1, "short"),
+                      {0xe0, 0xf0});
   EXPECT_EQ("61664", SyncFormatValue(val_int16, opts));
 
   // 32-bit.
-  ExprValue val_int32(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 1, "int"),
-      {0x01, 0x02, 0x03, 0x04});
+  ExprValue val_int32(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 1, "int"),
+                      {0x01, 0x02, 0x03, 0x04});
   EXPECT_EQ("67305985", SyncFormatValue(val_int32, opts));
 
   // 64-bit.
-  ExprValue val_int64(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned,
-                                                    1, "long long"),
+  ExprValue val_int64(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsigned, 1, "long long"),
                       {0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff});
   EXPECT_EQ("18446744073709551614", SyncFormatValue(val_int64, opts));
 
   // Force a 32-bit float to an unsigned and a hex.
-  ExprValue val_float(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeFloat, 4, "float"),
-      {0x04, 0x03, 0x02, 0x01});
+  ExprValue val_float(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeFloat, 4, "float"),
+                      {0x04, 0x03, 0x02, 0x01});
   opts.num_format = FormatExprValueOptions::NumFormat::kUnsigned;
   EXPECT_EQ("16909060", SyncFormatValue(val_float, opts));
   opts.num_format = FormatExprValueOptions::NumFormat::kHex;
@@ -191,21 +171,17 @@ TEST_F(FormatValueTest, Bool) {
   FormatExprValueOptions opts;
 
   // 8-bit true.
-  ExprValue val_true8(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeBoolean, 1, "bool"),
-      {0x01});
+  ExprValue val_true8(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeBoolean, 1, "bool"), {0x01});
   EXPECT_EQ("true", SyncFormatValue(val_true8, opts));
 
   // 8-bit false.
-  ExprValue val_false8(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeBoolean, 1, "bool"),
-      {0x00});
+  ExprValue val_false8(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeBoolean, 1, "bool"),
+                       {0x00});
   EXPECT_EQ("false", SyncFormatValue(val_false8, opts));
 
   // 32-bit true.
-  ExprValue val_false32(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeBoolean, 4, "bool"),
-      {0x00, 0x01, 0x00, 0x00});
+  ExprValue val_false32(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeBoolean, 4, "bool"),
+                        {0x00, 0x01, 0x00, 0x00});
   EXPECT_EQ("false", SyncFormatValue(val_false8, opts));
 }
 
@@ -213,34 +189,29 @@ TEST_F(FormatValueTest, Char) {
   FormatExprValueOptions opts;
 
   // 8-bit char.
-  ExprValue val_char8(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsignedChar, 1, "char"),
-      {'c'});
+  ExprValue val_char8(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsignedChar, 1, "char"),
+                      {'c'});
   EXPECT_EQ("'c'", SyncFormatValue(val_char8, opts));
 
   // Hex encoded 8-bit char.
   ExprValue val_char8_zero(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsignedChar, 1, "char"),
-      {0});
+      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsignedChar, 1, "char"), {0});
   EXPECT_EQ(R"('\x00')", SyncFormatValue(val_char8_zero, opts));
 
   // Backslash-escaped 8-bit char.
   ExprValue val_char8_quote(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsignedChar, 1, "char"),
-      {'\"'});
+      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeUnsignedChar, 1, "char"), {'\"'});
   EXPECT_EQ(R"('\"')", SyncFormatValue(val_char8_quote, opts));
 
   // 32-bit char (downcasted to 8 for printing).
-  ExprValue val_char32(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSignedChar, 4, "big"),
-      {'A', 1, 2, 3});
+  ExprValue val_char32(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSignedChar, 4, "big"),
+                       {'A', 1, 2, 3});
   EXPECT_EQ("'A'", SyncFormatValue(val_char32, opts));
 
   // 32-bit int forced to char.
   opts.num_format = FormatExprValueOptions::NumFormat::kChar;
-  ExprValue val_int32(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 4, "int32_t"),
-      {'$', 0x01, 0x00, 0x00});
+  ExprValue val_int32(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 4, "int32_t"),
+                      {'$', 0x01, 0x00, 0x00});
   EXPECT_EQ("'$'", SyncFormatValue(val_int32, opts));
 }
 
@@ -252,27 +223,23 @@ TEST_F(FormatValueTest, Float) {
   // 32-bit float.
   float in_float = 3.14159;
   memcpy(buffer, &in_float, 4);
-  ExprValue val_float(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeFloat, 4, "float"),
-      std::vector<uint8_t>(&buffer[0], &buffer[4]));
+  ExprValue val_float(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeFloat, 4, "float"),
+                      std::vector<uint8_t>(&buffer[0], &buffer[4]));
   EXPECT_EQ("3.14159", SyncFormatValue(val_float, opts));
 
   // 64-bit float.
   double in_double = 9.875e+12;
   memcpy(buffer, &in_double, 8);
-  ExprValue val_double(
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeFloat, 8, "double"),
-      std::vector<uint8_t>(&buffer[0], &buffer[8]));
+  ExprValue val_double(fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeFloat, 8, "double"),
+                       std::vector<uint8_t>(&buffer[0], &buffer[8]));
   EXPECT_EQ("9.875e+12", SyncFormatValue(val_double, opts));
 }
 
 TEST_F(FormatValueTest, Pointer) {
   FormatExprValueOptions opts;
 
-  auto base_type =
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 1, "int");
-  auto ptr_type = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType,
-                                                    LazySymbol(base_type));
+  auto base_type = fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 1, "int");
+  auto ptr_type = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol(base_type));
 
   std::vector<uint8_t> data = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
   ExprValue value(ptr_type, data);
@@ -303,19 +270,16 @@ TEST_F(FormatValueTest, GoodStrings) {
   FormatExprValueOptions opts;
 
   constexpr uint64_t kAddress = 0x1100;
-  std::vector<uint8_t> data = {'A',  'B',  'C', 'D',  'E', 'F',
-                               '\n', 0x01, 'z', '\\', '"', 0};
+  std::vector<uint8_t> data = {'A', 'B', 'C', 'D', 'E', 'F', '\n', 0x01, 'z', '\\', '"', 0};
   provider()->AddMemory(kAddress, data);
 
   // Little-endian version of the address.
-  std::vector<uint8_t> address_data = {0x00, 0x11, 0x00, 0x00,
-                                       0x00, 0x00, 0x00, 0x00};
+  std::vector<uint8_t> address_data = {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
   // This string is a char* and it should stop printing at the null terminator.
   const char kExpected[] = R"("ABCDEF\n\x01z\\\"")";
   auto ptr_type = GetCharPointerType();
-  EXPECT_EQ(kExpected,
-            SyncFormatValue(ExprValue(ptr_type, address_data), opts));
+  EXPECT_EQ(kExpected, SyncFormatValue(ExprValue(ptr_type, address_data), opts));
 
   // Force type info.
   opts.verbosity = FormatExprValueOptions::Verbosity::kAllTypes;
@@ -332,12 +296,23 @@ TEST_F(FormatValueTest, GoodStrings) {
   opts.verbosity = FormatExprValueOptions::Verbosity::kAllTypes;
   EXPECT_EQ(std::string("(char[12]) ") + kExpected,
             SyncFormatValue(ExprValue(array_type, data), opts));
+
+  // This type is a "const array of const char". I don't know how to type this
+  // in C (most related things end up as "const pointer to const char") and the
+  // type name looks wrong but GCC will generate this for the type of
+  // compiler-generated variables like __func__.
+  auto char_type = GetCharType();
+  auto const_char = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kConstType, LazySymbol(char_type));
+  auto array_const_char = fxl::MakeRefCounted<ArrayType>(const_char, 12);
+  auto const_array_const_char =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kConstType, LazySymbol(array_const_char));
+  EXPECT_EQ(std::string("(const const char[12]) ") + kExpected,
+            SyncFormatValue(ExprValue(const_array_const_char, data), opts));
 }
 
 TEST_F(FormatValueTest, BadStrings) {
   FormatExprValueOptions opts;
-  std::vector<uint8_t> address_data = {0x00, 0x11, 0x00, 0x00,
-                                       0x00, 0x00, 0x00, 0x00};
+  std::vector<uint8_t> address_data = {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
   // Should report invalid pointer.
   auto ptr_type = GetCharPointerType();
@@ -356,19 +331,16 @@ TEST_F(FormatValueTest, TruncatedString) {
   provider()->AddMemory(kAddress, {'A', 'B', 'C', 'D', 'E', 'F'});
 
   // Little-endian version of kAddress.
-  std::vector<uint8_t> address_data = {0x00, 0x11, 0x00, 0x00,
-                                       0x00, 0x00, 0x00, 0x00};
+  std::vector<uint8_t> address_data = {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
   // This string doesn't end in a null terminator but rather invalid memory.
   // We should print as much as we have.
   auto ptr_type = GetCharPointerType();
-  EXPECT_EQ(R"("ABCDEF")",
-            SyncFormatValue(ExprValue(ptr_type, address_data), opts));
+  EXPECT_EQ(R"("ABCDEF")", SyncFormatValue(ExprValue(ptr_type, address_data), opts));
 
   // Should only report the first 4 chars with a ... indicator.
   opts.max_array_size = 4;  // Truncate past this value.
-  EXPECT_EQ(R"("ABCD"...)",
-            SyncFormatValue(ExprValue(ptr_type, address_data), opts));
+  EXPECT_EQ(R"("ABCD"...)", SyncFormatValue(ExprValue(ptr_type, address_data), opts));
 }
 
 TEST_F(FormatValueTest, EmptyAndBadArray) {
@@ -380,16 +352,13 @@ TEST_F(FormatValueTest, EmptyAndBadArray) {
 
   // Empty array with valid pointer.
   auto empty_array_type = fxl::MakeRefCounted<ArrayType>(GetInt32Type(), 0);
-  EXPECT_EQ(R"({})", SyncFormatValue(ExprValue(empty_array_type,
-                                               std::vector<uint8_t>(), source),
-                                     opts));
+  EXPECT_EQ(R"({})",
+            SyncFormatValue(ExprValue(empty_array_type, std::vector<uint8_t>(), source), opts));
 
   // Array type declares a size but there's no data.
   auto array_type = fxl::MakeRefCounted<ArrayType>(GetInt32Type(), 1);
-  EXPECT_EQ(
-      R"(<Array data (0 bytes) is too small for the expected size (4 bytes).>)",
-      SyncFormatValue(ExprValue(array_type, std::vector<uint8_t>(), source),
-                      opts));
+  EXPECT_EQ(R"(<Array data (0 bytes) is too small for the expected size (4 bytes).>)",
+            SyncFormatValue(ExprValue(array_type, std::vector<uint8_t>(), source), opts));
 }
 
 TEST_F(FormatValueTest, TruncatedArray) {
@@ -404,28 +373,24 @@ TEST_F(FormatValueTest, TruncatedArray) {
   auto array_type = fxl::MakeRefCounted<ArrayType>(GetInt32Type(), 2);
 
   // This array has exactly the max size, we shouldn't mark it as truncated.
-  EXPECT_EQ("{1, 2}",
-            SyncFormatValue(ExprValue(array_type, data, source), opts));
+  EXPECT_EQ("{1, 2}", SyncFormatValue(ExprValue(array_type, data, source), opts));
 
   // Try one with type info forced on. Only the root array type should have the
   // type, not each individual element.
   opts.verbosity = FormatExprValueOptions::Verbosity::kAllTypes;
-  EXPECT_EQ("(int32_t[2]) {1, 2}",
-            SyncFormatValue(ExprValue(array_type, data, source), opts));
+  EXPECT_EQ("(int32_t[2]) {1, 2}", SyncFormatValue(ExprValue(array_type, data, source), opts));
 
   // This one is truncated.
   opts.max_array_size = 1;
-  EXPECT_EQ("(int32_t[2]) {1, ...}",
-            SyncFormatValue(ExprValue(array_type, data, source), opts));
+  EXPECT_EQ("(int32_t[2]) {1, ...}", SyncFormatValue(ExprValue(array_type, data, source), opts));
 }
 
 TEST_F(FormatValueTest, Reference) {
   FormatExprValueOptions opts;
 
-  auto base_type =
-      fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 1, "int");
-  auto ref_type = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kReferenceType,
-                                                    LazySymbol(base_type));
+  auto base_type = fxl::MakeRefCounted<BaseType>(BaseType::kBaseTypeSigned, 1, "int");
+  auto ref_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kReferenceType, LazySymbol(base_type));
   constexpr uint64_t kAddress = 0x1100;
   provider()->AddMemory(kAddress, {123, 0, 0, 0, 0, 0, 0, 0});
 
@@ -438,7 +403,7 @@ TEST_F(FormatValueTest, Reference) {
   opts.verbosity = FormatExprValueOptions::Verbosity::kAllTypes;
   EXPECT_EQ("(int&) 0x1100 = 123", SyncFormatValue(value, opts));
 
-  // Force with minimal formatting (no addr ot type info).
+  // Force with minimal formatting (no addr or type info).
   opts.verbosity = FormatExprValueOptions::Verbosity::kMinimal;
   EXPECT_EQ("123", SyncFormatValue(value, opts));
 
@@ -446,13 +411,12 @@ TEST_F(FormatValueTest, Reference) {
   std::vector<uint8_t> bad_data = {0x00, 0x22, 0, 0, 0, 0, 0, 0};
   opts.verbosity = FormatExprValueOptions::Verbosity::kMedium;
   value = ExprValue(ref_type, bad_data);
-  EXPECT_EQ("(int&) 0x2200 = <Invalid pointer 0x2200>",
-            SyncFormatValue(value, opts));
+  EXPECT_EQ("(int&) 0x2200 = <Invalid pointer 0x2200>", SyncFormatValue(value, opts));
 
   // Test an rvalue reference. This is treated the same as a regular reference
   // from an interpretation and printing perspective.
-  auto rvalue_ref_type = fxl::MakeRefCounted<ModifiedType>(
-      DwarfTag::kRvalueReferenceType, LazySymbol(base_type));
+  auto rvalue_ref_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kRvalueReferenceType, LazySymbol(base_type));
   value = ExprValue(rvalue_ref_type, data);
   opts.verbosity = FormatExprValueOptions::Verbosity::kMedium;
   EXPECT_EQ("(int&&) 0x1100 = 123", SyncFormatValue(value, opts));
@@ -469,8 +433,8 @@ TEST_F(FormatValueTest, Structs) {
 
   // Make an int reference. Reference type printing combined with struct type
   // printing can get complicated.
-  auto int_ref = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kReferenceType,
-                                                   LazySymbol(int32_type));
+  auto int_ref =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kReferenceType, LazySymbol(int32_type));
 
   // The references point to this data.
   constexpr uint64_t kAddress = 0x1100;
@@ -478,16 +442,15 @@ TEST_F(FormatValueTest, Structs) {
 
   // Struct with two values, an int and a int&, and a pair of two of those
   // structs.
-  auto foo = MakeCollectionType(DwarfTag::kStructureType, "Foo",
-                                {{"a", int32_type}, {"b", int_ref}});
-  auto pair = MakeCollectionType(DwarfTag::kStructureType, "Pair",
-                                 {{"first", foo}, {"second", foo}});
+  auto foo =
+      MakeCollectionType(DwarfTag::kStructureType, "Foo", {{"a", int32_type}, {"b", int_ref}});
+  auto pair =
+      MakeCollectionType(DwarfTag::kStructureType, "Pair", {{"first", foo}, {"second", foo}});
 
-  ExprValue pair_value(
-      pair, {0x11, 0x00, 0x11, 0x00,                            // (int32) a
-             0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,    // (int32&) b
-             0x33, 0x00, 0x33, 0x00,                            // (int32) a
-             0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});  // (int32&) b
+  ExprValue pair_value(pair, {0x11, 0x00, 0x11, 0x00,                            // (int32) a
+                              0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,    // (int32&) b
+                              0x33, 0x00, 0x33, 0x00,                            // (int32) a
+                              0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});  // (int32&) b
 
   // The references when not printing all types are printed after the
   // struct member name.
@@ -508,10 +471,9 @@ TEST_F(FormatValueTest, Structs) {
   // Test an anonymous struct. Clang will generate structs with no names for
   // things like closures.
   auto anon_struct = fxl::MakeRefCounted<Collection>(DwarfTag::kStructureType);
-  auto anon_struct_ptr = fxl::MakeRefCounted<ModifiedType>(
-      DwarfTag::kPointerType, LazySymbol(anon_struct));
-  ExprValue anon_value(anon_struct_ptr,
-                       {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
+  auto anon_struct_ptr =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol(anon_struct));
+  ExprValue anon_value(anon_struct_ptr, {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
   EXPECT_EQ("((anon struct)*) 0x1100", SyncFormatValue(anon_value, opts));
 }
 
@@ -523,9 +485,8 @@ TEST_F(FormatValueTest, Union) {
   // Define a union type with two int32 values.
   auto int32_type = MakeInt32Type();
 
-  auto union_type = fxl::MakeRefCounted<Collection>(DwarfTag::kUnionType);
+  auto union_type = fxl::MakeRefCounted<Collection>(DwarfTag::kUnionType, "MyUnion");
   union_type->set_byte_size(int32_type->byte_size());
-  union_type->set_assigned_name("MyUnion");
 
   std::vector<LazySymbol> data_members;
 
@@ -550,23 +511,20 @@ TEST_F(FormatValueTest, Union) {
 // Tests formatting when a class has derived base classes.
 TEST_F(FormatValueTest, DerivedClasses) {
   auto int32_type = MakeInt32Type();
-  auto base = MakeCollectionType(DwarfTag::kStructureType, "Base",
-                                 {{"a", int32_type}, {"b", int32_type}});
+  auto base =
+      MakeCollectionType(DwarfTag::kStructureType, "Base", {{"a", int32_type}, {"b", int32_type}});
 
   // This second base class is empty, it should be omitted from the output.
-  auto empty_base = fxl::MakeRefCounted<Collection>(DwarfTag::kClassType);
-  empty_base->set_assigned_name("EmptyBase");
+  auto empty_base = fxl::MakeRefCounted<Collection>(DwarfTag::kClassType, "EmptyBase");
 
   // Derived class, leave enough room to hold |Base|.
-  auto derived = MakeCollectionTypeWithOffset(
-      DwarfTag::kStructureType, "Derived", base->byte_size(),
-      {{"c", int32_type}, {"d", int32_type}});
+  auto derived =
+      MakeCollectionTypeWithOffset(DwarfTag::kStructureType, "Derived", base->byte_size(),
+                                   {{"c", int32_type}, {"d", int32_type}});
 
   auto inherited = fxl::MakeRefCounted<InheritedFrom>(LazySymbol(base), 0);
-  auto empty_inherited =
-      fxl::MakeRefCounted<InheritedFrom>(LazySymbol(empty_base), 0);
-  derived->set_inherited_from(
-      {LazySymbol(inherited), LazySymbol(empty_inherited)});
+  auto empty_inherited = fxl::MakeRefCounted<InheritedFrom>(LazySymbol(empty_base), 0);
+  derived->set_inherited_from({LazySymbol(inherited), LazySymbol(empty_inherited)});
 
   uint8_t kAValue = 1;
   uint8_t kBValue = 2;
@@ -580,8 +538,7 @@ TEST_F(FormatValueTest, DerivedClasses) {
   // Default formatting. Only the Base should be printed, EmptyBase should be
   // omitted because it has no data.
   FormatExprValueOptions opts;
-  EXPECT_EQ("{Base = {a = 1, b = 2}, c = 3, d = 4}",
-            SyncFormatValue(value, opts));
+  EXPECT_EQ("{Base = {a = 1, b = 2}, c = 3, d = 4}", SyncFormatValue(value, opts));
 
   // Force types on. The type of the base class should not be duplicated.
   opts.verbosity = FormatExprValueOptions::Verbosity::kAllTypes;
@@ -597,77 +554,63 @@ TEST_F(FormatValueTest, Enumeration) {
   unsigned_map[0] = "kZero";
   unsigned_map[1] = "kOne";
   unsigned_map[std::numeric_limits<uint64_t>::max()] = "kMax";
-  auto unsigned_enum = fxl::MakeRefCounted<Enumeration>(
-      "UnsignedEnum", LazySymbol(), 8, false, unsigned_map);
+  auto unsigned_enum =
+      fxl::MakeRefCounted<Enumeration>("UnsignedEnum", LazySymbol(), 8, false, unsigned_map);
 
   // Found value
   FormatExprValueOptions opts;
-  EXPECT_EQ("kZero",
-            SyncFormatValue(ExprValue(unsigned_enum, {0, 0, 0, 0, 0, 0, 0, 0}),
-                            opts));
+  EXPECT_EQ("kZero", SyncFormatValue(ExprValue(unsigned_enum, {0, 0, 0, 0, 0, 0, 0, 0}), opts));
   EXPECT_EQ("kMax",
-            SyncFormatValue(ExprValue(unsigned_enum, {0xff, 0xff, 0xff, 0xff,
-                                                      0xff, 0xff, 0xff, 0xff}),
-                            opts));
+            SyncFormatValue(
+                ExprValue(unsigned_enum, {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}), opts));
 
   // Found value forced to hex.
   FormatExprValueOptions hex_opts;
   hex_opts.num_format = FormatExprValueOptions::NumFormat::kHex;
-  EXPECT_EQ("0xffffffffffffffff",
-            SyncFormatValue(ExprValue(unsigned_enum, {0xff, 0xff, 0xff, 0xff,
-                                                      0xff, 0xff, 0xff, 0xff}),
-                            hex_opts));
+  EXPECT_EQ(
+      "0xffffffffffffffff",
+      SyncFormatValue(ExprValue(unsigned_enum, {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}),
+                      hex_opts));
 
   // Not found value.
-  EXPECT_EQ("12",
-            SyncFormatValue(ExprValue(unsigned_enum, {12, 0, 0, 0, 0, 0, 0, 0}),
-                            opts));
+  EXPECT_EQ("12", SyncFormatValue(ExprValue(unsigned_enum, {12, 0, 0, 0, 0, 0, 0, 0}), opts));
 
   // Signed 32-bit enum.
   Enumeration::Map signed_map;
   signed_map[0] = "kZero";
   signed_map[static_cast<uint64_t>(-5)] = "kMinusFive";
-  signed_map[static_cast<uint64_t>(std::numeric_limits<int32_t>::max())] =
-      "kMax";
-  auto signed_enum = fxl::MakeRefCounted<Enumeration>(
-      "SignedEnum", LazySymbol(), 4, true, signed_map);
+  signed_map[static_cast<uint64_t>(std::numeric_limits<int32_t>::max())] = "kMax";
+  auto signed_enum =
+      fxl::MakeRefCounted<Enumeration>("SignedEnum", LazySymbol(), 4, true, signed_map);
 
   // Found values.
-  EXPECT_EQ("kZero",
-            SyncFormatValue(ExprValue(signed_enum, {0, 0, 0, 0}), opts));
-  EXPECT_EQ(
-      "kMinusFive",
-      SyncFormatValue(ExprValue(signed_enum, {0xfb, 0xff, 0xff, 0xff}), opts));
+  EXPECT_EQ("kZero", SyncFormatValue(ExprValue(signed_enum, {0, 0, 0, 0}), opts));
+  EXPECT_EQ("kMinusFive", SyncFormatValue(ExprValue(signed_enum, {0xfb, 0xff, 0xff, 0xff}), opts));
 
   // Not-found value.
-  EXPECT_EQ("-4", SyncFormatValue(
-                      ExprValue(signed_enum, {0xfc, 0xff, 0xff, 0xff}), opts));
+  EXPECT_EQ("-4", SyncFormatValue(ExprValue(signed_enum, {0xfc, 0xff, 0xff, 0xff}), opts));
 
   // Not-found signed value printed as hex should be unsigned.
   EXPECT_EQ("0xffffffff",
-            SyncFormatValue(ExprValue(signed_enum, {0xff, 0xff, 0xff, 0xff}),
-                            hex_opts));
+            SyncFormatValue(ExprValue(signed_enum, {0xff, 0xff, 0xff, 0xff}), hex_opts));
 
   // Force type info.
   FormatExprValueOptions type_opts;
   type_opts.verbosity = FormatExprValueOptions::Verbosity::kAllTypes;
-  EXPECT_EQ("(SignedEnum) kZero",
-            SyncFormatValue(ExprValue(signed_enum, {0, 0, 0, 0}), type_opts));
+  EXPECT_EQ("(SignedEnum) kZero", SyncFormatValue(ExprValue(signed_enum, {0, 0, 0, 0}), type_opts));
   EXPECT_EQ("(SignedEnum) -4",
-            SyncFormatValue(ExprValue(signed_enum, {0xfc, 0xff, 0xff, 0xff}),
-                            type_opts));
+            SyncFormatValue(ExprValue(signed_enum, {0xfc, 0xff, 0xff, 0xff}), type_opts));
 }
 
 TEST_F(FormatValueTest, FunctionPtr) {
   // This is a function type. There isn't a corresponding C/C++ type for a
   // function type (without a pointer modifier) but we define it anyway in
   // case it comes up (possibly another language).
-  auto func_type = fxl::MakeRefCounted<FunctionType>(LazySymbol(),
-                                                     std::vector<LazySymbol>());
+  auto func_type = fxl::MakeRefCounted<FunctionType>(LazySymbol(), std::vector<LazySymbol>());
 
   // This type is "void (*)()"
-  auto func_ptr_type = fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType,
-                                                         LazySymbol(func_type));
+  auto func_ptr_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kPointerType, LazySymbol(func_type));
 
   SymbolContext symbol_context = SymbolContext::ForRelativeAddresses();
 
@@ -676,9 +619,8 @@ TEST_F(FormatValueTest, FunctionPtr) {
 
   // Map the address to point to the function.
   constexpr uint64_t kAddress = 0x1234;
-  process_context().AddResult(
-      kAddress, Location(kAddress, FileLine("file.cc", 21), 0, symbol_context,
-                         LazySymbol(function)));
+  eval_context()->AddLocation(kAddress, Location(kAddress, FileLine("file.cc", 21), 0,
+                                                 symbol_context, LazySymbol(function)));
 
   // Function.
   FormatExprValueOptions type_opts;
@@ -695,9 +637,7 @@ TEST_F(FormatValueTest, FunctionPtr) {
   EXPECT_EQ("(void (*)()) 0x0", SyncFormatValue(null_ptr, type_opts));
 
   // Function pointer to unknown memory is printed in hex by default.
-  EXPECT_EQ("0x5",
-            SyncFormatValue(ExprValue(func_ptr_type, {5, 0, 0, 0, 0, 0, 0, 0}),
-                            opts));
+  EXPECT_EQ("0x5", SyncFormatValue(ExprValue(func_ptr_type, {5, 0, 0, 0, 0, 0, 0, 0}), opts));
 
   // Found symbol (matching kAddress) should be printed.
   ExprValue good_ptr(func_ptr_type, {0x34, 0x12, 0, 0, 0, 0, 0, 0});
@@ -711,33 +651,28 @@ TEST_F(FormatValueTest, FunctionPtr) {
   // Member function pointer. The type naming of function pointers is tested by
   // the MemberPtr class, and otherwise the code paths are the same, so here
   // we only need to verify things are hooked up.
-  auto containing = fxl::MakeRefCounted<Collection>(DwarfTag::kClassType);
-  containing->set_assigned_name("MyClass");
+  auto containing = fxl::MakeRefCounted<Collection>(DwarfTag::kClassType, "MyClass");
 
-  auto member_func = fxl::MakeRefCounted<MemberPtr>(LazySymbol(containing),
-                                                    LazySymbol(func_type));
+  auto member_func = fxl::MakeRefCounted<MemberPtr>(LazySymbol(containing), LazySymbol(func_type));
   ExprValue null_member_func_ptr(member_func, {0, 0, 0, 0, 0, 0, 0, 0});
   EXPECT_EQ("0x0", SyncFormatValue(null_member_func_ptr, opts));
-  EXPECT_EQ("(void (MyClass::*)()) 0x0",
-            SyncFormatValue(null_member_func_ptr, type_opts));
+  EXPECT_EQ("(void (MyClass::*)()) 0x0", SyncFormatValue(null_member_func_ptr, type_opts));
 
   // Member function to a known symbol. This doesn't resolve to something that
   // looks like a class member, but that's OK, wherever the address points to
   // is what we print.
   ExprValue good_member_func_ptr(member_func, {0x34, 0x12, 0, 0, 0, 0, 0, 0});
-  EXPECT_EQ("(void (MyClass::*)()) &MyFunc",
-            SyncFormatValue(good_member_func_ptr, type_opts));
+  EXPECT_EQ("(void (MyClass::*)()) &MyFunc", SyncFormatValue(good_member_func_ptr, type_opts));
 }
 
 // This tests pointers to member data. Pointers to member functions were tested
 // by the FunctionPtr test.
 TEST_F(FormatValueTest, MemberPtr) {
-  auto containing = fxl::MakeRefCounted<Collection>(DwarfTag::kClassType);
-  containing->set_assigned_name("MyClass");
+  auto containing = fxl::MakeRefCounted<Collection>(DwarfTag::kClassType, "MyClass");
 
   auto int32_type = GetInt32Type();
-  auto member_int32 = fxl::MakeRefCounted<MemberPtr>(LazySymbol(containing),
-                                                     LazySymbol(int32_type));
+  auto member_int32 =
+      fxl::MakeRefCounted<MemberPtr>(LazySymbol(containing), LazySymbol(int32_type));
 
   // Null pointer.
   FormatExprValueOptions opts;
@@ -748,8 +683,7 @@ TEST_F(FormatValueTest, MemberPtr) {
   FormatExprValueOptions type_opts;
   type_opts.verbosity = FormatExprValueOptions::Verbosity::kAllTypes;
   ExprValue good_member_ptr(member_int32, {0x34, 0x12, 0, 0, 0, 0, 0, 0});
-  EXPECT_EQ("(int32_t MyClass::*) 0x1234",
-            SyncFormatValue(good_member_ptr, type_opts));
+  EXPECT_EQ("(int32_t MyClass::*) 0x1234", SyncFormatValue(good_member_ptr, type_opts));
 }
 
 // Tests printing nullptr_t which is defined as
@@ -763,8 +697,8 @@ TEST_F(FormatValueTest, NullptrT) {
   underlying_type->set_byte_size(8);
 
   // The nullptr_t is defined as a typedef for the above.
-  auto nullptr_t_type = fxl::MakeRefCounted<ModifiedType>(
-      DwarfTag::kTypedef, LazySymbol(underlying_type));
+  auto nullptr_t_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kTypedef, LazySymbol(underlying_type));
   nullptr_t_type->set_assigned_name("nullptr_t");
 
   ExprValue null_value(nullptr_t_type, {0, 0, 0, 0, 0, 0, 0, 0});
@@ -778,11 +712,11 @@ TEST_F(FormatValueTest, NullptrT) {
 }
 
 TEST_F(FormatValueTest, ZxStatusT) {
-  // Types in the global namespace named "zs_status_t" of the right size should
+  // Types in the global namespace named "zx_status_t" of the right size should
   // get the enum name expanded (Zircon special-case).
   auto int32_type = GetInt32Type();
-  auto status_t_type = fxl::MakeRefCounted<ModifiedType>(
-      DwarfTag::kTypedef, LazySymbol(int32_type));
+  auto status_t_type =
+      fxl::MakeRefCounted<ModifiedType>(DwarfTag::kTypedef, LazySymbol(int32_type));
   status_t_type->set_assigned_name("zx_status_t");
 
   ExprValue status_ok(status_t_type, {0, 0, 0, 0});
@@ -791,8 +725,7 @@ TEST_F(FormatValueTest, ZxStatusT) {
 
   // -15 = ZX_ERR_BUFFER_TOO_SMALL
   ExprValue status_too_small(status_t_type, {0xf1, 0xff, 0xff, 0xff});
-  EXPECT_EQ("-15 (ZX_ERR_BUFFER_TOO_SMALL)",
-            SyncFormatValue(status_too_small, opts));
+  EXPECT_EQ("-15 (ZX_ERR_BUFFER_TOO_SMALL)", SyncFormatValue(status_too_small, opts));
 
   // Invalid negative number.
   ExprValue status_invalid(status_t_type, {0xf0, 0xd8, 0xff, 0xff});
@@ -804,8 +737,74 @@ TEST_F(FormatValueTest, ZxStatusT) {
 
   // Hex formatting should be applied if requested.
   opts.num_format = FormatExprValueOptions::NumFormat::kHex;
-  EXPECT_EQ("0xfffffff1 (ZX_ERR_BUFFER_TOO_SMALL)",
-            SyncFormatValue(status_too_small, opts));
+  EXPECT_EQ("0xfffffff1 (ZX_ERR_BUFFER_TOO_SMALL)", SyncFormatValue(status_too_small, opts));
+}
+
+// Tests that printing values with a forward-declared-struct type finds the
+// definition and uses it.
+TEST_F(FormatValueTest, ForwardDecl) {
+  // Definition of "ns::Foo".
+  auto int32_type = GetInt32Type();
+  auto def =
+      MakeCollectionType(DwarfTag::kStructureType, "Foo", {{"a", int32_type}, {"b", int32_type}});
+  auto ns = fxl::MakeRefCounted<Namespace>("ns");
+  def->set_parent(LazySymbol(ns));
+  EXPECT_EQ("ns::Foo", def->GetFullName());
+
+  // Forward-declaration of "ns::Foo".
+  auto decl = fxl::MakeRefCounted<Collection>(def->tag(), "Foo");
+  decl->set_parent(LazySymbol(ns));
+  decl->set_is_declaration(true);
+  EXPECT_EQ("ns::Foo", decl->GetFullName());
+
+  // A value referencing the forward declaration.
+  ExprValue decl_value(decl, {1, 0, 0, 0,    // (int32) a = 1
+                              2, 0, 0, 0});  // (int32) b = 2
+
+  // Printing the forward-declaration without giving the definition will
+  // report an error.
+  EXPECT_EQ("<No definition>", SyncFormatValue(decl_value, FormatExprValueOptions()));
+
+  // Add a definition, the formatter should find and use it.
+  eval_context()->AddType(def);
+  EXPECT_EQ("{a = 1, b = 2}", SyncFormatValue(decl_value, FormatExprValueOptions()));
+}
+
+TEST_F(FormatValueTest, RustEnum) {
+  auto rust_enum = MakeTestRustEnum();
+
+  // Since "none" is the default, random disciminant values (here, the 32-bit
+  // "100" value) will match it.
+  ExprValue none_value(rust_enum, {100, 0, 0, 0,              // Discriminant
+                                   0, 0, 0, 0, 0, 0, 0, 0});  // Unused
+  FormatExprValueOptions opts;
+  EXPECT_EQ("None", SyncFormatValue(none_value, opts));
+
+  // Scalar.
+  ExprValue scalar_value(rust_enum, {0, 0, 0, 0,    // Discriminant
+                                     51, 0, 0, 0,   // Scalar value.
+                                     0, 0, 0, 0});  // Unused
+  EXPECT_EQ("Scalar(51)", SyncFormatValue(scalar_value, opts));
+
+  // Struct with named values.
+  ExprValue point_value(rust_enum, {1, 0, 0, 0,    // Discriminant
+                                    1, 0, 0, 0,    // x
+                                    2, 0, 0, 0});  // y
+  EXPECT_EQ("Point{x = 1, y = 2}", SyncFormatValue(point_value, opts));
+}
+
+TEST_F(FormatValueTest, RustTuple) {
+  auto tuple_two_type =
+      MakeTestRustTuple("(int32_t, uint64_t)", {MakeInt32Type(), MakeUint64Type()});
+  ExprValue tuple_two(tuple_two_type, {123, 0, 0, 0,               // int32_t member 0
+                                       78, 0, 0, 0, 0, 0, 0, 0});  // uint64_t member 1
+  FormatExprValueOptions opts;
+  EXPECT_EQ("(123, 78)", SyncFormatValue(tuple_two, opts));
+
+  // 1-element tuple struct.
+  auto tuple_struct_one_type = MakeTestRustTuple("Some", {MakeInt32Type()});
+  ExprValue tuple_struct_one(tuple_struct_one_type, {123, 0, 0, 0});  // int32_t member 0
+  EXPECT_EQ("Some(123)", SyncFormatValue(tuple_struct_one, opts));
 }
 
 }  // namespace zxdb

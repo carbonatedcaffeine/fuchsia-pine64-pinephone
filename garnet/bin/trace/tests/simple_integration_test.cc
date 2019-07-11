@@ -6,8 +6,8 @@
 // The big part of the test is that this works at all in the presence of
 // a provider that provides two of them.
 
-#include <src/lib/fxl/logging.h>
 #include <lib/zx/time.h>
+#include <src/lib/fxl/logging.h>
 #include <trace-provider/provider.h>
 #include <zircon/status.h>
 
@@ -16,7 +16,7 @@
 static bool RunSimpleTest(const tracing::Spec& spec) {
   async::Loop loop(&kAsyncLoopConfigNoAttachToThread);
 
-  fbl::unique_ptr<trace::TraceProvider> provider;
+  fbl::unique_ptr<trace::TraceProviderWithFdio> provider;
   if (!CreateProviderSynchronously(loop, "simple", &provider)) {
     return false;
   }

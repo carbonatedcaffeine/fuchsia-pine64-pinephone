@@ -5,10 +5,10 @@
 #ifndef SRC_CONNECTIVITY_WLAN_LIB_MLME_CPP_INCLUDE_WLAN_MLME_ASSOC_CONTEXT_H_
 #define SRC_CONNECTIVITY_WLAN_LIB_MLME_CPP_INCLUDE_WLAN_MLME_ASSOC_CONTEXT_H_
 
+#include <ddk/hw/wlan/wlaninfo.h>
+#include <fbl/span.h>
 #include <wlan/common/element.h>
-#include <wlan/common/span.h>
 #include <wlan/mlme/mac_frame.h>
-#include <wlan/protocol/mac.h>
 
 #include <optional>
 #include <vector>
@@ -47,17 +47,18 @@ struct AssocContext {
   std::optional<VhtCapabilities> vht_cap = std::nullopt;
   std::optional<VhtOperation> vht_op = std::nullopt;
 
-  PHY phy = WLAN_PHY_OFDM;
+  wlan_info_phy_type_t phy = WLAN_INFO_PHY_TYPE_OFDM;
   wlan_channel_t chan;
 
   bool is_cbw40_rx = false;
   bool is_cbw40_tx = false;
 
-  PHY DerivePhy() const;
+  wlan_info_phy_type_t DerivePhy() const;
   wlan_assoc_ctx_t ToDdk() const;
 };
 
-const wlan_band_info_t* FindBand(const wlan_info_t& ifc_info, bool is_5ghz);
+const wlan_info_band_info_t* FindBand(const wlan_info_t& ifc_info,
+                                      bool is_5ghz);
 
 std::optional<std::vector<SupportedRate>> BuildAssocReqSuppRates(
     const std::vector<uint8_t>& ap_basic_rate_set,
@@ -65,12 +66,13 @@ std::optional<std::vector<SupportedRate>> BuildAssocReqSuppRates(
     const std::vector<SupportedRate>& client_rates);
 
 // Visable only for unit testing.
-std::optional<AssocContext> ParseAssocRespIe(Span<const uint8_t> ie_chains);
+std::optional<AssocContext> ParseAssocRespIe(
+    fbl::Span<const uint8_t> ie_chains);
 
 AssocContext MakeClientAssocCtx(const wlan_info_t& ifc_info,
                                 const wlan_channel_t join_chan);
 std::optional<AssocContext> MakeBssAssocCtx(
-    const AssociationResponse& assoc_resp, Span<const uint8_t> ie_chains,
+    const AssociationResponse& assoc_resp, fbl::Span<const uint8_t> ie_chains,
     const common::MacAddr& peer);
 
 AssocContext IntersectAssocCtx(const AssocContext& bss,

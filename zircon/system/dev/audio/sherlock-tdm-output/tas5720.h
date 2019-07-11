@@ -6,7 +6,7 @@
 
 #include <ddk/debug.h>
 #include <ddk/protocol/i2c.h>
-#include <ddktl/i2c-channel.h>
+#include <lib/device-protocol/i2c-channel.h>
 #include <fbl/unique_ptr.h>
 #include <lib/codec-interface/codec-interface.h>
 
@@ -29,6 +29,7 @@ public:
     float GetMinGain() const override { return kMinGain; }
     float GetMaxGain() const override { return kMaxGain; }
     float GetGainStep() const override { return kGainStep; }
+    zx_status_t Mute(bool mute) override;
 
 private:
     static constexpr float kMaxGain = 24.0;

@@ -2,16 +2,27 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/package.gni")
+import("//build/test.gni")
+import("//build/test/test_package.gni")
 
-package("e2e_input_tests") {
-  testonly = true
-
+test_package("e2e_input_tests") {
   deps = [
+    ":base_view_ime_test",
+    ":mediabuttons_listener_test",
     ":minimal_input_test",
   ]
 
   tests = [
+    {
+      name = "base_view_ime_test"
+      environments = [
+        {
+          dimensions = {
+            device_type = "Intel NUC Kit NUC7i5DNHE"
+          }
+        },
+      ]
+    },
     {
       name = "minimal_input_test"
       environments = [
@@ -22,26 +33,25 @@ package("e2e_input_tests") {
         },
       ]
     },
-  ]
-
-  meta = [
     {
-      path = rebase_path("meta/minimal_input_test.cmx")
-      dest = "minimal_input_test.cmx"
+      name = "mediabuttons_listener_test"
+      environments = [
+        {
+          dimensions = {
+            device_type = "Intel NUC Kit NUC7i5DNHE"
+          }
+        },
+      ]
     },
   ]
 }
 
-executable("minimal_input_test") {
-  testonly = true
-
+# Each e2e test must run in its own executable.
+test("minimal_input_test") {
   sources = [
-    "mediabuttons_listener_test.cc",
     "minimal_input_test.cc",
   ]
-
   output_name = "minimal_input_test"
-
   deps = [
     "//garnet/public/lib/component/cpp",
     "//garnet/public/lib/gtest",
@@ -50,7 +60,56 @@ executable("minimal_input_test") {
     "//sdk/fidl/fuchsia.ui.input",
     "//sdk/fidl/fuchsia.ui.policy",
     "//sdk/fidl/fuchsia.ui.scenic",
-    "//sdk/fidl/fuchsia.ui.views",
+    "//sdk/lib/ui/scenic/cpp",
+    "//src/lib/fxl",
+    "//src/lib/fxl/test:gtest_main",
+    "//third_party/googletest:gtest",
+    "//zircon/public/lib/async-loop-cpp",
+    "//zircon/public/lib/fdio",
+    "//zircon/public/lib/fit",
+    "//zircon/public/lib/zx",
+  ]
+}
+
+# Each e2e test must run in its own executable.
+test("base_view_ime_test") {
+  sources = [
+    "base_view_ime_test.cc",
+  ]
+  output_name = "base_view_ime_test"
+  deps = [
+    "//garnet/public/lib/component/cpp",
+    "//garnet/public/lib/gtest",
+    "//garnet/public/lib/ui/base_view/cpp",
+    "//garnet/public/lib/ui/input/cpp",
+    "//sdk/fidl/fuchsia.ui.input",
+    "//sdk/fidl/fuchsia.ui.policy",
+    "//sdk/fidl/fuchsia.ui.scenic",
+    "//sdk/lib/ui/scenic/cpp",
+    "//src/lib/fxl",
+    "//src/lib/fxl/test:gtest_main",
+    "//third_party/googletest:gtest",
+    "//zircon/public/lib/async-loop-cpp",
+    "//zircon/public/lib/fdio",
+    "//zircon/public/lib/fit",
+    "//zircon/public/lib/zx",
+  ]
+}
+
+# Each e2e test must run in its own executable.
+test("mediabuttons_listener_test") {
+  sources = [
+    "mediabuttons_listener_test.cc",
+  ]
+  output_name = "mediabuttons_listener_test"
+  deps = [
+    "//garnet/public/lib/component/cpp",
+    "//garnet/public/lib/gtest",
+    "//garnet/public/lib/ui/base_view/cpp",
+    "//garnet/public/lib/ui/input/cpp",
+    "//sdk/fidl/fuchsia.ui.input",
+    "//sdk/fidl/fuchsia.ui.policy",
+    "//sdk/fidl/fuchsia.ui.scenic",
     "//sdk/lib/ui/scenic/cpp",
     "//src/lib/fxl",
     "//src/lib/fxl/test:gtest_main",

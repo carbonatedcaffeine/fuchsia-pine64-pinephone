@@ -15,10 +15,12 @@
  */
 /* ****************** SDIO CARD Interface Functions **************************/
 
-// TODO(cphoenix): Do we need sdio, completion, status, stdatomic, threads?
-#if (CONFIG_BRCMFMAC_USB || CONFIG_BRCMFMAC_SDIO || CONFIG_BRCMFMAC_PCIE)
+#include <algorithm>
+#include <atomic>
+#include <pthread.h>
+
 #include <ddk/device.h>
-#endif
+#include <ddk/protocol/composite.h>
 #include <ddk/protocol/sdio.h>
 #include <ddk/metadata.h>
 #include <ddk/trace/event.h>
@@ -27,8 +29,6 @@
 #include <wifi/wifi-config.h>
 #include <zircon/status.h>
 
-#include <pthread.h>
-#include <stdatomic.h>
 #ifndef _ALL_SOURCE
 #define _ALL_SOURCE // Enables thrd_create_with_name in <threads.h>.
 #endif
@@ -41,7 +41,6 @@
 #include "chip.h"
 #include "chipcommon.h"
 #include "common.h"
-#include "core.h"
 #include "debug.h"
 #include "defs.h"
 #include "device.h"
@@ -49,9 +48,6 @@
 #include "netbuf.h"
 #include "sdio.h"
 #include "soc.h"
-#if CONFIG_BRCMFMAC_SIM
-#include "src/connectivity/wlan/drivers/testing/lib/sim-device/device.h"
-#endif
 
 #define SDIOH_API_ACCESS_RETRY_LIMIT 2
 
@@ -64,16 +60,8 @@
 
 #define BRCMF_DEFAULT_RXGLOM_SIZE 32 /* max rx frames in glom chain */
 
-struct brcmf_sdiod_freezer {
-    atomic_int freezing;
-    atomic_int thread_count;
-    uint32_t frozen_count;
-    sync_completion_t thread_freeze;
-    sync_completion_t resumed;
-};
-
 static void brcmf_sdiod_ib_irqhandler(struct brcmf_sdio_dev* sdiodev) {
-    brcmf_dbg(INTR, "IB intr triggered\n");
+    BRCMF_DBG(INTR, "IB intr triggered\n");
 
     brcmf_sdio_isr(sdiodev->bus);
 }
@@ -85,7 +73,7 @@ zx_status_t brcmf_sdiod_configure_oob_interrupt(struct brcmf_sdio_dev* sdiodev,
                                                 wifi_config_t *config) {
     zx_status_t ret = gpio_config_in(&sdiodev->gpios[WIFI_OOB_IRQ_GPIO_INDEX], GPIO_NO_PULL);
     if (ret != ZX_OK) {
-        BRCMF_LOGF(ERROR, "brcmf_sdiod_intr_register: gpio_config failed: %d\n", ret);
+        BRCMF_ERR("brcmf_sdiod_intr_register: gpio_config failed: %d\n", ret);
         return ret;
     }
 
@@ -93,7 +81,7 @@ zx_status_t brcmf_sdiod_configure_oob_interrupt(struct brcmf_sdio_dev* sdiodev,
                              config->oob_irq_mode,
                              &sdiodev->irq_handle);
     if (ret != ZX_OK) {
-        BRCMF_LOGF(ERROR, "brcmf_sdiod_intr_register: gpio_get_interrupt failed: %d\n", ret);
+        BRCMF_ERR("brcmf_sdiod_intr_register: gpio_get_interrupt failed: %d\n", ret);
         return ret;
     }
     return ZX_OK;
@@ -111,7 +99,7 @@ zx_status_t brcmf_sdiod_get_bootloader_macaddr(struct brcmf_sdio_dev* sdiodev, u
         return ret;
     }
     memcpy(macaddr, bootloader_macaddr, 6);
-    brcmf_dbg(INFO, "got bootloader mac address: %02x:%02x:%02x:%02x:%02x:%02x\n",
+    BRCMF_DBG(INFO, "got bootloader mac address: %02x:%02x:%02x:%02x:%02x:%02x\n",
               macaddr[0], macaddr[1], macaddr[2], macaddr[3], macaddr[4], macaddr[5]);
     return ZX_OK;
 }
@@ -130,13 +118,13 @@ zx_status_t brcmf_sdiod_intr_register(struct brcmf_sdio_dev* sdiodev) {
                               &config, sizeof(wifi_config_t), &actual);
     if ((ret != ZX_OK && ret != ZX_ERR_NOT_FOUND) ||
         (ret == ZX_OK && actual != sizeof(wifi_config_t))) {
-        BRCMF_LOGF(ERROR, "brcmf_sdiod_intr_register: device_get_metadata failed\n");
+        BRCMF_ERR("brcmf_sdiod_intr_register: device_get_metadata failed\n");
         return ret;
     }
 
     // If there is metadata, OOB is supported.
     if (ret == ZX_OK) {
-        brcmf_dbg(SDIO, "Enter, register OOB IRQ\n");
+        BRCMF_DBG(SDIO, "Enter, register OOB IRQ\n");
         ret = brcmf_sdiod_configure_oob_interrupt(sdiodev, &config);
         if (ret != ZX_OK) {
             return ret;
@@ -146,14 +134,14 @@ zx_status_t brcmf_sdiod_intr_register(struct brcmf_sdio_dev* sdiodev) {
         // thrd_success and maybe thrd_nomem. See zircon/third_party/ulib/musl/include/threads.h
         pdata->oob_irq_supported = true;
         // TODO(WLAN-744): Get interrupts working.
-        brcmf_dbg(TEMP, "* * * NOT starting oob_irqhandler! Depending on watchdog.* * *");
+        BRCMF_DBG(TEMP, "* * * NOT starting oob_irqhandler! Depending on watchdog.* * *");
         //thrd_create_with_name(&sdiodev->isr_thread, brcmf_sdiod_oob_irqhandler, sdiodev,
         //                      "brcmf-sdio-isr");
         //thrd_detach(sdiodev->isr_thread);
         sdiodev->oob_irq_requested = true;
         ret = enable_irq_wake(sdiodev->irq_handle);
         if (ret != ZX_OK) {
-            brcmf_err("enable_irq_wake failed %d\n", ret);
+            BRCMF_ERR("enable_irq_wake failed %d\n", ret);
             return ret;
         }
         sdiodev->irq_wake = true;
@@ -173,25 +161,24 @@ zx_status_t brcmf_sdiod_intr_register(struct brcmf_sdio_dev* sdiodev) {
         }
 
         /* must configure SDIO_CCCR_INT_ENABLE to enable irq */
-        data = brcmf_sdiod_func0_rb(sdiodev, SDIO_CCCR_INT_ENABLE, &ret);
-        data |= SDIO_CCCR_IEN_FUNC1 | SDIO_CCCR_IEN_FUNC2 | SDIO_CCCR_IEN_FUNC0;
-        brcmf_sdiod_func0_wb(sdiodev, SDIO_CCCR_INT_ENABLE, data, &ret);
+        sdio_enable_fn_intr(&sdiodev->sdio_proto_fn1);
+        sdio_enable_fn_intr(&sdiodev->sdio_proto_fn2);
 
         /* redirect, configure and enable io for interrupt signal */
         data = SDIO_CCCR_BRCM_SEPINT_MASK | SDIO_CCCR_BRCM_SEPINT_OE;
         if (config.oob_irq_mode == ZX_INTERRUPT_MODE_LEVEL_HIGH) {
             data |= SDIO_CCCR_BRCM_SEPINT_ACT_HI;
         }
-        brcmf_sdiod_func0_wb(sdiodev, SDIO_CCCR_BRCM_SEPINT, data, &ret);
+        brcmf_sdiod_vendor_control_wb(sdiodev, SDIO_CCCR_BRCM_SEPINT, data, &ret);
         // TODO(cphoenix): This pause is probably unnecessary.
         zx_nanosleep(zx_deadline_after(ZX_MSEC(100)));
         sdio_release_host(sdiodev->func1);
     } else {
-        brcmf_dbg(SDIO, "Entering\n");
+        BRCMF_DBG(SDIO, "Entering\n");
         sdio_claim_host(sdiodev->func1);
-        sdio_enable_fn_intr(&sdiodev->sdio_proto, SDIO_FN_1);
+        sdio_enable_fn_intr(&sdiodev->sdio_proto_fn1);
         (void)brcmf_sdiod_ib_irqhandler; // TODO(cphoenix): If we use these, plug them in later.
-        sdio_enable_fn_intr(&sdiodev->sdio_proto, SDIO_FN_2);
+        sdio_enable_fn_intr(&sdiodev->sdio_proto_fn2);
         (void)brcmf_sdiod_dummy_irqhandler;
         sdio_release_host(sdiodev->func1);
         sdiodev->sd_irq_requested = true;
@@ -201,7 +188,7 @@ zx_status_t brcmf_sdiod_intr_register(struct brcmf_sdio_dev* sdiodev) {
 }
 
 void brcmf_sdiod_intr_unregister(struct brcmf_sdio_dev* sdiodev) {
-    brcmf_dbg(SDIO, "Entering oob=%d sd=%d\n", sdiodev->oob_irq_requested,
+    BRCMF_DBG(SDIO, "Entering oob=%d sd=%d\n", sdiodev->oob_irq_requested,
               sdiodev->sd_irq_requested);
 
     if (sdiodev->oob_irq_requested) {
@@ -209,8 +196,9 @@ void brcmf_sdiod_intr_unregister(struct brcmf_sdio_dev* sdiodev) {
 
         pdata = &sdiodev->settings->bus.sdio;
         sdio_claim_host(sdiodev->func1);
-        brcmf_sdiod_func0_wb(sdiodev, SDIO_CCCR_BRCM_SEPINT, 0, NULL);
-        brcmf_sdiod_func0_wb(sdiodev, SDIO_CCCR_INT_ENABLE, 0, NULL);
+        brcmf_sdiod_vendor_control_wb(sdiodev, SDIO_CCCR_BRCM_SEPINT, 0, NULL);
+        sdio_disable_fn_intr(&sdiodev->sdio_proto_fn1);
+        sdio_disable_fn_intr(&sdiodev->sdio_proto_fn2);
         sdio_release_host(sdiodev->func1);
 
         sdiodev->oob_irq_requested = false;
@@ -224,8 +212,8 @@ void brcmf_sdiod_intr_unregister(struct brcmf_sdio_dev* sdiodev) {
 
     if (sdiodev->sd_irq_requested) {
         sdio_claim_host(sdiodev->func1);
-        sdio_disable_fn_intr(&sdiodev->sdio_proto, SDIO_FN_2);
-        sdio_disable_fn_intr(&sdiodev->sdio_proto, SDIO_FN_1);
+        sdio_disable_fn_intr(&sdiodev->sdio_proto_fn2);
+        sdio_disable_fn_intr(&sdiodev->sdio_proto_fn1);
         sdio_release_host(sdiodev->func1);
         sdiodev->sd_irq_requested = false;
     }
@@ -236,7 +224,7 @@ void brcmf_sdiod_change_state(struct brcmf_sdio_dev* sdiodev, enum brcmf_sdiod_s
         return;
     }
 
-    brcmf_dbg(TRACE, "%d -> %d\n", sdiodev->state, state);
+    BRCMF_DBG(TRACE, "%d -> %d\n", sdiodev->state, state);
     switch (sdiodev->state) {
     case BRCMF_SDIOD_DATA:
         /* any other state means bus interface is down */
@@ -274,9 +262,14 @@ static zx_status_t brcmf_sdiod_transfer(struct brcmf_sdio_dev* sdiodev, uint8_t 
     txn.use_dma = false; // TODO(cphoenix): Decide when to use DMA
     txn.buf_offset = 0;
 
-    result = sdio_do_rw_txn(&sdiodev->sdio_proto, func, &txn);
+    if (func == SDIO_FN_1) {
+        result = sdio_do_rw_txn(&sdiodev->sdio_proto_fn1, &txn);
+    } else {
+        result = sdio_do_rw_txn(&sdiodev->sdio_proto_fn2, &txn);
+    }
+
     if (result != ZX_OK) {
-        brcmf_dbg(TEMP, "Why did this fail?? result %d %s", result, zx_status_get_string(result));
+        BRCMF_DBG(TEMP, "Why did this fail?? result %d %s", result, zx_status_get_string(result));
     }
     return result;
 }
@@ -292,9 +285,16 @@ static uint8_t brcmf_sdiod_func_rb(struct brcmf_sdio_dev* sdiodev, uint8_t func,
     return data;
 }
 
-uint8_t brcmf_sdiod_func0_rb(struct brcmf_sdio_dev* sdiodev, uint32_t addr,
-                             zx_status_t* result_out) {
-    return brcmf_sdiod_func_rb(sdiodev, SDIO_FN_0, addr, result_out);
+uint8_t brcmf_sdiod_vendor_control_rb(struct brcmf_sdio_dev* sdiodev, uint32_t addr,
+                                      zx_status_t* result_out) {
+    uint8_t data = 0;
+    zx_status_t result;
+    // Any function device can access the vendor control registers; fn2 could be used here instead.
+    result = sdio_do_vendor_control_rw_byte(&sdiodev->sdio_proto_fn1, false, addr, 0, &data);
+    if (result_out != NULL) {
+        *result_out = result;
+    }
+    return data;
 }
 
 uint8_t brcmf_sdiod_func1_rb(struct brcmf_sdio_dev* sdiodev, uint32_t addr,
@@ -302,10 +302,11 @@ uint8_t brcmf_sdiod_func1_rb(struct brcmf_sdio_dev* sdiodev, uint32_t addr,
     return brcmf_sdiod_func_rb(sdiodev, SDIO_FN_1, addr, result_out);
 }
 
-void brcmf_sdiod_func0_wb(struct brcmf_sdio_dev* sdiodev, uint32_t addr, uint8_t data,
-                             zx_status_t* result_out) {
+void brcmf_sdiod_vendor_control_wb(struct brcmf_sdio_dev* sdiodev, uint32_t addr, uint8_t data,
+                                   zx_status_t* result_out) {
     zx_status_t result;
-    result = brcmf_sdiod_transfer(sdiodev, SDIO_FN_0, addr, true, &data, sizeof(data), false);
+    // Any function device can access the vendor control registers; fn2 could be used here instead.
+    result = sdio_do_vendor_control_rw_byte(&sdiodev->sdio_proto_fn1, true, addr, data, NULL);
     if (result_out != NULL) {
         *result_out = result;
     }
@@ -445,7 +446,7 @@ zx_status_t brcmf_sdiod_recv_buf(struct brcmf_sdio_dev* sdiodev, uint8_t* buf, u
 
     mypkt = brcmu_pkt_buf_get_netbuf(nbytes);
     if (!mypkt) {
-        brcmf_err("brcmu_pkt_buf_get_netbuf failed: len %d\n", nbytes);
+        BRCMF_ERR("brcmu_pkt_buf_get_netbuf failed: len %d\n", nbytes);
         return ZX_ERR_NO_MEMORY;
     }
 
@@ -489,7 +490,7 @@ zx_status_t brcmf_sdiod_recv_chain(struct brcmf_sdio_dev* sdiodev, struct brcmf_
     TRACE_DURATION("brcmfmac:isr", "sdiod_recv_chain",
                    "list_len", TA_UINT32(list_len));
 
-    brcmf_dbg(SDIO, "addr = 0x%x, size = %d\n", addr, list_len);
+    BRCMF_DBG(SDIO, "addr = 0x%x, size = %d\n", addr, list_len);
 
     err = brcmf_sdiod_set_backplane_window(sdiodev, addr);
     if (err != ZX_OK) {
@@ -532,7 +533,7 @@ zx_status_t brcmf_sdiod_send_buf(struct brcmf_sdio_dev* sdiodev, uint8_t* buf, u
     mypkt = brcmu_pkt_buf_get_netbuf(nbytes);
 
     if (!mypkt) {
-        brcmf_err("brcmu_pkt_buf_get_netbuf failed: len %d\n", nbytes);
+        BRCMF_ERR("brcmu_pkt_buf_get_netbuf failed: len %d\n", nbytes);
         return ZX_ERR_IO;
     }
 
@@ -560,7 +561,7 @@ zx_status_t brcmf_sdiod_send_pkt(struct brcmf_sdio_dev* sdiodev, struct brcmf_ne
     uint32_t addr = sdiodev->cc_core->base;
     zx_status_t err;
 
-    brcmf_dbg(SDIO, "addr = 0x%x, size = %d\n", addr, brcmf_netbuf_list_length(pktq));
+    BRCMF_DBG(SDIO, "addr = 0x%x, size = %d\n", addr, brcmf_netbuf_list_length(pktq));
 
     TRACE_DURATION("brcmfmac:isr", "sdiod_send_pkt");
 
@@ -592,9 +593,16 @@ zx_status_t brcmf_sdiod_ramrw(struct brcmf_sdio_dev* sdiodev, bool write, uint32
 #define MAX_XFER_SIZE 0x100 // TODO(cphoenix): Remove when SDIO bug (?) is fixed.
 
     uint packet_size = min_t(uint, MAX_XFER_SIZE, size);
-    pkt = brcmf_netbuf_allocate(packet_size);
+    uint alloc_size = packet_size;
+    if (!write) {
+        // Must round up the allocation size to match brcmf_sdiod_netbuf_read.
+        alloc_size += 3;
+        alloc_size &= (uint)~3;
+    }
+
+    pkt = brcmf_netbuf_allocate(alloc_size);
     if (!pkt) {
-        brcmf_err("brcmf_netbuf_allocate failed: len %d\n", packet_size);
+        BRCMF_ERR("brcmf_netbuf_allocate failed: len %d\n", packet_size);
         return ZX_ERR_IO;
     }
     pkt->priority = 0;
@@ -603,7 +611,7 @@ zx_status_t brcmf_sdiod_ramrw(struct brcmf_sdio_dev* sdiodev, bool write, uint32
     this_transfer_address = address & SBSDIO_SB_OFT_ADDR_MASK;
     uint32_t low_address_bits = this_transfer_address & (MAX_XFER_SIZE - 1);
     if (low_address_bits) {
-        this_transfer_size = min(packet_size, MAX_XFER_SIZE - low_address_bits);
+        this_transfer_size = std::min(packet_size, MAX_XFER_SIZE - low_address_bits);
     } else {
         this_transfer_size = packet_size;
     }
@@ -632,7 +640,7 @@ zx_status_t brcmf_sdiod_ramrw(struct brcmf_sdio_dev* sdiodev, bool write, uint32
         }
 
         if (err != ZX_OK) {
-            brcmf_err("membytes transfer failed\n");
+            BRCMF_ERR("membytes transfer failed\n");
             break;
         }
         if (!write) {
@@ -658,86 +666,18 @@ zx_status_t brcmf_sdiod_ramrw(struct brcmf_sdio_dev* sdiodev, bool write, uint32
 }
 
 zx_status_t brcmf_sdiod_abort(struct brcmf_sdio_dev* sdiodev, uint32_t func) {
-    brcmf_dbg(SDIO, "Enter\n");
+    BRCMF_DBG(SDIO, "Enter\n");
 
     /* Issue abort cmd52 command through F0 */
-    brcmf_sdiod_func0_wb(sdiodev, SDIO_CCCR_ABORT_RESET, func, NULL);
+    if (func == SDIO_FN_1) {
+        sdio_io_abort(&sdiodev->sdio_proto_fn1);
+    } else {
+        sdio_io_abort(&sdiodev->sdio_proto_fn2);
+    }
 
-    brcmf_dbg(SDIO, "Exit\n");
+    BRCMF_DBG(SDIO, "Exit\n");
     return ZX_OK;
 }
-
-#ifdef CONFIG_PM_SLEEP
-static zx_status_t brcmf_sdiod_freezer_attach(struct brcmf_sdio_dev* sdiodev) {
-    sdiodev->freezer =
-        static_cast<decltype(sdiodev->freezer)>(calloc(1, sizeof(*sdiodev->freezer)));
-    if (!sdiodev->freezer) { return ZX_ERR_NO_MEMORY; }
-    atomic_store(&sdiodev->freezer->thread_count, 0);
-    atomic_store(&sdiodev->freezer->freezing, 0);
-    sdiodev->freezer->thread_freeze = {};
-    sdiodev->freezer->resumed = {};
-    return ZX_OK;
-}
-
-static void brcmf_sdiod_freezer_detach(struct brcmf_sdio_dev* sdiodev) {
-    if (sdiodev->freezer) {
-        WARN_ON(atomic_load(&sdiodev->freezer->freezing));
-        free(sdiodev->freezer);
-    }
-}
-
-static zx_status_t brcmf_sdiod_freezer_on(struct brcmf_sdio_dev* sdiodev) {
-    zx_status_t res = ZX_OK;
-
-    sdiodev->freezer->frozen_count = 0;
-    sync_completion_reset(&sdiodev->freezer->resumed);
-    sync_completion_reset(&sdiodev->freezer->thread_freeze);
-    atomic_store(&sdiodev->freezer->freezing, 1);
-    brcmf_sdio_trigger_dpc(sdiodev->bus);
-    sync_completion_wait(&sdiodev->freezer->thread_freeze, ZX_TIME_INFINITE);
-    sdio_claim_host(sdiodev->func1);
-    res = brcmf_sdio_sleep(sdiodev->bus, true);
-    sdio_release_host(sdiodev->func1);
-    return res;
-}
-
-static void brcmf_sdiod_freezer_off(struct brcmf_sdio_dev* sdiodev) {
-    sdio_claim_host(sdiodev->func1);
-    brcmf_sdio_sleep(sdiodev->bus, false);
-    sdio_release_host(sdiodev->func1);
-    atomic_store(&sdiodev->freezer->freezing, 0);
-    sync_completion_signal(&sdiodev->freezer->resumed);
-}
-
-bool brcmf_sdiod_freezing(struct brcmf_sdio_dev* sdiodev) {
-    return atomic_load(&sdiodev->freezer->freezing);
-}
-
-void brcmf_sdiod_try_freeze(struct brcmf_sdio_dev* sdiodev) {
-    if (!brcmf_sdiod_freezing(sdiodev)) {
-        return;
-    }
-    sdiodev->freezer->frozen_count++;
-    if (atomic_load(&sdiodev->freezer->thread_count) == sdiodev->freezer->frozen_count) {
-        sync_completion_signal(&sdiodev->freezer->thread_freeze);
-    }
-    sync_completion_wait(&sdiodev->freezer->resumed, ZX_TIME_INFINITE);
-}
-
-void brcmf_sdiod_freezer_count(struct brcmf_sdio_dev* sdiodev) {
-    atomic_fetch_add(&sdiodev->freezer->thread_count, 1);
-}
-
-void brcmf_sdiod_freezer_uncount(struct brcmf_sdio_dev* sdiodev) {
-    atomic_fetch_sub(&sdiodev->freezer->thread_count, 1);
-}
-#else
-static zx_status_t brcmf_sdiod_freezer_attach(struct brcmf_sdio_dev* sdiodev) {
-    return ZX_OK;
-}
-
-static void brcmf_sdiod_freezer_detach(struct brcmf_sdio_dev* sdiodev) {}
-#endif /* CONFIG_PM_SLEEP */
 
 static zx_status_t brcmf_sdiod_remove(struct brcmf_sdio_dev* sdiodev) {
     sdiodev->state = BRCMF_SDIOD_DOWN;
@@ -746,16 +686,14 @@ static zx_status_t brcmf_sdiod_remove(struct brcmf_sdio_dev* sdiodev) {
         sdiodev->bus = NULL;
     }
 
-    brcmf_sdiod_freezer_detach(sdiodev);
-
     /* Disable Function 2 */
     sdio_claim_host(sdiodev->func2);
-    sdio_disable_fn(&sdiodev->sdio_proto, SDIO_FN_2);
+    sdio_disable_fn(&sdiodev->sdio_proto_fn2);
     sdio_release_host(sdiodev->func2);
 
     /* Disable Function 1 */
     sdio_claim_host(sdiodev->func1);
-    sdio_disable_fn(&sdiodev->sdio_proto, SDIO_FN_1);
+    sdio_disable_fn(&sdiodev->sdio_proto_fn1);
     sdio_release_host(sdiodev->func1);
 
     sdiodev->sbwad = 0;
@@ -778,14 +716,14 @@ static void brcmf_sdiod_host_fixup(struct mmc_host* host) {
 static zx_status_t brcmf_sdiod_probe(struct brcmf_sdio_dev* sdiodev) {
     zx_status_t ret = ZX_OK;
 
-    ret = sdio_update_block_size(&sdiodev->sdio_proto, SDIO_FN_1, SDIO_FUNC1_BLOCKSIZE, false);
+    ret = sdio_update_block_size(&sdiodev->sdio_proto_fn1, SDIO_FUNC1_BLOCKSIZE, false);
     if (ret != ZX_OK) {
-        brcmf_err("Failed to set F1 blocksize\n");
+        BRCMF_ERR("Failed to set F1 blocksize\n");
         goto out;
     }
-    ret = sdio_update_block_size(&sdiodev->sdio_proto, SDIO_FN_2, SDIO_FUNC2_BLOCKSIZE, false);
+    ret = sdio_update_block_size(&sdiodev->sdio_proto_fn2, SDIO_FUNC2_BLOCKSIZE, false);
     if (ret != ZX_OK) {
-        brcmf_err("Failed to set F2 blocksize\n");
+        BRCMF_ERR("Failed to set F2 blocksize\n");
         goto out;
     }
 
@@ -794,14 +732,9 @@ static zx_status_t brcmf_sdiod_probe(struct brcmf_sdio_dev* sdiodev) {
     //sdiodev->func2->enable_timeout = SDIO_WAIT_F2RDY;
 
     /* Enable Function 1 */
-    ret = sdio_enable_fn(&sdiodev->sdio_proto, SDIO_FN_1);
+    ret = sdio_enable_fn(&sdiodev->sdio_proto_fn1);
     if (ret != ZX_OK) {
-        brcmf_err("Failed to enable F1: err=%d\n", ret);
-        goto out;
-    }
-
-    ret = brcmf_sdiod_freezer_attach(sdiodev);
-    if (ret != ZX_OK) {
+        BRCMF_ERR("Failed to enable F1: err=%d\n", ret);
         goto out;
     }
 
@@ -847,18 +780,7 @@ static const struct sdio_device_id brcmf_sdmmc_ids[] = {
 };
 #endif // TODO_ADD_SDIO_IDS
 
-static void brcmf_sdiod_acpi_set_power_manageable(struct brcmf_device* dev, int val) {
-#if IS_ENABLED(CONFIG_ACPI)
-    struct acpi_device* adev;
-
-    adev = ACPI_COMPANION(dev);
-    if (adev) {
-        adev->flags.power_manageable = 0;
-    }
-#endif
-}
-
-zx_status_t brcmf_sdio_register(zx_device_t* zxdev, composite_protocol_t* composite_proto) {
+zx_status_t brcmf_sdio_register(zx_device_t* zxdev) {
     zx_status_t err;
     struct brcmf_device* dev;
     zx_status_t status;
@@ -868,52 +790,65 @@ zx_status_t brcmf_sdio_register(zx_device_t* zxdev, composite_protocol_t* compos
     struct sdio_func* func2 = NULL;
     struct brcmf_sdio_dev* sdiodev = NULL;
 
-    brcmf_dbg(SDIO, "Enter\n");
+    BRCMF_DBG(SDIO, "Enter\n");
 
-    uint32_t component_count = composite_get_component_count(composite_proto);
+    composite_protocol_t composite_proto = {};
+    status =
+        device_get_protocol(zxdev, ZX_PROTOCOL_COMPOSITE, &composite_proto);
+    if (status != ZX_OK) {
+      return status;
+    }
+
+    uint32_t component_count = composite_get_component_count(&composite_proto);
     if (component_count < 2) {
-        brcmf_err("Not enough components (need atleast 2, have %u)", component_count);
+        BRCMF_ERR("Not enough components (need atleast 2, have %u)", component_count);
         return ZX_ERR_INTERNAL;
     }
     // One for SDIO, one or two GPIOs.
     zx_device_t* components[COMPONENT_COUNT];
     size_t actual;
-    composite_get_components(composite_proto, components, countof(components), &actual);
+    composite_get_components(&composite_proto, components, countof(components), &actual);
     if (actual < 2) {
-        brcmf_err("Not enough components (need atleast 2, have %zu)", actual);
+        BRCMF_ERR("Not enough components (need atleast 2, have %zu)", actual);
         return ZX_ERR_INTERNAL;
     }
 
-    sdio_protocol_t sdio_proto;
+    sdio_protocol_t sdio_proto_fn1;
+    sdio_protocol_t sdio_proto_fn2;
     gpio_protocol_t gpio_protos[GPIO_COUNT];
     bool has_debug_gpio = false;
 
-    status = device_get_protocol(components[COMPONENT_SDIO], ZX_PROTOCOL_SDIO, &sdio_proto);
+    status = device_get_protocol(components[COMPONENT_SDIO_FN1], ZX_PROTOCOL_SDIO, &sdio_proto_fn1);
     if (status != ZX_OK) {
-        brcmf_err("ZX_PROTOCOL_SDIO not found, err=%d\n", status);
+        BRCMF_ERR("ZX_PROTOCOL_SDIO not found, err=%d\n", status);
+        return status;
+    }
+    status = device_get_protocol(components[COMPONENT_SDIO_FN2], ZX_PROTOCOL_SDIO, &sdio_proto_fn2);
+    if (status != ZX_OK) {
+        BRCMF_ERR("ZX_PROTOCOL_SDIO not found, err=%d\n", status);
         return status;
     }
     status = device_get_protocol(components[COMPONENT_OOB_GPIO], ZX_PROTOCOL_GPIO,
                                  &gpio_protos[WIFI_OOB_IRQ_GPIO_INDEX]);
     if (status != ZX_OK) {
-        brcmf_err("ZX_PROTOCOL_GPIO not found, err=%d\n", status);
+        BRCMF_ERR("ZX_PROTOCOL_GPIO not found, err=%d\n", status);
         return status;
     }
     // Debug GPIO is optional
-    if (component_count > 2) {
+    if (component_count > 3) {
         status = device_get_protocol(components[COMPONENT_DEBUG_GPIO], ZX_PROTOCOL_GPIO,
                                      &gpio_protos[DEBUG_GPIO_INDEX]);
         if (status != ZX_OK) {
-            brcmf_err("ZX_PROTOCOL_GPIO not found, err=%d\n", status);
+            BRCMF_ERR("ZX_PROTOCOL_GPIO not found, err=%d\n", status);
             return status;
         }
         has_debug_gpio = true;
     }
 
     sdio_hw_info_t devinfo;
-    sdio_get_dev_hw_info(&sdio_proto, &devinfo);
+    sdio_get_dev_hw_info(&sdio_proto_fn1, &devinfo);
     if (devinfo.dev_hw_info.num_funcs < 3) {
-        brcmf_err("Not enough SDIO funcs (need 3, have %d)", devinfo.dev_hw_info.num_funcs);
+        BRCMF_ERR("Not enough SDIO funcs (need 3, have %d)", devinfo.dev_hw_info.num_funcs);
         return ZX_ERR_IO;
     }
 
@@ -926,17 +861,13 @@ zx_status_t brcmf_sdio_register(zx_device_t* zxdev, composite_protocol_t* compos
         goto fail;
     }
 
-    brcmf_dbg(SDIO, "sdio vendor ID: 0x%04x\n", devinfo.funcs_hw_info[SDIO_FN_1].manufacturer_id);
-    brcmf_dbg(SDIO, "sdio device ID: 0x%04x\n", devinfo.funcs_hw_info[SDIO_FN_1].product_id);
+    BRCMF_DBG(SDIO, "sdio vendor ID: 0x%04x\n", devinfo.funcs_hw_info[SDIO_FN_1].manufacturer_id);
+    BRCMF_DBG(SDIO, "sdio device ID: 0x%04x\n", devinfo.funcs_hw_info[SDIO_FN_1].product_id);
 
     // TODO(cphoenix): Reexamine this when SDIO is more mature - do we need to support "quirks" in
     // Fuchsia? (MMC_QUIRK_LENIENT_FN0 is defined outside this driver.)
     /* Set MMC_QUIRK_LENIENT_FN0 for this card */
     //func->card->quirks |= MMC_QUIRK_LENIENT_FN0;
-
-    /* prohibit ACPI power management for this device */
-    // TODO(cphoenix): Linux power management stuff
-    brcmf_sdiod_acpi_set_power_manageable(NULL, 0);
 
     bus_if = static_cast<decltype(bus_if)>(calloc(1, sizeof(struct brcmf_bus)));
     if (!bus_if) {
@@ -974,7 +905,8 @@ zx_status_t brcmf_sdio_register(zx_device_t* zxdev, composite_protocol_t* compos
     }
     dev = &sdiodev->dev;
     dev->zxdev = zxdev;
-    memcpy(&sdiodev->sdio_proto, &sdio_proto, sizeof(sdiodev->sdio_proto));
+    memcpy(&sdiodev->sdio_proto_fn1, &sdio_proto_fn1, sizeof(sdiodev->sdio_proto_fn1));
+    memcpy(&sdiodev->sdio_proto_fn2, &sdio_proto_fn2, sizeof(sdiodev->sdio_proto_fn2));
     memcpy(&sdiodev->gpios[WIFI_OOB_IRQ_GPIO_INDEX], &gpio_protos[WIFI_OOB_IRQ_GPIO_INDEX],
            sizeof(gpio_protos[WIFI_OOB_IRQ_GPIO_INDEX]));
     if (has_debug_gpio) {
@@ -986,7 +918,6 @@ zx_status_t brcmf_sdio_register(zx_device_t* zxdev, composite_protocol_t* compos
     sdiodev->func1 = func1;
     sdiodev->func2 = func2;
     bus_if->bus_priv.sdio = sdiodev;
-    bus_if->proto_type = BRCMF_PROTO_BCDC;
     dev->bus = bus_if;
 
     sdiodev->manufacturer_id = devinfo.funcs_hw_info[SDIO_FN_1].manufacturer_id;
@@ -994,15 +925,15 @@ zx_status_t brcmf_sdio_register(zx_device_t* zxdev, composite_protocol_t* compos
 
     brcmf_sdiod_change_state(sdiodev, BRCMF_SDIOD_DOWN);
 
-    brcmf_dbg(SDIO, "F2 found, calling brcmf_sdiod_probe...\n");
+    BRCMF_DBG(SDIO, "F2 found, calling brcmf_sdiod_probe...\n");
     err = brcmf_sdiod_probe(sdiodev);
     if (err != ZX_OK) {
-        brcmf_err("F2 error, probe failed %d...\n", err);
+        BRCMF_ERR("F2 error, probe failed %d...\n", err);
         goto fail;
     }
 
     pthread_mutexattr_destroy(&mutex_attr);
-    brcmf_dbg(SDIO, "F2 init completed...\n");
+    BRCMF_DBG(SDIO, "F2 init completed...\n");
     return ZX_OK;
 
 fail:
@@ -1023,12 +954,12 @@ fail:
 static void brcmf_ops_sdio_remove(struct brcmf_sdio_dev* sdiodev) {
     struct brcmf_bus* bus_if;
 
-    brcmf_dbg(SDIO, "Enter\n");
+    BRCMF_DBG(SDIO, "Enter\n");
     if (sdiodev == NULL) {
         return;
     }
-    brcmf_dbg(SDIO, "sdio vendor ID: 0x%04x\n", sdiodev->manufacturer_id);
-    brcmf_dbg(SDIO, "sdio device ID: 0x%04x\n", sdiodev->product_id);
+    BRCMF_DBG(SDIO, "sdio vendor ID: 0x%04x\n", sdiodev->manufacturer_id);
+    BRCMF_DBG(SDIO, "sdio device ID: 0x%04x\n", sdiodev->product_id);
 
     bus_if = dev_to_bus(&sdiodev->dev);
     if (bus_if) {
@@ -1049,66 +980,19 @@ static void brcmf_ops_sdio_remove(struct brcmf_sdio_dev* sdiodev) {
         free(sdiodev);
     }
 
-    brcmf_dbg(SDIO, "Exit\n");
+    BRCMF_DBG(SDIO, "Exit\n");
 }
 
 void brcmf_sdio_wowl_config(struct brcmf_device* dev, bool enabled) {
     struct brcmf_bus* bus_if = dev_to_bus(dev);
     struct brcmf_sdio_dev* sdiodev = bus_if->bus_priv.sdio;
 
-    brcmf_dbg(SDIO, "Configuring WOWL, enabled=%d\n", enabled);
+    BRCMF_DBG(SDIO, "Configuring WOWL, enabled=%d\n", enabled);
     sdiodev->wowl_enabled = enabled;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static zx_status_t brcmf_ops_sdio_suspend(struct brcmf_sdio_dev* sdiodev, uint32_t func) {
-    struct brcmf_bus* bus_if;
-    mmc_pm_flag_t sdio_flags;
-    struct brcmf_device* dev = sdiodev->dev;
-
-    brcmf_dbg(SDIO, "Enter: F%d\n", func);
-    if (func != SDIO_FN_1) {
-        return ZX_OK;
-    }
-
-    bus_if = dev_to_bus(dev);
-    sdiodev = bus_if->bus_priv.sdio;
-
-    brcmf_sdiod_freezer_on(sdiodev);
-    brcmf_sdio_wd_timer(sdiodev->bus, false);
-
-    sdio_flags = MMC_PM_KEEP_POWER;
-    if (sdiodev->wowl_enabled) {
-        if (sdiodev->settings->bus.sdio.oob_irq_supported) {
-            enable_irq_wake(sdiodev->irq_handle);
-        } else {
-            sdio_flags |= MMC_PM_WAKE_SDIO_IRQ;
-        }
-    }
-    if (sdio_set_host_pm_flags(sdiodev, SDIO_FN_1, sdio_flags)) {
-        brcmf_err("Failed to set pm_flags %x\n", sdio_flags);
-    }
-    return ZX_OK;
-}
-
-static zx_status_t brcmf_ops_sdio_resume(struct brcmf_device* dev) {
-    struct brcmf_bus* bus_if = dev_to_bus(dev);
-    struct brcmf_sdio_dev* sdiodev = bus_if->bus_priv.sdio;
-
-    brcmf_dbg(SDIO, "Enter");
-
-    brcmf_sdiod_freezer_off(sdiodev);
-    return ZX_OK;
-}
-
-static const struct dev_pm_ops brcmf_sdio_pm_ops = {
-    .suspend = brcmf_ops_sdio_suspend,
-    .resume = brcmf_ops_sdio_resume,
-};
-#endif /* CONFIG_PM_SLEEP */
-
 void brcmf_sdio_exit(void) {
-    brcmf_dbg(SDIO, "Enter\n");
+    BRCMF_DBG(SDIO, "Enter\n");
 
     // TODO(cphoenix): Hook up the actual remove pathway.
     brcmf_ops_sdio_remove(NULL);

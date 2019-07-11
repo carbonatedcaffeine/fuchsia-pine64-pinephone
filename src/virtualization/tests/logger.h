@@ -7,13 +7,14 @@
 
 #include <string>
 
-// Logger is a singleton class that TestSerial uses to write the guest's logs
+// Logger is a singleton class that GuestConsole uses to write the guest's logs
 // to. Then a test listener outputs the buffer if a test fails.
 class Logger {
  public:
   static Logger& Get();
   void Reset() { buffer_.clear(); }
   void Write(const char* s, size_t count);
+  void Write(const std::string& buffer);
   const std::string& Buffer() { return buffer_; }
 
  private:

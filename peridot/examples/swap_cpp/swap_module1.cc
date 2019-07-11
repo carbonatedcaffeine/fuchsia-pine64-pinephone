@@ -4,18 +4,18 @@
 
 #include <lib/app_driver/cpp/app_driver.h>
 #include <lib/async-loop/cpp/loop.h>
-#include <lib/component/cpp/startup_context.h>
+#include <lib/sys/cpp/component_context.h>
 #include <trace-provider/provider.h>
 
 #include "peridot/examples/swap_cpp/module.h"
 
 int main(int /*argc*/, const char** /*argv*/) {
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
-  trace::TraceProvider trace_provider(loop.dispatcher());
+  trace::TraceProviderWithFdio trace_provider(loop.dispatcher());
 
-  auto context = component::StartupContext::CreateFromStartupInfo();
+  auto context = sys::ComponentContext::Create();
   modular::AppDriver<modular_example::ModuleApp> driver(
-      context->outgoing().deprecated_services(),
+      context->outgoing(),
       std::make_unique<modular_example::ModuleApp>(
           context.get(),
           [](scenic::ViewContext view_context) {

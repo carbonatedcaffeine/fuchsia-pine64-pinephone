@@ -5,7 +5,7 @@
 use {
     failure::Error,
     fidl::endpoints::create_proxy,
-    fidl_fuchsia_bluetooth_host::{BondingData, HostData},
+    fidl_fuchsia_bluetooth_control::{BondingData, HostData},
     fidl_fuchsia_stash::{
         GetIteratorMarker, StoreAccessorMarker, StoreAccessorProxy, StoreMarker, Value,
     },
@@ -14,6 +14,9 @@ use {
     serde_json,
     std::collections::HashMap,
 };
+
+#[cfg(test)]
+use {fidl::endpoints::Proxy, fuchsia_async as fasync, fuchsia_zircon as zx};
 
 use crate::store::{
     keys::{
@@ -192,6 +195,14 @@ impl Stash {
         }
         Ok(host_data_map)
     }
+
+    #[cfg(test)]
+    pub fn stub() -> Result<Stash, Error> {
+        let (proxy, _server) = zx::Channel::create()?;
+        let proxy = fasync::Channel::from_channel(proxy)?;
+        let proxy = StoreAccessorProxy::from_channel(proxy);
+        Ok(Stash { proxy, bonding_data: HashMap::new(), host_data: HashMap::new() })
+    }
 }
 
 /// Connects to the stash service and initializes a Stash object. This function obtains
@@ -212,7 +223,7 @@ pub async fn init_stash(component_id: &str) -> Result<Stash, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fidl_fuchsia_bluetooth_host::LocalKey;
+    use fidl_fuchsia_bluetooth_control::LocalKey;
     use {
         fuchsia_async as fasync, fuchsia_component::client::connect_to_service, pin_utils::pin_mut,
     };

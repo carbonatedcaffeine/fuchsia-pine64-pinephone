@@ -13,8 +13,9 @@
 #include "device.h"
 #include "queue_pool.h"
 #include "semaphore_pool.h"
+#include "spn_vk.h"
+#include "spn_vk_target.h"
 #include "state_assert.h"
-#include "target.h"
 
 //
 // Styling states
@@ -59,10 +60,10 @@ struct spn_si_vk
 
 struct spn_styling_impl
 {
-  struct spn_styling *             styling;
-  struct spn_device *              device;
-  struct spn_target_config const * config;
-  struct spn_si_vk                 vk;
+  struct spn_styling *                styling;
+  struct spn_device *                 device;
+  struct spn_vk_target_config const * config;  // TODO: why are we storing this here?
+  struct spn_si_vk                    vk;
 
   SPN_ASSERT_STATE_DECLARE(spn_si_state_e);
 
@@ -134,26 +135,26 @@ spn_si_seal(struct spn_styling_impl * const impl)
       //
       // launch a copy and record a semaphore
       //
-      VkBufferCopy const bc = {.srcOffset = impl->vk.h.dbi.offset,
-                               .dstOffset = impl->vk.d.dbi.offset,
-                               .size      = impl->styling->dwords.next * sizeof(uint32_t)};
+      VkBufferCopy const bc = { .srcOffset = impl->vk.h.dbi.offset,
+                                .dstOffset = impl->vk.d.dbi.offset,
+                                .size      = impl->styling->dwords.next * sizeof(uint32_t) };
 
       vkCmdCopyBuffer(cb, impl->vk.h.dbi.buffer, impl->vk.d.dbi.buffer, 1, &bc);
 
-      struct spn_si_complete_payload payload = {.impl = impl, .cb = cb};
+      struct spn_si_complete_payload payload = { .impl = impl, .cb = cb };
 
       VkFence const fence =
         spn_device_cb_end_fence_acquire(device, cb, spn_si_complete, &payload, sizeof(payload));
       // boilerplate submit
-      struct VkSubmitInfo const si = {.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                                      .pNext                = NULL,
-                                      .waitSemaphoreCount   = 0,
-                                      .pWaitSemaphores      = NULL,
-                                      .pWaitDstStageMask    = NULL,
-                                      .commandBufferCount   = 1,
-                                      .pCommandBuffers      = &cb,
-                                      .signalSemaphoreCount = 1,
-                                      .pSignalSemaphores    = &impl->vk.semaphore.sealing};
+      struct VkSubmitInfo const si = { .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                                       .pNext                = NULL,
+                                       .waitSemaphoreCount   = 0,
+                                       .pWaitSemaphores      = NULL,
+                                       .pWaitDstStageMask    = NULL,
+                                       .commandBufferCount   = 1,
+                                       .pCommandBuffers      = &cb,
+                                       .signalSemaphoreCount = 1,
+                                       .pSignalSemaphores    = &impl->vk.semaphore.sealing };
 
       vk(QueueSubmit(spn_device_queue_next(device), 1, &si, fence));
     }
@@ -242,13 +243,13 @@ spn_si_release(struct spn_styling_impl * const impl)
   if (impl->config->styling.vk.d != 0)
     {
       spn_allocator_device_perm_free(&device->allocator.device.perm.local,
-                                     device->vk,
+                                     device->environment,
                                      &impl->vk.d.dbi,
                                      impl->vk.d.dm);
     }
 
   spn_allocator_device_perm_free(&device->allocator.device.perm.coherent,
-                                 device->vk,
+                                 device->environment,
                                  &impl->vk.h.dbi,
                                  impl->vk.h.dm);
 
@@ -322,7 +323,7 @@ spn_styling_impl_create(struct spn_device * const   device,
   // save device
   impl->device = device;
 
-  struct spn_target_config const * const config = spn_target_get_config(device->target);
+  struct spn_vk_target_config const * const config = spn_vk_get_config(device->instance);
 
   impl->config = config;
 
@@ -348,18 +349,18 @@ spn_styling_impl_create(struct spn_device * const   device,
   size_t const styling_size = dwords_count * sizeof(uint32_t);
 
   spn_allocator_device_perm_alloc(&device->allocator.device.perm.coherent,
-                                  device->vk,
+                                  device->environment,
                                   dwords_count * sizeof(uint32_t),
                                   NULL,
                                   &impl->vk.h.dbi,
                                   &impl->vk.h.dm);
 
-  vk(MapMemory(device->vk->d, impl->vk.h.dm, 0, VK_WHOLE_SIZE, 0, (void **)&s->extent));
+  vk(MapMemory(device->environment->d, impl->vk.h.dm, 0, VK_WHOLE_SIZE, 0, (void **)&s->extent));
 
   if (config->styling.vk.d != 0)
     {
       spn_allocator_device_perm_alloc(&device->allocator.device.perm.local,
-                                      device->vk,
+                                      device->environment,
                                       styling_size,
                                       NULL,
                                       &impl->vk.d.dbi,
@@ -367,8 +368,9 @@ spn_styling_impl_create(struct spn_device * const   device,
     }
   else
     {
-      impl->vk.d.dbi = (VkDescriptorBufferInfo){.buffer = VK_NULL_HANDLE, .offset = 0, .range = 0};
-      impl->vk.d.dm  = VK_NULL_HANDLE;
+      impl->vk.d.dbi =
+        (VkDescriptorBufferInfo){ .buffer = VK_NULL_HANDLE, .offset = 0, .range = 0 };
+      impl->vk.d.dm = VK_NULL_HANDLE;
     }
 
   // the styling impl starts out unsealed
@@ -382,13 +384,13 @@ spn_styling_impl_create(struct spn_device * const   device,
 //
 
 void
-spn_styling_impl_pre_render_ds(struct spn_styling * const             styling,
-                               struct spn_target_ds_styling_t * const ds,
-                               VkCommandBuffer                        cb)
+spn_styling_impl_pre_render_ds(struct spn_styling * const         styling,
+                               struct spn_vk_ds_styling_t * const ds,
+                               VkCommandBuffer                    cb)
 {
-  struct spn_styling_impl * const impl   = styling->impl;
-  struct spn_device * const       device = impl->device;
-  struct spn_target * const       target = device->target;
+  struct spn_styling_impl * const impl     = styling->impl;
+  struct spn_device * const       device   = impl->device;
+  struct spn_vk * const           instance = device->instance;
 
   assert(impl->state >= SPN_SI_STATE_SEALING);
 
@@ -396,16 +398,16 @@ spn_styling_impl_pre_render_ds(struct spn_styling * const             styling,
   // acquire STYLING descriptor set
   //
 
-  spn_target_ds_acquire_styling(target, device, ds);
+  spn_vk_ds_acquire_styling(instance, device, ds);
 
   // copy the dbi structs
-  *spn_target_ds_get_styling_styling(target, *ds) = impl->vk.d.dbi;
+  *spn_vk_ds_get_styling_styling(instance, *ds) = impl->vk.d.dbi;
 
   // update ds
-  spn_target_ds_update_styling(target, device->vk, *ds);
+  spn_vk_ds_update_styling(instance, device->environment, *ds);
 
   // bind
-  spn_target_ds_bind_render_styling(target, cb, *ds);
+  spn_vk_ds_bind_render_styling(instance, cb, *ds);
 }
 
 //

@@ -5,6 +5,8 @@
 #include "src/cobalt/bin/app/cobalt_app.h"
 
 #include "lib/backoff/exponential_backoff.h"
+#include "logger/internal_metrics_config.cb.h"
+#include "src/cobalt/bin/app/logger_impl.h"
 #include "src/cobalt/bin/app/utils.h"
 #include "src/cobalt/bin/utils/fuchsia_http_client.h"
 #include "third_party/cobalt/encoder/file_observation_store.h"
@@ -20,39 +22,28 @@ using clearcut::ClearcutUploader;
 using encoder::ClearcutV1ShippingManager;
 using encoder::ClientSecret;
 using encoder::FileObservationStore;
-using encoder::LegacyShippingManager;
 using encoder::MemoryObservationStore;
 using encoder::ObservationStore;
 using encoder::ShippingManager;
 using encoder::UploadScheduler;
+using logger::ProjectContextFactory;
 using util::PosixFileSystem;
 using utils::FuchsiaHTTPClient;
 
-// Each "send attempt" is actually a cycle of potential retries. These
-// two parameters configure the SendRetryer.
-const std::chrono::seconds kInitialRpcDeadline(10);
-const std::chrono::seconds kDeadlinePerSendAttempt(60);
-
 const size_t kMaxBytesPerEnvelope = 512 * 1024;  // 0.5 MiB.
 
-constexpr char kCloudShufflerUri[] = "shuffler.cobalt-api.fuchsia.com:443";
 constexpr char kClearcutEndpoint[] = "https://jmt17.google.com/log";
 
-constexpr char kAnalyzerPublicKeyPemPath[] =
-    "/pkg/data/certs/cobaltv0.1/analyzer_public.pem";
-constexpr char kShufflerPublicKeyPemPath[] =
-    "/pkg/data/certs/cobaltv0.1/shuffler_public.pem";
 constexpr char kAnalyzerTinkPublicKeyPath[] = "/pkg/data/keys/analyzer_public";
 constexpr char kShufflerTinkPublicKeyPath[] = "/pkg/data/keys/shuffler_public";
 constexpr char kMetricsRegistryPath[] = "/pkg/data/global_metrics_registry.pb";
 
-constexpr char kLegacyObservationStorePath[] = "/data/legacy_observation_store";
 constexpr char kObservationStorePath[] = "/data/observation_store";
 constexpr char kLocalAggregateProtoStorePath[] = "/data/local_aggregate_store";
 constexpr char kObsHistoryProtoStorePath[] = "/data/obs_history_store";
+constexpr char kSystemDataCachePrefix[] = "/data/system_data_";
 
 namespace {
-
 std::unique_ptr<ObservationStore> NewObservationStore(
     size_t max_bytes_per_event, size_t max_bytes_per_envelope,
     size_t max_bytes_total, std::string root_directory, std::string name_prefix,
@@ -79,52 +70,29 @@ CobaltApp::CobaltApp(
     size_t event_aggregator_backfill_days, bool start_event_aggregator_worker,
     bool use_memory_observation_store, size_t max_bytes_per_observation_store,
     const std::string& product_name, const std::string& board_name,
-    const std::string& version)
-    : system_data_(product_name, board_name, version),
+    const std::string& version, const std::vector<std::string>& debug_channels)
+    : system_data_(product_name, board_name, version,
+                   std::make_unique<logger::ChannelMapper>(debug_channels)),
       context_(sys::ComponentContext::Create()),
-      shuffler_client_(kCloudShufflerUri, true),
-      send_retryer_(&shuffler_client_),
       network_wrapper_(
           dispatcher, std::make_unique<backoff::ExponentialBackoff>(),
           [this] { return context_->svc()->Connect<http::HttpService>(); }),
-      // NOTE: Currently all observations are immediate observations and so it
-      // makes sense to use MAX_BYTES_PER_EVENT as the value of
-      // max_bytes_per_observation. But when we start implementing non-immediate
-      // observations this needs to be revisited.
       // TODO(pesk): Observations for UniqueActives reports are of comparable
-      // size to the events logged for them, so no change is needed now. Update
-      // this comment as we add more non-immediate report types.
-      legacy_observation_store_(NewObservationStore(
-          fuchsia::cobalt::MAX_BYTES_PER_EVENT, kMaxBytesPerEnvelope,
-          max_bytes_per_observation_store, kLegacyObservationStorePath,
-          "Legacy", use_memory_observation_store)),
+      // size to the events logged for them, so it makes sense to use
+      // MAX_BYTES_PER_EVENT as the value of max_bytes_per_observation.
+      // Revisit this as we add more non-immediate report types.
       observation_store_(NewObservationStore(
           fuchsia::cobalt::MAX_BYTES_PER_EVENT, kMaxBytesPerEnvelope,
           max_bytes_per_observation_store, kObservationStorePath, "V1",
           use_memory_observation_store)),
-      legacy_encrypt_to_analyzer_(
-          util::EncryptedMessageMaker::MakeHybridEcdh(
-              ReadPublicKeyPem(kAnalyzerPublicKeyPemPath))
-              .ValueOrDie()),
-      legacy_encrypt_to_shuffler_(
-          util::EncryptedMessageMaker::MakeHybridEcdh(
-              ReadPublicKeyPem(kShufflerPublicKeyPemPath))
-              .ValueOrDie()),
       encrypt_to_analyzer_(
-          util::EncryptedMessageMaker::MakeHybridTinkForObservations(
+          util::EncryptedMessageMaker::MakeForObservations(
               ReadPublicKeyPem(kAnalyzerTinkPublicKeyPath))
               .ValueOrDie()),
       encrypt_to_shuffler_(
-          util::EncryptedMessageMaker::MakeHybridTinkForEnvelopes(
+          util::EncryptedMessageMaker::MakeForEnvelopes(
               ReadPublicKeyPem(kShufflerTinkPublicKeyPath))
               .ValueOrDie()),
-
-      legacy_shipping_manager_(
-          UploadScheduler(target_interval, min_interval, initial_interval),
-          legacy_observation_store_.get(), legacy_encrypt_to_shuffler_.get(),
-          LegacyShippingManager::SendRetryerParams(kInitialRpcDeadline,
-                                                   kDeadlinePerSendAttempt),
-          &send_retryer_),
 
       clearcut_shipping_manager_(
           UploadScheduler(target_interval, min_interval, initial_interval),
@@ -146,9 +114,8 @@ CobaltApp::CobaltApp(
           &logger_encoder_, &observation_writer_, &local_aggregate_proto_store_,
           &obs_history_proto_store_, event_aggregator_backfill_days),
       controller_impl_(new CobaltControllerImpl(
-          dispatcher, {&legacy_shipping_manager_, &clearcut_shipping_manager_},
-          &event_aggregator_, observation_store_.get())) {
-  legacy_shipping_manager_.Start();
+          dispatcher, {&clearcut_shipping_manager_}, &event_aggregator_,
+          observation_store_.get())) {
   clearcut_shipping_manager_.Start();
   if (start_event_aggregator_worker) {
     event_aggregator_.Start();
@@ -168,16 +135,34 @@ CobaltApp::CobaltApp(
       << "Could not read the Cobalt global metrics registry: "
       << kMetricsRegistryPath;
 
+  // Create the internal logger
+  auto global_project_context_factory =
+      std::make_shared<ProjectContextFactory>(global_metrics_registry_bytes);
+  auto internal_project_context =
+      global_project_context_factory->NewProjectContext(
+          logger::kCustomerName, logger::kProjectName, ReleaseStage::GA);
+  if (!internal_project_context) {
+    FX_LOGS(ERROR) << "The CobaltRegistry bundled with Cobalt does not "
+                      "include the expected internal metrics project. "
+                      "Cobalt-measuring-Cobalt will be disabled.";
+  }
+  // Help the compiler understand which of several constructor overloads we
+  // mean to be invoking here.
+  logger::LoggerInterface* null_logger = nullptr;
+  internal_logger_.reset(new logger::Logger(
+      std::move(internal_project_context), &logger_encoder_, &event_aggregator_,
+      &observation_writer_, null_logger));
+
   logger_factory_impl_.reset(new LoggerFactoryImpl(
-      global_metrics_registry_bytes, getClientSecret(),
-      legacy_observation_store_.get(), legacy_encrypt_to_analyzer_.get(),
-      &legacy_shipping_manager_, &system_data_, &timer_manager_,
-      &logger_encoder_, &observation_writer_, &event_aggregator_));
+      std::move(global_project_context_factory), getClientSecret(),
+      &timer_manager_, &logger_encoder_, &observation_writer_,
+      &event_aggregator_, internal_logger_.get(), &system_data_));
 
   context_->outgoing()->AddPublicService(
       logger_factory_bindings_.GetHandler(logger_factory_impl_.get()));
 
-  system_data_updater_impl_.reset(new SystemDataUpdaterImpl(&system_data_));
+  system_data_updater_impl_.reset(
+      new SystemDataUpdaterImpl(&system_data_, kSystemDataCachePrefix));
   context_->outgoing()->AddPublicService(
       system_data_updater_bindings_.GetHandler(
           system_data_updater_impl_.get()));

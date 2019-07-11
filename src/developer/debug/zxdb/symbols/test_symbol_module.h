@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_TEST_SYMBOL_MODULE_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_TEST_SYMBOL_MODULE_H_
 
 #include <memory>
 #include <string>
@@ -42,6 +43,7 @@ class TestSymbolModule {
   static const char kMyMemberOneName[];
   static const char kFunctionInTest2Name[];
   static const char kMyMemberTwoName[];
+  static const char kAnonNSFunctionName[];
   static const char kGlobalName[];
   static const char kClassStaticName[];
   static const char kPltFunctionName[];
@@ -91,3 +93,5 @@ class TestSymbolModule {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_TEST_SYMBOL_MODULE_H_

@@ -3,21 +3,20 @@
 #include <protocols.test.fidl.json.llcpp.h>
 #include <memory>
 
+namespace llcpp {
+
 namespace test {
 namespace name {
 
-::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::WithErrorSyntax_ErrorAsPrimitive_Result() {
+::llcpp::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::WithErrorSyntax_ErrorAsPrimitive_Result() {
   tag_ = Tag::Invalid;
-  memset(reinterpret_cast<uint8_t*>(&tag_) + sizeof(tag_),
-         0,
-         offsetof(WithErrorSyntax_ErrorAsPrimitive_Result, response_) - sizeof(tag_));
 }
 
-::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::~WithErrorSyntax_ErrorAsPrimitive_Result() {
+::llcpp::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::~WithErrorSyntax_ErrorAsPrimitive_Result() {
   Destroy();
 }
 
-void ::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::Destroy() {
+void ::llcpp::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::Destroy() {
   switch (which()) {
   case Tag::kResponse:
     response_.~WithErrorSyntax_ErrorAsPrimitive_Response();
@@ -28,7 +27,7 @@ void ::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::Destroy() {
   tag_ = Tag::Invalid;
 }
 
-void ::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::MoveImpl_(WithErrorSyntax_ErrorAsPrimitive_Result&& other) {
+void ::llcpp::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::MoveImpl_(WithErrorSyntax_ErrorAsPrimitive_Result&& other) {
   switch (other.which()) {
   case Tag::kResponse:
     mutable_response() = std::move(other.mutable_response());
@@ -42,32 +41,26 @@ void ::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::MoveImpl_(WithErrorS
   other.Destroy();
 }
 
-void ::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::SizeAndOffsetAssertionHelper() {
-  static_assert(offsetof(::test::name::WithErrorSyntax_ErrorAsPrimitive_Result, response_) == 4);
-  static_assert(offsetof(::test::name::WithErrorSyntax_ErrorAsPrimitive_Result, err_) == 4);
-  static_assert(sizeof(::test::name::WithErrorSyntax_ErrorAsPrimitive_Result) == ::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::PrimarySize);
+void ::llcpp::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::SizeAndOffsetAssertionHelper() {
+  static_assert(offsetof(::llcpp::test::name::WithErrorSyntax_ErrorAsPrimitive_Result, response_) == 4);
+  static_assert(offsetof(::llcpp::test::name::WithErrorSyntax_ErrorAsPrimitive_Result, err_) == 4);
+  static_assert(sizeof(::llcpp::test::name::WithErrorSyntax_ErrorAsPrimitive_Result) == ::llcpp::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::PrimarySize);
 }
 
 
-WithErrorSyntax_ErrorAsPrimitive_Response& ::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::mutable_response() {
+WithErrorSyntax_ErrorAsPrimitive_Response& ::llcpp::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::mutable_response() {
   if (which() != Tag::kResponse) {
     Destroy();
     new (&response_) WithErrorSyntax_ErrorAsPrimitive_Response;
-    memset(reinterpret_cast<uint8_t*>(&response_) + sizeof(WithErrorSyntax_ErrorAsPrimitive_Response),
-           0,
-           sizeof(WithErrorSyntax_ErrorAsPrimitive_Result) - offsetof(WithErrorSyntax_ErrorAsPrimitive_Result, response_) - sizeof(WithErrorSyntax_ErrorAsPrimitive_Response));
   }
   tag_ = Tag::kResponse;
   return response_;
 }
 
-uint32_t& ::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::mutable_err() {
+uint32_t& ::llcpp::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::mutable_err() {
   if (which() != Tag::kErr) {
     Destroy();
     new (&err_) uint32_t;
-    memset(reinterpret_cast<uint8_t*>(&err_) + sizeof(uint32_t),
-           0,
-           sizeof(WithErrorSyntax_ErrorAsPrimitive_Result) - offsetof(WithErrorSyntax_ErrorAsPrimitive_Result, err_) - sizeof(uint32_t));
   }
   tag_ = Tag::kErr;
   return err_;
@@ -77,13 +70,13 @@ uint32_t& ::test::name::WithErrorSyntax_ErrorAsPrimitive_Result::mutable_err() {
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kKitchenSink_MethodA_Ordinal = 450577456u;
+constexpr uint64_t kKitchenSink_MethodA_Ordinal = 450577456lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kKitchenSink_EventA_Ordinal = 1795426833u;
+constexpr uint64_t kKitchenSink_EventA_Ordinal = 1795426833lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kKitchenSink_MethodB_Ordinal = 1999489700u;
+constexpr uint64_t kKitchenSink_MethodB_Ordinal = 1999489700lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kKitchenSink_MutateSocket_Ordinal = 115851270u;
+constexpr uint64_t kKitchenSink_MutateSocket_Ordinal = 115851270lu << 32;
 extern "C" const fidl_type_t test_name_KitchenSinkMutateSocketRequestTable;
 extern "C" const fidl_type_t test_name_KitchenSinkMutateSocketResponseTable;
 
@@ -548,13 +541,13 @@ void KitchenSink::Interface::MutateSocketCompleterBase::Reply(::fidl::DecodedMes
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kChannelProtocol_MethodA_Ordinal = 1432785874u;
+constexpr uint64_t kChannelProtocol_MethodA_Ordinal = 1432785874lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kChannelProtocol_EventA_Ordinal = 477676034u;
+constexpr uint64_t kChannelProtocol_EventA_Ordinal = 477676034lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kChannelProtocol_MethodB_Ordinal = 180770075u;
+constexpr uint64_t kChannelProtocol_MethodB_Ordinal = 180770075lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kChannelProtocol_MutateSocket_Ordinal = 1258480262u;
+constexpr uint64_t kChannelProtocol_MutateSocket_Ordinal = 1258480262lu << 32;
 extern "C" const fidl_type_t test_name_ChannelProtocolMutateSocketRequestTable;
 extern "C" const fidl_type_t test_name_ChannelProtocolMutateSocketResponseTable;
 
@@ -1019,13 +1012,13 @@ void ChannelProtocol::Interface::MutateSocketCompleterBase::Reply(::fidl::Decode
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kSocketControlProtocol_MethodA_Ordinal = 1007842318u;
+constexpr uint64_t kSocketControlProtocol_MethodA_Ordinal = 1007842318lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kSocketControlProtocol_EventA_Ordinal = 955483393u;
+constexpr uint64_t kSocketControlProtocol_EventA_Ordinal = 955483393lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kSocketControlProtocol_MethodB_Ordinal = 677342235u;
+constexpr uint64_t kSocketControlProtocol_MethodB_Ordinal = 677342235lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kSocketControlProtocol_MutateSocket_Ordinal = 255772213u;
+constexpr uint64_t kSocketControlProtocol_MutateSocket_Ordinal = 255772213lu << 32;
 extern "C" const fidl_type_t test_name_SocketControlProtocolMutateSocketRequestTable;
 extern "C" const fidl_type_t test_name_SocketControlProtocolMutateSocketResponseTable;
 
@@ -1490,13 +1483,13 @@ void SocketControlProtocol::Interface::MutateSocketCompleterBase::Reply(::fidl::
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kOvernetInternalProtocol_MethodA_Ordinal = 1993818253u;
+constexpr uint64_t kOvernetInternalProtocol_MethodA_Ordinal = 1993818253lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kOvernetInternalProtocol_EventA_Ordinal = 1746007436u;
+constexpr uint64_t kOvernetInternalProtocol_EventA_Ordinal = 1746007436lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kOvernetInternalProtocol_MethodB_Ordinal = 952134976u;
+constexpr uint64_t kOvernetInternalProtocol_MethodB_Ordinal = 952134976lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kOvernetInternalProtocol_MutateSocket_Ordinal = 1691201382u;
+constexpr uint64_t kOvernetInternalProtocol_MutateSocket_Ordinal = 1691201382lu << 32;
 extern "C" const fidl_type_t test_name_OvernetInternalProtocolMutateSocketRequestTable;
 extern "C" const fidl_type_t test_name_OvernetInternalProtocolMutateSocketResponseTable;
 
@@ -1961,26 +1954,26 @@ void OvernetInternalProtocol::Interface::MutateSocketCompleterBase::Reply(::fidl
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kWithAndWithoutRequestResponse_NoRequestNoResponse_Ordinal = 503576693u;
+constexpr uint64_t kWithAndWithoutRequestResponse_NoRequestNoResponse_Ordinal = 503576693lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kWithAndWithoutRequestResponse_NoRequestEmptyResponse_Ordinal = 1308023765u;
+constexpr uint64_t kWithAndWithoutRequestResponse_NoRequestEmptyResponse_Ordinal = 1308023765lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kWithAndWithoutRequestResponse_NoRequestWithResponse_Ordinal = 107534328u;
+constexpr uint64_t kWithAndWithoutRequestResponse_NoRequestWithResponse_Ordinal = 107534328lu << 32;
 extern "C" const fidl_type_t test_name_WithAndWithoutRequestResponseNoRequestWithResponseResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kWithAndWithoutRequestResponse_WithRequestNoResponse_Ordinal = 432149361u;
+constexpr uint64_t kWithAndWithoutRequestResponse_WithRequestNoResponse_Ordinal = 432149361lu << 32;
 extern "C" const fidl_type_t test_name_WithAndWithoutRequestResponseWithRequestNoResponseRequestTable;
 [[maybe_unused]]
-constexpr uint32_t kWithAndWithoutRequestResponse_WithRequestEmptyResponse_Ordinal = 1995585907u;
+constexpr uint64_t kWithAndWithoutRequestResponse_WithRequestEmptyResponse_Ordinal = 1995585907lu << 32;
 extern "C" const fidl_type_t test_name_WithAndWithoutRequestResponseWithRequestEmptyResponseRequestTable;
 [[maybe_unused]]
-constexpr uint32_t kWithAndWithoutRequestResponse_WithRequestWithResponse_Ordinal = 426977568u;
+constexpr uint64_t kWithAndWithoutRequestResponse_WithRequestWithResponse_Ordinal = 426977568lu << 32;
 extern "C" const fidl_type_t test_name_WithAndWithoutRequestResponseWithRequestWithResponseRequestTable;
 extern "C" const fidl_type_t test_name_WithAndWithoutRequestResponseWithRequestWithResponseResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kWithAndWithoutRequestResponse_OnEmptyResponse_Ordinal = 1769985842u;
+constexpr uint64_t kWithAndWithoutRequestResponse_OnEmptyResponse_Ordinal = 1769985842lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kWithAndWithoutRequestResponse_OnWithResponse_Ordinal = 2051478023u;
+constexpr uint64_t kWithAndWithoutRequestResponse_OnWithResponse_Ordinal = 2051478023lu << 32;
 extern "C" const fidl_type_t test_name_WithAndWithoutRequestResponseOnWithResponseEventTable;
 
 }  // namespace
@@ -2630,18 +2623,15 @@ zx_status_t WithAndWithoutRequestResponse::SendOnWithResponseEvent(::zx::unowned
 }
 
 
-::test::name::WithErrorSyntax_ErrorAsEnum_Result::WithErrorSyntax_ErrorAsEnum_Result() {
+::llcpp::test::name::WithErrorSyntax_ErrorAsEnum_Result::WithErrorSyntax_ErrorAsEnum_Result() {
   tag_ = Tag::Invalid;
-  memset(reinterpret_cast<uint8_t*>(&tag_) + sizeof(tag_),
-         0,
-         offsetof(WithErrorSyntax_ErrorAsEnum_Result, response_) - sizeof(tag_));
 }
 
-::test::name::WithErrorSyntax_ErrorAsEnum_Result::~WithErrorSyntax_ErrorAsEnum_Result() {
+::llcpp::test::name::WithErrorSyntax_ErrorAsEnum_Result::~WithErrorSyntax_ErrorAsEnum_Result() {
   Destroy();
 }
 
-void ::test::name::WithErrorSyntax_ErrorAsEnum_Result::Destroy() {
+void ::llcpp::test::name::WithErrorSyntax_ErrorAsEnum_Result::Destroy() {
   switch (which()) {
   case Tag::kResponse:
     response_.~WithErrorSyntax_ErrorAsEnum_Response();
@@ -2655,7 +2645,7 @@ void ::test::name::WithErrorSyntax_ErrorAsEnum_Result::Destroy() {
   tag_ = Tag::Invalid;
 }
 
-void ::test::name::WithErrorSyntax_ErrorAsEnum_Result::MoveImpl_(WithErrorSyntax_ErrorAsEnum_Result&& other) {
+void ::llcpp::test::name::WithErrorSyntax_ErrorAsEnum_Result::MoveImpl_(WithErrorSyntax_ErrorAsEnum_Result&& other) {
   switch (other.which()) {
   case Tag::kResponse:
     mutable_response() = std::move(other.mutable_response());
@@ -2669,32 +2659,26 @@ void ::test::name::WithErrorSyntax_ErrorAsEnum_Result::MoveImpl_(WithErrorSyntax
   other.Destroy();
 }
 
-void ::test::name::WithErrorSyntax_ErrorAsEnum_Result::SizeAndOffsetAssertionHelper() {
-  static_assert(offsetof(::test::name::WithErrorSyntax_ErrorAsEnum_Result, response_) == 4);
-  static_assert(offsetof(::test::name::WithErrorSyntax_ErrorAsEnum_Result, err_) == 4);
-  static_assert(sizeof(::test::name::WithErrorSyntax_ErrorAsEnum_Result) == ::test::name::WithErrorSyntax_ErrorAsEnum_Result::PrimarySize);
+void ::llcpp::test::name::WithErrorSyntax_ErrorAsEnum_Result::SizeAndOffsetAssertionHelper() {
+  static_assert(offsetof(::llcpp::test::name::WithErrorSyntax_ErrorAsEnum_Result, response_) == 4);
+  static_assert(offsetof(::llcpp::test::name::WithErrorSyntax_ErrorAsEnum_Result, err_) == 4);
+  static_assert(sizeof(::llcpp::test::name::WithErrorSyntax_ErrorAsEnum_Result) == ::llcpp::test::name::WithErrorSyntax_ErrorAsEnum_Result::PrimarySize);
 }
 
 
-WithErrorSyntax_ErrorAsEnum_Response& ::test::name::WithErrorSyntax_ErrorAsEnum_Result::mutable_response() {
+WithErrorSyntax_ErrorAsEnum_Response& ::llcpp::test::name::WithErrorSyntax_ErrorAsEnum_Result::mutable_response() {
   if (which() != Tag::kResponse) {
     Destroy();
     new (&response_) WithErrorSyntax_ErrorAsEnum_Response;
-    memset(reinterpret_cast<uint8_t*>(&response_) + sizeof(WithErrorSyntax_ErrorAsEnum_Response),
-           0,
-           sizeof(WithErrorSyntax_ErrorAsEnum_Result) - offsetof(WithErrorSyntax_ErrorAsEnum_Result, response_) - sizeof(WithErrorSyntax_ErrorAsEnum_Response));
   }
   tag_ = Tag::kResponse;
   return response_;
 }
 
-ErrorEnun& ::test::name::WithErrorSyntax_ErrorAsEnum_Result::mutable_err() {
+ErrorEnun& ::llcpp::test::name::WithErrorSyntax_ErrorAsEnum_Result::mutable_err() {
   if (which() != Tag::kErr) {
     Destroy();
     new (&err_) ErrorEnun;
-    memset(reinterpret_cast<uint8_t*>(&err_) + sizeof(ErrorEnun),
-           0,
-           sizeof(WithErrorSyntax_ErrorAsEnum_Result) - offsetof(WithErrorSyntax_ErrorAsEnum_Result, err_) - sizeof(ErrorEnun));
   }
   tag_ = Tag::kErr;
   return err_;
@@ -2704,9 +2688,11 @@ ErrorEnun& ::test::name::WithErrorSyntax_ErrorAsEnum_Result::mutable_err() {
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kWithErrorSyntax_ErrorAsPrimitive_Ordinal = 2069369145u;
+constexpr uint64_t kWithErrorSyntax_ErrorAsPrimitive_Ordinal = 2069369145lu << 32;
+extern "C" const fidl_type_t test_name_WithErrorSyntaxErrorAsPrimitiveResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kWithErrorSyntax_ErrorAsEnum_Ordinal = 1284890143u;
+constexpr uint64_t kWithErrorSyntax_ErrorAsEnum_Ordinal = 1284890143lu << 32;
+extern "C" const fidl_type_t test_name_WithErrorSyntaxErrorAsEnumResponseTable;
 
 }  // namespace
 
@@ -2996,3 +2982,4 @@ void WithErrorSyntax::Interface::ErrorAsEnumCompleterBase::Reply(::fidl::Decoded
 
 }  // namespace name
 }  // namespace test
+}  // namespace llcpp

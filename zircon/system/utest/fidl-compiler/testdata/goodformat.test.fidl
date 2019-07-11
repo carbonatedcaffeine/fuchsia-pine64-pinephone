@@ -5,6 +5,10 @@
 // This is the library
 library test;
 
+/// we do not aggregate attributes, but they should not be
+/// lost either
+///
+/// and it's also neat to format them properly
 using something.or.another as thing;
 
 struct arrays {
@@ -31,6 +35,13 @@ const uint32 z = 9021;
 enum Enum2 : uint32 {
     enum_0 = 0; // More comments
 };
+
+bits Bats : uint64 {
+    FIRST_MEMBER = 0b010101;
+};
+
+/// a type alias doc comment
+using TheTypeAlias = vector:9;
 
 union MyUnion { // super annoying!
     string? s;

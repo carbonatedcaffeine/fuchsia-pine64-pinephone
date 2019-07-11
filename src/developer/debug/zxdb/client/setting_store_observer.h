@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SETTING_STORE_OBSERVER_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SETTING_STORE_OBSERVER_H_
 
 #include <string>
 
@@ -23,8 +24,9 @@ class SettingStoreObserver {
   // The store is given because an observer could be listening to two stores at
   // the same time. It's the observer's job to correctly identify the setting
   // and call the correct getter/setter functions.
-  virtual void OnSettingChanged(const SettingStore&,
-                                const std::string& setting_name) = 0;
+  virtual void OnSettingChanged(const SettingStore&, const std::string& setting_name) = 0;
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SETTING_STORE_OBSERVER_H_

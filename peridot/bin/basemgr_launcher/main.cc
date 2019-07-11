@@ -2,19 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <iostream>
-#include <string>
-#include <vector>
-
 #include <fuchsia/io/cpp/fidl.h>
 #include <fuchsia/sys/cpp/fidl.h>
 #include <lib/async-loop/cpp/loop.h>
-#include <lib/component/cpp/startup_context.h>
+#include <lib/async/cpp/task.h>
+#include <lib/sys/cpp/component_context.h>
 #include <lib/vfs/cpp/pseudo_dir.h>
 #include <lib/vfs/cpp/pseudo_file.h>
 #include <src/lib/files/glob.h>
 #include <src/lib/fxl/command_line.h>
 #include <src/lib/fxl/strings/string_printf.h>
+
+#include <iostream>
+#include <string>
+#include <vector>
 
 constexpr char kConfigFilename[] = "startup.config";
 constexpr char kBasemgrUrl[] =
@@ -30,14 +31,15 @@ std::unique_ptr<vfs::PseudoDir> CreateConfigPseudoDir() {
   }
 
   auto dir = std::make_unique<vfs::PseudoDir>();
-  dir->AddEntry(
-      kConfigFilename,
-      std::make_unique<vfs::PseudoFile>(
-          [config_str = std::move(config_str)](std::vector<uint8_t>* out) {
-            std::copy(config_str.begin(), config_str.end(),
-                      std::back_inserter(*out));
-            return ZX_OK;
-          }));
+  dir->AddEntry(kConfigFilename,
+                std::make_unique<vfs::PseudoFile>(
+                    config_str.length(),
+                    [config_str = std::move(config_str)](
+                        std::vector<uint8_t>* out, size_t /*unused*/) {
+                      std::copy(config_str.begin(), config_str.end(),
+                                std::back_inserter(*out));
+                      return ZX_OK;
+                    }));
   return dir;
 }
 
@@ -82,10 +84,10 @@ int main(int argc, const char** argv) {
   launch_info.flat_namespace->directories.push_back(dir_handle.TakeChannel());
 
   // Launch a basemgr instance with the custom namespace we created above.
-  std::unique_ptr<component::StartupContext> context =
-      component::StartupContext::CreateFromStartupInfo();
+  std::unique_ptr<sys::ComponentContext> context =
+      sys::ComponentContext::Create();
   fuchsia::sys::LauncherPtr launcher;
-  context->ConnectToEnvironmentService(launcher.NewRequest());
+  context->svc()->Connect(launcher.NewRequest());
   fidl::InterfacePtr<fuchsia::sys::ComponentController> controller;
   launcher->CreateComponent(std::move(launch_info), controller.NewRequest());
 

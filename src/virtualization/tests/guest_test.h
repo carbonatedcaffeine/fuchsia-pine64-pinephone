@@ -11,10 +11,7 @@
 #include "src/virtualization/tests/enclosed_guest.h"
 
 // GuestTest creates a static EnclosedGuest to be shared across all tests in a
-// test fixture. Each translation unit that uses GuestTest must instantiate
-// enclosed_guest_ for each derivation of EnclosedGuest it uses. For example:
-//    template <class T>
-//    T* GuestTest<T>::enclosed_guest_ = nullptr;
+// test fixture.
 template <class T>
 class GuestTest : public ::testing::Test {
  public:
@@ -36,14 +33,13 @@ class GuestTest : public ::testing::Test {
     ASSERT_TRUE(enclosed_guest_->Ready()) << "Guest setup failed";
   }
 
-  static zx_status_t Execute(const std::string& message,
-                             std::string* result = nullptr) {
-    return enclosed_guest_->Execute(message, result);
+  static zx_status_t Execute(const std::vector<std::string>& argv, std::string* result = nullptr) {
+    return enclosed_guest_->Execute(argv, result);
   }
 
-  static zx_status_t RunUtil(const std::string& util, const std::string& args,
+  static zx_status_t RunUtil(const std::string& util, const std::vector<std::string>& argv,
                              std::string* result = nullptr) {
-    return enclosed_guest_->RunUtil(util, args, result);
+    return enclosed_guest_->RunUtil(util, argv, result);
   }
 
   GuestKernel GetGuestKernel() { return enclosed_guest_->GetGuestKernel(); }
@@ -51,14 +47,12 @@ class GuestTest : public ::testing::Test {
   uint32_t GetGuestCid() { return enclosed_guest_->GetGuestCid(); }
 
   void GetHostVsockEndpoint(
-      fidl::InterfaceRequest<fuchsia::virtualization::HostVsockEndpoint>
-          endpoint) {
+      fidl::InterfaceRequest<fuchsia::virtualization::HostVsockEndpoint> endpoint) {
     enclosed_guest_->GetHostVsockEndpoint(std::move(endpoint));
   }
 
   void ConnectToBalloon(
-      fidl::InterfaceRequest<fuchsia::virtualization::BalloonController>
-          balloon_controller) {
+      fidl::InterfaceRequest<fuchsia::virtualization::BalloonController> balloon_controller) {
     enclosed_guest_->ConnectToBalloon(std::move(balloon_controller));
   }
 
@@ -67,7 +61,7 @@ class GuestTest : public ::testing::Test {
   const T* GetEnclosedGuest() const { return enclosed_guest_; }
 
  private:
-  static T* enclosed_guest_;
+  static inline T* enclosed_guest_ = nullptr;
 };
 
 #endif  // SRC_VIRTUALIZATION_TESTS_GUEST_TEST_H_

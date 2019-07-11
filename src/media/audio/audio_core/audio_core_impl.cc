@@ -8,27 +8,32 @@
 #include <lib/async/cpp/task.h>
 #include <lib/async/default.h>
 
-#include "src/lib/fxl/log_settings.h"
 #include "src/media/audio/audio_core/audio_capturer_impl.h"
 #include "src/media/audio/audio_core/audio_device_manager.h"
 #include "src/media/audio/audio_core/audio_renderer_impl.h"
+#include "src/media/audio/audio_core/logging.h"
 
 namespace media::audio {
+namespace {
+// All audio renderer buffers will need to fit within this VMAR. We want to
+// choose a size here large enough that will accomodate all the mappings
+// required by all clients while also being small enough to avoid unnecessary
+// page table fragmentation.
+constexpr size_t kAudioRendererVmarSize = 16ull * 1024 * 1024 * 1024;
+constexpr zx_vm_option_t kAudioRendererVmarFlags =
+    ZX_VM_COMPACT | ZX_VM_CAN_MAP_READ | ZX_VM_CAN_MAP_WRITE | ZX_VM_ALIGN_1GB;
+}  // namespace
 
 constexpr float AudioCoreImpl::kMaxSystemAudioGainDb;
 
-AudioCoreImpl::AudioCoreImpl(
-    std::unique_ptr<sys::ComponentContext> startup_context)
-    : device_manager_(this), ctx_(std::move(startup_context)) {
-  fxl::LogSettings settings;
+AudioCoreImpl::AudioCoreImpl(std::unique_ptr<sys::ComponentContext> startup_context)
+    : device_manager_(this),
+      ctx_(std::move(startup_context)),
+      vmar_manager_(
+          fzl::VmarManager::Create(kAudioRendererVmarSize, nullptr, kAudioRendererVmarFlags)) {
+  FXL_DCHECK(vmar_manager_ != nullptr) << "Failed to allocate VMAR";
 
-#ifdef NDEBUG
-  settings.min_log_level = fxl::LOG_WARNING;
-#else
-  settings.min_log_level = fxl::LOG_INFO;
-#endif
-
-  fxl::SetLogSettings(settings);
+  Logging::Init();
 
   // Stash a pointer to our async object.
   dispatcher_ = async_get_default_dispatcher();
@@ -45,18 +50,16 @@ AudioCoreImpl::AudioCoreImpl(
   // (even non-realtime ones).  This, however, will take more significant
   // restructuring.  We will cross that bridge when we have the TBD way to deal
   // with realtime requirements in place.
-  auto profile_provider =
-      ctx_->svc()->Connect<fuchsia::scheduler::ProfileProvider>();
-  profile_provider->GetProfile(
-      24 /* HIGH_PRIORITY in LK */,
-      "src/media/audio/audio_core/audio_core_impl",
-      [](zx_status_t fidl_status, zx::profile profile) {
-        FXL_DCHECK(fidl_status == ZX_OK);
-        if (fidl_status == ZX_OK) {
-          zx_status_t status = zx::thread::self()->set_profile(profile, 0);
-          FXL_DCHECK(status == ZX_OK);
-        }
-      });
+  auto profile_provider = ctx_->svc()->Connect<fuchsia::scheduler::ProfileProvider>();
+  profile_provider->GetProfile(24 /* HIGH_PRIORITY in LK */,
+                               "src/media/audio/audio_core/audio_core_impl",
+                               [](zx_status_t fidl_status, zx::profile profile) {
+                                 FXL_DCHECK(fidl_status == ZX_OK);
+                                 if (fidl_status == ZX_OK) {
+                                   zx_status_t status = zx::thread::self()->set_profile(profile, 0);
+                                   FXL_DCHECK(status == ZX_OK);
+                                 }
+                               });
 
   // Set up our output manager.
   zx_status_t res = device_manager_.Init();
@@ -76,14 +79,12 @@ void AudioCoreImpl::PublishServices() {
   ctx_->outgoing()->AddPublicService<fuchsia::media::AudioCore>(
       [this](fidl::InterfaceRequest<fuchsia::media::AudioCore> request) {
         bindings_.AddBinding(this, std::move(request));
-        bindings_.bindings().back()->events().SystemGainMuteChanged(
-            system_gain_db_, system_muted_);
+        bindings_.bindings().back()->events().SystemGainMuteChanged(system_gain_db_, system_muted_);
       });
   // TODO(dalesat): Load the gain/mute values.
 
   ctx_->outgoing()->AddPublicService<fuchsia::media::AudioDeviceEnumerator>(
-      [this](fidl::InterfaceRequest<fuchsia::media::AudioDeviceEnumerator>
-                 request) {
+      [this](fidl::InterfaceRequest<fuchsia::media::AudioDeviceEnumerator> request) {
         device_manager_.AddDeviceEnumeratorClient(std::move(request));
       });
 }
@@ -95,28 +96,28 @@ void AudioCoreImpl::Shutdown() {
 }
 
 void AudioCoreImpl::CreateAudioRenderer(
-    fidl::InterfaceRequest<fuchsia::media::AudioRenderer>
-        audio_renderer_request) {
+    fidl::InterfaceRequest<fuchsia::media::AudioRenderer> audio_renderer_request) {
+  AUD_VLOG(TRACE);
   device_manager_.AddAudioRenderer(
       AudioRendererImpl::Create(std::move(audio_renderer_request), this));
 }
 
 void AudioCoreImpl::CreateAudioCapturer(
-    bool loopback, fidl::InterfaceRequest<fuchsia::media::AudioCapturer>
-                       audio_capturer_request) {
-  device_manager_.AddAudioCapturer(AudioCapturerImpl::Create(
-      std::move(audio_capturer_request), this, loopback));
+    bool loopback, fidl::InterfaceRequest<fuchsia::media::AudioCapturer> audio_capturer_request) {
+  AUD_VLOG(TRACE);
+  device_manager_.AddAudioCapturer(
+      AudioCapturerImpl::Create(loopback, std::move(audio_capturer_request), this));
 }
 
 void AudioCoreImpl::SetSystemGain(float gain_db) {
   // NAN is undefined and "signless". We cannot simply clamp it into range.
+  AUD_VLOG(TRACE) << " (" << gain_db << " dB)";
   if (isnan(gain_db)) {
-    FXL_LOG(ERROR) << "Invalid system gain " << gain_db
-                   << " dB -- making no change";
+    FXL_LOG(ERROR) << "Invalid system gain " << gain_db << " dB -- making no change";
     return;
   }
-  gain_db = std::max(std::min(gain_db, kMaxSystemAudioGainDb),
-                     fuchsia::media::audio::MUTED_GAIN_DB);
+  gain_db =
+      std::max(std::min(gain_db, kMaxSystemAudioGainDb), fuchsia::media::audio::MUTED_GAIN_DB);
 
   if (system_gain_db_ == gain_db) {
     // This system gain is the same as the last one we broadcast.
@@ -134,6 +135,7 @@ void AudioCoreImpl::SetSystemGain(float gain_db) {
 }
 
 void AudioCoreImpl::SetSystemMute(bool muted) {
+  AUD_VLOG(TRACE) << " (mute: " << muted << ")";
   if (system_muted_ == muted) {
     // A device might have received a SetDeviceMute call since we last set this.
     // Only update devices that have diverged from the System Gain/Mute values.
@@ -149,17 +151,61 @@ void AudioCoreImpl::SetSystemMute(bool muted) {
 }
 
 void AudioCoreImpl::NotifyGainMuteChanged() {
+  AUD_VLOG(TRACE) << " (" << system_gain_db_ << " dB, mute: " << system_muted_ << ")";
   for (auto& binding : bindings_.bindings()) {
     binding->events().SystemGainMuteChanged(system_gain_db_, system_muted_);
   }
 }
 
-void AudioCoreImpl::SetRoutingPolicy(
-    fuchsia::media::AudioOutputRoutingPolicy policy) {
+float AudioCoreImpl::GetRenderUsageGain(fuchsia::media::AudioRenderUsage usage) {
+  auto usage_index = fidl::ToUnderlying(usage);
+
+  if (usage_index >= fuchsia::media::RENDER_USAGE_COUNT) {
+    FXL_LOG(ERROR) << "Unexpected Render Usage: " << usage_index;
+    return Gain::kUnityGainDb;
+  }
+  return Gain::GetRenderUsageGain(usage);
+}
+
+float AudioCoreImpl::GetCaptureUsageGain(fuchsia::media::AudioCaptureUsage usage) {
+  auto usage_index = fidl::ToUnderlying(usage);
+
+  if (usage_index >= fuchsia::media::CAPTURE_USAGE_COUNT) {
+    FXL_LOG(ERROR) << "Unexpected Capture Usage: " << usage_index;
+    return Gain::kUnityGainDb;
+  }
+  return Gain::GetCaptureUsageGain(usage);
+}
+
+void AudioCoreImpl::SetRenderUsageGain(fuchsia::media::AudioRenderUsage usage, float gain_db) {
+  AUD_VLOG(TRACE) << " (usage: " << static_cast<int>(usage) << ", " << gain_db << " dB)";
+
+  auto usage_index = fidl::ToUnderlying(usage);
+  if (usage_index >= fuchsia::media::RENDER_USAGE_COUNT) {
+    FXL_LOG(ERROR) << "Unexpected Render Usage: " << usage_index;
+    return;
+  }
+  Gain::SetRenderUsageGain(usage, gain_db);
+}
+
+void AudioCoreImpl::SetCaptureUsageGain(fuchsia::media::AudioCaptureUsage usage, float gain_db) {
+  AUD_VLOG(TRACE) << " (usage: " << static_cast<int>(usage) << ", " << gain_db << " dB)";
+
+  auto usage_index = fidl::ToUnderlying(usage);
+  if (usage_index >= fuchsia::media::CAPTURE_USAGE_COUNT) {
+    FXL_LOG(ERROR) << "Unexpected Capture Usage: " << usage_index;
+    return;
+  }
+  Gain::SetCaptureUsageGain(usage, gain_db);
+}
+
+void AudioCoreImpl::SetRoutingPolicy(fuchsia::media::AudioOutputRoutingPolicy policy) {
+  AUD_VLOG(TRACE) << " (policy: " << static_cast<int>(policy) << ")";
   device_manager_.SetRoutingPolicy(policy);
 }
 
 void AudioCoreImpl::EnableDeviceSettings(bool enabled) {
+  AUD_VLOG(TRACE) << " (enabled: " << enabled << ")";
   device_manager_.EnableDeviceSettings(enabled);
 }
 
@@ -199,8 +245,7 @@ void AudioCoreImpl::DoPacketCleanup() {
   }
 }
 
-void AudioCoreImpl::SchedulePacketCleanup(
-    std::unique_ptr<AudioPacketRef> packet) {
+void AudioCoreImpl::SchedulePacketCleanup(std::unique_ptr<AudioPacketRef> packet) {
   std::lock_guard<std::mutex> locker(cleanup_queue_mutex_);
 
   packet_cleanup_queue_.push_back(std::move(packet));
@@ -212,8 +257,7 @@ void AudioCoreImpl::SchedulePacketCleanup(
   }
 }
 
-void AudioCoreImpl::ScheduleFlushCleanup(
-    std::unique_ptr<PendingFlushToken> token) {
+void AudioCoreImpl::ScheduleFlushCleanup(std::unique_ptr<PendingFlushToken> token) {
   std::lock_guard<std::mutex> locker(cleanup_queue_mutex_);
 
   flush_cleanup_queue_.push_back(std::move(token));

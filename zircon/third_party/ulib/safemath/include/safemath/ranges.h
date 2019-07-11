@@ -6,6 +6,7 @@
 #define SAFEMATH_RANGES_H_
 
 #include <math.h>
+
 #include <algorithm>
 
 namespace safemath {

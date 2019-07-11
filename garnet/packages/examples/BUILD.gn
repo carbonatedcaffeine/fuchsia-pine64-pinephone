@@ -32,7 +32,6 @@ group("carnelian") {
 group("scenic") {
   testonly = true
   public_deps = [
-    "//garnet/bin/ui/sketchy:sketchy_service",
     "//garnet/examples/ui:bouncing_ball",
     "//garnet/examples/ui:direct_input",
     "//garnet/examples/ui:direct_input_child",
@@ -44,20 +43,19 @@ group("scenic") {
     "//garnet/examples/ui:simplest_app",
     "//garnet/examples/ui:simplest_app",
     "//garnet/examples/ui:simplest_embedder",
-    "//garnet/examples/ui:sketchy_client",
     "//garnet/examples/ui:spinning_square_view",
     "//garnet/examples/ui:standalone_app",
     "//garnet/examples/ui:tile_view",
-    "//garnet/examples/ui:video_display",
     "//garnet/examples/ui:yuv_to_image_pipe",
     "//garnet/packages/prod:scenic",
+    "//src/camera/examples/video_display",
   ]
 }
 
 group("escher") {
   testonly = true
   public_deps = [
-    "//garnet/examples/escher:escher_waterfall",
+    "//src/ui/examples/escher:escher_waterfall",
   ]
 }
 
@@ -80,10 +78,10 @@ group("all") {
     "//garnet/packages/examples:eth-rs",
     "//garnet/packages/examples:fidl",
     "//garnet/packages/examples:http",
+    "//garnet/packages/examples:inspection",
     "//garnet/packages/examples:intl",
     "//garnet/packages/examples:media",
     "//garnet/packages/examples:mediaplayer",
-    "//garnet/packages/examples:mediasession",
     "//garnet/packages/examples:netstack",
     "//garnet/packages/examples:overnet",
     "//garnet/packages/examples:rust",
@@ -92,8 +90,10 @@ group("all") {
     "//garnet/packages/examples:tcp",
     "//garnet/packages/examples:vkcube_on_fb",
     "//garnet/packages/examples:vkcube_on_scenic",
+    "//garnet/packages/examples:vkcube_skip_present",
     "//garnet/packages/examples:vklatency_on_fb",
     "//garnet/packages/examples:vklatency_on_scenic",
+    "//garnet/packages/examples:vkprimer",
     "//garnet/packages/examples:vulkaninfo",
   ]
 }
@@ -127,6 +127,7 @@ group("fidl") {
   testonly = true
   public_deps = [
     "//garnet/examples/fidl/echo_client_cpp",
+    "//garnet/examples/fidl/echo_client_cpp_synchronous",
     "//garnet/examples/fidl/echo_client_go",
     "//garnet/examples/fidl/echo_client_llcpp",
     "//garnet/examples/fidl/echo_client_rust",
@@ -137,6 +138,15 @@ group("fidl") {
     "//garnet/examples/fidl/echo_server_llcpp",
     "//garnet/examples/fidl/echo_server_rust",
     "//garnet/go/src/fidl/examples",
+  ]
+}
+
+group("inspection") {
+  testonly = true
+  public_deps = [
+    "//garnet/examples/inspection:example_server",
+    "//garnet/examples/inspection:example_server_unittests",
+    "//garnet/examples/rust/inspect-rs",
   ]
 }
 
@@ -151,22 +161,22 @@ group("overnet") {
 group("mediaplayer") {
   testonly = true
   public_deps = [
-    "//garnet/examples/mediaplayer:mediaplayer_examples",
+    "//examples/media/playback",
   ]
 }
 
 group("media") {
   testonly = true
   public_deps = [
-    "//garnet/examples/camera/camera_client:camera_client",
     "//examples/media/audio/fx",
     "//examples/media/audio/simple_sine",
     "//examples/media/audio/sync_sine",
     "//examples/media/audio/tones",
     "//examples/media/audio/vu_meter",
     "//garnet/examples/media:use_h264_decoder_test",
-    "//garnet/examples/media:use_vp9_decoder_test",
     "//garnet/examples/media:use_media_decoder",
+    "//garnet/examples/media:use_vp9_decoder_test",
+    "//src/media:examples",
   ]
 }
 
@@ -216,6 +226,7 @@ group("benchmark") {
 group("intl") {
   testonly = true
   public_deps = [
+    "//examples/intl/tz_version_parrot",
     "//garnet/examples/intl/manager:intl_property_manager",
     "//garnet/examples/intl/wisdom:intl_wisdom",
   ]
@@ -243,16 +254,23 @@ group("rust") {
   ]
 }
 
-group("mediasession") {
-  testonly = true
-  public_deps = [
-    "//garnet/examples/mediasession:sine_player",
-  ]
-}
-
 group("vkcube_on_fb") {
   testonly = true
   public_deps = [
     "//garnet/lib/vulkan:vkcube_on_fb",
+  ]
+}
+
+group("vkcube_skip_present") {
+  testonly = true
+  public_deps = [
+    "//garnet/lib/vulkan:vkcube_skip_present",
+  ]
+}
+
+group("vkprimer") {
+  testonly = true
+  public_deps = [
+    "//garnet/lib/vulkan:vkprimer",
   ]
 }

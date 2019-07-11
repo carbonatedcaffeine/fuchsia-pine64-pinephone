@@ -6,8 +6,9 @@ import("//build/package.gni")
 import("//third_party/cobalt_config/metrics_registry.gni")
 import("//third_party/protobuf/proto_library.gni")
 
-# Generate the global_metrics_registry.pb file to be used in constructing
-# loggers when the user doesn't provide their own config.
+# Generates the global_metrics_registry.pb file. This may be selectively
+# overriden by callers who supply their own copy of their project's
+# registry.
 metrics_registry("global_metrics_registry") {
   global = true
 }
@@ -18,8 +19,6 @@ source_set("lib") {
     "cobalt_app.h",
     "cobalt_controller_impl.cc",
     "cobalt_controller_impl.h",
-    "legacy_logger_impl.cc",
-    "legacy_logger_impl.h",
     "logger_factory_impl.cc",
     "logger_factory_impl.h",
     "logger_impl.cc",
@@ -35,6 +34,7 @@ source_set("lib") {
   public_deps = [
     "//garnet/public/lib/fsl",
     "//garnet/public/lib/network_wrapper",
+    "//garnet/public/lib/syslog/cpp",
     "//sdk/lib/sys/cpp",
     "//src/cobalt/bin/utils:fuchsia_http_client",
     "//src/connectivity/wlan/lib/mlme/cpp:mlme",
@@ -45,8 +45,6 @@ source_set("lib") {
     "//third_party/cobalt/logger:project_context_factory",
     "//third_party/cobalt/util:pem_util",
     "//third_party/cobalt/util:posix_file_system",
-    "//third_party/grpc:grpc++",
-    "//third_party/protobuf:protobuf_lite",
     "//zircon/public/fidl/fuchsia-cobalt",
     "//zircon/public/fidl/fuchsia-sysinfo:fuchsia-sysinfo_c",
     "//zircon/public/lib/async-loop-cpp",
@@ -62,6 +60,8 @@ executable("app") {
 
   deps = [
     ":lib",
+    "//zircon/public/lib/trace",
+    "//zircon/public/lib/trace-provider-with-fdio",
   ]
 }
 
@@ -82,23 +82,13 @@ package("cobalt") {
 
   resources = [
     {
-      path = rebase_path(
-              "//third_party/cobalt/production/fuchsia-cobalt-us-central1-c/analyzer_public.pem")
-      dest = "certs/cobaltv0.1/analyzer_public.pem"
-    },
-    {
-      path = rebase_path(
-              "//third_party/cobalt/production/fuchsia-cobalt-us-central1-c/shuffler_public.pem")
-      dest = "certs/cobaltv0.1/shuffler_public.pem"
-    },
-    {
       # Cobalt 1.0 analyzer public key.
-      path = rebase_path("//third_party/cobalt/keys/analyzer_public_key.tink")
+      path = rebase_path("//third_party/cobalt/keys/analyzer_public.cobalt_key")
       dest = "keys/analyzer_public"
     },
     {
       # Cobalt 1.0 shuffler public key.
-      path = rebase_path("//third_party/cobalt/keys/shuffler_public_key.tink")
+      path = rebase_path("//third_party/cobalt/keys/shuffler_public.cobalt_key")
       dest = "keys/shuffler_public"
     },
     {
@@ -114,6 +104,7 @@ executable("cobalt_app_unittests") {
   testonly = true
 
   sources = [
+    "logger_impl_test.cc",
     "system_data_updater_impl_test.cc",
     "timer_manager_test.cc",
   ]
@@ -123,7 +114,9 @@ executable("cobalt_app_unittests") {
     "//garnet/public/lib/fsl",
     "//garnet/public/lib/gtest",
     "//sdk/lib/sys/cpp/testing:unit",
+    "//src/lib/cobalt/cpp:cobalt_event_builder",
     "//src/lib/fxl/test:gtest_main",
+    "//third_party/cobalt/logger:logger_test_utils",
     "//zircon/public/fidl/fuchsia-cobalt",
   ]
 }

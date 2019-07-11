@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("$zx/public/gn/prebuilt.gni")
+
 # All the $current_cpu values that `current_os == "fuchsia"` supports.
 standard_fuchsia_cpus = [
   "arm64",
@@ -29,7 +31,7 @@ foreach(host, standard_build_hosts) {
     {
       cpu = host.cpu
       os = host.os
-      sysroot = "$zx/prebuilt/downloads/sysroot/$os-$cpu"
+      sysroot = "$prebuilt_dir/third_party/sysroot/$os-$cpu"
     },
   ]
 }
@@ -68,6 +70,7 @@ standard_configs = [
   "$zx/public/gn/config:default_include_dirs",
   "$zx/public/gn/config:default_frame_pointers",
   "$zx/public/gn/config:default_linker_gc",
+  "$zx/public/gn/config:default_template_backtrace_limit",
   "$zx/public/gn/config:no_exceptions",
   "$zx/public/gn/config:no_rtti",
   "$zx/public/gn/config:no_threadsafe_statics",
@@ -156,12 +159,19 @@ standard_environments = [
         ]
         add = [ "$zx/system/core/devmgr:driver_deps" ]
       },
+
+      # The compiler implicitly links to runtime libraries that might turn
+      # into runtime dependencies on the shared libraries.  By default,
+      # that includes the shared standard C++ runtime.  But when that is
+      # linked in statically, other runtimes (e.g. instrumentation) still
+      # implicitly linked in might have runtime dependencies of their own.
+      # So first add the static C++ deps and then, if not actually using
+      # static C++, remove it again and add the shared C++ deps instead.
+      "$zx/public/gn/config:static-libc++-deps",
       {
-        # Unless we're statically linking the C++ standard library, we have
-        # to assume there will be some link-time references that turn into
-        # runtime dependencies on the shared libraries.
         unless_configs = [ "$zx/public/gn/config:static-libc++" ]
-        add = [ "$zx/public/gn/config:shared-libcxx-deps" ]
+        add = [ "$zx/public/gn/config:shared-libc++-deps" ]
+        remove = [ "$zx/public/gn/config:static-libc++-deps" ]
       },
     ]
     shlib = true
@@ -214,7 +224,6 @@ standard_sanitizer_variants = [
         },
       ]
       implicit_deps = [
-        "$zx/public/gn/config/instrumentation:asan_deps",
         {
           types = [
             "executable",
@@ -230,6 +239,13 @@ standard_sanitizer_variants = [
           add = [ "$zx/system/core/devmgr:driver_deps.$name" ]
         },
       ]
+      toolchain_vars = {
+        # This is the key for toolchain_runtime_deps() to find the right
+        # shared library dependencies for the instrumentation.  Note that
+        # the asan runtime includes ubsan but not vice versa, so this set
+        # must be used in preference to ubsan when both are enabled.
+        runtime_deps_cflags = [ "-fsanitize=address" ]
+      }
       tags = [
         "instrumented",
         "useronly",
@@ -240,7 +256,13 @@ standard_sanitizer_variants = [
     variant = {
       name = "ubsan"
       configs = [ "$zx/public/gn/config/instrumentation:ubsan" ]
-      implicit_deps = [ "$zx/public/gn/config/instrumentation:ubsan_deps" ]
+      toolchain_vars = {
+        # This is the key for toolchain_runtime_deps() to find the right
+        # shared library dependencies for the instrumentation.  Note that
+        # the asan runtime includes ubsan but not vice versa, so this set
+        # should be ignored and the asan set used instead.
+        runtime_deps_cflags = [ "-fsanitize=undefined" ]
+      }
       tags = [
         "instrumented",
         "useronly",
@@ -251,15 +273,12 @@ standard_sanitizer_variants = [
     variant = {
       name = "asan-ubsan"
       bases = [
-        "asan",
+        # Note ubsan comes first so that asan's runtime_deps_cflags setting
+        # can override it.  Later bases append to configs and
+        # implicit_deps, but each toolchain_vars field just replaces any
+        # value set by the earlier base.
         "ubsan",
-      ]
-      implicit_deps = [
-        {
-          # The asan runtime covers ubsan too, so the standalone ubsan
-          # runtime is not needed.
-          remove = [ "$zx/public/gn/config/instrumentation:ubsan_deps" ]
-        },
+        "asan",
       ]
     }
   },
@@ -323,24 +342,7 @@ standard_variants += [
 # selector must be compatible with all environments used in
 # environment_redirect(),
 default_variants = [
-  # For host environments default to Clang.  The prebuilt Clang toolchain
-  # supplied for Fuchsia targets also targets Linux and Mac hosts and is
-  # more reliable (especially in C++ language and library support) than
-  # many native host toolchains (depending on host OS version), so always
-  # use it.  Users can use the "host_gcc" variant shorthand (below) to use
-  # the host-native GCC instead.
-  {
-    host = true
-    variant = "clang"
-  },
-
-  # Otherwise default to gcc.
-  "gcc",
-
-  # But GCC doesn't support some environments (efi, *.fuzz).  Those use
-  # exclude_variant_tags = [ "gcc" ] so the preceding selector won't match,
-  # and this final fallback is needed.  Clang supports all the environments
-  # defined in this build.
+  # Use Clang as default for both host and the target.
   "clang",
 ]
 

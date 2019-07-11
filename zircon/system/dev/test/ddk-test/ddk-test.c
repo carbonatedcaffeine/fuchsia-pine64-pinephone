@@ -6,6 +6,7 @@
 #include <ddk/driver.h>
 #include <ddk/binding.h>
 #include <ddk/protocol/test.h>
+#include <zircon/assert.h>
 
 #include <unittest/unittest.h>
 #include <stddef.h>
@@ -15,6 +16,7 @@
 #include <limits.h>
 
 extern struct test_case_element* test_case_ddk_metadata;
+extern struct test_case_element* test_case_ddk_svc;
 extern struct test_case_element* test_case_ddk_usb_request;
 
 zx_device_t* ddk_test_dev;
@@ -51,20 +53,45 @@ static zx_status_t ddk_test_func(void* cookie, test_report_t* report) {
 
     memset(report, 0, sizeof(*report));
     update_test_report(unittest_run_one_test(test_case_ddk_metadata, TEST_ALL), report);
+    update_test_report(unittest_run_one_test(test_case_ddk_svc, TEST_ALL), report);
     update_test_report(unittest_run_one_test(test_case_ddk_usb_request, TEST_ALL), report);
     unittest_restore_output_function();
     zx_handle_close(output);
     return report->n_failed == 0 ? ZX_OK : ZX_ERR_INTERNAL;
 }
 
+static zx_device_t* child_dev = NULL;
+
+static void child_unbind(void* ctx) {
+    device_remove(child_dev);
+}
+
+static zx_protocol_device_t child_device_ops = {
+    .version = DEVICE_OPS_VERSION,
+    .unbind = child_unbind,
+};
+
 zx_status_t ddk_test_bind(void* ctx, zx_device_t* parent) {
+    device_add_args_t args = {
+        .version = DEVICE_ADD_ARGS_VERSION,
+        .name = "child",
+        .ops = &child_device_ops,
+        .flags = DEVICE_ADD_NON_BINDABLE,
+    };
+    ZX_ASSERT(child_dev == NULL);
+    zx_status_t status = device_add(parent, &args, &child_dev);
+    if (status != ZX_OK) {
+        return status;
+    }
+
     test_protocol_t proto;
-    zx_status_t status = device_get_protocol(parent, ZX_PROTOCOL_TEST, &proto);
+    status = device_get_protocol(parent, ZX_PROTOCOL_TEST, &proto);
     if (status != ZX_OK) {
         return status;
     }
 
     ddk_test_dev = parent;
-    proto.ops->set_test_func(proto.ctx, &(test_func_t){ddk_test_func, parent});
+    const test_func_t test = {ddk_test_func, parent};
+    proto.ops->set_test_func(proto.ctx, &test);
     return ZX_OK;
 }

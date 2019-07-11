@@ -5,13 +5,11 @@
 #ifndef GARNET_BIN_CPUPERF_PROVIDER_APP_H_
 #define GARNET_BIN_CPUPERF_PROVIDER_APP_H_
 
-#include <trace/observer.h>
-
 #include <memory>
 
-#include <src/lib/fxl/command_line.h>
-#include <src/lib/fxl/macros.h>
 #include <lib/sys/cpp/component_context.h>
+#include <src/lib/fxl/command_line.h>
+#include <trace/observer.h>
 
 #include "garnet/bin/cpuperf_provider/categories.h"
 #include "garnet/lib/perfmon/controller.h"
@@ -51,7 +49,10 @@ class App {
 
   uint32_t buffer_size_in_pages_ = kDefaultBufferSizeInPages;
 
-  FXL_DISALLOW_COPY_AND_ASSIGN(App);
+  App(const App&) = delete;
+  App(App&&) = delete;
+  App& operator=(const App&) = delete;
+  App& operator=(App&&) = delete;
 };
 
 }  // namespace cpuperf_provider

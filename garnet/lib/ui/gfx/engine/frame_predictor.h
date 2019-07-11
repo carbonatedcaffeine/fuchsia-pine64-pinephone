@@ -7,8 +7,6 @@
 
 #include <lib/zx/time.h>
 
-#include <vector>
-
 #include "garnet/lib/ui/gfx/engine/duration_predictor.h"
 
 namespace scenic_impl {
@@ -43,10 +41,10 @@ class FramePredictor {
   // enough to apply one update and render a frame, in order to hit the
   // predicted presentation time.
   //
-  // Both |PredictedTimes.latch_point_time| and |PredictedTimes.presentation_time|
-  // are guaranteed to be after |request.now|.
-  // |PredictedTimes.presentation_time| is guaranteed to be later than or equal
-  // to |request.requested_presentation_time|.
+  // Both |PredictedTimes.latch_point_time| and
+  // |PredictedTimes.presentation_time| are guaranteed to be after
+  // |request.now|. |PredictedTimes.presentation_time| is guaranteed to be later
+  // than or equal to |request.requested_presentation_time|.
   PredictedTimes GetPrediction(PredictionRequest request) const;
 
   // Used by the client to report a measured render duration. The render
@@ -64,17 +62,21 @@ class FramePredictor {
   // |last_sync_time| The last known good sync time.
   // |sync_interval| The expected time between syncs.
   // |min_sync_time| The minimum time allowed to return.
-  static zx::time ComputeNextSyncTime(zx::time last_sync_time,
-                                       zx::duration sync_interval,
-                                       zx::time min_sync_time);
+  static zx::time ComputeNextSyncTime(zx::time last_sync_time, zx::duration sync_interval,
+                                      zx::time min_sync_time);
   // Returns a prediction for how long in total the next frame will take to
   // update and render.
   zx::duration PredictTotalRequiredDuration() const;
 
   // Safety margin added to prediction time to reduce impact of noise and
-  // misprediction. Unfortunately means minimum possible latency is increased
-  // by the same amount.
-  const zx::duration kHardcodedMargin = zx::usec(500);  // 0.5ms
+  // misprediction. Unfortunately this means minimum possible latency is
+  // increased by the same amount.
+  const zx::duration kHardcodedMargin = zx::msec(1);  // 1ms
+
+  // Rarely, it is possible for abnormally long GPU contexts to occur, and
+  // when they occur we do not want them to mess up future predictions by
+  // too much. We therefore clamp RenderDurations by this much.
+  const zx::duration kMaxFrameTime = zx::usec(16'666);  // 16.66ms
 
   // Render time prediction.
   const size_t kRenderPredictionWindowSize = 3;

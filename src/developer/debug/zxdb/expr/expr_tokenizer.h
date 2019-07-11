@@ -2,20 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_TOKENIZER_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_TOKENIZER_H_
 
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "src/developer/debug/zxdb/common/err.h"
+#include "src/developer/debug/zxdb/expr/expr_language.h"
 #include "src/developer/debug/zxdb/expr/expr_token.h"
+#include "src/developer/debug/zxdb/symbols/dwarf_lang.h"
 
 namespace zxdb {
 
 class ExprTokenizer {
  public:
-  explicit ExprTokenizer(const std::string& input);
+  explicit ExprTokenizer(const std::string& input, ExprLanguage lang = ExprLanguage::kC);
 
   // Returns true on successful tokenizing. In this case, the tokens can be
   // read from tokens(). On failure, err() will contain the error message, and
@@ -40,8 +43,7 @@ class ExprTokenizer {
   // Returns two context lines for an error message. It will quote a relevant
   // portion of the input showing the byte offset, and add a "^" on the next
   // line to indicate where the error is.
-  static std::string GetErrorContext(const std::string& input,
-                                     size_t byte_offset);
+  static std::string GetErrorContext(const std::string& input, size_t byte_offset);
 
  private:
   void AdvanceChars(int n);
@@ -65,6 +67,8 @@ class ExprTokenizer {
   bool can_advance(int n) const { return cur_ + n <= input_.size(); }
 
   std::string input_;
+  ExprLanguage language_;
+
   size_t cur_ = 0;  // Character offset into input_.
 
   Err err_;
@@ -74,3 +78,5 @@ class ExprTokenizer {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_TOKENIZER_H_

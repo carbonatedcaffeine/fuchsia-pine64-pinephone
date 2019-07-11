@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_SYMBOL_CONTEXT_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_SYMBOL_CONTEXT_H_
 
 #include <stdint.h>
 
@@ -27,12 +28,8 @@ class SymbolContext {
   explicit SymbolContext(uint64_t load_address) : load_address_(load_address) {}
 
   // Address conversion.
-  uint64_t RelativeToAbsolute(uint64_t relative) const {
-    return load_address_ + relative;
-  }
-  uint64_t AbsoluteToRelative(uint64_t absolute) const {
-    return absolute - load_address_;
-  }
+  uint64_t RelativeToAbsolute(uint64_t relative) const { return load_address_ + relative; }
+  uint64_t AbsoluteToRelative(uint64_t absolute) const { return absolute - load_address_; }
 
   // AddressRange conversion.
   AddressRange RelativeToAbsolute(const AddressRange& relative) const;
@@ -50,3 +47,5 @@ class SymbolContext {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_SYMBOL_CONTEXT_H_

@@ -2,17 +2,16 @@
 
 ## Checking out the Zircon source code
 
-*** note
-NOTE: The Fuchsia source includes Zircon. See Fuchsia's
-[Getting Started](https://fuchsia.googlesource.com/fuchsia/+/master/docs/getting_started.md)
+Note: The Fuchsia source includes Zircon. See Fuchsia's
+[Getting Started](/docs/getting_started.md)
 doc. Follow this doc to work on only Zircon.
-***
 
 The Zircon Git repository is located
 at: https://fuchsia.googlesource.com/zircon
 
 To clone the repository, assuming you setup the $SRC variable
 in your environment:
+
 ```shell
 git clone https://fuchsia.googlesource.com/zircon $SRC/zircon
 ```
@@ -28,12 +27,14 @@ try -j16 or -j8.
 ### Ubuntu
 
 On Ubuntu this should obtain the necessary pre-reqs:
+
 ```
 sudo apt-get install texinfo libglib2.0-dev autoconf libtool bison libsdl-dev build-essential
 ```
 
 ### macOS
 Install the Xcode Command Line Tools:
+
 ```
 xcode-select --install
 ```
@@ -41,11 +42,13 @@ xcode-select --install
 Install the other pre-reqs:
 
 * Using Homebrew:
+
 ```
 brew install wget pkg-config glib autoconf automake libtool
 ```
 
 * Using MacPorts:
+
 ```
 port install autoconf automake libtool libpixman pkgconfig glib2
 ```
@@ -171,7 +174,7 @@ build of recent-enough Clang with support for `x86_64` and `aarch64` compiled
 in should work.  You'll need a toolchain that also includes the runtime
 libraries.  We normally also use the same build of Clang for the host as well
 as for the `*-fuchsia` targets.  See
-[here](https://fuchsia.googlesource.com/fuchsia/+/master/docs/development/build/toolchain.md)
+[here](/docs/development/build/toolchain.md)
 for details on how we build Clang.
 
 ### Set up build arguments for toolchains
@@ -236,7 +239,7 @@ On systems that boot via EFI (such as Acer and NUC), either option is viable.
 On other systems, zirconboot may be the only option for network booting.
 
 ### Via Gigaboot
-The [GigaBoot20x6](https://fuchsia.googlesource.com/fuchsia/+/master/zircon/bootloader) bootloader speaks a simple network boot protocol (over IPV6 UDP)
+The [GigaBoot20x6](/zircon/bootloader) bootloader speaks a simple network boot protocol (over IPV6 UDP)
 which does not require any special host configuration or privileged access to use.
 
 It does this by taking advantage of IPV6 Link Local Addressing and Multicast,
@@ -244,8 +247,7 @@ allowing the device being booted to advertise its bootability and the host to fi
 it and send a system image to it.
 
 If you have a device (for example a Broadwell or Skylake Intel NUC) running
-GigaBoot20x6 first create a USB drive [manually](https://fuchsia.googlesource.com/fuchsia/+/master/zircon/docs/targets/acer12.md#How-to-Create-a-Bootable-USB-Flash-Drive)
-or (Linux only) using the [script](https://fuchsia.googlesource.com/fuchsia/+/master/scripts/build-bootable-usb-gigaboot.sh).
+GigaBoot20x6, first [create a USB drive](/zircon/docs/targets/usb_setup.md).
 
 ```
 $BUILDDIR/tools/bootserver $BUILDDIR/zircon.bin

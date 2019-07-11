@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/developer/debug/zxdb/console/format_register.h"
+
 #include <inttypes.h>
 #include <stdlib.h>
 
@@ -12,7 +14,6 @@
 #include "src/developer/debug/zxdb/client/session.h"
 #include "src/developer/debug/zxdb/common/err.h"
 #include "src/developer/debug/zxdb/console/console.h"
-#include "src/developer/debug/zxdb/console/format_register.h"
 #include "src/developer/debug/zxdb/console/format_register_arm64.h"
 #include "src/developer/debug/zxdb/console/format_register_x64.h"
 #include "src/developer/debug/zxdb/console/format_table.h"
@@ -28,24 +29,23 @@ using debug_ipc::RegisterID;
 
 namespace {
 
-void InternalFormatGeneric(const std::vector<Register>& registers,
-                           OutputBuffer* out) {
+void InternalFormatGeneric(const std::vector<Register>& registers, OutputBuffer* out) {
   std::vector<std::vector<OutputBuffer>> rows;
   for (const Register& reg : registers) {
-    auto color = rows.size() % 2 == 1 ? TextForegroundColor::kDefault
-                                      : TextForegroundColor::kLightGray;
+    auto color =
+        rows.size() % 2 == 1 ? TextForegroundColor::kDefault : TextForegroundColor::kLightGray;
     rows.push_back(DescribeRegister(reg, color));
   }
 
-  FormatTable({ColSpec(Align::kRight), ColSpec(Align::kRight), ColSpec()}, rows,
-              out);
+  // Pad left by two spaces so the headings make more sense.
+  FormatTable({ColSpec(Align::kRight, 0, std::string(), 2), ColSpec(Align::kRight), ColSpec()},
+              rows, out);
 }
 
-Err FormatCategory(const FormatRegisterOptions& options,
-                   RegisterCategory::Type category,
+Err FormatCategory(const FormatRegisterOptions& options, RegisterCategory::Type category,
                    const std::vector<Register>& registers, OutputBuffer* out) {
-  auto title = fxl::StringPrintf(
-      "%s Registers\n", debug_ipc::RegisterCategory::TypeToString(category));
+  auto title =
+      fxl::StringPrintf("%s Registers\n", debug_ipc::RegisterCategory::TypeToString(category));
   out->Append(OutputBuffer(Syntax::kHeading, std::move(title)));
 
   if (registers.empty()) {
@@ -63,8 +63,7 @@ Err FormatCategory(const FormatRegisterOptions& options,
       return err;
     }
   } else if (options.arch == debug_ipc::Arch::kArm64) {
-    if (FormatCategoryARM64(options, category, registers, &category_out,
-                            &err)) {
+    if (FormatCategoryARM64(options, category, registers, &category_out, &err)) {
       if (err.ok())
         out->Append(std::move(category_out));
       return err;
@@ -80,8 +79,8 @@ Err FormatCategory(const FormatRegisterOptions& options,
 
 }  // namespace
 
-Err FilterRegisters(const FormatRegisterOptions& options,
-                    const RegisterSet& register_set, FilteredRegisterSet* out) {
+Err FilterRegisters(const FormatRegisterOptions& options, const RegisterSet& register_set,
+                    FilteredRegisterSet* out) {
   const auto& category_map = register_set.category_map();
   // Used to track how many registers we found when filtering.
   int registers_found = 0;
@@ -105,8 +104,7 @@ Err FilterRegisters(const FormatRegisterOptions& options,
       // We use insensitive case regexp matching.
       debug_ipc::Regex regex;
       if (!regex.Init(options.filter_regexp)) {
-        return Err("Could not initialize regex %s.",
-                   options.filter_regexp.c_str());
+        return Err("Could not initialize regex %s.", options.filter_regexp.c_str());
       }
 
       for (const auto& reg : it->second) {
@@ -133,8 +131,7 @@ Err FilterRegisters(const FormatRegisterOptions& options,
   return Err();
 }
 
-Err FormatRegisters(const FormatRegisterOptions& options,
-                    const FilteredRegisterSet& filtered_set,
+Err FormatRegisters(const FormatRegisterOptions& options, const FilteredRegisterSet& filtered_set,
                     OutputBuffer* out) {
   // We should have detected on the filtering stage that we didn't find any
   // register.
@@ -152,8 +149,6 @@ Err FormatRegisters(const FormatRegisterOptions& options,
     out_buffers.emplace_back(std::move(cat_out));
   }
 
-  out->Clear();
-
   // Each section is separated by a new line.
   for (const auto& buf : out_buffers) {
     out->Append(std::move(buf));
@@ -164,8 +159,7 @@ Err FormatRegisters(const FormatRegisterOptions& options,
 
 // Formatting helpers ----------------------------------------------------------
 
-std::vector<OutputBuffer> DescribeRegister(const Register& reg,
-                                           TextForegroundColor color) {
+std::vector<OutputBuffer> DescribeRegister(const Register& reg, TextForegroundColor color) {
   std::vector<OutputBuffer> result;
   result.emplace_back(RegisterIDToString(reg.id()), color);
 
@@ -178,11 +172,9 @@ std::vector<OutputBuffer> DescribeRegister(const Register& reg,
     // check is intended to avoid cluttering up the results with large numbers
     // corresponding to pointers.
     constexpr uint64_t kMaxSmallMagnitude = 0xffff;
-    if (value <= kMaxSmallMagnitude ||
-        llabs(static_cast<long long int>(value)) <=
-            static_cast<long long int>(kMaxSmallMagnitude)) {
-      result.emplace_back(fxl::StringPrintf("= %d", static_cast<int>(value)),
-                          color);
+    if (value <= kMaxSmallMagnitude || llabs(static_cast<long long int>(value)) <=
+                                           static_cast<long long int>(kMaxSmallMagnitude)) {
+      result.emplace_back(fxl::StringPrintf("= %d", static_cast<int>(value)), color);
     } else {
       result.emplace_back();
     }

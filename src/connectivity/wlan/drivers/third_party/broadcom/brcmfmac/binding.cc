@@ -16,6 +16,7 @@
 
 #include "brcm_hw_ids.h"
 #include "common.h"
+#include "debug.h"
 
 #include <ddk/binding.h>
 #include <ddk/device.h>
@@ -25,14 +26,16 @@
 #include <hw/pci.h>
 
 zx_status_t brcmfmac_bind(void* ctx, zx_device_t* device) {
-    brcmf_dbg(TRACE, "Enter");
+    BRCMF_DBG(TRACE, "Enter");
     return brcmfmac_module_init(device);
 }
 
-static zx_driver_ops_t brcmfmac_driver_ops = {
-    .version = DRIVER_OPS_VERSION,
-    .bind = brcmfmac_bind,
-};
+static constexpr zx_driver_ops_t brcmfmac_driver_ops = []() {
+    zx_driver_ops_t ops = {};
+    ops.version = DRIVER_OPS_VERSION;
+    ops.bind = brcmfmac_bind;
+    return ops;
+}();
 
 ZIRCON_DRIVER_BEGIN(brcmfmac, brcmfmac_driver_ops, "zircon", "0.1", 33)
     BI_GOTO_IF(EQ, BIND_PROTOCOL, ZX_PROTOCOL_COMPOSITE, 5910),

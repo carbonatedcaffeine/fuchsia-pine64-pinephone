@@ -19,7 +19,6 @@
 
 #include "garnet/bin/ktrace_provider/reader.h"
 #include "garnet/bin/ktrace_provider/tags.h"
-#include "src/lib/fxl/macros.h"
 
 namespace ktrace_provider {
 
@@ -84,6 +83,26 @@ class Importer {
                            KernelThread outgoing_kernel_thread,
                            zx_koid_t incoming_thread,
                            KernelThread incoming_kernel_thread);
+  bool HandleInheritPriorityStart(trace_ticks_t event_time, uint32_t id,
+                                  trace_cpu_number_t cpu_number);
+  bool HandleInheritPriority(trace_ticks_t event_time, uint32_t id,
+                             uint32_t tid, uint32_t flags,
+                             int old_inherited_prio, int new_inherited_prio,
+                             int old_effective_prio, int new_effective_prio);
+  bool HandleFutexWait(trace_ticks_t event_time, uint64_t futex_id,
+                       uint32_t new_owner_tid, trace_cpu_number_t cpu_number);
+  bool HandleFutexWoke(trace_ticks_t event_time, uint64_t futex_id,
+                       zx_status_t wait_result, trace_cpu_number_t cpu_number);
+  bool HandleFutexWake(trace_ticks_t event_time, uint64_t futex_id,
+                       uint32_t new_owner_tid, uint32_t count, uint32_t flags,
+                       trace_cpu_number_t cpu_number);
+  bool HandleFutexRequeue(trace_ticks_t event_time, uint64_t futex_id,
+                          uint32_t new_owner_tid, uint32_t count,
+                          uint32_t flags, trace_cpu_number_t cpu_number);
+  bool HandleKernelMutexEvent(trace_ticks_t event_time, uint32_t which_event,
+                              uint32_t mutex_id, uint32_t tid,
+                              uint32_t waiter_count, uint32_t flags,
+                              trace_cpu_number_t cpu_number);
   bool HandleObjectDelete(trace_ticks_t event_time, zx_koid_t thread,
                           zx_koid_t object);
   bool HandleThreadCreate(trace_ticks_t event_time, zx_koid_t thread,
@@ -201,6 +220,32 @@ class Importer {
   trace_string_ref_t const exit_address_name_ref_;
   trace_string_ref_t const arg0_name_ref_;
   trace_string_ref_t const arg1_name_ref_;
+  trace_string_ref_t const inherit_prio_name_ref_;
+  trace_string_ref_t const inherit_prio_old_ip_name_ref_;
+  trace_string_ref_t const inherit_prio_new_ip_name_ref_;
+  trace_string_ref_t const inherit_prio_old_ep_name_ref_;
+  trace_string_ref_t const inherit_prio_new_ep_name_ref_;
+  trace_string_ref_t const futex_wait_name_ref_;
+  trace_string_ref_t const futex_woke_name_ref_;
+  trace_string_ref_t const futex_wake_name_ref_;
+  trace_string_ref_t const futex_requeue_name_ref_;
+  trace_string_ref_t const futex_id_name_ref_;
+  trace_string_ref_t const futex_owner_name_ref_;
+  trace_string_ref_t const futex_wait_res_name_ref_;
+  trace_string_ref_t const futex_count_name_ref_;
+  trace_string_ref_t const futex_was_requeue_name_ref_;
+  trace_string_ref_t const futex_was_active_name_ref_;
+  trace_string_ref_t const kernel_mutex_acquire_name_ref_;
+  trace_string_ref_t const kernel_mutex_block_name_ref_;
+  trace_string_ref_t const kernel_mutex_release_name_ref_;
+  trace_string_ref_t const kernel_mutex_mutex_id_name_ref_;
+  trace_string_ref_t const kernel_mutex_tid_name_ref_;
+  trace_string_ref_t const kernel_mutex_tid_type_ref_;
+  trace_string_ref_t const kernel_mutex_tid_type_user_ref_;
+  trace_string_ref_t const kernel_mutex_tid_type_kernel_ref_;
+  trace_string_ref_t const kernel_mutex_tid_type_none_ref_;
+  trace_string_ref_t const kernel_mutex_waiter_count_name_ref_;
+  trace_string_ref_t const misc_unknown_name_ref_;
 
   uint32_t version_ = 0u;
 
@@ -243,7 +288,10 @@ class Importer {
         message_counters_;
   } channels_;
 
-  FXL_DISALLOW_COPY_AND_ASSIGN(Importer);
+  Importer(const Importer&) = delete;
+  Importer(Importer&&) = delete;
+  Importer& operator=(const Importer&) = delete;
+  Importer& operator=(Importer&&) = delete;
 };
 
 }  // namespace ktrace_provider

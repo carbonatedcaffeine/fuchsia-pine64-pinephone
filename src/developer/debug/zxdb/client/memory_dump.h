@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_MEMORY_DUMP_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_MEMORY_DUMP_H_
 
 #include <stdint.h>
 
@@ -31,8 +32,7 @@ class MemoryDump {
   uint64_t size() const {
     if (blocks_.empty())
       return 0;
-    return blocks_.back().address + blocks_.back().size -
-           blocks_.front().address;
+    return blocks_.back().address + blocks_.back().size - blocks_.front().address;
   }
 
   // Returns true if every block in this memory dump is valid.
@@ -52,3 +52,5 @@ class MemoryDump {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_MEMORY_DUMP_H_

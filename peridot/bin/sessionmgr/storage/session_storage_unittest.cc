@@ -283,11 +283,8 @@ TEST_F(SessionStorageTest, DISABLED_DeleteStoryDeletesStoryPage) {
                           nullptr /* watcher */);
   done = false;
   snapshot->GetEntries(to_array("") /* key_start */, nullptr /* token */,
-                       [&](fuchsia::ledger::IterationStatus status,
-                           std::vector<fuchsia::ledger::Entry> entries,
+                       [&](std::vector<fuchsia::ledger::Entry> entries,
                            fuchsia::ledger::TokenPtr next_token) {
-                         ASSERT_EQ(fuchsia::ledger::IterationStatus::OK,
-                                   status);
                          EXPECT_EQ(nullptr, next_token);
                          EXPECT_TRUE(entries.empty());
                          done = true;

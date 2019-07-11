@@ -30,12 +30,18 @@
 // Compile-time images of HotSort targets
 //
 
-#include "targets/amd/gcn3/u32/hs_target.h"
-#include "targets/amd/gcn3/u64/hs_target.h"
-#include "targets/intel/gen8/u32/hs_target.h"
-#include "targets/intel/gen8/u64/hs_target.h"
-#include "targets/nvidia/sm35/u32/hs_target.h"
-#include "targets/nvidia/sm35/u64/hs_target.h"
+#include "hs_amd_gcn3_u32/hs_target.h"
+#include "hs_amd_gcn3_u64/hs_target.h"
+#include "hs_intel_gen8_u32/hs_target.h"
+#include "hs_intel_gen8_u64/hs_target.h"
+#include "hs_nvidia_sm35_u32/hs_target.h"
+#include "hs_nvidia_sm35_u64/hs_target.h"
+
+//
+// This test reads the target's architectural configuration
+//
+
+#include "targets/hotsort_vk_target.h"
 
 //
 //
@@ -276,9 +282,9 @@ is_matching_device(VkPhysicalDeviceProperties const * const phy_device_props,
       // device id here...
       //
       if (key_val_words == 1)
-        *hs_target = &hs_nvidia_sm35_u32;
+        *hs_target = hs_nvidia_sm35_u32;
       else
-        *hs_target = &hs_nvidia_sm35_u64;
+        *hs_target = hs_nvidia_sm35_u64;
     }
   else if (phy_device_props->vendorID == 0x8086)
     {
@@ -290,9 +296,9 @@ is_matching_device(VkPhysicalDeviceProperties const * const phy_device_props,
       // rigorous rejection by device id here...
       //
       if (key_val_words == 1)
-        *hs_target = &hs_intel_gen8_u32;
+        *hs_target = hs_intel_gen8_u32;
       else
-        *hs_target = &hs_intel_gen8_u64;
+        *hs_target = hs_intel_gen8_u64;
     }
   else if (phy_device_props->vendorID == 0x1002)
     {
@@ -300,9 +306,9 @@ is_matching_device(VkPhysicalDeviceProperties const * const phy_device_props,
       // AMD GCN
       //
       if (key_val_words == 1)
-        *hs_target = &hs_amd_gcn3_u32;
+        *hs_target = hs_amd_gcn3_u32;
       else
-        *hs_target = &hs_amd_gcn3_u64;
+        *hs_target = hs_amd_gcn3_u64;
     }
   else
     {
@@ -347,17 +353,17 @@ main(int argc, char const * argv[])
   //
   // create a Vulkan instances
   //
-  VkApplicationInfo const app_info = {.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-                                      .pNext              = NULL,
-                                      .pApplicationName   = "HotSort Bench",
-                                      .applicationVersion = 0,
-                                      .pEngineName        = "HotSort",
-                                      .engineVersion      = 0,
-                                      .apiVersion         = VK_API_VERSION_1_1};
+  VkApplicationInfo const app_info = { .sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+                                       .pNext              = NULL,
+                                       .pApplicationName   = "HotSort Bench",
+                                       .applicationVersion = 0,
+                                       .pEngineName        = "HotSort",
+                                       .engineVersion      = 0,
+                                       .apiVersion         = VK_API_VERSION_1_1 };
 
-  char const * const instance_enabled_layers[] = {"VK_LAYER_LUNARG_standard_validation"};
+  char const * const instance_enabled_layers[] = { "VK_LAYER_LUNARG_standard_validation" };
 
-  char const * const instance_enabled_extensions[] = {VK_EXT_DEBUG_REPORT_EXTENSION_NAME};
+  char const * const instance_enabled_extensions[] = { VK_EXT_DEBUG_REPORT_EXTENSION_NAME };
 
   uint32_t const instance_enabled_layer_count =
 #ifndef NDEBUG
@@ -375,15 +381,16 @@ main(int argc, char const * argv[])
 #endif
     ;
 
-  VkInstanceCreateInfo const instance_info = {
-    .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-    .pNext                   = NULL,
-    .flags                   = 0,
-    .pApplicationInfo        = &app_info,
-    .enabledLayerCount       = instance_enabled_layer_count,
-    .ppEnabledLayerNames     = instance_enabled_layers,
-    .enabledExtensionCount   = instance_enabled_extension_count,
-    .ppEnabledExtensionNames = instance_enabled_extensions};
+  VkInstanceCreateInfo const instance_info = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+                                               .pNext = NULL,
+                                               .flags = 0,
+                                               .pApplicationInfo    = &app_info,
+                                               .enabledLayerCount   = instance_enabled_layer_count,
+                                               .ppEnabledLayerNames = instance_enabled_layers,
+                                               .enabledExtensionCount =
+                                                 instance_enabled_extension_count,
+                                               .ppEnabledExtensionNames =
+                                                 instance_enabled_extensions };
 
   VkInstance instance;
 
@@ -406,7 +413,8 @@ main(int argc, char const * argv[])
     .pNext       = NULL,
     .flags       = UINT32_MAX,  // enable everything for now
     .pfnCallback = vk_debug_report_cb,
-    .pUserData   = NULL};
+    .pUserData   = NULL
+  };
 
   VkDebugReportCallbackEXT drc;
 
@@ -492,20 +500,21 @@ main(int argc, char const * argv[])
   //
   // create device
   //
-  float const queue_priorities[] = {1.0f};
+  float const queue_priorities[] = { 1.0f };
 
-  VkDeviceQueueCreateInfo const queue_info = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-                                              .pNext = NULL,
-                                              .flags = 0,
-                                              .queueFamilyIndex = 0,
-                                              .queueCount       = 1,
-                                              .pQueuePriorities = queue_priorities};
+  VkDeviceQueueCreateInfo const queue_info = { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                                               .pNext = NULL,
+                                               .flags = 0,
+                                               .queueFamilyIndex = 0,
+                                               .queueCount       = 1,
+                                               .pQueuePriorities = queue_priorities };
 
   //
   // clumsily enable AMD GCN shader info extension
   //
   char const * const device_enabled_extensions[] = {
-#if defined(HOTSORT_VK_VERBOSE_STATISTICS_AMD) || defined(HOTSORT_VK_VERBOSE_DISASSEMBLY_AMD)
+#if defined(HOTSORT_VK_SHADER_INFO_AMD_STATISTICS) ||                                              \
+  defined(HOTSORT_VK_SHADER_INFO_AMD_DISASSEMBLY)
     VK_AMD_SHADER_INFO_EXTENSION_NAME
 #else
     NULL
@@ -514,7 +523,8 @@ main(int argc, char const * argv[])
 
   uint32_t device_enabled_extension_count = 0;
 
-#if defined(HOTSORT_VK_VERBOSE_STATISTICS_AMD) || defined(HOTSORT_VK_VERBOSE_DISASSEMBLY_AMD)
+#if defined(HOTSORT_VK_SHADER_INFO_AMD_STATISTICS) ||                                              \
+  defined(HOTSORT_VK_SHADER_INFO_AMD_DISASSEMBLY)
   if (phy_device_props.vendorID == 0x1002)
     device_enabled_extension_count = 1;
 #endif
@@ -522,23 +532,23 @@ main(int argc, char const * argv[])
   //
   //
   //
-  VkPhysicalDeviceFeatures device_features = {false};
+  VkPhysicalDeviceFeatures device_features = { false };
 
   if (key_val_words == 2)
     {
       device_features.shaderInt64 = true;
     }
 
-  VkDeviceCreateInfo const device_info = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-                                          .pNext = NULL,
-                                          .flags = 0,
-                                          .queueCreateInfoCount    = 1,
-                                          .pQueueCreateInfos       = &queue_info,
-                                          .enabledLayerCount       = 0,
-                                          .ppEnabledLayerNames     = NULL,
-                                          .enabledExtensionCount   = device_enabled_extension_count,
-                                          .ppEnabledExtensionNames = device_enabled_extensions,
-                                          .pEnabledFeatures        = &device_features};
+  VkDeviceCreateInfo const device_info = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+                                           .pNext = NULL,
+                                           .flags = 0,
+                                           .queueCreateInfoCount  = 1,
+                                           .pQueueCreateInfos     = &queue_info,
+                                           .enabledLayerCount     = 0,
+                                           .ppEnabledLayerNames   = NULL,
+                                           .enabledExtensionCount = device_enabled_extension_count,
+                                           .ppEnabledExtensionNames = device_enabled_extensions,
+                                           .pEnabledFeatures        = &device_features };
 
   VkDevice device;
 
@@ -561,8 +571,8 @@ main(int argc, char const * argv[])
   //
   // create a descriptor set pool
   //
-  VkDescriptorPoolSize const dps[] = {
-    {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 2}};
+  VkDescriptorPoolSize const dps[] = { { .type            = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                         .descriptorCount = 2 } };
 
   VkDescriptorPoolCreateInfo const dpci = {
     .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -570,7 +580,8 @@ main(int argc, char const * argv[])
     .flags         = 0,  // VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
     .maxSets       = 1,
     .poolSizeCount = ARRAY_LENGTH_MACRO(dps),
-    .pPoolSizes    = dps};
+    .pPoolSizes    = dps
+  };
 
   VkDescriptorPool dp;
 
@@ -588,16 +599,17 @@ main(int argc, char const * argv[])
     .flags        = 0,
     .bindingCount = 2,  // 0:vout[], 1:vin[]
     .pBindings =
-      (VkDescriptorSetLayoutBinding[]){{.binding            = 0,  // vout
-                                        .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                        .descriptorCount    = 1,
-                                        .stageFlags         = VK_SHADER_STAGE_COMPUTE_BIT,
-                                        .pImmutableSamplers = NULL},
-                                       {.binding            = 1,  // vin
-                                        .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                        .descriptorCount    = 1,
-                                        .stageFlags         = VK_SHADER_STAGE_COMPUTE_BIT,
-                                        .pImmutableSamplers = NULL}}};
+      (VkDescriptorSetLayoutBinding[]){ { .binding            = 0,  // vout
+                                          .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                          .descriptorCount    = 1,
+                                          .stageFlags         = VK_SHADER_STAGE_COMPUTE_BIT,
+                                          .pImmutableSamplers = NULL },
+                                        { .binding            = 1,  // vin
+                                          .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                          .descriptorCount    = 1,
+                                          .stageFlags         = VK_SHADER_STAGE_COMPUTE_BIT,
+                                          .pImmutableSamplers = NULL } }
+  };
 
   VkDescriptorSetLayout dsl;
 
@@ -617,9 +629,10 @@ main(int argc, char const * argv[])
     .pSetLayouts            = &dsl,
     .pushConstantRangeCount = 1,
     .pPushConstantRanges =
-      (VkPushConstantRange[]){{.stageFlags = HOTSORT_VK_PUSH_CONSTANT_RANGE_STAGE_FLAGS,
-                               .offset     = HOTSORT_VK_PUSH_CONSTANT_RANGE_OFFSET,
-                               .size       = HOTSORT_VK_PUSH_CONSTANT_RANGE_SIZE}}};
+      (VkPushConstantRange[]){ { .stageFlags = HOTSORT_VK_PUSH_CONSTANT_RANGE_STAGE_FLAGS,
+                                 .offset     = HOTSORT_VK_PUSH_CONSTANT_RANGE_OFFSET,
+                                 .size       = HOTSORT_VK_PUSH_CONSTANT_RANGE_SIZE } }
+  };
 
   VkPipelineLayout pl;
 
@@ -631,11 +644,12 @@ main(int argc, char const * argv[])
   //
   // create a descriptor set
   //
-  VkDescriptorSetAllocateInfo const dsai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                                            .pNext = NULL,
-                                            .descriptorPool     = dp,
-                                            .descriptorSetCount = 1,
-                                            .pSetLayouts        = &dsl};
+  VkDescriptorSetAllocateInfo const dsai = { .sType =
+                                               VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                                             .pNext              = NULL,
+                                             .descriptorPool     = dp,
+                                             .descriptorSetCount = 1,
+                                             .pSetLayouts        = &dsl };
 
   VkDescriptorSet ds;
 
@@ -659,13 +673,13 @@ main(int argc, char const * argv[])
   //
   // create a query pool for benchmarking
   //
-  static VkQueryPoolCreateInfo const query_pool_info = {
-    .sType              = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-    .pNext              = NULL,
-    .flags              = 0,
-    .queryType          = VK_QUERY_TYPE_TIMESTAMP,
-    .queryCount         = 4,
-    .pipelineStatistics = 0};
+  static VkQueryPoolCreateInfo const query_pool_info = { .sType =
+                                                           VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                                                         .pNext      = NULL,
+                                                         .flags      = 0,
+                                                         .queryType  = VK_QUERY_TYPE_TIMESTAMP,
+                                                         .queryCount = 4,
+                                                         .pipelineStatistics = 0 };
 
   VkQueryPool query_pool;
 
@@ -680,14 +694,14 @@ main(int argc, char const * argv[])
 
   size_t const buffer_out_size = buffer_out_count * key_val_words * sizeof(uint32_t);
 
-  VkBufferCreateInfo bci = {.sType                 = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                            .pNext                 = NULL,
-                            .flags                 = 0,
-                            .size                  = buffer_out_size,
-                            .usage                 = 0,
-                            .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-                            .queueFamilyIndexCount = 0,
-                            .pQueueFamilyIndices   = NULL};
+  VkBufferCreateInfo bci = { .sType                 = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                             .pNext                 = NULL,
+                             .flags                 = 0,
+                             .size                  = buffer_out_size,
+                             .usage                 = 0,
+                             .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+                             .queueFamilyIndexCount = 0,
+                             .pQueueFamilyIndices   = NULL };
 
   VkBuffer vin, vout, sorted, rand;
 
@@ -724,22 +738,22 @@ main(int argc, char const * argv[])
   //
   // vin and vout have the same usage
   //
-  VkMemoryAllocateInfo const mai_vin_vout = {
-    .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-    .pNext           = NULL,
-    .allocationSize  = mr_vin.size,
-    .memoryTypeIndex = vk_find_mem_type_idx(&phy_device_mem_props,
-                                            mr_vin.memoryTypeBits,
-                                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
+  VkMemoryAllocateInfo const mai_vin_vout = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                              .pNext = NULL,
+                                              .allocationSize  = mr_vin.size,
+                                              .memoryTypeIndex = vk_find_mem_type_idx(
+                                                &phy_device_mem_props,
+                                                mr_vin.memoryTypeBits,
+                                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) };
 
-  VkMemoryAllocateInfo const mai_sorted_rand = {
-    .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-    .pNext           = NULL,
-    .allocationSize  = mr_sorted.size,
-    .memoryTypeIndex = vk_find_mem_type_idx(
-      &phy_device_mem_props,
-      mr_sorted.memoryTypeBits,
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+  VkMemoryAllocateInfo const mai_sorted_rand = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                                 .pNext = NULL,
+                                                 .allocationSize  = mr_sorted.size,
+                                                 .memoryTypeIndex = vk_find_mem_type_idx(
+                                                   &phy_device_mem_props,
+                                                   mr_sorted.memoryTypeBits,
+                                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) };
 
   VkDeviceMemory mem_vin, mem_vout, mem_sorted, mem_rand;
 
@@ -784,7 +798,8 @@ main(int argc, char const * argv[])
     .pNext              = NULL,
     .commandPool        = cmd_pool,
     .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    .commandBufferCount = 1};
+    .commandBufferCount = 1
+  };
 
   VkCommandBuffer cb;
 
@@ -797,41 +812,42 @@ main(int argc, char const * argv[])
     .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
     .pNext            = NULL,
     .flags            = 0,  // VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    .pInheritanceInfo = NULL};
+    .pInheritanceInfo = NULL
+  };
 
-  struct VkSubmitInfo const submit_info = {.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                                           .pNext                = NULL,
-                                           .waitSemaphoreCount   = 0,
-                                           .pWaitSemaphores      = NULL,
-                                           .pWaitDstStageMask    = NULL,
-                                           .commandBufferCount   = 1,
-                                           .pCommandBuffers      = &cb,
-                                           .signalSemaphoreCount = 0,
-                                           .pSignalSemaphores    = NULL};
+  struct VkSubmitInfo const submit_info = { .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                                            .pNext                = NULL,
+                                            .waitSemaphoreCount   = 0,
+                                            .pWaitSemaphores      = NULL,
+                                            .pWaitDstStageMask    = NULL,
+                                            .commandBufferCount   = 1,
+                                            .pCommandBuffers      = &cb,
+                                            .signalSemaphoreCount = 0,
+                                            .pSignalSemaphores    = NULL };
 
   //
   // update the descriptor set
   //
-  VkDescriptorBufferInfo const dbi[] = {{.buffer = vout, .offset = 0, .range = VK_WHOLE_SIZE},
-                                        {.buffer = vin, .offset = 0, .range = VK_WHOLE_SIZE}};
+  VkDescriptorBufferInfo const dbi[] = { { .buffer = vout, .offset = 0, .range = VK_WHOLE_SIZE },
+                                         { .buffer = vin, .offset = 0, .range = VK_WHOLE_SIZE } };
 
-  VkWriteDescriptorSet const wds[] = {{.sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                       .pNext            = NULL,
-                                       .dstSet           = ds,
-                                       .dstBinding       = 0,
-                                       .dstArrayElement  = 0,
-                                       .descriptorCount  = 2,
-                                       .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                       .pImageInfo       = NULL,
-                                       .pBufferInfo      = dbi,
-                                       .pTexelBufferView = NULL}};
+  VkWriteDescriptorSet const wds[] = { { .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                         .pNext            = NULL,
+                                         .dstSet           = ds,
+                                         .dstBinding       = 0,
+                                         .dstArrayElement  = 0,
+                                         .descriptorCount  = 2,
+                                         .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                         .pImageInfo       = NULL,
+                                         .pBufferInfo      = dbi,
+                                         .pTexelBufferView = NULL } };
 
   vkUpdateDescriptorSets(device, ARRAY_LENGTH_MACRO(wds), wds, 0, NULL);
 
   //
   // buffer offsets
   //
-  struct hotsort_vk_ds_offsets const offsets = {.in = 0UL, .out = 0UL};
+  struct hotsort_vk_ds_offsets const offsets = { .in = 0UL, .out = 0UL };
 
   //
   // labels
@@ -879,9 +895,9 @@ main(int argc, char const * argv[])
       //
       vkBeginCommandBuffer(cb, &cb_begin_info);
 
-      VkBufferCopy const copy_rand = {.srcOffset = 0,
-                                      .dstOffset = 0,
-                                      .size      = count * key_val_words * sizeof(uint32_t)};
+      VkBufferCopy const copy_rand = { .srcOffset = 0,
+                                       .dstOffset = 0,
+                                       .size      = count * key_val_words * sizeof(uint32_t) };
 
       vkCmdCopyBuffer(cb, rand, vin, 1, &copy_rand);
 
@@ -980,7 +996,7 @@ main(int argc, char const * argv[])
 
           vkBeginCommandBuffer(cb, &cb_begin_info);
 
-          VkBufferCopy const copy_vout = {.srcOffset = 0, .dstOffset = 0, .size = size_padded_in};
+          VkBufferCopy const copy_vout = { .srcOffset = 0, .dstOffset = 0, .size = size_padded_in };
 
           vkCmdCopyBuffer(cb, vout, sorted, 1, &copy_vout);
 
@@ -1062,7 +1078,7 @@ main(int argc, char const * argv[])
 
       fprintf(
         stdout,
-        "%s, %u.%u.%u.%u, %s, %s, %s, %8u, %8u, %8u, CPU, %s, %9.2f, %6.2f, GPU, %9u, %7.3f, %7.3f, %7.3f, %6.2f, %6.2f\n",
+        "%s, %u.%u.%u.%u, %s, %s, %s, %8u, %8u, %8u, CPU, %s, %9.2f, %6.2f, GPU, %9u, %7.3f, %7.3f, %7.3f, %7.2f, %7.2f\n",
         phy_device_props.deviceName,
         (phy_device_props.driverVersion >> 24) & 0xFF,
         (phy_device_props.driverVersion >> 16) & 0xFF,

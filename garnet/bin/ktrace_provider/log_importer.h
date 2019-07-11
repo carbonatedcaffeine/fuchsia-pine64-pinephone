@@ -9,8 +9,6 @@
 #include <lib/zx/debuglog.h>
 #include <trace-engine/types.h>
 
-#include "src/lib/fxl/macros.h"
-
 namespace ktrace_provider {
 
 class LogImporter {
@@ -30,7 +28,10 @@ class LogImporter {
   double time_scale_;
   async::WaitMethod<LogImporter, &LogImporter::Handle> wait_{this};
 
-  FXL_DISALLOW_COPY_AND_ASSIGN(LogImporter);
+  LogImporter(const LogImporter&) = delete;
+  LogImporter(LogImporter&&) = delete;
+  LogImporter& operator=(const LogImporter&) = delete;
+  LogImporter& operator=(LogImporter&&) = delete;
 };
 
 }  // namespace ktrace_provider

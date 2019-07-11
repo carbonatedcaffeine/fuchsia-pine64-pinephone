@@ -4,8 +4,8 @@
 
 driver("usb-peripheral") {
   sources = [
-    "usb-function.cpp",
-    "usb-peripheral.cpp",
+    "usb-function.cc",
+    "usb-peripheral.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.usb",
@@ -14,7 +14,7 @@ driver("usb-peripheral") {
     "$zx/system/banjo/ddk.protocol.usb.modeswitch",
     "$zx/system/banjo/ddk.protocol.usb.request",
     "$zx/system/dev/lib/usb",
-    "$zx/system/fidl/fuchsia-hardware-usb-peripheral:c",
+    "$zx/system/fidl/fuchsia-hardware-usb-peripheral:llcpp",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",
     "$zx/system/ulib/fbl",

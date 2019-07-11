@@ -32,7 +32,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
-#include <wlan/protocol/info.h>
 #include <zircon/assert.h>
 #include <zircon/listnode.h>
 #include <zircon/syscalls.h>
@@ -51,13 +50,13 @@ typedef uint64_t __be64;
 #define GENMASK1(val) ((1UL << (val)) - 1)
 #define GENMASK(start, end) ((GENMASK1((start) + 1) & ~GENMASK1(end)))
 
-#define WARN(cond, msg)                                                                 \
-    ({  bool ret_cond = cond;                                                           \
-        if (ret_cond) {                                                                 \
-            BRCMF_LOGF(WARN, "brcmfmac: unexpected condition %s warns %s at %s:%d\n",   \
-                       #cond, msg, __FILE__, __LINE__);                                 \
-        }                                                                               \
-        ret_cond;                                                                       \
+#define WARN(cond, msg)                                                           \
+    ({  bool ret_cond = cond;                                                     \
+        if (ret_cond) {                                                           \
+            BRCMF_WARN("brcmfmac: unexpected condition %s warns %s at %s:%d\n",   \
+                       #cond, msg, __FILE__, __LINE__);                           \
+        }                                                                         \
+        ret_cond;                                                                 \
     })
 
 // TODO(cphoenix): Looks like these evaluate cond multiple times. And maybe should
@@ -99,12 +98,9 @@ typedef uint64_t __be64;
 
 #define ioread8(addr) (*(volatile uint8_t*)(uintptr_t)(addr))
 
-#define usleep(us) zx_nanosleep(zx_deadline_after(ZX_USEC(us)))
-#define usleep_range(early, late) usleep(early)
 #define msleep(ms) zx_nanosleep(zx_deadline_after(ZX_MSEC(ms)))
 #define PAUSE zx_nanosleep(zx_deadline_after(ZX_MSEC(50)))
 
-#define min(a, b) (((a) < (b)) ? (a) : (b))
 #define min_t(t, a, b) (((t)(a) < (t)(b)) ? (t)(a) : (t)(b))
 
 #define roundup(n, m) (((n) % (m) == 0) ? (n) : (n) + ((m) - ((n) % (m))))
@@ -119,17 +115,6 @@ typedef uint64_t __be64;
         /*BRCMF_LOGF(ERROR, "brcmfmac: * * ERROR * * Called linux function %s\n", #name);   */ \
         return 0;                                                                              \
     }
-
-#define CHIPSET_ARM_CM3_CORE      0x82a
-#define CHIPSET_INTERNAL_MEM_CORE 0x80e
-#define CHIPSET_ARM_CR4_CORE      0x83e
-#define CHIPSET_ARM_CA7_CORE      0x847
-#define CHIPSET_80211_CORE        0x812
-#define CHIPSET_PCIE2_CORE        0x83c
-#define CHIPSET_SDIO_DEV_CORE     0x829
-#define CHIPSET_CHIPCOMMON_CORE   0x800
-#define CHIPSET_SYS_MEM_CORE      0x849
-#define CHIPSET_PMU_CORE          0x827
 
 // clang-format off
 #define LINUX_FUNCII(name) LINUX_FUNC(name, int, int)
@@ -231,14 +216,9 @@ LINUX_FUNCVI(dma_map_single) // PCI only
 LINUX_FUNCVI(dma_mapping_error) // PCI only
 LINUX_FUNCVI(dma_unmap_single) // PCI only
 
-#define netdev_for_each_mc_addr(a, b) for (({brcmf_err("Calling netdev_for_each_mc_addr"); \
+#define netdev_for_each_mc_addr(a, b) for (({BRCMF_ERR("Calling netdev_for_each_mc_addr"); \
                                              a = nullptr;});1;)
-#define for_each_set_bit(a, b, c) for (({brcmf_err("Calling for_each_set_bit"); a = 0;});1;)
-
-#define DEBUG                         // Turns on struct members that debug.c needs
-#define CONFIG_OF                     // Turns on functions that of.c needs
-#define CONFIG_BRCMFMAC_PROTO_MSGBUF  // turns on msgbuf.h
-#define CONFIG_BRCMFMAC_PROTO_BCDC    // Needed to see func defs in bcdc.h
+#define for_each_set_bit(a, b, c) for (({BRCMF_ERR("Calling for_each_set_bit"); a = 0;});1;)
 
 #define KBUILD_MODNAME "brcmfmac"
 
@@ -263,8 +243,7 @@ enum {
     UPDATE_ASSOC_IES,
     WIPHY_FLAG_SUPPORTS_TDLS,
     REGULATORY_CUSTOM_REG,
-    IFF_ALLMULTI = 0,
-    NET_NETBUF_PAD,
+    NET_NETBUF_PAD = 1,
     IFF_PROMISC,
     NETDEV_TX_OK,
     NETIF_F_IP_CSUM,
@@ -427,10 +406,6 @@ struct notifier_block {
 
 struct in6_addr {
     int foo;
-};
-
-struct seq_file {
-    void* private_data;
 };
 
 typedef uint64_t dma_addr_t;

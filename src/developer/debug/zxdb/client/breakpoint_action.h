@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_BREAKPOINT_ACTION_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_BREAKPOINT_ACTION_H_
 
 namespace zxdb {
 
@@ -27,7 +28,8 @@ enum class BreakpointAction {
 // Returns the action that takes precedence. If two breakpoints are hit at the
 // same time and they each report different actions, the one with the highest
 // precedence is the action taken.
-BreakpointAction BreakpointActionHighestPrecedence(BreakpointAction a,
-                                                   BreakpointAction b);
+BreakpointAction BreakpointActionHighestPrecedence(BreakpointAction a, BreakpointAction b);
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_BREAKPOINT_ACTION_H_

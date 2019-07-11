@@ -15,13 +15,15 @@
 #include <sstream>
 #include <string>
 
+#include <lib/fsl/syslogger/init.h>
+
 #include "lib/fidl/cpp/binding.h"
 #include "lib/fidl/cpp/synchronous_interface_ptr.h"
 #include "lib/svc/cpp/services.h"
+#include "lib/syslog/cpp/logger.h"
 #include "src/cobalt/bin/testapp/cobalt_testapp.h"
 #include "src/lib/fxl/command_line.h"
 #include "src/lib/fxl/log_settings_command_line.h"
-#include "src/lib/fxl/logging.h"
 #include "src/lib/fxl/macros.h"
 #include "src/lib/fxl/strings/string_view.h"
 
@@ -30,17 +32,37 @@
 // Don't use the network. Default=false (i.e. do use the network.)
 constexpr fxl::StringView kNoNetworkForTesting = "no_network_for_testing";
 
+// Use the prober project instead of the testapp project. Default=false (i.e.,
+// use the testapp project).
+constexpr fxl::StringView kTestForProber = "test_for_prober";
+
+// If --test_for_prober was also passed, run the testapp in prober mode instead
+// of printing a warning and exiting.
+constexpr fxl::StringView kOverrideProberWarning = "override_prober_warning";
+
 int main(int argc, const char** argv) {
   const auto command_line = fxl::CommandLineFromArgcArgv(argc, argv);
   fxl::SetLogSettingsFromCommandLine(command_line);
+  fsl::InitLoggerFromCommandLine(command_line, {"cobalt", "testapp"});
   bool use_network = !command_line.HasOption(kNoNetworkForTesting);
 
-  async::Loop loop(&kAsyncLoopConfigAttachToThread);
-  cobalt::testapp::CobaltTestApp app(use_network);
-  if (!app.RunTests()) {
-    FXL_LOG(ERROR) << "FAIL";
+  FX_LOGS(INFO) << "The Cobalt testapp is starting.";
+
+  bool test_for_prober = command_line.HasOption(kTestForProber);
+  if (test_for_prober && !command_line.HasOption(kOverrideProberWarning)) {
+    FX_LOGS(ERROR) << "Running the testapp in prober mode outside of CI will "
+                      "corrupt prober test output. If you need to do this, "
+                      "pass the flag --override_prober_warning.";
     return 1;
   }
-  FXL_LOG(INFO) << "PASS";
+
+  async::Loop loop(&kAsyncLoopConfigAttachToThread);
+  cobalt::testapp::CobaltTestApp app(use_network, test_for_prober);
+
+  if (!app.RunTests()) {
+    FX_LOGS(ERROR) << "FAIL";
+    return 1;
+  }
+  FX_LOGS(INFO) << "PASS";
   return 0;
 }

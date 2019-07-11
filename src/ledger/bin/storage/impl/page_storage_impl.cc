@@ -37,8 +37,10 @@
 #include "src/ledger/bin/storage/impl/object_digest.h"
 #include "src/ledger/bin/storage/impl/object_identifier_encoding.h"
 #include "src/ledger/bin/storage/impl/object_impl.h"
+#include "src/ledger/bin/storage/impl/piece_tracker.h"
 #include "src/ledger/bin/storage/impl/split.h"
 #include "src/ledger/bin/storage/public/constants.h"
+#include "src/ledger/bin/storage/public/object.h"
 #include "src/ledger/bin/storage/public/types.h"
 #include "src/ledger/lib/coroutine/coroutine_waiter.h"
 #include "src/lib/files/directory.h"
@@ -51,27 +53,21 @@
 #include "src/lib/fxl/memory/ref_ptr.h"
 #include "src/lib/fxl/memory/weak_ptr.h"
 #include "src/lib/fxl/strings/concatenate.h"
+#include "src/lib/fxl/strings/string_view.h"
 
 namespace storage {
-
-using coroutine::CoroutineHandler;
-
 namespace {
+
+using ::coroutine::CoroutineHandler;
 
 struct StringPointerComparator {
   using is_transparent = std::true_type;
 
-  bool operator()(const std::string* str1, const std::string* str2) const {
-    return *str1 < *str2;
-  }
+  bool operator()(const std::string* str1, const std::string* str2) const { return *str1 < *str2; }
 
-  bool operator()(const std::string* str1, const CommitIdView* str2) const {
-    return *str1 < *str2;
-  }
+  bool operator()(const std::string* str1, const CommitIdView* str2) const { return *str1 < *str2; }
 
-  bool operator()(const CommitIdView* str1, const std::string* str2) const {
-    return *str1 < *str2;
-  }
+  bool operator()(const CommitIdView* str1, const std::string* str2) const { return *str1 < *str2; }
 };
 
 // Converts the user-provided offset for an object part (defined in comments for
@@ -85,30 +81,28 @@ int64_t GetObjectPartStart(int64_t offset, int64_t object_size) {
   return offset < 0 ? object_size + offset : offset;
 }
 
-int64_t GetObjectPartLength(int64_t max_size, int64_t object_size,
-                            int64_t start) {
+int64_t GetObjectPartLength(int64_t max_size, int64_t object_size, int64_t start) {
   int64_t adjusted_max_size = max_size < 0 ? object_size : max_size;
-  return start > object_size ? 0
-                             : std::min(adjusted_max_size, object_size - start);
+  return start > object_size ? 0 : std::min(adjusted_max_size, object_size - start);
 }
 
 }  // namespace
 
-PageStorageImpl::PageStorageImpl(
-    ledger::Environment* environment,
-    encryption::EncryptionService* encryption_service, std::unique_ptr<Db> db,
-    PageId page_id)
+PageStorageImpl::PageStorageImpl(ledger::Environment* environment,
+                                 encryption::EncryptionService* encryption_service,
+                                 std::unique_ptr<Db> db, PageId page_id, CommitPruningPolicy policy)
     : PageStorageImpl(environment, encryption_service,
-                      std::make_unique<PageDbImpl>(environment, std::move(db)),
-                      std::move(page_id)) {}
+                      std::make_unique<PageDbImpl>(environment, std::move(db)), std::move(page_id),
+                      policy) {}
 
-PageStorageImpl::PageStorageImpl(
-    ledger::Environment* environment,
-    encryption::EncryptionService* encryption_service,
-    std::unique_ptr<PageDb> page_db, PageId page_id)
+PageStorageImpl::PageStorageImpl(ledger::Environment* environment,
+                                 encryption::EncryptionService* encryption_service,
+                                 std::unique_ptr<PageDb> page_db, PageId page_id,
+                                 CommitPruningPolicy policy)
     : environment_(environment),
       encryption_service_(encryption_service),
       page_id_(std::move(page_id)),
+      commit_pruner_(environment_, this, &commit_tracker_, policy),
       db_(std::move(page_db)),
       page_sync_(nullptr),
       coroutine_manager_(environment->coroutine_service()) {}
@@ -117,20 +111,16 @@ PageStorageImpl::~PageStorageImpl() {}
 
 void PageStorageImpl::Init(fit::function<void(Status)> callback) {
   coroutine_manager_.StartCoroutine(
-      std::move(callback),
-      [this](CoroutineHandler* handler, fit::function<void(Status)> callback) {
+      std::move(callback), [this](CoroutineHandler* handler, fit::function<void(Status)> callback) {
         callback(SynchronousInit(handler));
       });
 }
 
 PageId PageStorageImpl::GetId() { return page_id_; }
 
-void PageStorageImpl::SetSyncDelegate(PageSyncDelegate* page_sync) {
-  page_sync_ = page_sync;
-}
+void PageStorageImpl::SetSyncDelegate(PageSyncDelegate* page_sync) { page_sync_ = page_sync; }
 
-Status PageStorageImpl::GetHeadCommits(
-    std::vector<std::unique_ptr<const Commit>>* head_commits) {
+Status PageStorageImpl::GetHeadCommits(std::vector<std::unique_ptr<const Commit>>* head_commits) {
   FXL_DCHECK(head_commits);
   *head_commits = commit_tracker_.GetHeads();
   return Status::OK;
@@ -141,20 +131,16 @@ void PageStorageImpl::GetMergeCommitIds(
     fit::function<void(Status, std::vector<CommitId>)> callback) {
   coroutine_manager_.StartCoroutine(
       std::move(callback),
-      [this, parent1_id = parent1_id.ToString(),
-       parent2_id = parent2_id.ToString()](
-          CoroutineHandler* handler,
-          fit::function<void(Status, std::vector<CommitId>)> callback) {
+      [this, parent1_id = parent1_id.ToString(), parent2_id = parent2_id.ToString()](
+          CoroutineHandler* handler, fit::function<void(Status, std::vector<CommitId>)> callback) {
         std::vector<CommitId> commit_ids;
-        Status status =
-            db_->GetMerges(handler, parent1_id, parent2_id, &commit_ids);
+        Status status = db_->GetMerges(handler, parent1_id, parent2_id, &commit_ids);
         callback(status, std::move(commit_ids));
       });
 }
 
 void PageStorageImpl::GetCommit(
-    CommitIdView commit_id,
-    fit::function<void(Status, std::unique_ptr<const Commit>)> callback) {
+    CommitIdView commit_id, fit::function<void(Status, std::unique_ptr<const Commit>)> callback) {
   FXL_DCHECK(commit_id.size());
   coroutine_manager_.StartCoroutine(
       std::move(callback),
@@ -167,21 +153,6 @@ void PageStorageImpl::GetCommit(
       });
 }
 
-void PageStorageImpl::AddCommitFromLocal(
-    std::unique_ptr<const Commit> commit,
-    std::vector<ObjectIdentifier> new_objects,
-    fit::function<void(Status)> callback) {
-  FXL_DCHECK(IsDigestValid(commit->GetRootIdentifier().object_digest()));
-  coroutine_manager_.StartCoroutine(
-      std::move(callback),
-      [this, commit = std::move(commit), new_objects = std::move(new_objects)](
-          CoroutineHandler* handler,
-          fit::function<void(Status)> callback) mutable {
-        callback(SynchronousAddCommitFromLocal(handler, std::move(commit),
-                                               std::move(new_objects)));
-      });
-}
-
 void PageStorageImpl::AddCommitsFromSync(
     std::vector<CommitIdAndBytes> ids_and_bytes, ChangeSource source,
     fit::function<void(Status, std::vector<CommitId>)> callback) {
@@ -191,21 +162,19 @@ void PageStorageImpl::AddCommitsFromSync(
           CoroutineHandler* handler,
           fit::function<void(Status, std::vector<CommitId>)> callback) mutable {
         std::vector<CommitId> missing_ids;
-        Status status = SynchronousAddCommitsFromSync(
-            handler, std::move(ids_and_bytes), source, &missing_ids);
+        Status status =
+            SynchronousAddCommitsFromSync(handler, std::move(ids_and_bytes), source, &missing_ids);
         callback(status, std::move(missing_ids));
       });
 }
 
-std::unique_ptr<Journal> PageStorageImpl::StartCommit(
-    std::unique_ptr<const Commit> commit) {
+std::unique_ptr<Journal> PageStorageImpl::StartCommit(std::unique_ptr<const Commit> commit) {
   return JournalImpl::Simple(environment_, this, std::move(commit));
 }
 
-std::unique_ptr<Journal> PageStorageImpl::StartMergeCommit(
-    std::unique_ptr<const Commit> left, std::unique_ptr<const Commit> right) {
-  return JournalImpl::Merge(environment_, this, std::move(left),
-                            std::move(right));
+std::unique_ptr<Journal> PageStorageImpl::StartMergeCommit(std::unique_ptr<const Commit> left,
+                                                           std::unique_ptr<const Commit> right) {
+  return JournalImpl::Merge(environment_, this, std::move(left), std::move(right));
 }
 
 void PageStorageImpl::CommitJournal(
@@ -213,22 +182,65 @@ void PageStorageImpl::CommitJournal(
     fit::function<void(Status, std::unique_ptr<const Commit>)> callback) {
   FXL_DCHECK(journal);
 
-  auto managed_journal = managed_container_.Manage(std::move(journal));
-  JournalImpl* journal_ptr = static_cast<JournalImpl*>(managed_journal->get());
+  coroutine_manager_.StartCoroutine(
+      std::move(callback),
+      [this, journal = std::move(journal)](
+          CoroutineHandler* handler,
+          fit::function<void(Status, std::unique_ptr<const Commit>)> callback) mutable {
+        JournalImpl* journal_ptr = static_cast<JournalImpl*>(journal.get());
 
-  // |managed_journal| needs to be kept in memory until |Commit| has finished
-  // execution.
-  journal_ptr->Commit(
-      [managed_journal = std::move(managed_journal),
-       callback = std::move(callback)](
-          Status status, std::unique_ptr<const Commit> commit) mutable {
+        std::unique_ptr<const Commit> commit;
+        std::vector<ObjectIdentifier> objects_to_sync;
+        Status status = journal_ptr->Commit(handler, &commit, &objects_to_sync);
+        if (status != Status::OK || !commit) {
+          // There is an error, or the commit is empty (no change).
+          callback(status, nullptr);
+          return;
+        }
+
+        status =
+            SynchronousAddCommitFromLocal(handler, commit->Clone(), std::move(objects_to_sync));
+
+        if (status != Status::OK) {
+          callback(status, nullptr);
+          return;
+        }
+
         callback(status, std::move(commit));
       });
 }
 
-void PageStorageImpl::AddCommitWatcher(CommitWatcher* watcher) {
-  watchers_.AddObserver(watcher);
+void PageStorageImpl::DeleteCommits(std::vector<std::unique_ptr<const Commit>> commits,
+                                    fit::function<void(Status)> callback) {
+  coroutine_manager_.StartCoroutine(
+      std::move(callback), [this, commits = std::move(commits)](
+                               CoroutineHandler* handler, fit::function<void(Status)> callback) {
+        std::unique_ptr<PageDb::Batch> batch;
+        Status status = db_->StartBatch(handler, &batch);
+        if (status != Status::OK) {
+          callback(status);
+          return;
+        }
+        for (const std::unique_ptr<const Commit>& commit : commits) {
+          auto parents = commit->GetParentIds();
+          if (parents.size() > 1) {
+            status = batch->DeleteMerge(handler, parents[0], parents[1], commit->GetId());
+            if (status != Status::OK) {
+              callback(status);
+              return;
+            }
+          }
+          status = batch->DeleteCommit(handler, commit->GetId(), commit->GetRootIdentifier());
+          if (status != Status::OK) {
+            callback(status);
+            return;
+          }
+        }
+        callback(batch->Execute(handler));
+      });
 }
+
+void PageStorageImpl::AddCommitWatcher(CommitWatcher* watcher) { watchers_.AddObserver(watcher); }
 
 void PageStorageImpl::RemoveCommitWatcher(CommitWatcher* watcher) {
   watchers_.RemoveObserver(watcher);
@@ -239,8 +251,7 @@ void PageStorageImpl::IsSynced(fit::function<void(Status, bool)> callback) {
   // Check for unsynced commits.
   coroutine_manager_.StartCoroutine(
       waiter->NewCallback(),
-      [this](CoroutineHandler* handler,
-             fit::function<void(Status, bool)> callback) {
+      [this](CoroutineHandler* handler, fit::function<void(Status, bool)> callback) {
         std::vector<CommitId> commit_ids;
         Status status = db_->GetUnsyncedCommitIds(handler, &commit_ids);
         if (status != Status::OK) {
@@ -260,8 +271,7 @@ void PageStorageImpl::IsSynced(fit::function<void(Status, bool)> callback) {
     }
   });
 
-  waiter->Finalize([callback = std::move(callback)](
-                       Status status, std::vector<bool> is_synced) {
+  waiter->Finalize([callback = std::move(callback)](Status status, std::vector<bool> is_synced) {
     if (status != Status::OK) {
       callback(status, false);
       return;
@@ -275,8 +285,8 @@ bool PageStorageImpl::IsOnline() { return page_is_online_; }
 
 void PageStorageImpl::IsEmpty(fit::function<void(Status, bool)> callback) {
   coroutine_manager_.StartCoroutine(
-      std::move(callback), [this](CoroutineHandler* handler,
-                                  fit::function<void(Status, bool)> callback) {
+      std::move(callback),
+      [this](CoroutineHandler* handler, fit::function<void(Status, bool)> callback) {
         // Check there is a single head.
         std::vector<std::pair<zx::time_utc, CommitId>> commit_ids;
         Status status = db_->GetHeads(handler, &commit_ids);
@@ -308,14 +318,11 @@ void PageStorageImpl::IsEmpty(fit::function<void(Status, bool)> callback) {
 }
 
 void PageStorageImpl::GetUnsyncedCommits(
-    fit::function<void(Status, std::vector<std::unique_ptr<const Commit>>)>
-        callback) {
+    fit::function<void(Status, std::vector<std::unique_ptr<const Commit>>)> callback) {
   coroutine_manager_.StartCoroutine(
       std::move(callback),
       [this](CoroutineHandler* handler,
-             fit::function<void(Status,
-                                std::vector<std::unique_ptr<const Commit>>)>
-                 callback) {
+             fit::function<void(Status, std::vector<std::unique_ptr<const Commit>>)> callback) {
         std::vector<std::unique_ptr<const Commit>> unsynced_commits;
         Status s = SynchronousGetUnsyncedCommits(handler, &unsynced_commits);
         callback(s, std::move(unsynced_commits));
@@ -326,8 +333,7 @@ void PageStorageImpl::MarkCommitSynced(const CommitId& commit_id,
                                        fit::function<void(Status)> callback) {
   coroutine_manager_.StartCoroutine(
       std::move(callback),
-      [this, commit_id](CoroutineHandler* handler,
-                        fit::function<void(Status)> callback) {
+      [this, commit_id](CoroutineHandler* handler, fit::function<void(Status)> callback) {
         callback(SynchronousMarkCommitSynced(handler, commit_id));
       });
 }
@@ -336,12 +342,10 @@ void PageStorageImpl::GetUnsyncedPieces(
     fit::function<void(Status, std::vector<ObjectIdentifier>)> callback) {
   coroutine_manager_.StartCoroutine(
       std::move(callback),
-      [this](
-          CoroutineHandler* handler,
-          fit::function<void(Status, std::vector<ObjectIdentifier>)> callback) {
+      [this](CoroutineHandler* handler,
+             fit::function<void(Status, std::vector<ObjectIdentifier>)> callback) {
         std::vector<ObjectIdentifier> unsynced_object_identifiers;
-        Status s =
-            db_->GetUnsyncedPieces(handler, &unsynced_object_identifiers);
+        Status s = db_->GetUnsyncedPieces(handler, &unsynced_object_identifiers);
         callback(s, unsynced_object_identifiers);
       });
 }
@@ -349,25 +353,20 @@ void PageStorageImpl::GetUnsyncedPieces(
 void PageStorageImpl::MarkPieceSynced(ObjectIdentifier object_identifier,
                                       fit::function<void(Status)> callback) {
   coroutine_manager_.StartCoroutine(
-      std::move(callback),
-      [this, object_identifier = std::move(object_identifier)](
-          CoroutineHandler* handler, fit::function<void(Status)> callback) {
-        callback(db_->SetObjectStatus(handler, object_identifier,
-                                      PageDbObjectStatus::SYNCED));
+      std::move(callback), [this, object_identifier = std::move(object_identifier)](
+                               CoroutineHandler* handler, fit::function<void(Status)> callback) {
+        callback(db_->SetObjectStatus(handler, object_identifier, PageDbObjectStatus::SYNCED));
       });
 }
 
-void PageStorageImpl::IsPieceSynced(
-    ObjectIdentifier object_identifier,
-    fit::function<void(Status, bool)> callback) {
+void PageStorageImpl::IsPieceSynced(ObjectIdentifier object_identifier,
+                                    fit::function<void(Status, bool)> callback) {
   coroutine_manager_.StartCoroutine(
       std::move(callback),
       [this, object_identifier = std::move(object_identifier)](
-          CoroutineHandler* handler,
-          fit::function<void(Status, bool)> callback) {
+          CoroutineHandler* handler, fit::function<void(Status, bool)> callback) {
         PageDbObjectStatus object_status;
-        Status status =
-            db_->GetObjectStatus(handler, object_identifier, &object_status);
+        Status status = db_->GetObjectStatus(handler, object_identifier, &object_status);
         callback(status, object_status == PageDbObjectStatus::SYNCED);
       });
 }
@@ -390,256 +389,241 @@ void PageStorageImpl::MarkSyncedToPeer(fit::function<void(Status)> callback) {
       });
 }
 
-void PageStorageImpl::AddObjectFromLocal(
-    ObjectType object_type, std::unique_ptr<DataSource> data_source,
-    ObjectReferencesAndPriority tree_references,
-    fit::function<void(Status, ObjectIdentifier)> callback) {
+void PageStorageImpl::AddObjectFromLocal(ObjectType object_type,
+                                         std::unique_ptr<DataSource> data_source,
+                                         ObjectReferencesAndPriority tree_references,
+                                         fit::function<void(Status, ObjectIdentifier)> callback) {
   // |data_source| is not splitted yet: |tree_references| must contain only
   // BTree-level references, not piece-level references, and only in the case
   // where |data_source| actually represents a tree node.
   FXL_DCHECK(object_type == ObjectType::TREE_NODE || tree_references.empty());
-  auto traced_callback =
-      TRACE_CALLBACK(std::move(callback), "ledger", "page_storage_add_object");
+  auto traced_callback = TRACE_CALLBACK(std::move(callback), "ledger", "page_storage_add_object");
 
   auto managed_data_source = managed_container_.Manage(std::move(data_source));
   auto managed_data_source_ptr = managed_data_source->get();
   auto waiter = fxl::MakeRefCounted<callback::StatusWaiter<Status>>(Status::OK);
-  SplitDataSource(
-      managed_data_source_ptr, object_type,
-      [this](ObjectDigest object_digest) {
-        FXL_DCHECK(IsDigestValid(object_digest));
-        return encryption_service_->MakeObjectIdentifier(
-            std::move(object_digest));
-      },
+  encryption_service_->GetChunkingPermutation(
       [this, waiter, managed_data_source = std::move(managed_data_source),
-       tree_references = std::move(tree_references),
+       tree_references = std::move(tree_references), managed_data_source_ptr, object_type,
        callback = std::move(traced_callback)](
-          IterationStatus status, std::unique_ptr<Piece> piece) mutable {
-        if (status == IterationStatus::ERROR) {
-          callback(Status::IO_ERROR, ObjectIdentifier());
+          encryption::Status status,
+          fit::function<uint64_t(uint64_t)> chunking_permutation) mutable {
+        if (status != encryption::Status::OK) {
+          callback(Status::INTERNAL_ERROR, ObjectIdentifier());
           return;
         }
+        SplitDataSource(
+            managed_data_source_ptr, object_type,
+            [this](ObjectDigest object_digest) {
+              FXL_DCHECK(IsDigestValid(object_digest));
+              return encryption_service_->MakeObjectIdentifier(std::move(object_digest));
+            },
+            std::move(chunking_permutation),
+            [this, waiter, managed_data_source = std::move(managed_data_source),
+             tree_references = std::move(tree_references), callback = std::move(callback)](
+                IterationStatus status, std::unique_ptr<Piece> piece) mutable {
+              if (status == IterationStatus::ERROR) {
+                callback(Status::IO_ERROR, ObjectIdentifier());
+                return;
+              }
 
-        FXL_DCHECK(piece != nullptr);
-        ObjectIdentifier identifier = piece->GetIdentifier();
-        auto object_info = GetObjectDigestInfo(identifier.object_digest());
-        if (!object_info.is_inlined()) {
-          ObjectReferencesAndPriority piece_references;
-          if (piece->AppendReferences(&piece_references) != Status::OK) {
-            // The piece is generated internally by splitting, not coming from
-            // untrusted source, so decoding should never fail.
-            callback(Status::INTERNAL_ERROR, ObjectIdentifier());
-            return;
-          }
-          if (object_info.object_type == ObjectType::TREE_NODE) {
-            // There is at most one TREE_NODE, and it must be the last piece, so
-            // it is safe to add tree_references to piece_references there.
-            FXL_DCHECK(status == IterationStatus::DONE);
-            piece_references.insert(
-                std::make_move_iterator(tree_references.begin()),
-                std::make_move_iterator(tree_references.end()));
-          }
-          AddPiece(std::move(piece), ChangeSource::LOCAL, IsObjectSynced::NO,
-                   std::move(piece_references), waiter->NewCallback());
-        }
-        if (status == IterationStatus::IN_PROGRESS)
-          return;
+              FXL_DCHECK(piece != nullptr);
+              ObjectIdentifier identifier = piece->GetIdentifier();
+              auto object_info = GetObjectDigestInfo(identifier.object_digest());
+              if (!object_info.is_inlined()) {
+                ObjectReferencesAndPriority piece_references;
+                if (piece->AppendReferences(&piece_references) != Status::OK) {
+                  // The piece is generated internally by splitting, not coming from
+                  // untrusted source, so decoding should never fail.
+                  callback(Status::INTERNAL_ERROR, ObjectIdentifier());
+                  return;
+                }
+                if (object_info.object_type == ObjectType::TREE_NODE) {
+                  // There is at most one TREE_NODE, and it must be the last piece, so
+                  // it is safe to add tree_references to piece_references there.
+                  FXL_DCHECK(status == IterationStatus::DONE);
+                  piece_references.insert(std::make_move_iterator(tree_references.begin()),
+                                          std::make_move_iterator(tree_references.end()));
+                }
+                AddPiece(std::move(piece), ChangeSource::LOCAL, IsObjectSynced::NO,
+                         std::move(piece_references), waiter->NewCallback());
+              }
+              if (status == IterationStatus::IN_PROGRESS)
+                return;
 
-        FXL_DCHECK(status == IterationStatus::DONE);
-        waiter->Finalize(
-            [identifier = std::move(identifier),
-             callback = std::move(callback)](Status status) mutable {
-              callback(status, std::move(identifier));
+              FXL_DCHECK(status == IterationStatus::DONE);
+              waiter->Finalize([identifier = std::move(identifier),
+                                callback = std::move(callback)](Status status) mutable {
+                callback(status, std::move(identifier));
+              });
             });
       });
 }
 
-void PageStorageImpl::GetObjectPart(
-    ObjectIdentifier object_identifier, int64_t offset, int64_t max_size,
-    Location location, fit::function<void(Status, fsl::SizedVmo)> callback) {
+void PageStorageImpl::GetObjectPart(ObjectIdentifier object_identifier, int64_t offset,
+                                    int64_t max_size, Location location,
+                                    fit::function<void(Status, fsl::SizedVmo)> callback) {
   FXL_DCHECK(IsDigestValid(object_identifier.object_digest()));
-  GetPiece(object_identifier, [this, object_identifier, offset, max_size,
-                               location, callback = std::move(callback)](
-                                  Status status,
-                                  std::unique_ptr<const Piece> piece) mutable {
-    if (status == Status::INTERNAL_NOT_FOUND) {
-      // The root piece is missing; download the whole object (if we
-      // have network).
-      if (location == Location::NETWORK) {
-        DownloadObjectPart(
-            object_identifier, offset, max_size, 0,
-            [this, object_identifier, offset, max_size, location,
-             callback = std::move(callback)](Status status) mutable {
-              if (status != Status::OK) {
-                callback(status, nullptr);
-                return;
-              }
+  FXL_DCHECK(GetObjectDigestInfo(object_identifier.object_digest()).object_type ==
+             ObjectType::BLOB);
+  GetOrDownloadPiece(
+      object_identifier, location,
+      [this, location, object_identifier = std::move(object_identifier), offset, max_size,
+       callback = std::move(callback)](Status status, std::unique_ptr<const Piece> piece,
+                                       std::unique_ptr<const PieceToken> token,
+                                       WritePieceCallback write_callback) mutable {
+        if (status != Status::OK) {
+          callback(status, nullptr);
+          return;
+        }
+        FXL_DCHECK(piece);
+        // |piece| is necessarily a blob, so it must have been retrieved from
+        // disk or written to disk already.
+        FXL_DCHECK(!write_callback);
 
-              GetObjectPart(object_identifier, offset, max_size, location,
-                            std::move(callback));
-            });
-      } else {
-        callback(Status::INTERNAL_NOT_FOUND, nullptr);
-      }
-      return;
-    }
+        // If we are reading zero bytes, bail out now.
+        if (max_size == 0) {
+          fsl::SizedVmo buffer;
+          if (!fsl::VmoFromString("", &buffer)) {
+            callback(Status::INTERNAL_ERROR, nullptr);
+            return;
+          }
+          callback(Status::OK, std::move(buffer));
+          return;
+        }
 
-    if (status != Status::OK) {
-      callback(status, nullptr);
-      return;
-    }
+        ObjectDigestInfo digest_info = GetObjectDigestInfo(piece->GetIdentifier().object_digest());
 
-    FXL_DCHECK(piece);
-    ObjectDigestInfo digest_info =
-        GetObjectDigestInfo(object_identifier.object_digest());
-    fxl::StringView data = piece->GetData();
+        // If the piece is a chunk, then the piece represents the whole object.
+        if (digest_info.is_chunk()) {
+          const fxl::StringView data = piece->GetData();
+          fsl::SizedVmo buffer;
+          int64_t start = GetObjectPartStart(offset, data.size());
+          int64_t length = GetObjectPartLength(max_size, data.size(), start);
+          if (!fsl::VmoFromString(data.substr(start, length), &buffer)) {
+            callback(Status::INTERNAL_ERROR, nullptr);
+            return;
+          }
+          callback(Status::OK, std::move(buffer));
+          return;
+        }
 
-    if (digest_info.is_inlined() || digest_info.is_chunk()) {
-      fsl::SizedVmo buffer;
-      int64_t start = GetObjectPartStart(offset, data.size());
-      int64_t length = GetObjectPartLength(max_size, data.size(), start);
-
-      if (!fsl::VmoFromString(data.substr(start, length), &buffer)) {
-        callback(Status::INTERNAL_ERROR, nullptr);
-        return;
-      }
-      callback(Status::OK, std::move(buffer));
-      return;
-    }
-
-    FXL_DCHECK(digest_info.piece_type == PieceType::INDEX);
-    GetIndexObject(std::move(piece), offset, max_size, location,
-                   std::move(callback));
-  });
+        FXL_DCHECK(digest_info.piece_type == PieceType::INDEX);
+        GetIndexObject(*piece, offset, max_size, location, std::move(callback));
+      });
 }
 
 void PageStorageImpl::GetObject(
     ObjectIdentifier object_identifier, Location location,
     fit::function<void(Status, std::unique_ptr<const Object>)> callback) {
-  auto traced_callback =
-      TRACE_CALLBACK(std::move(callback), "ledger", "page_storage_get_object");
+  auto traced_callback = TRACE_CALLBACK(std::move(callback), "ledger", "page_storage_get_object");
   FXL_DCHECK(IsDigestValid(object_identifier.object_digest()));
-  GetPiece(object_identifier, [this, object_identifier, location,
-                               callback = std::move(traced_callback)](
-                                  Status status,
-                                  std::unique_ptr<const Piece> piece) mutable {
-    if (status == Status::INTERNAL_NOT_FOUND) {
-      // The root piece is missing; download it (if we have network),
-      // as well as all the descendent pieces that we might need to
-      // read the requested part.
-      if (location == Location::NETWORK) {
-        DownloadObjectPart(
-            object_identifier, 0, -1, 0,
-            [this, object_identifier, location,
-             callback = std::move(callback)](Status status) mutable {
-              if (status != Status::OK) {
-                callback(status, nullptr);
-                return;
-              }
+  GetOrDownloadPiece(
+      object_identifier, location,
+      [this, location, object_identifier = std::move(object_identifier),
+       callback = std::move(traced_callback)](Status status, std::unique_ptr<const Piece> piece,
+                                              std::unique_ptr<const PieceToken> token,
+                                              WritePieceCallback write_callback) mutable {
+        if (status != Status::OK) {
+          callback(status, nullptr);
+          return;
+        }
+        FXL_DCHECK(piece);
+        ObjectDigestInfo digest_info = GetObjectDigestInfo(piece->GetIdentifier().object_digest());
 
-              GetObject(object_identifier, location, std::move(callback));
-            });
-      } else {
-        callback(Status::INTERNAL_NOT_FOUND, nullptr);
-      }
-      return;
-    }
-
-    if (status != Status::OK) {
-      callback(status, nullptr);
-      return;
-    }
-
-    FXL_DCHECK(piece);
-    ObjectDigestInfo digest_info =
-        GetObjectDigestInfo(object_identifier.object_digest());
-
-    if (digest_info.is_chunk()) {
-      callback(Status::OK, std::make_unique<ChunkObject>(std::move(piece)));
-      return;
-    }
-
-    FXL_DCHECK(digest_info.piece_type == PieceType::INDEX);
-    GetIndexObject(
-        std::move(piece), 0, -1, location,
-        [object_identifier, callback = std::move(callback)](
-            Status status, fsl::SizedVmo vmo) mutable {
-          callback(status, std::make_unique<VmoObject>(
-                               std::move(object_identifier), std::move(vmo)));
+        // If the piece is a chunk, then the piece represents the whole object.
+        if (digest_info.is_chunk()) {
+          FXL_DCHECK(!write_callback);
+          callback(Status::OK, std::make_unique<ChunkObject>(std::move(piece)));
+          return;
         }
 
-    );
-  });
+        FXL_DCHECK(digest_info.piece_type == PieceType::INDEX);
+        // This reference remains valid as long as |piece| is valid. The latter
+        // is owned by the final callback passed to GetIndexObject, so it
+        // outlives the former.
+        const Piece& piece_ref = *piece;
+        GetIndexObject(piece_ref, 0, -1, location,
+                       [piece = std::move(piece), object_identifier,
+                        write_callback = std::move(write_callback),
+                        callback = std::move(callback)](Status status, fsl::SizedVmo vmo) mutable {
+                         if (status != Status::OK) {
+                           callback(status, nullptr);
+                           return;
+                         }
+                         auto object = std::make_unique<VmoObject>(std::move(object_identifier),
+                                                                   std::move(vmo));
+                         if (write_callback) {
+                           write_callback(std::move(piece), std::move(object), std::move(callback));
+                         } else {
+                           callback(status, std::move(object));
+                         }
+                       });
+      });
 }
 
 void PageStorageImpl::GetPiece(
     ObjectIdentifier object_identifier,
-    fit::function<void(Status, std::unique_ptr<const Piece>)> callback) {
-  ObjectDigestInfo digest_info =
-      GetObjectDigestInfo(object_identifier.object_digest());
+    fit::function<void(Status, std::unique_ptr<const Piece>, std::unique_ptr<const PieceToken>)>
+        callback) {
+  ObjectDigestInfo digest_info = GetObjectDigestInfo(object_identifier.object_digest());
   if (digest_info.is_inlined()) {
-    callback(Status::OK,
-             std::make_unique<InlinePiece>(std::move(object_identifier)));
+    auto token = std::make_unique<DiscardableToken>(object_identifier);
+    callback(Status::OK, std::make_unique<InlinePiece>(std::move(object_identifier)),
+             std::move(token));
     return;
   }
 
   coroutine_manager_.StartCoroutine(
       std::move(callback),
       [this, object_identifier = std::move(object_identifier)](
-          CoroutineHandler* handler,
-          fit::function<void(Status, std::unique_ptr<const Piece>)>
-              callback) mutable {
+          CoroutineHandler* handler, fit::function<void(Status, std::unique_ptr<const Piece>,
+                                                        std::unique_ptr<const PieceToken>)>
+                                         callback) mutable {
         std::unique_ptr<const Piece> piece;
-        Status status =
-            db_->ReadObject(handler, std::move(object_identifier), &piece);
-        callback(status, std::move(piece));
+        std::unique_ptr<const PieceToken> token;
+        Status status = db_->ReadObject(handler, std::move(object_identifier), &piece, &token);
+        callback(status, std::move(piece), std::move(token));
       });
 }
 
-void PageStorageImpl::SetSyncMetadata(fxl::StringView key,
-                                      fxl::StringView value,
+void PageStorageImpl::SetSyncMetadata(fxl::StringView key, fxl::StringView value,
                                       fit::function<void(Status)> callback) {
   coroutine_manager_.StartCoroutine(
-      std::move(callback),
-      [this, key = key.ToString(), value = value.ToString()](
-          CoroutineHandler* handler, fit::function<void(Status)> callback) {
+      std::move(callback), [this, key = key.ToString(), value = value.ToString()](
+                               CoroutineHandler* handler, fit::function<void(Status)> callback) {
         callback(db_->SetSyncMetadata(handler, key, value));
       });
 }
 
-void PageStorageImpl::GetSyncMetadata(
-    fxl::StringView key, fit::function<void(Status, std::string)> callback) {
+void PageStorageImpl::GetSyncMetadata(fxl::StringView key,
+                                      fit::function<void(Status, std::string)> callback) {
   coroutine_manager_.StartCoroutine(
       std::move(callback),
-      [this, key = key.ToString()](
-          CoroutineHandler* handler,
-          fit::function<void(Status, std::string)> callback) {
+      [this, key = key.ToString()](CoroutineHandler* handler,
+                                   fit::function<void(Status, std::string)> callback) {
         std::string value;
         Status status = db_->GetSyncMetadata(handler, key, &value);
         callback(status, std::move(value));
       });
 }
 
-void PageStorageImpl::GetCommitContents(const Commit& commit,
-                                        std::string min_key,
+void PageStorageImpl::GetCommitContents(const Commit& commit, std::string min_key,
                                         fit::function<bool(Entry)> on_next,
                                         fit::function<void(Status)> on_done) {
   btree::ForEachEntry(
-      environment_->coroutine_service(), this, commit.GetRootIdentifier(),
-      min_key,
+      environment_->coroutine_service(), this, commit.GetRootIdentifier(), min_key,
       [on_next = std::move(on_next)](btree::EntryAndNodeIdentifier next) {
         return on_next(next.entry);
       },
       std::move(on_done));
 }
 
-void PageStorageImpl::GetEntryFromCommit(
-    const Commit& commit, std::string key,
-    fit::function<void(Status, Entry)> callback) {
+void PageStorageImpl::GetEntryFromCommit(const Commit& commit, std::string key,
+                                         fit::function<void(Status, Entry)> callback) {
   std::unique_ptr<bool> key_found = std::make_unique<bool>(false);
   auto on_next = [key, key_found = key_found.get(),
-                  callback =
-                      callback.share()](btree::EntryAndNodeIdentifier next) {
+                  callback = callback.share()](btree::EntryAndNodeIdentifier next) {
     if (next.entry.key == key) {
       *key_found = true;
       callback(Status::OK, next.entry);
@@ -647,8 +631,7 @@ void PageStorageImpl::GetEntryFromCommit(
     return false;
   };
 
-  auto on_done = [key_found = std::move(key_found),
-                  callback = std::move(callback)](Status s) {
+  auto on_done = [key_found = std::move(key_found), callback = std::move(callback)](Status s) {
     if (*key_found) {
       return;
     }
@@ -658,62 +641,59 @@ void PageStorageImpl::GetEntryFromCommit(
     }
     callback(s, Entry());
   };
-  btree::ForEachEntry(environment_->coroutine_service(), this,
-                      commit.GetRootIdentifier(), std::move(key),
-                      std::move(on_next), std::move(on_done));
+  btree::ForEachEntry(environment_->coroutine_service(), this, commit.GetRootIdentifier(),
+                      std::move(key), std::move(on_next), std::move(on_done));
 }
 
-void PageStorageImpl::GetCommitContentsDiff(
-    const Commit& base_commit, const Commit& other_commit, std::string min_key,
-    fit::function<bool(EntryChange)> on_next_diff,
-    fit::function<void(Status)> on_done) {
-  btree::ForEachDiff(environment_->coroutine_service(), this,
-                     base_commit.GetRootIdentifier(),
-                     other_commit.GetRootIdentifier(), std::move(min_key),
-                     std::move(on_next_diff), std::move(on_done));
+void PageStorageImpl::GetCommitContentsDiff(const Commit& base_commit, const Commit& other_commit,
+                                            std::string min_key,
+                                            fit::function<bool(EntryChange)> on_next_diff,
+                                            fit::function<void(Status)> on_done) {
+  btree::ForEachDiff(environment_->coroutine_service(), this, base_commit.GetRootIdentifier(),
+                     other_commit.GetRootIdentifier(), std::move(min_key), std::move(on_next_diff),
+                     std::move(on_done));
 }
 
-void PageStorageImpl::GetThreeWayContentsDiff(
-    const Commit& base_commit, const Commit& left_commit,
-    const Commit& right_commit, std::string min_key,
-    fit::function<bool(ThreeWayChange)> on_next_diff,
-    fit::function<void(Status)> on_done) {
-  btree::ForEachThreeWayDiff(
-      environment_->coroutine_service(), this, base_commit.GetRootIdentifier(),
-      left_commit.GetRootIdentifier(), right_commit.GetRootIdentifier(),
-      std::move(min_key), std::move(on_next_diff), std::move(on_done));
+void PageStorageImpl::GetThreeWayContentsDiff(const Commit& base_commit, const Commit& left_commit,
+                                              const Commit& right_commit, std::string min_key,
+                                              fit::function<bool(ThreeWayChange)> on_next_diff,
+                                              fit::function<void(Status)> on_done) {
+  btree::ForEachThreeWayDiff(environment_->coroutine_service(), this,
+                             base_commit.GetRootIdentifier(), left_commit.GetRootIdentifier(),
+                             right_commit.GetRootIdentifier(), std::move(min_key),
+                             std::move(on_next_diff), std::move(on_done));
 }
 
 void PageStorageImpl::NotifyWatchersOfNewCommits(
-    const std::vector<std::unique_ptr<const Commit>>& new_commits,
-    ChangeSource source) {
+    const std::vector<std::unique_ptr<const Commit>>& new_commits, ChangeSource source) {
   for (auto& watcher : watchers_) {
     watcher.OnNewCommits(new_commits, source);
   }
 }
 
-Status PageStorageImpl::MarkAllPiecesLocal(
-    CoroutineHandler* handler, PageDb::Batch* batch,
-    std::vector<ObjectIdentifier> object_identifiers) {
+Status PageStorageImpl::MarkAllPiecesLocal(CoroutineHandler* handler, PageDb::Batch* batch,
+                                           std::vector<ObjectIdentifier> object_identifiers) {
   std::set<ObjectIdentifier> seen_identifiers;
   while (!object_identifiers.empty()) {
     auto it = seen_identifiers.insert(std::move(object_identifiers.back()));
     object_identifiers.pop_back();
     const ObjectIdentifier& object_identifier = *(it.first);
-    FXL_DCHECK(
-        !GetObjectDigestInfo(object_identifier.object_digest()).is_inlined());
-    Status status = batch->SetObjectStatus(handler, object_identifier,
-                                           PageDbObjectStatus::LOCAL);
+    FXL_DCHECK(!GetObjectDigestInfo(object_identifier.object_digest()).is_inlined());
+    Status status = batch->SetObjectStatus(handler, object_identifier, PageDbObjectStatus::LOCAL);
     if (status != Status::OK) {
       return status;
     }
-    if (GetObjectDigestInfo(object_identifier.object_digest()).piece_type ==
-        PieceType::INDEX) {
+    if (GetObjectDigestInfo(object_identifier.object_digest()).piece_type == PieceType::INDEX) {
       std::unique_ptr<const Piece> piece;
-      status = db_->ReadObject(handler, object_identifier, &piece);
+      std::unique_ptr<const PieceToken> token;
+      status = db_->ReadObject(handler, object_identifier, &piece, &token);
       if (status != Status::OK) {
         return status;
       }
+      // The token can be safely discarded: either the read piece is provided by
+      // the caller, which is responsible for keeping it alive, or it is
+      // referenced by its parent piece so it has on-disk references.
+      token.reset();
 
       fxl::StringView content = piece->GetData();
 
@@ -723,13 +703,10 @@ Status PageStorageImpl::MarkAllPiecesLocal(
         return status;
       }
 
-      object_identifiers.reserve(object_identifiers.size() +
-                                 file_index->children()->size());
+      object_identifiers.reserve(object_identifiers.size() + file_index->children()->size());
       for (const auto* child : *file_index->children()) {
-        ObjectIdentifier new_object_identifier =
-            ToObjectIdentifier(child->object_identifier());
-        if (!GetObjectDigestInfo(new_object_identifier.object_digest())
-                 .is_inlined()) {
+        ObjectIdentifier new_object_identifier = ToObjectIdentifier(child->object_identifier());
+        if (!GetObjectDigestInfo(new_object_identifier.object_digest()).is_inlined()) {
           if (!seen_identifiers.count(new_object_identifier)) {
             object_identifiers.push_back(std::move(new_object_identifier));
           }
@@ -740,8 +717,7 @@ Status PageStorageImpl::MarkAllPiecesLocal(
   return Status::OK;
 }
 
-Status PageStorageImpl::ContainsCommit(CoroutineHandler* handler,
-                                       CommitIdView id) {
+Status PageStorageImpl::ContainsCommit(CoroutineHandler* handler, CommitIdView id) {
   if (IsFirstCommit(id)) {
     return Status::OK;
   }
@@ -749,59 +725,49 @@ Status PageStorageImpl::ContainsCommit(CoroutineHandler* handler,
   return db_->GetCommitStorageBytes(handler, id, &bytes);
 }
 
-bool PageStorageImpl::IsFirstCommit(CommitIdView id) {
-  return id == kFirstPageCommitId;
-}
+bool PageStorageImpl::IsFirstCommit(CommitIdView id) { return id == kFirstPageCommitId; }
 
-void PageStorageImpl::AddPiece(std::unique_ptr<Piece> piece,
-                               ChangeSource source,
+void PageStorageImpl::AddPiece(std::unique_ptr<const Piece> piece, ChangeSource source,
                                IsObjectSynced is_object_synced,
                                ObjectReferencesAndPriority references,
                                fit::function<void(Status)> callback) {
   coroutine_manager_.StartCoroutine(
       std::move(callback),
-      [this, piece = std::move(piece), source,
-       references = std::move(references),
-       is_object_synced](CoroutineHandler* handler,
-                         fit::function<void(Status)> callback) mutable {
-        callback(SynchronousAddPiece(handler, *piece, source, is_object_synced,
-                                     std::move(references)));
+      [this, piece = std::move(piece), source, references = std::move(references),
+       is_object_synced](CoroutineHandler* handler, fit::function<void(Status)> callback) mutable {
+        callback(
+            SynchronousAddPiece(handler, *piece, source, is_object_synced, std::move(references)));
       });
 }
 
-void PageStorageImpl::ObjectIsUntracked(
-    ObjectIdentifier object_identifier,
-    fit::function<void(Status, bool)> callback) {
+void PageStorageImpl::ObjectIsUntracked(ObjectIdentifier object_identifier,
+                                        fit::function<void(Status, bool)> callback) {
   coroutine_manager_.StartCoroutine(
       std::move(callback),
       [this, object_identifier = std::move(object_identifier)](
-          CoroutineHandler* handler,
-          fit::function<void(Status, bool)> callback) mutable {
-        if (GetObjectDigestInfo(object_identifier.object_digest())
-                .is_inlined()) {
+          CoroutineHandler* handler, fit::function<void(Status, bool)> callback) mutable {
+        if (GetObjectDigestInfo(object_identifier.object_digest()).is_inlined()) {
           callback(Status::OK, false);
           return;
         }
 
         PageDbObjectStatus object_status;
-        Status status =
-            db_->GetObjectStatus(handler, object_identifier, &object_status);
+        Status status = db_->GetObjectStatus(handler, object_identifier, &object_status);
         callback(status, object_status == PageDbObjectStatus::TRANSIENT);
       });
 }
 
-void PageStorageImpl::GetIndexObject(
-    std::unique_ptr<const Piece> piece, int64_t offset, int64_t max_size,
-    Location location, fit::function<void(Status, fsl::SizedVmo)> callback) {
-  ObjectDigestInfo digest_info =
-      GetObjectDigestInfo(piece->GetIdentifier().object_digest());
+void PageStorageImpl::GetIndexObject(const Piece& piece, int64_t offset, int64_t max_size,
+                                     Location location,
+                                     fit::function<void(Status, fsl::SizedVmo)> callback) {
+  ObjectDigestInfo digest_info = GetObjectDigestInfo(piece.GetIdentifier().object_digest());
 
   FXL_DCHECK(digest_info.piece_type == PieceType::INDEX);
-  fxl::StringView content = piece->GetData();
+  fxl::StringView content = piece.GetData();
   const FileIndex* file_index;
   Status status = FileIndexSerialization::ParseFileIndex(content, &file_index);
   if (status != Status::OK) {
-    callback(Status::FORMAT_ERROR, nullptr);
+    callback(Status::DATA_INTEGRITY_ERROR, nullptr);
     return;
   }
 
@@ -810,7 +776,7 @@ void PageStorageImpl::GetIndexObject(
   zx::vmo raw_vmo;
   zx_status_t zx_status = zx::vmo::create(length, 0, &raw_vmo);
   if (zx_status != ZX_OK) {
-    FXL_LOG(WARNING) << "Unable to create VMO of size: " << length;
+    FXL_PLOG(WARNING, zx_status) << "Unable to create VMO of size: " << length;
     callback(Status::INTERNAL_ERROR, nullptr);
     return;
   }
@@ -819,83 +785,31 @@ void PageStorageImpl::GetIndexObject(
   fsl::SizedVmo vmo_copy;
   zx_status = vmo.Duplicate(ZX_RIGHTS_BASIC | ZX_RIGHT_WRITE, &vmo_copy);
   if (zx_status != ZX_OK) {
-    FXL_LOG(ERROR) << "Unable to duplicate vmo. Status: " << zx_status;
+    FXL_PLOG(ERROR, zx_status) << "Unable to duplicate vmo";
     callback(Status::INTERNAL_ERROR, nullptr);
     return;
   }
 
   FillBufferWithObjectContent(
-      std::move(piece), std::move(vmo_copy), start, length, 0,
-      file_index->size(), location,
-      [vmo = std::move(vmo), callback = std::move(callback)](
-          Status status) mutable { callback(status, std::move(vmo)); });
+      piece, std::move(vmo_copy), start, length, 0, file_index->size(), location,
+      [vmo = std::move(vmo), callback = std::move(callback)](Status status) mutable {
+        callback(status, std::move(vmo));
+      });
 }
 
-void PageStorageImpl::FillBufferWithObjectContent(
-    ObjectIdentifier object_identifier, fsl::SizedVmo vmo,
-    int64_t global_offset, int64_t global_size, int64_t current_position,
-    int64_t object_size, Location location,
-    fit::function<void(Status)> callback) {
-  GetPiece(object_identifier, [this, object_identifier, vmo = std::move(vmo),
-                               global_offset, global_size, current_position,
-                               object_size, location,
-                               callback = std::move(callback)](
-                                  Status status,
-                                  std::unique_ptr<const Piece> piece) mutable {
-    if (status == Status::INTERNAL_NOT_FOUND) {
-      // If we encounter a missing piece, we should download it
-      // together with a subtree needed for the request.
-      // Note that a similar mechanism is at play in |GetObjectPart|
-      // but it triggers only when the root piece is missing; here, we
-      // cover the case where the root piece was present and we started
-      // recursing in the tree but eventually found a missing piece.
-      if (location != Location::NETWORK) {
-        callback(Status::INTERNAL_NOT_FOUND);
-        return;
-      }
-      DownloadObjectPart(
-          object_identifier, global_offset, global_size, current_position,
-          [this, object_identifier, location, vmo = std::move(vmo),
-           global_offset, global_size, current_position, object_size,
-           callback = std::move(callback)](Status status) mutable {
-            if (status != Status::OK) {
-              callback(status);
-              return;
-            }
-            FillBufferWithObjectContent(
-                object_identifier, std::move(vmo), global_offset, global_size,
-                current_position, object_size, location, std::move(callback));
-            return;
-          });
-      return;
-    }
-    if (status != Status::OK) {
-      callback(status);
-      return;
-    }
-
-    FXL_DCHECK(piece);
-    FillBufferWithObjectContent(std::move(piece), std::move(vmo), global_offset,
-                                global_size, current_position, object_size,
-                                location, std::move(callback));
-  });
-}
-
-void PageStorageImpl::FillBufferWithObjectContent(
-    std::unique_ptr<const Piece> piece, fsl::SizedVmo vmo,
-    int64_t global_offset, int64_t global_size, int64_t current_position,
-    int64_t object_size, Location location,
-    fit::function<void(Status)> callback) {
-  fxl::StringView content = piece->GetData();
-  ObjectDigestInfo digest_info =
-      GetObjectDigestInfo(piece->GetIdentifier().object_digest());
+void PageStorageImpl::FillBufferWithObjectContent(const Piece& piece, fsl::SizedVmo vmo,
+                                                  int64_t global_offset, int64_t global_size,
+                                                  int64_t current_position, int64_t object_size,
+                                                  Location location,
+                                                  fit::function<void(Status)> callback) {
+  fxl::StringView content = piece.GetData();
+  ObjectDigestInfo digest_info = GetObjectDigestInfo(piece.GetIdentifier().object_digest());
   if (digest_info.is_inlined() || digest_info.is_chunk()) {
     if (object_size != static_cast<int64_t>(content.size())) {
-      FXL_LOG(ERROR) << "Error in serialization format. Expecting object: "
-                     << piece->GetIdentifier()
+      FXL_LOG(ERROR) << "Error in serialization format. Expecting object: " << piece.GetIdentifier()
                      << " to have size: " << object_size
                      << ", but found an object of size: " << content.size();
-      callback(Status::FORMAT_ERROR);
+      callback(Status::DATA_INTEGRITY_ERROR);
       return;
     }
     // Distance is negative if the offset is ahead and positive if behind.
@@ -908,14 +822,12 @@ void PageStorageImpl::FillBufferWithObjectContent(
     int64_t write_offset = std::max(distance_from_global_offset, 0L);
     // Read and write until reaching either size of the object, or global size.
     int64_t read_write_size =
-        std::min(static_cast<int64_t>(content.size()) - read_offset,
-                 global_size - write_offset);
+        std::min(static_cast<int64_t>(content.size()) - read_offset, global_size - write_offset);
     FXL_DCHECK(read_write_size > 0);
     fxl::StringView read_substr = content.substr(read_offset, read_write_size);
-    zx_status_t zx_status =
-        vmo.vmo().write(read_substr.data(), write_offset, read_write_size);
+    zx_status_t zx_status = vmo.vmo().write(read_substr.data(), write_offset, read_write_size);
     if (zx_status != ZX_OK) {
-      FXL_LOG(ERROR) << "Unable to write to vmo. Status: " << zx_status;
+      FXL_PLOG(ERROR, zx_status) << "Unable to write to vmo";
       callback(Status::INTERNAL_ERROR);
       return;
     }
@@ -926,200 +838,219 @@ void PageStorageImpl::FillBufferWithObjectContent(
   const FileIndex* file_index;
   Status status = FileIndexSerialization::ParseFileIndex(content, &file_index);
   if (status != Status::OK) {
-    callback(Status::FORMAT_ERROR);
+    callback(Status::DATA_INTEGRITY_ERROR);
     return;
   }
   if (static_cast<int64_t>(file_index->size()) != object_size) {
-    FXL_LOG(ERROR) << "Error in serialization format. Expecting object: "
-                   << piece->GetIdentifier() << " to have size " << object_size
-                   << ", but found an index object of size: "
-                   << file_index->size();
-    callback(Status::FORMAT_ERROR);
+    FXL_LOG(ERROR) << "Error in serialization format. Expecting object: " << piece.GetIdentifier()
+                   << " to have size " << object_size
+                   << ", but found an index object of size: " << file_index->size();
+    callback(Status::DATA_INTEGRITY_ERROR);
     return;
   }
 
+  // Iterate over the children pieces, recursing into the ones corresponding to
+  // the part of the object to be copied to the VMO. Tokens for all pieces are
+  // collected to be kept alive until the finalization callback has run, which
+  // includes writing the current piece to disk if necessary.
   int64_t sub_offset = 0;
-  auto waiter = fxl::MakeRefCounted<callback::StatusWaiter<Status>>(Status::OK);
+  auto waiter =
+      fxl::MakeRefCounted<callback::Waiter<Status, std::unique_ptr<const PieceToken>>>(Status::OK);
   for (const auto* child : *file_index->children()) {
     if (sub_offset + child->size() > file_index->size()) {
-      callback(Status::FORMAT_ERROR);
+      callback(Status::DATA_INTEGRITY_ERROR);
       return;
     }
     int64_t child_position = current_position + sub_offset;
-    ObjectIdentifier child_identifier =
-        ToObjectIdentifier(child->object_identifier());
-    if (child_position + static_cast<int64_t>(child->size()) < global_offset) {
+    ObjectIdentifier child_identifier = ToObjectIdentifier(child->object_identifier());
+    // Skip children before the part to copy.
+    if (child_position + static_cast<int64_t>(child->size()) <= global_offset) {
       sub_offset += child->size();
       continue;
     }
-    if (global_offset + global_size < child_position) {
+    // Stop iterating as soon as the part has been fully copied.
+    if (global_offset + global_size <= child_position) {
       break;
     }
+    // Create a copy of the VMO to be owned by the recursive call.
     fsl::SizedVmo vmo_copy;
-    zx_status_t zx_status =
-        vmo.Duplicate(ZX_RIGHTS_BASIC | ZX_RIGHT_WRITE, &vmo_copy);
+    zx_status_t zx_status = vmo.Duplicate(ZX_RIGHTS_BASIC | ZX_RIGHT_WRITE, &vmo_copy);
     if (zx_status != ZX_OK) {
-      FXL_LOG(ERROR) << "Unable to duplicate vmo. Status: " << zx_status;
+      FXL_PLOG(ERROR, zx_status) << "Unable to duplicate vmo";
       callback(Status::INTERNAL_ERROR);
       return;
     }
-    FillBufferWithObjectContent(child_identifier, std::move(vmo_copy),
-                                global_offset, global_size, child_position,
-                                child->size(), location, waiter->NewCallback());
+    // This is a child, so it cannot be a tree node, only top pieces may be tree
+    // nodes.
+    FXL_DCHECK(GetObjectDigestInfo(child_identifier.object_digest()).object_type ==
+               ObjectType::BLOB);
+    GetOrDownloadPiece(
+        child_identifier, location,
+        [this, child_identifier, vmo = std::move(vmo_copy), global_offset, global_size,
+         child_position, child_size = child->size(), location,
+         child_callback = waiter->NewCallback()](
+            Status status, std::unique_ptr<const Piece> child_piece,
+            std::unique_ptr<const PieceToken> token, WritePieceCallback write_callback) mutable {
+          if (status != Status::OK) {
+            child_callback(status, nullptr);
+            return;
+          }
+          FXL_DCHECK(child_piece);
+          FXL_DCHECK(token);
+          // The |child_piece| is necessarily a blob, so it must have been read
+          // from or written to disk already.
+          FXL_DCHECK(!write_callback);
+          FXL_VLOG(1) << "Got token for child piece " << token->GetIdentifier();
+          FillBufferWithObjectContent(
+              *child_piece, std::move(vmo), global_offset, global_size, child_position, child_size,
+              location,
+              [token = std::move(token), child_callback = std::move(child_callback)](
+                  Status status) mutable { child_callback(status, std::move(token)); });
+        });
     sub_offset += child->size();
   }
-  waiter->Finalize(std::move(callback));
+  // Collected tokens are kept alive until the final callback has completed.
+  waiter->Finalize(
+      [callback = std::move(callback)](
+          Status status, std::vector<std::unique_ptr<const PieceToken>>) { callback(status); });
 }
 
-void PageStorageImpl::DownloadObjectPart(ObjectIdentifier object_identifier,
-                                         int64_t global_offset,
-                                         int64_t global_size,
-                                         int64_t current_position,
-                                         fit::function<void(Status)> callback) {
-  if (!page_sync_) {
-    callback(Status::NETWORK_ERROR);
-    return;
-  }
-  FXL_DCHECK(
-      !GetObjectDigestInfo(object_identifier.object_digest()).is_inlined());
+void PageStorageImpl::GetOrDownloadPiece(
+    ObjectIdentifier object_identifier, Location location,
+    fit::function<void(Status, std::unique_ptr<const Piece>, std::unique_ptr<const PieceToken>,
+                       WritePieceCallback)>
+        callback) {
+  GetPiece(object_identifier, [this, callback = std::move(callback), location,
+                               object_identifier = std::move(object_identifier)](
+                                  Status status, std::unique_ptr<const Piece> piece,
+                                  std::unique_ptr<const PieceToken> token) mutable {
+    // Object was found.
+    if (status == Status::OK) {
+      callback(status, std::move(piece), std::move(token), {});
+      return;
+    }
+    FXL_DCHECK(piece == nullptr);
+    FXL_DCHECK(token == nullptr);
+    // An unexpected error occured.
+    if (status != Status::INTERNAL_NOT_FOUND || location == Location::LOCAL) {
+      callback(status, nullptr, nullptr, {});
+      return;
+    }
+    // Object not found locally, attempt to download it.
+    FXL_DCHECK(location == Location::NETWORK);
+    if (!page_sync_) {
+      callback(Status::NETWORK_ERROR, nullptr, nullptr, {});
+      return;
+    }
+    coroutine_manager_.StartCoroutine(
+        std::move(callback),
+        [this, object_identifier = std::move(object_identifier)](
+            CoroutineHandler* handler,
+            fit::function<void(Status, std::unique_ptr<const Piece>,
+                               std::unique_ptr<const PieceToken>, WritePieceCallback)>
+                callback) mutable {
+          Status status;
+          ChangeSource source;
+          IsObjectSynced is_object_synced;
+          std::unique_ptr<DataSource::DataChunk> chunk;
 
-  coroutine_manager_.StartCoroutine(
-      std::move(callback),
-      [this, object_identifier = std::move(object_identifier), global_offset,
-       global_size,
-       current_position](CoroutineHandler* handler,
-                         fit::function<void(Status)> callback) mutable {
-        Status status;
-        ChangeSource source;
-        IsObjectSynced is_object_synced;
-        std::unique_ptr<DataSource::DataChunk> chunk;
-
-        // Retrieve an object from the network.
-        if (coroutine::SyncCall(
-                handler,
-                [this, object_identifier](
-                    fit::function<void(Status, ChangeSource, IsObjectSynced,
-                                       std::unique_ptr<DataSource::DataChunk>)>
-                        callback) mutable {
-                  page_sync_->GetObject(std::move(object_identifier),
-                                        std::move(callback));
-                },
-                &status, &source, &is_object_synced,
-                &chunk) == coroutine::ContinuationStatus::INTERRUPTED) {
-          callback(Status::INTERRUPTED);
-          return;
-        }
-
-        if (status != Status::OK) {
-          callback(status);
-          return;
-        }
-
-        auto digest_info =
-            GetObjectDigestInfo(object_identifier.object_digest());
-        FXL_DCHECK(!digest_info.is_inlined());
-
-        if (object_identifier.object_digest() !=
-            ComputeObjectDigest(digest_info.piece_type, digest_info.object_type,
-                                chunk->Get())) {
-          callback(Status::OBJECT_DIGEST_MISMATCH);
-          return;
-        }
-
-        if (digest_info.is_chunk()) {
-          // Downloaded chunk objects are directly added to storage. They have
-          // no children at all, so references are empty.
-          callback(SynchronousAddPiece(
-              handler,
-              DataChunkPiece(std::move(object_identifier), std::move(chunk)),
-              source, is_object_synced, {}));
-          return;
-        }
-
-        const FileIndex* file_index;
-        // Dowloaded index objects need to be recursed into to find chunk
-        // objects at the leaves.
-        status =
-            FileIndexSerialization::ParseFileIndex(chunk->Get(), &file_index);
-        if (status != Status::OK) {
-          callback(Status::FORMAT_ERROR);
-          return;
-        }
-
-        if (digest_info.object_type == ObjectType::TREE_NODE) {
-          // For the root node, we need to do some extra work of sanitizing the
-          // user-provided offset and size (as we now know the full size of the
-          // object). For non-root indexes and chunks, we assume the offset and
-          // max_size are already sanitized.
-          global_offset = GetObjectPartStart(global_offset, file_index->size());
-          global_size = GetObjectPartLength(global_size, file_index->size(),
-                                            global_offset);
-        }
-
-        int64_t sub_offset = 0;
-        auto waiter =
-            fxl::MakeRefCounted<callback::StatusWaiter<Status>>(Status::OK);
-        for (const auto* child : *file_index->children()) {
-          // Recursively download the children of this index that we are
-          // interested in.
-          if (sub_offset + child->size() > file_index->size()) {
-            callback(Status::FORMAT_ERROR);
+          // Retrieve an object from the network.
+          if (coroutine::SyncCall(
+                  handler,
+                  [this,
+                   object_identifier](fit::function<void(Status, ChangeSource, IsObjectSynced,
+                                                         std::unique_ptr<DataSource::DataChunk>)>
+                                          callback) mutable {
+                    page_sync_->GetObject(std::move(object_identifier), std::move(callback));
+                  },
+                  &status, &source, &is_object_synced,
+                  &chunk) == coroutine::ContinuationStatus::INTERRUPTED) {
+            callback(Status::INTERRUPTED, nullptr, nullptr, {});
             return;
           }
-          int64_t child_position = current_position + sub_offset;
-          if (global_offset + global_size < child_position) {
-            // This child starts after the part we want ends: skip it and all
-            // the remaining ones.
-            break;
-          }
-
-          sub_offset += child->size();
-          if (child_position + static_cast<int64_t>(child->size()) <
-              global_offset) {
-            // This child ends before the part we want starts: skip it.
-            continue;
-          }
-          ObjectIdentifier child_identifier =
-              ToObjectIdentifier(child->object_identifier());
-          if (GetObjectDigestInfo(child_identifier.object_digest())
-                  .is_inlined()) {
-            // Nothing to download for inline pieces, but we must account for
-            // their size.
-            continue;
-          }
-
-          Status status = db_->HasObject(handler, child_identifier);
-          // Check if the child is in the database. Otherwise, download it
-          // recursively.
-          if (status == Status::OK) {
-            continue;
-          } else if (status != Status::INTERNAL_NOT_FOUND) {
-            callback(status);
+          if (status != Status::OK) {
+            callback(status, nullptr, nullptr, {});
             return;
           }
-          DownloadObjectPart(std::move(child_identifier), global_offset,
-                             global_size, child_position,
-                             waiter->NewCallback());
-        }
+          // Sanity-check of retrieved object.
+          auto digest_info = GetObjectDigestInfo(object_identifier.object_digest());
+          FXL_DCHECK(!digest_info.is_inlined());
 
-        if (coroutine::Wait(handler, std::move(waiter), &status) ==
-            coroutine::ContinuationStatus::INTERRUPTED) {
-          callback(Status::INTERRUPTED);
-          return;
-        }
+          if (object_identifier.object_digest() !=
+              ComputeObjectDigest(digest_info.piece_type, digest_info.object_type, chunk->Get())) {
+            callback(Status::DATA_INTEGRITY_ERROR, nullptr, nullptr, {});
+            return;
+          }
+          std::unique_ptr<const Piece> piece =
+              std::make_unique<DataChunkPiece>(std::move(object_identifier), std::move(chunk));
 
-        if (status != Status::OK) {
-          callback(status);
-          return;
-        }
-
-        // TODO(kerneis): handle children.
-        callback(SynchronousAddPiece(
-            handler,
-            DataChunkPiece(std::move(object_identifier), std::move(chunk)),
-            source, is_object_synced, {}));
-      });
+          // Write the piece to disk if possible. Index tree nodes cannot be
+          // written at this stage as we need the full object.
+          if (digest_info.object_type == ObjectType::TREE_NODE &&
+              digest_info.piece_type == PieceType::INDEX) {
+            // Return a WritePiece callback and a discardable token since the
+            // piece has not been written to disk.
+            auto token = std::make_unique<DiscardableToken>(piece->GetIdentifier());
+            callback(
+                Status::OK, std::move(piece), std::move(token),
+                [this, source, is_object_synced](
+                    std::unique_ptr<const Piece> piece, std::unique_ptr<const Object> object,
+                    fit::function<void(Status, std::unique_ptr<const Object>)> final_callback) {
+                  ObjectReferencesAndPriority references;
+                  Status status = piece->AppendReferences(&references);
+                  if (status != Status::OK) {
+                    final_callback(status, nullptr);
+                    return;
+                  }
+                  status = object->AppendReferences(&references);
+                  if (status != Status::OK) {
+                    final_callback(status, nullptr);
+                    return;
+                  }
+                  AddPiece(std::move(piece), source, is_object_synced, references,
+                           [final_callback = std::move(final_callback),
+                            object = std::move(object)](Status status) mutable {
+                             if (status != Status::OK) {
+                               final_callback(status, nullptr);
+                               return;
+                             }
+                             final_callback(Status::OK, std::move(object));
+                           });
+                });
+            return;
+          }
+          ObjectReferencesAndPriority references;
+          status = piece->AppendReferences(&references);
+          if (status != Status::OK) {
+            callback(status, nullptr, nullptr, {});
+            return;
+          }
+          if (digest_info.object_type == ObjectType::TREE_NODE) {
+            FXL_DCHECK(digest_info.is_chunk());
+            // Convert the piece to a chunk Object to extract its
+            // references.
+            auto object = std::make_unique<ChunkObject>(std::move(piece));
+            status = object->AppendReferences(&references);
+            if (status != Status::OK) {
+              callback(status, nullptr, nullptr, {});
+              return;
+            }
+            piece = object->ReleasePiece();
+          }
+          status = SynchronousAddPiece(handler, *piece, source, is_object_synced, references);
+          if (status != Status::OK) {
+            callback(status, nullptr, nullptr, {});
+            return;
+          }
+          // TODO(kerneis): get a real token in SynchronousAddPiece above
+          // instead.
+          auto token = std::make_unique<DiscardableToken>(piece->GetIdentifier());
+          callback(Status::OK, std::move(piece), std::move(token), {});
+        });
+  });
 }
+
+LiveCommitTracker* PageStorageImpl::GetCommitTracker() { return &commit_tracker_; }
 
 Status PageStorageImpl::SynchronousInit(CoroutineHandler* handler) {
   // Add the default page head if this page is empty.
@@ -1136,15 +1067,14 @@ Status PageStorageImpl::SynchronousInit(CoroutineHandler* handler) {
       return s;
     }
     std::unique_ptr<const Commit> head_commit;
-    s = SynchronousGetCommit(handler, kFirstPageCommitId.ToString(),
-                             &head_commit);
+    s = SynchronousGetCommit(handler, kFirstPageCommitId.ToString(), &head_commit);
     if (s != Status::OK) {
       return s;
     }
     commits.push_back(std::move(head_commit));
   } else {
-    auto waiter = fxl::MakeRefCounted<
-        callback::Waiter<Status, std::unique_ptr<const Commit>>>(Status::OK);
+    auto waiter =
+        fxl::MakeRefCounted<callback::Waiter<Status, std::unique_ptr<const Commit>>>(Status::OK);
 
     for (const auto& head : heads) {
       GetCommit(head.second, waiter->NewCallback());
@@ -1163,16 +1093,14 @@ Status PageStorageImpl::SynchronousInit(CoroutineHandler* handler) {
   return db_->IsPageOnline(handler, &page_is_online_);
 }
 
-Status PageStorageImpl::SynchronousGetCommit(
-    CoroutineHandler* handler, CommitId commit_id,
-    std::unique_ptr<const Commit>* commit) {
+Status PageStorageImpl::SynchronousGetCommit(CoroutineHandler* handler, CommitId commit_id,
+                                             std::unique_ptr<const Commit>* commit) {
   if (IsFirstCommit(commit_id)) {
     Status s;
     if (coroutine::SyncCall(
             handler,
-            [this](fit::function<void(Status, std::unique_ptr<const Commit>)>
-                       callback) {
-              CommitImpl::Empty(this, std::move(callback));
+            [this](fit::function<void(Status, std::unique_ptr<const Commit>)> callback) {
+              CommitImpl::Empty(this, &commit_tracker_, std::move(callback));
             },
             &s, commit) == coroutine::ContinuationStatus::INTERRUPTED) {
       return Status::INTERRUPTED;
@@ -1184,13 +1112,13 @@ Status PageStorageImpl::SynchronousGetCommit(
   if (s != Status::OK) {
     return s;
   }
-  return CommitImpl::FromStorageBytes(this, commit_id, std::move(bytes),
-                                      commit);
+  return CommitImpl::FromStorageBytes(&commit_tracker_, commit_id, std::move(bytes), commit);
 }
 
-Status PageStorageImpl::SynchronousAddCommitFromLocal(
-    CoroutineHandler* handler, std::unique_ptr<const Commit> commit,
-    std::vector<ObjectIdentifier> new_objects) {
+Status PageStorageImpl::SynchronousAddCommitFromLocal(CoroutineHandler* handler,
+                                                      std::unique_ptr<const Commit> commit,
+                                                      std::vector<ObjectIdentifier> new_objects) {
+  FXL_DCHECK(IsDigestValid(commit->GetRootIdentifier().object_digest()));
   std::vector<std::unique_ptr<const Commit>> commits;
   commits.reserve(1);
   commits.push_back(std::move(commit));
@@ -1199,9 +1127,10 @@ Status PageStorageImpl::SynchronousAddCommitFromLocal(
                                std::move(new_objects), nullptr);
 }
 
-Status PageStorageImpl::SynchronousAddCommitsFromSync(
-    CoroutineHandler* handler, std::vector<CommitIdAndBytes> ids_and_bytes,
-    ChangeSource source, std::vector<CommitId>* missing_ids) {
+Status PageStorageImpl::SynchronousAddCommitsFromSync(CoroutineHandler* handler,
+                                                      std::vector<CommitIdAndBytes> ids_and_bytes,
+                                                      ChangeSource source,
+                                                      std::vector<CommitId>* missing_ids) {
   std::vector<std::unique_ptr<const Commit>> commits;
 
   std::map<const CommitId*, const Commit*, StringPointerComparator> leaves;
@@ -1238,8 +1167,7 @@ Status PageStorageImpl::SynchronousAddCommitsFromSync(
     }
 
     std::unique_ptr<const Commit> commit;
-    status = CommitImpl::FromStorageBytes(this, id, std::move(storage_bytes),
-                                          &commit);
+    status = CommitImpl::FromStorageBytes(&commit_tracker_, id, std::move(storage_bytes), &commit);
     if (status != Status::OK) {
       FXL_LOG(ERROR) << "Unable to add commit. Id: " << convert::ToHex(id);
       return status;
@@ -1266,8 +1194,7 @@ Status PageStorageImpl::SynchronousAddCommitsFromSync(
   // Get all objects from sync and then add the commit objects.
   for (const auto& leaf : leaves) {
     btree::GetObjectsFromSync(environment_->coroutine_service(), this,
-                              leaf.second->GetRootIdentifier(),
-                              waiter->NewCallback());
+                              leaf.second->GetRootIdentifier(), waiter->NewCallback());
   }
 
   Status waiter_status;
@@ -1279,21 +1206,20 @@ Status PageStorageImpl::SynchronousAddCommitsFromSync(
     return waiter_status;
   }
 
-  return SynchronousAddCommits(handler, std::move(commits), source,
-                               std::vector<ObjectIdentifier>(), missing_ids);
+  return SynchronousAddCommits(handler, std::move(commits), source, std::vector<ObjectIdentifier>(),
+                               missing_ids);
 }
 
 Status PageStorageImpl::SynchronousGetUnsyncedCommits(
-    CoroutineHandler* handler,
-    std::vector<std::unique_ptr<const Commit>>* unsynced_commits) {
+    CoroutineHandler* handler, std::vector<std::unique_ptr<const Commit>>* unsynced_commits) {
   std::vector<CommitId> commit_ids;
   Status s = db_->GetUnsyncedCommitIds(handler, &commit_ids);
   if (s != Status::OK) {
     return s;
   }
 
-  auto waiter = fxl::MakeRefCounted<
-      callback::Waiter<Status, std::unique_ptr<const Commit>>>(Status::OK);
+  auto waiter =
+      fxl::MakeRefCounted<callback::Waiter<Status, std::unique_ptr<const Commit>>>(Status::OK);
   for (const auto& commit_id : commit_ids) {
     GetCommit(commit_id, waiter->NewCallback());
   }
@@ -1324,9 +1250,9 @@ Status PageStorageImpl::SynchronousMarkCommitSynced(CoroutineHandler* handler,
   return batch->Execute(handler);
 }
 
-Status PageStorageImpl::SynchronousMarkCommitSyncedInBatch(
-    CoroutineHandler* handler, PageDb::Batch* batch,
-    const CommitId& commit_id) {
+Status PageStorageImpl::SynchronousMarkCommitSyncedInBatch(CoroutineHandler* handler,
+                                                           PageDb::Batch* batch,
+                                                           const CommitId& commit_id) {
   Status status = SynchronousMarkPageOnline(handler, batch);
   if (status != Status::OK) {
     return status;
@@ -1334,11 +1260,11 @@ Status PageStorageImpl::SynchronousMarkCommitSyncedInBatch(
   return batch->MarkCommitIdSynced(handler, commit_id);
 }
 
-Status PageStorageImpl::SynchronousAddCommits(
-    CoroutineHandler* handler,
-    std::vector<std::unique_ptr<const Commit>> commits, ChangeSource source,
-    std::vector<ObjectIdentifier> new_objects,
-    std::vector<CommitId>* missing_ids) {
+Status PageStorageImpl::SynchronousAddCommits(CoroutineHandler* handler,
+                                              std::vector<std::unique_ptr<const Commit>> commits,
+                                              ChangeSource source,
+                                              std::vector<ObjectIdentifier> new_objects,
+                                              std::vector<CommitId>* missing_ids) {
   // Make sure that only one AddCommits operation is executed at a time.
   // Otherwise, if db_ operations are asynchronous, ContainsCommit (below) may
   // return NOT_FOUND while another commit is added, and batch->Execute() will
@@ -1372,8 +1298,7 @@ Status PageStorageImpl::SynchronousAddCommits(
     Status s = ContainsCommit(handler, commit->GetId());
     if (s == Status::OK) {
       if (source == ChangeSource::CLOUD) {
-        s = SynchronousMarkCommitSyncedInBatch(handler, batch.get(),
-                                               commit->GetId());
+        s = SynchronousMarkCommitSyncedInBatch(handler, batch.get(), commit->GetId());
         if (s != Status::OK) {
           return s;
         }
@@ -1389,8 +1314,7 @@ Status PageStorageImpl::SynchronousAddCommits(
     // If the commit is a merge, register it in the merge index.
     std::vector<CommitIdView> parent_ids = commit->GetParentIds();
     if (parent_ids.size() == 2) {
-      s = batch->AddMerge(handler, parent_ids[0], parent_ids[1],
-                          commit->GetId());
+      s = batch->AddMerge(handler, parent_ids[0], parent_ids[1], commit->GetId());
       if (s != Status::OK) {
         return s;
       }
@@ -1409,9 +1333,8 @@ Status PageStorageImpl::SynchronousAddCommits(
           return s;
         }
         if (s != Status::OK) {
-          FXL_LOG(ERROR) << "Failed to find parent commit \""
-                         << ToHex(parent_id) << "\" of commit \""
-                         << convert::ToHex(commit->GetId()) << "\".";
+          FXL_LOG(ERROR) << "Failed to find parent commit \"" << ToHex(parent_id)
+                         << "\" of commit \"" << convert::ToHex(commit->GetId()) << "\".";
           if (s == Status::INTERNAL_NOT_FOUND) {
             if (missing_ids) {
               missing_ids->push_back(parent_id.ToString());
@@ -1439,16 +1362,14 @@ Status PageStorageImpl::SynchronousAddCommits(
       continue;
     }
 
-    s = batch->AddCommitStorageBytes(handler, commit->GetId(),
-                                     commit->GetRootIdentifier(),
+    s = batch->AddCommitStorageBytes(handler, commit->GetId(), commit->GetRootIdentifier(),
                                      commit->GetStorageBytes());
     if (s != Status::OK) {
       return s;
     }
 
     if (source != ChangeSource::CLOUD) {
-      s = batch->MarkCommitIdUnsynced(handler, commit->GetId(),
-                                      commit->GetGeneration());
+      s = batch->MarkCommitIdUnsynced(handler, commit->GetId(), commit->GetGeneration());
       if (s != Status::OK) {
         return s;
       }
@@ -1463,19 +1384,16 @@ Status PageStorageImpl::SynchronousAddCommits(
 
   if (orphaned_commits > 0) {
     if (source != ChangeSource::P2P) {
-      ledger::ReportEvent(
-          ledger::CobaltEvent::COMMITS_RECEIVED_OUT_OF_ORDER_NOT_RECOVERED);
-      FXL_LOG(ERROR)
-          << "Failed adding commits. Found " << orphaned_commits
-          << " orphaned commits (one of their parent was not found).";
+      ledger::ReportEvent(ledger::CobaltEvent::COMMITS_RECEIVED_OUT_OF_ORDER_NOT_RECOVERED);
+      FXL_LOG(ERROR) << "Failed adding commits. Found " << orphaned_commits
+                     << " orphaned commits (one of their parent was not found).";
     }
     return Status::INTERNAL_NOT_FOUND;
   }
 
   // Update heads in Db.
   for (const auto& head : heads_to_add) {
-    Status s = batch->AddHead(handler, head.second->GetId(),
-                              head.second->GetTimestamp());
+    Status s = batch->AddHead(handler, head.second->GetId(), head.second->GetTimestamp());
     if (s != Status::OK) {
       return s;
     }
@@ -1488,7 +1406,6 @@ Status PageStorageImpl::SynchronousAddCommits(
   }
 
   s = batch->Execute(handler);
-
   if (s != Status::OK) {
     return s;
   }
@@ -1496,40 +1413,38 @@ Status PageStorageImpl::SynchronousAddCommits(
   // Only update the cache of heads after a successful update of the PageDb.
   commit_tracker_.RemoveHeads(std::move(removed_heads));
   std::vector<std::unique_ptr<const Commit>> new_heads;
-  std::transform(
-      std::make_move_iterator(heads_to_add.begin()),
-      std::make_move_iterator(heads_to_add.end()),
-      std::back_inserter(new_heads),
-      [](std::pair<CommitId, std::unique_ptr<const Commit>>&& head) {
-        return std::move(std::get<std::unique_ptr<const Commit>>(head));
-      });
+  std::transform(std::make_move_iterator(heads_to_add.begin()),
+                 std::make_move_iterator(heads_to_add.end()), std::back_inserter(new_heads),
+                 [](std::pair<CommitId, std::unique_ptr<const Commit>>&& head) {
+                   return std::move(std::get<std::unique_ptr<const Commit>>(head));
+                 });
   commit_tracker_.AddHeads(std::move(new_heads));
   NotifyWatchersOfNewCommits(commits_to_send, source);
-
+  commit_pruner_.Prune([](Status status) {
+    if (status != Status::OK) {
+      FXL_LOG(ERROR) << "Error when pruning: " << status;
+    }
+  });
   return s;
 }
 
-Status PageStorageImpl::SynchronousAddPiece(
-    CoroutineHandler* handler, const Piece& piece, ChangeSource source,
-    IsObjectSynced is_object_synced, ObjectReferencesAndPriority references) {
-  FXL_DCHECK(
-      !GetObjectDigestInfo(piece.GetIdentifier().object_digest()).is_inlined());
+Status PageStorageImpl::SynchronousAddPiece(CoroutineHandler* handler, const Piece& piece,
+                                            ChangeSource source, IsObjectSynced is_object_synced,
+                                            ObjectReferencesAndPriority references) {
+  FXL_DCHECK(!GetObjectDigestInfo(piece.GetIdentifier().object_digest()).is_inlined());
   FXL_DCHECK(
       piece.GetIdentifier().object_digest() ==
-      ComputeObjectDigest(
-          GetObjectDigestInfo(piece.GetIdentifier().object_digest()).piece_type,
-          GetObjectDigestInfo(piece.GetIdentifier().object_digest())
-              .object_type,
-          piece.GetData()));
+      ComputeObjectDigest(GetObjectDigestInfo(piece.GetIdentifier().object_digest()).piece_type,
+                          GetObjectDigestInfo(piece.GetIdentifier().object_digest()).object_type,
+                          piece.GetData()));
 
   Status status = db_->HasObject(handler, piece.GetIdentifier());
   if (status == Status::INTERNAL_NOT_FOUND) {
     PageDbObjectStatus object_status;
     switch (is_object_synced) {
       case IsObjectSynced::NO:
-        object_status =
-            (source == ChangeSource::LOCAL ? PageDbObjectStatus::TRANSIENT
-                                           : PageDbObjectStatus::LOCAL);
+        object_status = (source == ChangeSource::LOCAL ? PageDbObjectStatus::TRANSIENT
+                                                       : PageDbObjectStatus::LOCAL);
         break;
       case IsObjectSynced::YES:
         object_status = PageDbObjectStatus::SYNCED;
@@ -1540,8 +1455,8 @@ Status PageStorageImpl::SynchronousAddPiece(
   return status;
 }
 
-Status PageStorageImpl::SynchronousMarkPageOnline(
-    coroutine::CoroutineHandler* handler, PageDb::Batch* batch) {
+Status PageStorageImpl::SynchronousMarkPageOnline(coroutine::CoroutineHandler* handler,
+                                                  PageDb::Batch* batch) {
   if (page_is_online_) {
     return Status::OK;
   }
@@ -1552,8 +1467,7 @@ Status PageStorageImpl::SynchronousMarkPageOnline(
   return status;
 }
 
-FXL_WARN_UNUSED_RESULT Status
-PageStorageImpl::SynchronousGetEmptyNodeIdentifier(
+FXL_WARN_UNUSED_RESULT Status PageStorageImpl::SynchronousGetEmptyNodeIdentifier(
     coroutine::CoroutineHandler* handler, ObjectIdentifier** empty_node_id) {
   if (!empty_node_id_) {
     // Get the empty node identifier and cache it.
@@ -1564,15 +1478,13 @@ PageStorageImpl::SynchronousGetEmptyNodeIdentifier(
             [this](fit::function<void(Status, ObjectIdentifier)> callback) {
               btree::TreeNode::Empty(this, std::move(callback));
             },
-            &status,
-            &object_identifier) == coroutine::ContinuationStatus::INTERRUPTED) {
+            &status, &object_identifier) == coroutine::ContinuationStatus::INTERRUPTED) {
       return Status::INTERRUPTED;
     }
     if (status != Status::OK) {
       return status;
     }
-    empty_node_id_ =
-        std::make_unique<ObjectIdentifier>(std::move(object_identifier));
+    empty_node_id_ = std::make_unique<ObjectIdentifier>(std::move(object_identifier));
   }
   *empty_node_id = empty_node_id_.get();
   return Status::OK;

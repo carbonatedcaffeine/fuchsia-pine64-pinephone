@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/fuchsia/zircon.gni")
+import("//build/config/fuchsia/zircon_images.gni")
 import("//build/package.gni")
 
 zircon_extras_manifest("zircon-test-manifest") {
@@ -16,4 +16,66 @@ package("zircon_tests") {
     ":zircon-test-manifest",
   ]
   extra = get_target_outputs(":zircon-test-manifest")
+}
+
+zircon_extras_manifest("zircon-fuzzers-manifest") {
+  manifest = "tests"
+  patterns = [
+    "bin/*-fuzzer.*",
+    "meta/*-fuzzer.*.cmx",
+  ]
+}
+
+package("zircon_fuzzers") {
+  deps = [
+    ":zircon-fuzzers-manifest",
+  ]
+  extra = get_target_outputs(":zircon-fuzzers-manifest")
+  metadata = {
+    fuzz_spec = [
+      {
+        fuzzers_package = target_name
+        fuzzers =
+            read_file("$zircon_root_build_dir/legacy_fuzzers-$target_cpu.json",
+                      "json")
+        fuzz_host = false
+      },
+    ]
+  }
+}
+
+# This tells the infra recipes how to run ZBI tests.  These are defined in
+# the Zircon build with zbi_test().  Bringing the packages from this file
+# into the build causes this file to be written, so a build including one
+# of these packages is a build whose bots will run the ZBI tests.
+#
+# The schema produced here matches images.json with the addition of the
+# `success_string` key.
+generated_file("zbi_tests") {
+  outputs = [
+    "$root_build_dir/zbi_tests.json",
+  ]
+  output_conversion = "json"
+
+  zbi_test_success_string =
+      read_file("$zircon_root_build_dir/zbi_test_success_string.json", "json")
+
+  contents = []
+  foreach(image, zircon_images) {
+    if (image.type == "zbi" && defined(image.tags) &&
+        image.tags + [ "zbi-test" ] - [ "zbi-test" ] != image.tags &&
+        image.cpu == current_cpu) {
+      contents += [
+        {
+          cpu = image.cpu
+          name = image.name
+          path = rebase_path(image.path, root_build_dir, zircon_root_build_dir)
+          label = image.label
+          type = "zbi"
+          bootserver_netboot = [ "--boot" ]
+          success_string = zbi_test_success_string
+        },
+      ]
+    }
+  }
 }

@@ -10,7 +10,7 @@ library("usb") {
   ]
   sources = [
     "usb-request.c",
-    "usb-wrapper.cpp",
+    "usb-wrapper.cc",
     "usb.c",
   ]
   public_deps = [
@@ -30,8 +30,9 @@ library("usb") {
 }
 
 test("usb-wrapper-test") {
+  output_name = "usb-wrapper-test"
   sources = [
-    "tests/usb-wrapper-tests.cpp",
+    "usb-wrapper-test.cc",
   ]
   deps = [
     ":usb",
@@ -45,5 +46,6 @@ test("usb-wrapper-test") {
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/unittest",
     "$zx/system/ulib/zircon",
+    "$zx/system/ulib/zxtest",
   ]
 }

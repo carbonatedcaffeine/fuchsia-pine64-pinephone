@@ -2,18 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <gtest/gtest.h>
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/sys/cpp/component_context.h>
 #include <lib/zx/eventpair.h>
 #include <lib/zx/process.h>
 #include <lib/zx/time.h>
 #include <src/lib/fxl/command_line.h>
-#include <src/lib/fxl/log_settings_command_line.h>
 #include <src/lib/fxl/logging.h>
+#include <src/lib/fxl/test/test_settings.h>
 #include <zircon/status.h>
 
 #include "garnet/bin/trace/tests/run_test.h"
-#include "gtest/gtest.h"
 
 // Note: /data is no longer large enough in qemu sessions
 const char kOutputFilePath[] = "/tmp/test.trace";
@@ -137,12 +137,14 @@ TEST(TwoProvidersTwoEngines, DISABLED_Test) {
 // This is useful because our verbosity is passed on to each test.
 int main(int argc, char** argv) {
   auto cl = fxl::CommandLineFromArgcArgv(argc, argv);
-  if (!fxl::SetLogSettingsFromCommandLine(cl))
+  if (!fxl::SetTestSettings(cl))
     return EXIT_FAILURE;
 
   testing::InitGoogleTest(&argc, argv);
 
   // |Create()| needs a loop, it uses the default dispatcher.
+  // TODO(PT-176): use a separate test loop for each test to avoid something
+  // pushed on the loop in a test being run in the next one.
   {
     async::Loop loop(&kAsyncLoopConfigAttachToThread);
     g_context = sys::ComponentContext::Create();

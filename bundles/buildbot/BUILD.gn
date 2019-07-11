@@ -10,6 +10,7 @@ group("bringup") {
   testonly = true
   public_deps = [
     "//garnet/packages/tests:zircon",
+    "//garnet/tests/zircon/bringup",
   ]
 }
 
@@ -22,10 +23,16 @@ group("core") {
     "//garnet/packages:all",
     "//peridot/packages:all",
     "//src:tests",
+    "//tools:tests",
   ]
 }
 
 group("terminal") {
+  testonly = true
+  public_deps = []
+}
+
+group("workstation") {
   testonly = true
   public_deps = []
 }

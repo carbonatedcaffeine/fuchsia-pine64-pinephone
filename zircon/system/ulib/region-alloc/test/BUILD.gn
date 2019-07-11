@@ -12,12 +12,12 @@ group("test") {
 test("region-alloc") {
   sources = [
     "region-alloc-c-api.c",
-    "region-alloc.cpp",
+    "region-alloc.cc",
   ]
   deps = [
     "$zx/system/ulib/fbl",
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/region-alloc",
-    "$zx/system/ulib/unittest",
+    "$zx/system/ulib/zxtest",
   ]
 }

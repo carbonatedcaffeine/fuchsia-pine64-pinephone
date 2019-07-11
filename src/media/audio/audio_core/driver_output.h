@@ -5,39 +5,31 @@
 #ifndef SRC_MEDIA_AUDIO_AUDIO_CORE_DRIVER_OUTPUT_H_
 #define SRC_MEDIA_AUDIO_AUDIO_CORE_DRIVER_OUTPUT_H_
 
-#include <dispatcher-pool/dispatcher-channel.h>
 #include <lib/zx/channel.h>
-#include <lib/zx/vmo.h>
-#include <zircon/device/audio.h>
 
 #include "src/media/audio/audio_core/audio_driver.h"
-#include "src/media/audio/audio_core/standard_output_base.h"
+#include "src/media/audio/audio_core/audio_output.h"
 #include "src/media/audio/lib/wav_writer/wav_writer.h"
 
 namespace media::audio {
 
-constexpr bool kWavWriterEnabled = false;
+constexpr bool kEnableFinalMixWavWriter = false;
 
-class DriverOutput : public StandardOutputBase {
+class DriverOutput : public AudioOutput {
  public:
-  static fbl::RefPtr<AudioOutput> Create(zx::channel channel,
-                                         AudioDeviceManager* manager);
+  static fbl::RefPtr<AudioOutput> Create(zx::channel channel, AudioDeviceManager* manager);
   ~DriverOutput();
 
  protected:
   // AudioOutput implementation
   zx_status_t Init() override;
   void OnWakeup() FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()) override;
-
-  // StandardOutputBase implementation
   bool StartMixJob(MixJob* job, fxl::TimePoint process_start)
       FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()) override;
-  bool FinishMixJob(const MixJob& job)
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()) override;
+  bool FinishMixJob(const MixJob& job) FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token()) override;
 
   // AudioDevice implementation
-  void ApplyGainLimits(::fuchsia::media::AudioGainInfo* in_out_info,
-                       uint32_t set_flags) override;
+  void ApplyGainLimits(fuchsia::media::AudioGainInfo* in_out_info, uint32_t set_flags) override;
 
  private:
   enum class State {
@@ -55,14 +47,11 @@ class DriverOutput : public StandardOutputBase {
 
   // Callbacks triggered by our driver object as it completes various
   // asynchronous tasks.
-  void OnDriverInfoFetched() override
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
+  void OnDriverInfoFetched() override FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
 
-  void OnDriverConfigComplete() override
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
+  void OnDriverConfigComplete() override FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
 
-  void OnDriverStartComplete() override
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
+  void OnDriverStartComplete() override FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
 
   void OnDriverPlugStateChange(bool plugged, zx_time_t plug_time) override
       FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
@@ -78,7 +67,10 @@ class DriverOutput : public StandardOutputBase {
   zx_time_t underflow_start_time_ = 0;
   zx_time_t underflow_cooldown_deadline_ = 0;
 
-  WavWriter<kWavWriterEnabled> wav_writer_;
+  // This atomic is only used when the final-mix wave-writer is enabled --
+  // specifically to generate unique ids for each final-mix WAV file.
+  static std::atomic<uint32_t> final_mix_instance_num_;
+  WavWriter<kEnableFinalMixWavWriter> wav_writer_;
 };
 
 }  // namespace media::audio

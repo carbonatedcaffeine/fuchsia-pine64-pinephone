@@ -17,12 +17,16 @@ rustc_library("io_util") {
     "//third_party/rust_crates:failure",
     "//third_party/rust_crates:tempfile",
     "//zircon/public/fidl/fuchsia-io:fuchsia-io-rustc",
+
+    # test only deps
+    "//garnet/public/rust/fuchsia-vfs/pseudo-fs",
+    "//third_party/rust_crates:futures-preview",
   ]
 }
 
 test_package("io_util_tests") {
   deps = [
-    ":io_util",
+    ":io_util_test",
   ]
 
   tests = [

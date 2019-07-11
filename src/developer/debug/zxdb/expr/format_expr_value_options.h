@@ -2,12 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_EXPR_FORMAT_EXPR_VALUE_OPTIONS_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_EXPR_FORMAT_EXPR_VALUE_OPTIONS_H_
 
 #include <stdint.h>
 
 namespace zxdb {
 
+// TODO(brettw) when the new formatting system is completed, this should be separated into a
+// console-specific part with verbosity, and a base-class for the number format, etc. for the
+// format_node layer.
 struct FormatExprValueOptions {
   enum class NumFormat { kDefault, kUnsigned, kSigned, kHex, kChar };
 
@@ -42,3 +46,5 @@ struct FormatExprValueOptions {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_EXPR_FORMAT_EXPR_VALUE_OPTIONS_H_

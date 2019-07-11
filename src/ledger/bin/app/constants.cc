@@ -4,7 +4,7 @@
 
 #include "src/ledger/bin/app/constants.h"
 
-#include <fuchsia/ledger/internal/cpp/fidl.h>
+#include <fuchsia/ledger/cpp/fidl.h>
 
 #include <string>
 
@@ -15,7 +15,6 @@ const char kNullPageId[::fuchsia::ledger::PAGE_ID_SIZE] = {};
 }  // namespace
 
 // The zero-initialized root id.
-constexpr fxl::StringView kRootPageId(kNullPageId,
-                                      ::fuchsia::ledger::PAGE_ID_SIZE);
+constexpr fxl::StringView kRootPageId(kNullPageId, ::fuchsia::ledger::PAGE_ID_SIZE);
 
 }  // namespace ledger

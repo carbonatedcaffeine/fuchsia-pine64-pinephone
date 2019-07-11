@@ -210,9 +210,6 @@ CodecAdapterVp9::CoreCodecGetBufferCollectionConstraints(
   // amlogic requires physically contiguous on both input and output
   result.buffer_memory_constraints.physically_contiguous_required = true;
   result.buffer_memory_constraints.secure_required = false;
-  // This isn't expected to fully work at first, but allow getting as far as we
-  // can.
-  result.buffer_memory_constraints.secure_permitted = true;
 
   if (port == kOutputPort) {
     result.image_format_constraints_count = 1;
@@ -295,7 +292,7 @@ void CodecAdapterVp9::CoreCodecSetBufferCollectionInfo(
       buffer_collection_info.settings.buffer_settings.is_physically_contiguous);
   ZX_DEBUG_ASSERT(
       buffer_collection_info.settings.buffer_settings.coherency_domain ==
-      fuchsia::sysmem::CoherencyDomain::Cpu);
+      fuchsia::sysmem::CoherencyDomain::CPU);
   if (port == kOutputPort) {
     ZX_DEBUG_ASSERT(
         buffer_collection_info.settings.has_image_format_constraints);
@@ -855,7 +852,7 @@ void CodecAdapterVp9::ReadMoreInputData(Vp9Decoder* decoder) {
     if (item.is_format_details()) {
       // TODO(dustingreen): Be more strict about what the input format actually
       // is, and less strict about it matching the initial format.
-      ZX_ASSERT(item.format_details() == initial_input_format_details_);
+      ZX_ASSERT(fidl::Equals(item.format_details(), initial_input_format_details_));
       continue;
     }
 

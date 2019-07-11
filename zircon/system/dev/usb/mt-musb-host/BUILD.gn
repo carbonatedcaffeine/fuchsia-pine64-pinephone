@@ -3,17 +3,25 @@
 # found in the LICENSE file.
 
 driver("mt-musb-host") {
-  sources = [
-    "usb-device.cpp",
-    "usb-endpoint.cpp",
-    "usb-hci.cpp",
-    "usb-root-hub.cpp",
-    "usb-spew.cpp",
-    "usb-transaction.cpp",
-  ]
   deps = [
+    ":common",
+  ]
+}
+
+source_set("common") {
+  visibility = [ ":*" ]
+  sources = [
+    "usb-device.cc",
+    "usb-hci.cc",
+    "usb-request-queue.cc",
+    "usb-root-hub.cc",
+    "usb-spew.cc",
+    "usb-transaction.cc",
+  ]
+  public_deps = [
     "$zx/system/banjo/ddk.protocol.usb.bus",
     "$zx/system/banjo/ddk.protocol.usb.hci",
+    "$zx/system/dev/lib/device-protocol-pdev",
     "$zx/system/dev/lib/mmio",
     "$zx/system/dev/lib/mt8167",
     "$zx/system/dev/lib/usb",
@@ -27,12 +35,25 @@ driver("mt-musb-host") {
   ]
 }
 
-test("mt-hci-transaction-test") {
+test("mt-hci-test") {
+  output_name = "mt-hci-test"
   sources = [
-    "usb-transaction-test.cpp",
-    "usb-transaction.cpp",
+    "usb-hci-test.cc",
   ]
   deps = [
+    ":common",
+    "$zx/system/dev/lib/fake_ddk",
+    "$zx/system/ulib/zxtest",
+  ]
+}
+
+test("mt-hci-transaction-test") {
+  sources = [
+    "usb-transaction-test.cc",
+    "usb-transaction.cc",
+  ]
+  deps = [
+    "$zx/system/dev/lib/device-protocol-pdev",
     "$zx/system/dev/lib/fake_ddk",
     "$zx/system/dev/lib/mmio",
     "$zx/system/dev/lib/mt8167",
@@ -46,11 +67,11 @@ test("mt-hci-transaction-test") {
   ]
 }
 
-test("mt-hci-endpoint-test") {
+test("mt-hci-request-queue-test") {
   sources = [
-    "usb-endpoint-test.cpp",
-    "usb-endpoint.cpp",
-    "usb-transaction.cpp",
+    "usb-request-queue-test.cc",
+    "usb-request-queue.cc",
+    "usb-transaction.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.usb.hci",

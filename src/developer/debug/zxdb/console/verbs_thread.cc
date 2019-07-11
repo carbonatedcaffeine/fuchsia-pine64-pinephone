@@ -21,14 +21,14 @@
 #include "src/developer/debug/zxdb/console/format_frame.h"
 #include "src/developer/debug/zxdb/console/format_register.h"
 #include "src/developer/debug/zxdb/console/format_table.h"
+#include "src/developer/debug/zxdb/console/format_target.h"
 #include "src/developer/debug/zxdb/console/format_value.h"
-#include "src/developer/debug/zxdb/console/format_value_process_context_impl.h"
 #include "src/developer/debug/zxdb/console/input_location_parser.h"
 #include "src/developer/debug/zxdb/console/output_buffer.h"
 #include "src/developer/debug/zxdb/console/string_util.h"
 #include "src/developer/debug/zxdb/console/verbs.h"
+#include "src/developer/debug/zxdb/expr/eval_context_impl.h"
 #include "src/developer/debug/zxdb/expr/expr.h"
-#include "src/developer/debug/zxdb/expr/symbol_eval_context.h"
 #include "src/developer/debug/zxdb/symbols/code_block.h"
 #include "src/developer/debug/zxdb/symbols/function.h"
 #include "src/developer/debug/zxdb/symbols/location.h"
@@ -65,8 +65,7 @@ bool VerifySystemHasRunningProcess(System* system, Err* err) {
 }
 
 // Populates the formatting options with the given command's switches.
-Err GetFormatExprValueOptions(const Command& cmd,
-                              FormatExprValueOptions* options) {
+Err GetFormatExprValueOptions(const Command& cmd, FormatExprValueOptions* options) {
   // Verbosity.
   if (cmd.HasSwitch(kForceAllTypes))
     options->verbosity = FormatExprValueOptions::Verbosity::kAllTypes;
@@ -86,12 +85,11 @@ Err GetFormatExprValueOptions(const Command& cmd,
 
   // Mapping from command-line parameter to format enum.
   constexpr size_t kFormatCount = 4;
-  static constexpr std::pair<int, FormatExprValueOptions::NumFormat>
-      kFormats[kFormatCount] = {
-          {kForceNumberChar, FormatExprValueOptions::NumFormat::kChar},
-          {kForceNumberUnsigned, FormatExprValueOptions::NumFormat::kUnsigned},
-          {kForceNumberSigned, FormatExprValueOptions::NumFormat::kSigned},
-          {kForceNumberHex, FormatExprValueOptions::NumFormat::kHex}};
+  static constexpr std::pair<int, FormatExprValueOptions::NumFormat> kFormats[kFormatCount] = {
+      {kForceNumberChar, FormatExprValueOptions::NumFormat::kChar},
+      {kForceNumberUnsigned, FormatExprValueOptions::NumFormat::kUnsigned},
+      {kForceNumberSigned, FormatExprValueOptions::NumFormat::kSigned},
+      {kForceNumberHex, FormatExprValueOptions::NumFormat::kHex}};
 
   int num_type_overrides = 0;
   for (const auto& cur : kFormats) {
@@ -170,8 +168,7 @@ Err DoBacktrace(ConsoleContext* context, const Command& cmd) {
 
 // continue --------------------------------------------------------------------
 
-const char kContinueShortHelp[] =
-    "continue / c: Continue a suspended thread or process.";
+const char kContinueShortHelp[] = "continue / c: Continue a suspended thread or process.";
 const char kContinueHelp[] =
     R"(continue / c
 
@@ -277,8 +274,7 @@ Err DoDown(ConsoleContext* context, const Command& cmd) {
   id -= 1;
 
   context->SetActiveFrameIdForThread(cmd.thread(), id);
-  FormatFrameAsync(context, cmd.target(), cmd.thread(),
-                   cmd.thread()->GetStack()[id]);
+  FormatFrameAsync(context, cmd.target(), cmd.thread(), cmd.thread()->GetStack()[id]);
 
   return Err();
 }
@@ -319,8 +315,7 @@ Err DoUp(ConsoleContext* context, const Command& cmd) {
   auto cb = [context, cmd, id](const Err& err) {
     Err got;
 
-    if (!err.has_error() &&
-        static_cast<size_t>(id) >= cmd.thread()->GetStack().size()) {
+    if (!err.has_error() && static_cast<size_t>(id) >= cmd.thread()->GetStack().size()) {
       got = Err("At top of stack.");
     } else {
       got = err;
@@ -330,8 +325,7 @@ Err DoUp(ConsoleContext* context, const Command& cmd) {
       Console::get()->Output(got);
     } else {
       context->SetActiveFrameIdForThread(cmd.thread(), id);
-      FormatFrameAsync(context, cmd.target(), cmd.thread(),
-                       cmd.thread()->GetStack()[id]);
+      FormatFrameAsync(context, cmd.target(), cmd.thread(), cmd.thread()->GetStack()[id]);
     }
   };
 
@@ -346,8 +340,7 @@ Err DoUp(ConsoleContext* context, const Command& cmd) {
 
 // finish ----------------------------------------------------------------------
 
-const char kFinishShortHelp[] =
-    "finish / fi: Finish execution of a stack frame.";
+const char kFinishShortHelp[] = "finish / fi: Finish execution of a stack frame.";
 const char kFinishHelp[] =
     R"(finish / fi
 
@@ -375,12 +368,7 @@ Examples
       recursive.
 )";
 Err DoFinish(ConsoleContext* context, const Command& cmd) {
-  // This command allows "frame" which AssertStoppedThreadCommand doesn't,
-  // so pass "false" to disabled noun checking and manually check ourselves.
-  Err err = AssertStoppedThreadCommand(context, cmd, false, "finish");
-  if (err.has_error())
-    return err;
-  err = cmd.ValidateNouns({Noun::kProcess, Noun::kThread, Noun::kFrame});
+  Err err = AssertStoppedThreadWithFrameCommand(context, cmd, "finish");
   if (err.has_error())
     return err;
 
@@ -391,8 +379,7 @@ Err DoFinish(ConsoleContext* context, const Command& cmd) {
   else
     return Err("Internal error, frame not found in current thread.");
 
-  auto controller =
-      std::make_unique<FinishThreadController>(stack, frame_index);
+  auto controller = std::make_unique<FinishThreadController>(stack, frame_index);
   cmd.thread()->ContinueWith(std::move(controller), [](const Err& err) {
     if (err.has_error())
       Console::get()->Output(err);
@@ -402,8 +389,7 @@ Err DoFinish(ConsoleContext* context, const Command& cmd) {
 
 // jump ------------------------------------------------------------------------
 
-const char kJumpShortHelp[] =
-    "jump / jmp: Set the instruction pointer to a different address.";
+const char kJumpShortHelp[] = "jump / jmp: Set the instruction pointer to a different address.";
 const char kJumpHelp[] =
     R"(jump <location>
 
@@ -419,7 +405,7 @@ Location arguments
 
 )" LOCATION_ARG_HELP("jump");
 Err DoJump(ConsoleContext* context, const Command& cmd) {
-  Err err = AssertStoppedThreadCommand(context, cmd, false, "jump");
+  Err err = AssertStoppedThreadCommand(context, cmd, true, "jump");
   if (err.has_error())
     return err;
 
@@ -432,35 +418,32 @@ Err DoJump(ConsoleContext* context, const Command& cmd) {
     return err;
 
   Location location;
-  err = ResolveUniqueInputLocation(cmd.target()->GetProcess()->GetSymbols(),
-                                   input_location, true, &location);
+  err = ResolveUniqueInputLocation(cmd.target()->GetProcess()->GetSymbols(), input_location, true,
+                                   &location);
   if (err.has_error())
     return err;
 
-  cmd.thread()->JumpTo(
-      location.address(),
-      [thread = cmd.thread()->GetWeakPtr()](const Err& err) {
-        Console* console = Console::get();
-        if (err.has_error()) {
-          console->Output(err);
-        } else if (thread) {
-          // Reset the current stack frame to the top to reflect the location
-          // the user has just jumped to.
-          console->context().SetActiveFrameIdForThread(thread.get(), 0);
+  cmd.thread()->JumpTo(location.address(), [thread = cmd.thread()->GetWeakPtr()](const Err& err) {
+    Console* console = Console::get();
+    if (err.has_error()) {
+      console->Output(err);
+    } else if (thread) {
+      // Reset the current stack frame to the top to reflect the location
+      // the user has just jumped to.
+      console->context().SetActiveFrameIdForThread(thread.get(), 0);
 
-          // Tell the user where they are.
-          console->context().OutputThreadContext(
-              thread.get(), debug_ipc::NotifyException::Type::kNone, {});
-        }
-      });
+      // Tell the user where they are.
+      console->context().OutputThreadContext(thread.get(), debug_ipc::NotifyException::Type::kNone,
+                                             {});
+    }
+  });
 
   return Err();
 }
 
 // locals ----------------------------------------------------------------------
 
-const char kLocalsShortHelp[] =
-    "locals: Print local variables and function args.";
+const char kLocalsShortHelp[] = "locals: Print local variables and function args.";
 const char kLocalsHelp[] =
     R"(locals
 
@@ -488,16 +471,9 @@ Examples
       Prints locals with types.
 )";
 Err DoLocals(ConsoleContext* context, const Command& cmd) {
-  // Don't have AssertStoppedThreadCommand check nouns because we additionally
-  // allow "frame", which we manually validate below.
-  Err err = AssertStoppedThreadCommand(context, cmd, false, "locals");
+  Err err = AssertStoppedThreadWithFrameCommand(context, cmd, "locals");
   if (err.has_error())
     return err;
-  err = cmd.ValidateNouns({Noun::kProcess, Noun::kThread, Noun::kFrame});
-  if (err.has_error())
-    return err;
-  if (!cmd.frame())
-    return Err("There isn't a current frame to read locals from.");
 
   const Location& location = cmd.frame()->GetLocation();
   if (!location.symbol())
@@ -510,13 +486,16 @@ Err DoLocals(ConsoleContext* context, const Command& cmd) {
   // local variables. Using the map allows collecting only the innermost
   // version of a given name, and sorts them as we go.
   std::map<std::string, const Variable*> vars;
-  VisitLocalBlocks(function->GetMostSpecificChild(location.symbol_context(),
-                                                  location.address()),
+  VisitLocalBlocks(function->GetMostSpecificChild(location.symbol_context(), location.address()),
                    [&vars](const CodeBlock* block) {
                      for (const auto& lazy_var : block->variables()) {
                        const Variable* var = lazy_var.Get()->AsVariable();
                        if (!var)
                          continue;  // Symbols are corrupt.
+
+                       if (var->artificial())
+                         continue;  // Skip compiler-generated symbols.
+
                        const std::string& name = var->GetAssignedName();
                        if (vars.find(name) == vars.end())
                          vars[name] = var;  // New one.
@@ -530,6 +509,12 @@ Err DoLocals(ConsoleContext* context, const Command& cmd) {
     const Variable* var = param.Get()->AsVariable();
     if (!var)
       continue;  // Symbols are corrupt.
+
+    // Here we do not exclude artificial parameters. "this" will be marked as
+    // artificial and we want to include it. We could special-case the object
+    // pointer and exclude the rest, but there's not much other use for
+    // compiler-generated parameters for now.
+
     const std::string& name = var->GetAssignedName();
     if (vars.find(name) == vars.end())
       vars[name] = var;  // New one.
@@ -545,11 +530,9 @@ Err DoLocals(ConsoleContext* context, const Command& cmd) {
   if (err.has_error())
     return err;
 
-  auto helper = fxl::MakeRefCounted<FormatValue>(
-      std::make_unique<FormatValueProcessContextImpl>(cmd.target()));
+  auto helper = fxl::MakeRefCounted<FormatValue>();
   for (const auto& pair : vars) {
-    helper->AppendVariable(location.symbol_context(),
-                           cmd.frame()->GetSymbolDataProvider(), pair.second,
+    helper->AppendVariable(location.symbol_context(), cmd.frame()->GetEvalContext(), pair.second,
                            options);
     helper->Append(OutputBuffer("\n"));
   }
@@ -598,8 +581,7 @@ Err DoNext(ConsoleContext* context, const Command& cmd) {
   if (err.has_error())
     return err;
 
-  auto controller =
-      std::make_unique<StepOverThreadController>(StepMode::kSourceLine);
+  auto controller = std::make_unique<StepOverThreadController>(StepMode::kSourceLine);
   cmd.thread()->ContinueWith(std::move(controller), [](const Err& err) {
     if (err.has_error())
       Console::get()->Output(err);
@@ -609,8 +591,7 @@ Err DoNext(ConsoleContext* context, const Command& cmd) {
 
 // nexti -----------------------------------------------------------------------
 
-const char kNextiShortHelp[] =
-    "nexti / ni: Single-step over one machine instruction.";
+const char kNextiShortHelp[] = "nexti / ni: Single-step over one machine instruction.";
 const char kNextiHelp[] =
     R"(nexti / ni
 
@@ -653,8 +634,7 @@ Err DoNexti(ConsoleContext* context, const Command& cmd) {
   if (err.has_error())
     return err;
 
-  auto controller =
-      std::make_unique<StepOverThreadController>(StepMode::kInstruction);
+  auto controller = std::make_unique<StepOverThreadController>(StepMode::kInstruction);
   cmd.thread()->ContinueWith(std::move(controller), [](const Err& err) {
     if (err.has_error())
       Console::get()->Output(err);
@@ -715,8 +695,8 @@ Err PauseThread(ConsoleContext* context, Thread* thread) {
   // Only save the thread (for printing source info) if it's the current
   // thread.
   Target* target = thread->GetProcess()->GetTarget();
-  bool show_source = context->GetActiveTarget() == target &&
-                     context->GetActiveThreadForTarget(target) == thread;
+  bool show_source =
+      context->GetActiveTarget() == target && context->GetActiveThreadForTarget(target) == thread;
 
   thread->Pause([weak_thread = thread->GetWeakPtr(), show_source]() {
     if (!weak_thread)
@@ -725,13 +705,12 @@ Err PauseThread(ConsoleContext* context, Thread* thread) {
     Console* console = Console::get();
     if (show_source) {
       // Output the full source location.
-      console->context().OutputThreadContext(
-          weak_thread.get(), debug_ipc::NotifyException::Type::kNone, {});
+      console->context().OutputThreadContext(weak_thread.get(),
+                                             debug_ipc::NotifyException::Type::kNone, {});
 
     } else {
       // Not current, just output the one-line description.
-      console->Output("Paused " +
-                      DescribeThread(&console->context(), weak_thread.get()));
+      console->Output("Paused " + DescribeThread(&console->context(), weak_thread.get()));
     }
   });
 
@@ -740,8 +719,7 @@ Err PauseThread(ConsoleContext* context, Thread* thread) {
 
 // Source information on this thread will be printed out on completion. The
 // current thread may be null.
-Err PauseTarget(ConsoleContext* context, Target* target,
-                Thread* current_thread) {
+Err PauseTarget(ConsoleContext* context, Target* target, Thread* current_thread) {
   Process* process = target->GetProcess();
   if (!process)
     return Err("Process not running, can't pause.");
@@ -757,13 +735,14 @@ Err PauseTarget(ConsoleContext* context, Target* target,
     if (!weak_process)
       return;
     Console* console = Console::get();
-    console->Output("Paused " + DescribeTarget(&console->context(),
-                                               weak_process->GetTarget()));
+    OutputBuffer out("Paused");
+    out.Append(FormatTarget(&console->context(), weak_process->GetTarget()));
+    console->Output(out);
 
     if (weak_thread) {
       // Thread is current, show current location.
-      console->context().OutputThreadContext(
-          weak_thread.get(), debug_ipc::NotifyException::Type::kNone, {});
+      console->context().OutputThreadContext(weak_thread.get(),
+                                             debug_ipc::NotifyException::Type::kNone, {});
     }
   });
   return Err();
@@ -792,8 +771,8 @@ Err PauseSystem(System* system, Thread* current_thread) {
     for (const Target* target : weak_system->GetTargets()) {
       if (const Process* process = target->GetProcess()) {
         paused_process_count++;
-        out.Append(" " + GetBullet() + " " +
-                   DescribeTarget(&console->context(), target));
+        out.Append(" " + GetBullet() + " ");
+        out.Append(FormatTarget(&console->context(), target));
         out.Append("\n");
       }
     }
@@ -808,8 +787,8 @@ Err PauseSystem(System* system, Thread* current_thread) {
 
     // Follow with the source context of the current thread if there is one.
     if (weak_thread) {
-      console->context().OutputThreadContext(
-          weak_thread.get(), debug_ipc::NotifyException::Type::kNone, {});
+      console->context().OutputThreadContext(weak_thread.get(),
+                                             debug_ipc::NotifyException::Type::kNone, {});
     }
   });
   return Err();
@@ -878,10 +857,9 @@ Examples
 Err DoPrint(ConsoleContext* context, const Command& cmd) {
   // This will work in any context, but the data that's available will vary
   // depending on whether there's a stopped thread, a process, or nothing.
-  fxl::RefPtr<ExprEvalContext> eval_context = GetEvalContextForCommand(cmd);
+  fxl::RefPtr<EvalContext> eval_context = GetEvalContextForCommand(cmd);
 
-  auto formatter = fxl::MakeRefCounted<FormatValue>(
-      std::make_unique<FormatValueProcessContextImpl>(cmd.target()));
+  auto formatter = fxl::MakeRefCounted<FormatValue>();
 
   FormatExprValueOptions options;
   Err err = GetFormatExprValueOptions(cmd, &options);
@@ -891,23 +869,21 @@ Err DoPrint(ConsoleContext* context, const Command& cmd) {
   auto data_provider = eval_context->GetDataProvider();
   return EvalCommandExpression(
       cmd, "print", eval_context, false,
-      [formatter, options, data_provider](const Err& err, ExprValue value) {
+      [formatter, options, eval_context](const Err& err, ExprValue value) {
         if (err.has_error()) {
           Console::get()->Output(err);
         } else {
-          formatter->AppendValue(data_provider, value, options);
+          formatter->AppendValue(eval_context, value, options);
           // Bind the formatter to keep it in scope across this
           // async call.
-          formatter->Complete(
-              [formatter](OutputBuffer out) { Console::get()->Output(out); });
+          formatter->Complete([formatter](OutputBuffer out) { Console::get()->Output(out); });
         }
       });
 }
 
 // step ------------------------------------------------------------------------
 
-const char kStepShortHelp[] =
-    "step / s: Step one source line, going into subroutines.";
+const char kStepShortHelp[] = "step / s: Step one source line, going into subroutines.";
 const char kStepHelp[] =
     R"(step [ <function-fragment> ]
 
@@ -973,8 +949,7 @@ Err DoStep(ConsoleContext* context, const Command& cmd) {
 
   if (cmd.args().empty()) {
     // Step over a single line.
-    auto controller =
-        std::make_unique<StepThreadController>(StepMode::kSourceLine);
+    auto controller = std::make_unique<StepThreadController>(StepMode::kSourceLine);
     controller->set_stop_on_no_symbols(cmd.HasSwitch(kStepIntoUnsymbolized));
     cmd.thread()->ContinueWith(std::move(controller), std::move(completion));
   } else if (cmd.args().size() == 1) {
@@ -985,8 +960,7 @@ Err DoStep(ConsoleContext* context, const Command& cmd) {
           "The --unsymbolized switch is not compatible with a named "
           "subroutine to step\ninto.");
     }
-    auto controller =
-        std::make_unique<StepOverThreadController>(StepMode::kSourceLine);
+    auto controller = std::make_unique<StepOverThreadController>(StepMode::kSourceLine);
     controller->set_subframe_should_stop_callback(
         [substr = cmd.args()[0]](const Frame* frame) -> bool {
           const Symbol* symbol = frame->GetLocation().symbol().Get();
@@ -1004,8 +978,7 @@ Err DoStep(ConsoleContext* context, const Command& cmd) {
 
 // stepi -----------------------------------------------------------------------
 
-const char kStepiShortHelp[] =
-    "stepi / si: Single-step a thread one machine instruction.";
+const char kStepiShortHelp[] = "stepi / si: Single-step a thread one machine instruction.";
 const char kStepiHelp[] =
     R"(stepi / si
 
@@ -1050,20 +1023,20 @@ Err DoStepi(ConsoleContext* context, const Command& cmd) {
 
 using debug_ipc::RegisterCategory;
 
-const char kRegsShortHelp[] =
-    "regs / rg: Show the current registers for a thread.";
+const char kRegsShortHelp[] = "regs / rg: Show the current registers for a thread.";
 const char kRegsHelp[] =
     R"(regs [(--category|-c)=<category>] [(--extended|-e)] [<regexp>]
 
   Alias: "rg"
 
-  Shows the current registers for a thread. The thread must be stopped.
+  Shows the current registers for a stack frame. The thread must be stopped.
   By default the general purpose registers will be shown, but more can be
   configures through switches.
 
-  NOTE: The values are displayed in the endianess of the target architecture.
-        The interpretation of which bits are the MSB will vary across different
-        endianess.
+  When the frame is not the topmost stack frame, the regsiters shown will be
+  only those saved on the stack. The values will reflect the value of the
+  registers at the time that stack frame was active. To get the current CPU
+  registers, run "regs" on frame 0.
 
 Arguments
 
@@ -1096,21 +1069,47 @@ Examples
   regs
   thread 4 regs --category=vector
   process 2 thread 1 regs -c all v*
+  frame 2 regs
 )";
 
 // Switches
 constexpr int kRegsCategoriesSwitch = 1;
 constexpr int kRegsExtendedSwitch = 2;
 
+// Converts the saved registers on a given stack frame to the right format for
+// printing.
+RegisterSet FrameRegistersToSet(const Frame* frame) {
+  RegisterSet result_set;
+  result_set.set_arch(frame->session()->arch());
+  auto& general = result_set.category_map()[debug_ipc::RegisterCategory::Type::kGeneral];
+
+  for (const Register& reg : frame->GetGeneralRegisters())
+    general.push_back(reg);
+
+  std::sort(general.begin(), general.end(), [](auto& a, auto& b) {
+    return static_cast<uint32_t>(a.id()) < static_cast<uint32_t>(b.id());
+  });
+  return result_set;
+}
+
 void OnRegsComplete(const Err& cmd_err, const RegisterSet& register_set,
-                    FormatRegisterOptions options) {
+                    const FormatRegisterOptions& options, bool show_non_topmost_warning) {
   Console* console = Console::get();
   if (cmd_err.has_error()) {
     console->Output(cmd_err);
     return;
   }
 
-  options.arch = register_set.arch();
+  // Always output warning first if needed. If the filtering fails it could be
+  // because the register wasn't saved.
+  if (show_non_topmost_warning) {
+    OutputBuffer warning_out;
+    warning_out.Append(Syntax::kWarning, GetExclamation());
+    warning_out.Append(
+        " Stack frame is not topmost. Only saved registers will be "
+        "available.\n");
+    console->Output(warning_out);
+  }
 
   FilteredRegisterSet filtered_set;
   Err err = FilterRegisters(options, register_set, &filtered_set);
@@ -1129,11 +1128,11 @@ void OnRegsComplete(const Err& cmd_err, const RegisterSet& register_set,
 }
 
 Err DoRegs(ConsoleContext* context, const Command& cmd) {
-  Err err = AssertStoppedThreadCommand(context, cmd, true, "regs");
+  Err err = AssertStoppedThreadWithFrameCommand(context, cmd, "regs");
   if (err.has_error())
     return err;
 
-  // When empty, we print all the registers.
+  // When empty, print all the registers.
   std::string regex_filter;
   if (!cmd.args().empty()) {
     // We expect only one name.
@@ -1143,10 +1142,12 @@ Err DoRegs(ConsoleContext* context, const Command& cmd) {
     regex_filter = cmd.args().front();
   }
 
-  // General purpose are the default.
-  std::vector<RegisterCategory::Type> cats_to_show = {
-      RegisterCategory::Type::kGeneral};
-  if (cmd.HasSwitch(kRegsCategoriesSwitch)) {
+  bool top_stack_frame = (cmd.frame() == cmd.thread()->GetStack()[0]);
+
+  // General purpose are the default. Other categories can only be shown for
+  // the top stack frame since they require reading from the current CPU state.
+  std::vector<RegisterCategory::Type> cats_to_show = {RegisterCategory::Type::kGeneral};
+  if (top_stack_frame && cmd.HasSwitch(kRegsCategoriesSwitch)) {
     auto option = cmd.GetSwitchValue(kRegsCategoriesSwitch);
     if (option == "all") {
       cats_to_show = {
@@ -1168,26 +1169,32 @@ Err DoRegs(ConsoleContext* context, const Command& cmd) {
     }
   }
 
-  // Parse the switches
+  // Formatting options.
   FormatRegisterOptions options;
+  options.arch = cmd.thread()->session()->arch();
   options.categories = cats_to_show;
   options.extended = cmd.HasSwitch(kRegsExtendedSwitch);
   options.filter_regexp = std::move(regex_filter);
 
-  // We pass the given register name to the callback
-  auto regs_cb = [options = std::move(options)](const Err& err,
-                                                const RegisterSet& registers) {
-    OnRegsComplete(err, registers, std::move(options));
-  };
-
-  cmd.thread()->ReadRegisters(std::move(cats_to_show), regs_cb);
+  if (top_stack_frame) {
+    // Always request the current registers even if we're only printing the
+    // general ones (which will be cached on the top stack frame). The thread
+    // state could have changed out from under us.
+    cmd.thread()->ReadRegisters(
+        std::move(cats_to_show),
+        [options = std::move(options)](const Err& err, const RegisterSet& registers) {
+          OnRegsComplete(err, registers, std::move(options), false);
+        });
+  } else {
+    // Non-topmost, read the available registers directly off the stack frame.
+    OnRegsComplete(Err(), FrameRegistersToSet(cmd.frame()), options, true);
+  }
   return Err();
 }
 
 // until -----------------------------------------------------------------------
 
-const char kUntilShortHelp[] =
-    "until / u: Runs a thread until a location is reached.";
+const char kUntilShortHelp[] = "until / u: Runs a thread until a location is reached.";
 const char kUntilHelp[] =
     R"(until <location>
 
@@ -1261,8 +1268,7 @@ Err DoUntil(ConsoleContext* context, const Command& cmd) {
   if (cmd.args().empty()) {
     // No args means use the current location.
     if (!cmd.frame()) {
-      return Err(ErrType::kInput,
-                 "There isn't a current frame to take the location from.");
+      return Err(ErrType::kInput, "There isn't a current frame to take the location from.");
     }
     location = InputLocation(cmd.frame()->GetAddress());
   } else if (cmd.args().size() == 1) {
@@ -1282,8 +1288,7 @@ Err DoUntil(ConsoleContext* context, const Command& cmd) {
   };
 
   // Dispatch the request.
-  if (cmd.HasNoun(Noun::kProcess) && !cmd.HasNoun(Noun::kThread) &&
-      !cmd.HasNoun(Noun::kFrame)) {
+  if (cmd.HasNoun(Noun::kProcess) && !cmd.HasNoun(Noun::kThread) && !cmd.HasNoun(Noun::kFrame)) {
     // Process-wide ("process until ...").
     err = AssertRunningTarget(context, "until", cmd.target());
     if (err.has_error())
@@ -1291,11 +1296,7 @@ Err DoUntil(ConsoleContext* context, const Command& cmd) {
     cmd.target()->GetProcess()->ContinueUntil(location, callback);
   } else {
     // Thread-specific.
-    err = cmd.ValidateNouns({Noun::kProcess, Noun::kThread, Noun::kFrame});
-    if (err.has_error())
-      return err;
-
-    err = AssertStoppedThreadCommand(context, cmd, false, "until");
+    err = AssertStoppedThreadWithFrameCommand(context, cmd, "until");
     if (err.has_error())
       return err;
 
@@ -1322,71 +1323,60 @@ void AppendThreadVerbs(std::map<Verb, VerbRecord>* verbs) {
       SwitchRecord(kForceNumberHex, false, "", 'x'),
       SwitchRecord(kMaxArraySize, true, "max-array")};
 
-  VerbRecord backtrace(&DoBacktrace, {"backtrace", "bt"}, kBacktraceShortHelp,
-                       kBacktraceHelp, CommandGroup::kQuery);
+  VerbRecord backtrace(&DoBacktrace, {"backtrace", "bt"}, kBacktraceShortHelp, kBacktraceHelp,
+                       CommandGroup::kQuery);
   backtrace.switches = {force_types};
   (*verbs)[Verb::kBacktrace] = std::move(backtrace);
 
   (*verbs)[Verb::kContinue] =
-      VerbRecord(&DoContinue, {"continue", "cont", "c"}, kContinueShortHelp,
-                 kContinueHelp, CommandGroup::kStep, SourceAffinity::kSource);
+      VerbRecord(&DoContinue, {"continue", "cont", "c"}, kContinueShortHelp, kContinueHelp,
+                 CommandGroup::kStep, SourceAffinity::kSource);
   (*verbs)[Verb::kFinish] =
-      VerbRecord(&DoFinish, {"finish", "fi"}, kFinishShortHelp, kFinishHelp,
-                 CommandGroup::kStep);
-  (*verbs)[Verb::kJump] =
-      VerbRecord(&DoJump, &CompleteInputLocation, {"jump", "jmp"},
-                 kJumpShortHelp, kJumpHelp, CommandGroup::kStep);
+      VerbRecord(&DoFinish, {"finish", "fi"}, kFinishShortHelp, kFinishHelp, CommandGroup::kStep);
+  (*verbs)[Verb::kJump] = VerbRecord(&DoJump, &CompleteInputLocation, {"jump", "jmp"},
+                                     kJumpShortHelp, kJumpHelp, CommandGroup::kStep);
 
   // locals
-  VerbRecord locals(&DoLocals, {"locals"}, kLocalsShortHelp, kLocalsHelp,
-                    CommandGroup::kQuery);
+  VerbRecord locals(&DoLocals, {"locals"}, kLocalsShortHelp, kLocalsHelp, CommandGroup::kQuery);
   locals.switches = format_switches;
   (*verbs)[Verb::kLocals] = std::move(locals);
 
-  (*verbs)[Verb::kNext] =
-      VerbRecord(&DoNext, {"next", "n"}, kNextShortHelp, kNextHelp,
-                 CommandGroup::kStep, SourceAffinity::kSource);
-  (*verbs)[Verb::kNexti] =
-      VerbRecord(&DoNexti, {"nexti", "ni"}, kNextiShortHelp, kNextiHelp,
-                 CommandGroup::kAssembly, SourceAffinity::kAssembly);
+  (*verbs)[Verb::kNext] = VerbRecord(&DoNext, {"next", "n"}, kNextShortHelp, kNextHelp,
+                                     CommandGroup::kStep, SourceAffinity::kSource);
+  (*verbs)[Verb::kNexti] = VerbRecord(&DoNexti, {"nexti", "ni"}, kNextiShortHelp, kNextiHelp,
+                                      CommandGroup::kAssembly, SourceAffinity::kAssembly);
   (*verbs)[Verb::kPause] =
-      VerbRecord(&DoPause, {"pause", "pa"}, kPauseShortHelp, kPauseHelp,
-                 CommandGroup::kProcess);
+      VerbRecord(&DoPause, {"pause", "pa"}, kPauseShortHelp, kPauseHelp, CommandGroup::kProcess);
 
   // print
-  VerbRecord print(&DoPrint, {"print", "p"}, kPrintShortHelp, kPrintHelp,
-                   CommandGroup::kQuery);
+  VerbRecord print(&DoPrint, {"print", "p"}, kPrintShortHelp, kPrintHelp, CommandGroup::kQuery);
   print.switches = format_switches;
   (*verbs)[Verb::kPrint] = std::move(print);
 
   // regs
   SwitchRecord regs_categories(kRegsCategoriesSwitch, true, "category", 'c');
   SwitchRecord regs_extended(kRegsExtendedSwitch, false, "extended", 'e');
-  VerbRecord regs(&DoRegs, {"regs", "rg"}, kRegsShortHelp, kRegsHelp,
-                  CommandGroup::kAssembly);
+  VerbRecord regs(&DoRegs, {"regs", "rg"}, kRegsShortHelp, kRegsHelp, CommandGroup::kAssembly);
   regs.switches.push_back(std::move(regs_categories));
   regs.switches.push_back(std::move(regs_extended));
   (*verbs)[Verb::kRegs] = std::move(regs);
 
   // step
   SwitchRecord step_force(kStepIntoUnsymbolized, false, "unsymbolized", 'u');
-  VerbRecord step(&DoStep, {"step", "s"}, kStepShortHelp, kStepHelp,
-                  CommandGroup::kStep, SourceAffinity::kSource);
+  VerbRecord step(&DoStep, {"step", "s"}, kStepShortHelp, kStepHelp, CommandGroup::kStep,
+                  SourceAffinity::kSource);
   step.switches.push_back(step_force);
   (*verbs)[Verb::kStep] = std::move(step);
 
-  (*verbs)[Verb::kStepi] =
-      VerbRecord(&DoStepi, {"stepi", "si"}, kStepiShortHelp, kStepiHelp,
-                 CommandGroup::kAssembly, SourceAffinity::kAssembly);
-  (*verbs)[Verb::kUntil] =
-      VerbRecord(&DoUntil, &CompleteInputLocation, {"until", "u"},
-                 kUntilShortHelp, kUntilHelp, CommandGroup::kStep);
+  (*verbs)[Verb::kStepi] = VerbRecord(&DoStepi, {"stepi", "si"}, kStepiShortHelp, kStepiHelp,
+                                      CommandGroup::kAssembly, SourceAffinity::kAssembly);
+  (*verbs)[Verb::kUntil] = VerbRecord(&DoUntil, &CompleteInputLocation, {"until", "u"},
+                                      kUntilShortHelp, kUntilHelp, CommandGroup::kStep);
 
   // Stack navigation
-  (*verbs)[Verb::kDown] = VerbRecord(&DoDown, {"down"}, kDownShortHelp,
-                                     kDownHelp, CommandGroup::kGeneral);
-  (*verbs)[Verb::kUp] =
-      VerbRecord(&DoUp, {"up"}, kUpShortHelp, kUpHelp, CommandGroup::kGeneral);
+  (*verbs)[Verb::kDown] =
+      VerbRecord(&DoDown, {"down"}, kDownShortHelp, kDownHelp, CommandGroup::kGeneral);
+  (*verbs)[Verb::kUp] = VerbRecord(&DoUp, {"up"}, kUpShortHelp, kUpHelp, CommandGroup::kGeneral);
 }
 
 }  // namespace zxdb

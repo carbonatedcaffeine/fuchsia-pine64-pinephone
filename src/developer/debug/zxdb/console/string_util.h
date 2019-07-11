@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_STRING_UTIL_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_STRING_UTIL_H_
 
 #include "src/lib/fxl/strings/string_view.h"
 #include "src/lib/fxl/strings/utf_codecs.h"
@@ -21,6 +22,10 @@ std::string GetDisabledBreakpointMarker();
 // Returns a Unicode bullet in UTF-8.
 std::string GetBullet();
 
+// Returns the exclamation-point-in-triangle emoji. This includes a space
+// after it since this character is a wide emoji.
+std::string GetExclamation();
+
 // Returns the number of Unicode characters in the given UTF-8 string. This
 // attempts to predict how many spaces the given string will take up when
 // printed to a Unicode-aware text console.
@@ -32,3 +37,5 @@ std::string GetBullet();
 size_t UnicodeCharWidth(const std::string& str);
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_STRING_UTIL_H_

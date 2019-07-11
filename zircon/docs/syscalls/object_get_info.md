@@ -10,7 +10,7 @@ Query information about an object.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_status_t zx_object_get_info(zx_handle_t handle,
@@ -96,6 +96,7 @@ typedef struct zx_info_handle_count {
     uint32_t handle_count;
 } zx_info_handle_count_t;
 ```
+
 The *handle_count* should only be used as a debugging aid. Do not use it
 to check that an untrusted processes cannot modify a kernel object. Due to
 asynchronous nature of the system scheduler, there might be a time window
@@ -540,7 +541,7 @@ Additional errors:
 The `zx_info_vmos_t` array is list of all VMOs pointed to by the target process.
 Some VMOs are mapped, some are pointed to by handles, and some are both.
 
-**Note**: The same VMO may appear multiple times due to multiple
+Note: The same VMO may appear multiple times due to multiple
 mappings/handles. Also, because VMOs can change as the target process runs,
 the same VMO may have different values each time it appears. It is the
 caller's job to resolve any duplicates.

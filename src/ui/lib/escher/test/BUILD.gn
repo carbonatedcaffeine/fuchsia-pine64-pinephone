@@ -14,16 +14,19 @@ if (is_mac) {
       "no_op_mac_unittest.cc",
     ]
     deps = [
-      "//third_party/googletest:gtest_main",
+      "//src/lib/fxl/test:gtest_main",
     ]
   }
 } else {
   test("escher_unittests") {
     sources = [
+      "debug/debug_font_unittest.cc",
+      "debug/paper_renderer_test.cc",
       "fake_gpu_allocator.cc",
+      "fixtures/readback_test.cc",
+      "fixtures/readback_test.h",
       "fs/hack_filesystem_unittest.cc",
       "geometry/bounding_box_unittest.cc",
-      "geometry/clip_planes_unittest.cc",
       "geometry/indexed_triangle_mesh_clip_unittest.cc",
       "geometry/plane_unittest.cc",
       "gpu_allocator_unittest.cc",
@@ -160,7 +163,7 @@ source_set("gtest_escher") {
 group("force_waterfall_to_build_on_host") {
   if (is_linux) {
     deps = [
-      "//garnet/examples/escher/waterfall($host_toolchain)",
+      "//src/ui/examples/escher/waterfall($host_toolchain)",
     ]
   }
 }

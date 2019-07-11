@@ -1,0 +1,17 @@
+{
+    "program": {
+        "binary": "bin/app"
+    },
+    "sandbox": {
+        "features": [],
+        "services": [
+            "fuchsia.devicesettings.DeviceSettingsManager",
+            "fuchsia.sys.Loader",
+            "fuchsia.logger.LogSink",
+            "fuchsia.modular.EntityResolver",
+            "fuchsia.modular.PuppetMaster",
+            "fuchsia.net.oldhttp.HttpService",
+            "fuchsia.sys.Launcher"
+        ]
+    }
+}

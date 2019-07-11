@@ -4,13 +4,15 @@
 
 driver("bma253") {
   sources = [
-    "bma253.cpp",
+    "bma253.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.clock",
     "$zx/system/banjo/ddk.protocol.gpio",
     "$zx/system/banjo/ddk.protocol.hidbus",
     "$zx/system/banjo/ddk.protocol.i2c",
+    "$zx/system/dev/lib/device-protocol-i2c-channel",
+    "$zx/system/dev/lib/device-protocol-pdev",
     "$zx/system/dev/lib/mmio",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",
@@ -22,15 +24,20 @@ driver("bma253") {
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",
   ]
+
+  # TODO(ZX-2863): This driver violates the allowed shlib deps policy.
+  deprecated_inhibit_driver_shlib_allowlist = true
 }
 
 test("bma253-test") {
   output_name = "bma253-test"
   sources = [
-    "bma253-test.cpp",
-    "bma253.cpp",
+    "bma253-test.cc",
+    "bma253.cc",
   ]
   deps = [
+    "$zx/system/dev/lib/device-protocol-i2c-channel",
+    "$zx/system/dev/lib/device-protocol-pdev",
     "$zx/system/dev/lib/mmio",
     "$zx/system/dev/lib/mock-hidbus-ifc",
     "$zx/system/dev/lib/mock-i2c",

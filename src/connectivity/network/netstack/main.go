@@ -25,6 +25,7 @@ import (
 	"fidl/fuchsia/net"
 	"fidl/fuchsia/net/stack"
 	"fidl/fuchsia/netstack"
+	"fidl/fuchsia/posix/socket"
 
 	"github.com/google/netstack/tcpip"
 	"github.com/google/netstack/tcpip/network/arp"
@@ -37,8 +38,11 @@ import (
 )
 
 func Main() {
+	logLevel := syslog.InfoLevel
+
 	flags := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	sniff := flags.Bool("sniff", false, "Enable the sniffer")
+	flags.Var(&logLevel, "verbosity", "Set the logging verbosity")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		panic(err)
 	}
@@ -46,9 +50,9 @@ func Main() {
 	ctx := context.CreateFromStartupInfo()
 
 	l, err := syslog.NewLogger(syslog.LogInitOptions{
-		LogLevel:                      syslog.DebugLevel,
+		LogLevel:                      logLevel,
 		MinSeverityForFileAndLineInfo: syslog.InfoLevel,
-		Tags: []string{"netstack"},
+		Tags:                          []string{"netstack"},
 	})
 	if err != nil {
 		panic(err)
@@ -163,11 +167,26 @@ func Main() {
 		return err
 	})
 
-	var socketProvider net.SocketProviderService
-	ctx.OutgoingService.AddService(net.SocketProviderName, func(c zx.Channel) error {
-		_, err := socketProvider.Add(&socketProviderImpl{ns: ns}, c, nil)
+	var nameLookupService net.NameLookupService
+	nameLookupImpl := nameLookupImpl{dnsClient: ns.dnsClient}
+	ctx.OutgoingService.AddService(net.NameLookupName, func(c zx.Channel) error {
+		_, err := nameLookupService.Add(&nameLookupImpl, c, nil)
 		return err
 	})
+
+	netSocketProvider := &socketProviderImpl{ns: ns}
+	var netSocketProviderService net.SocketProviderService
+	ctx.OutgoingService.AddService(net.SocketProviderName, func(c zx.Channel) error {
+		_, err := netSocketProviderService.Add(netSocketProvider, c, nil)
+		return err
+	})
+	posixSocketProvider := &providerImpl{socketProviderImpl: netSocketProvider}
+	var posixSocketProviderService socket.ProviderService
+	ctx.OutgoingService.AddService(socket.ProviderName, func(c zx.Channel) error {
+		_, err := posixSocketProviderService.Add(posixSocketProvider, c, nil)
+		return err
+	})
+
 	if err := connectivity.AddOutgoingService(ctx); err != nil {
 		syslog.Fatalf("%v", err)
 	}

@@ -4,19 +4,22 @@
 
 //! The Ethernet protocol.
 
+use std::collections::{HashMap, VecDeque};
+
 use log::debug;
 use packet::{Buf, MtuError, ParseBuffer, Serializer};
 use specialize_ip_macro::specialize_ip_address;
 use zerocopy::{AsBytes, FromBytes, Unaligned};
 
-use crate::device::arp::{ArpDevice, ArpHardwareType, ArpState};
+use crate::device::arp::{self, ArpDevice, ArpHardwareType, ArpState};
 use crate::device::{ndp, ndp::NdpState};
 use crate::device::{DeviceId, FrameDestination};
 use crate::ip::{AddrSubnet, Ip, IpAddr, IpAddress, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr};
+use crate::types::{BroadcastAddress, MulticastAddr, MulticastAddress, UnicastAddress};
 use crate::wire::arp::peek_arp_types;
 use crate::wire::ethernet::{EthernetFrame, EthernetFrameBuilder};
-use crate::{Context, EventDispatcher};
-use std::collections::{HashMap, VecDeque};
+use crate::{Context, EventDispatcher, StackState};
+use std::ops::Deref;
 
 /// A media access control (MAC) address.
 #[derive(Copy, Clone, Eq, PartialEq, Debug, FromBytes, AsBytes, Unaligned)]
@@ -71,31 +74,26 @@ impl Mac {
         ipv6_addr[8..16].copy_from_slice(&self.to_eui64(eui_magic));
         Ipv6Addr::new(ipv6_addr)
     }
+}
 
-    /// Is this a unicast MAC address?
-    ///
-    /// Returns true if the least significant bit of the first byte of the
-    /// address is 0.
-    pub(crate) fn is_unicast(self) -> bool {
+impl UnicastAddress for Mac {
+    fn is_unicast(&self) -> bool {
         // https://en.wikipedia.org/wiki/MAC_address#Unicast_vs._multicast
         self.0[0] & 1 == 0
     }
+}
 
-    /// Is this a multicast MAC address?
-    ///
-    /// Returns true if the least significant bit of the first byte of the
-    /// address is 1.
-    pub(crate) fn is_multicast(self) -> bool {
+impl MulticastAddress for Mac {
+    fn is_multicast(&self) -> bool {
         // https://en.wikipedia.org/wiki/MAC_address#Unicast_vs._multicast
         self.0[0] & 1 == 1
     }
+}
 
-    /// Is this the broadcast MAC address?
-    ///
-    /// Returns true if this is the broadcast MAC address, FF:FF:FF:FF:FF:FF.
-    pub(crate) fn is_broadcast(self) -> bool {
+impl BroadcastAddress for Mac {
+    fn is_broadcast(&self) -> bool {
         // https://en.wikipedia.org/wiki/MAC_address#Unicast_vs._multicast
-        self == Mac::BROADCAST
+        *self == Mac::BROADCAST
     }
 }
 
@@ -220,30 +218,26 @@ impl EthernetIpExt for Ipv6 {
 #[specialize_ip_address]
 pub(crate) fn send_ip_frame<D: EventDispatcher, A: IpAddress, S: Serializer>(
     ctx: &mut Context<D>,
-    device_id: u64,
+    device_id: usize,
     local_addr: A,
     body: S,
 ) -> Result<(), (MtuError<S::InnerError>, S)> {
-    let state = get_device_state(ctx, device_id);
+    let state = get_device_state_mut(ctx.state_mut(), device_id);
     let (local_mac, mtu) = (state.mac, state.mtu);
 
-    #[ipv4addr]
-    let dst_mac = {
-        if let Some(dst_mac) = crate::device::arp::lookup::<_, _, EthernetArpDevice>(
-            ctx, device_id, local_mac, local_addr,
-        ) {
-            Ok(dst_mac)
-        } else {
-            Err(IpAddr::V4(local_addr))
-        }
-    };
-
-    #[ipv6addr]
-    let dst_mac = {
-        if let Some(dst_mac) = ndp::lookup::<_, EthernetNdpDevice>(ctx, device_id, local_addr) {
-            Ok(dst_mac)
-        } else {
-            Err(IpAddr::V6(local_addr))
+    let dst_mac = match MulticastAddr::new(local_addr) {
+        Some(multicast) => Ok(Mac::from(&multicast)),
+        None => {
+            #[ipv4addr]
+            {
+                arp::lookup::<_, _, EthernetArpDevice>(ctx, device_id, local_mac, local_addr)
+                    .ok_or(IpAddr::V4(local_addr))
+            }
+            #[ipv6addr]
+            {
+                ndp::lookup::<_, EthernetNdpDevice>(ctx, device_id, local_addr)
+                    .ok_or(IpAddr::V6(local_addr))
+            }
         }
     };
 
@@ -254,10 +248,10 @@ pub(crate) fn send_ip_frame<D: EventDispatcher, A: IpAddress, S: Serializer>(
                 .encapsulate(EthernetFrameBuilder::new(local_mac, dst_mac, A::Version::ETHER_TYPE))
                 .serialize_outer()
                 .map_err(|(err, ser)| (err, ser.into_serializer().into_serializer()))?;
-            ctx.dispatcher().send_frame(DeviceId::new_ethernet(device_id), buffer.as_ref());
+            ctx.dispatcher_mut().send_frame(DeviceId::new_ethernet(device_id), buffer.as_ref());
         }
         Err(local_addr) => {
-            let state = get_device_state(ctx, device_id);
+            let state = get_device_state_mut(ctx.state_mut(), device_id);
             let dropped = state.add_pending_frame(
                 local_addr,
                 body.with_mtu(mtu as usize)
@@ -277,10 +271,45 @@ pub(crate) fn send_ip_frame<D: EventDispatcher, A: IpAddress, S: Serializer>(
     Ok(())
 }
 
+impl<'a, A: IpAddress> From<&'a MulticastAddr<A>> for Mac {
+    fn from(addr: &'a MulticastAddr<A>) -> Mac {
+        #[specialize_ip_address]
+        fn map_multicast_address<A: IpAddress>(a: &A) -> Mac {
+            // Please refer to RFC7042 for details. especially,
+            // https://tools.ietf.org/html/rfc7042#section-2.1.1
+            // for mapping IPv4 multicast addresses, and
+            // https://tools.ietf.org/html/rfc7042#section-2.3.1
+            // for mapping IPv6 multicast addresses
+            let ip_bytes = a.bytes();
+            let mut mac_bytes = [0; 6];
+            #[ipv4addr]
+            {
+                mac_bytes[0] = 0x01;
+                mac_bytes[1] = 0x00;
+                mac_bytes[2] = 0x5e;
+                mac_bytes[3] = ip_bytes[1] & 0x7f;
+                mac_bytes[4] = ip_bytes[2];
+                mac_bytes[5] = ip_bytes[3];
+            }
+            #[ipv6addr]
+            {
+                mac_bytes[0] = 0x33;
+                mac_bytes[1] = 0x33;
+                mac_bytes[2] = ip_bytes[12];
+                mac_bytes[3] = ip_bytes[13];
+                mac_bytes[4] = ip_bytes[14];
+                mac_bytes[5] = ip_bytes[15];
+            }
+            Mac::new(mac_bytes)
+        }
+        map_multicast_address(addr.deref())
+    }
+}
+
 /// Receive an Ethernet frame from the network.
 pub(crate) fn receive_frame<D: EventDispatcher>(
     ctx: &mut Context<D>,
-    device_id: u64,
+    device_id: usize,
     bytes: &mut [u8],
 ) {
     let mut buffer = Buf::new(bytes, ..);
@@ -293,7 +322,7 @@ pub(crate) fn receive_frame<D: EventDispatcher>(
 
     let (src, dst) = (frame.src_mac(), frame.dst_mac());
     let device = DeviceId::new_ethernet(device_id);
-    let frame_dst = if dst == get_device_state(ctx, device_id).mac {
+    let frame_dst = if dst == get_device_state(ctx.state(), device_id).mac {
         FrameDestination::Unicast
     } else if dst.is_broadcast() {
         FrameDestination::Broadcast
@@ -332,12 +361,12 @@ pub(crate) fn receive_frame<D: EventDispatcher>(
 #[specialize_ip_address]
 pub(crate) fn get_ip_addr_subnet<D: EventDispatcher, A: IpAddress>(
     ctx: &mut Context<D>,
-    device_id: u64,
+    device_id: usize,
 ) -> Option<AddrSubnet<A>> {
     #[ipv4addr]
-    return get_device_state(ctx, device_id).ipv4_addr_sub;
+    return get_device_state(ctx.state(), device_id).ipv4_addr_sub;
     #[ipv6addr]
-    return get_device_state(ctx, device_id).ipv6_addr_sub;
+    return get_device_state(ctx.state(), device_id).ipv6_addr_sub;
 }
 
 /// Get the IPv6 link-local address associated with this device.
@@ -346,64 +375,81 @@ pub(crate) fn get_ip_addr_subnet<D: EventDispatcher, A: IpAddress>(
 /// address.
 pub(crate) fn get_ipv6_link_local_addr<D: EventDispatcher>(
     ctx: &mut Context<D>,
-    device_id: u64,
+    device_id: usize,
 ) -> Ipv6Addr {
     // TODO(brunodalbo) the link local address is subject to the same collision
     //  verifications as prefix global addresses, we should keep a state machine
     //  about that check and cache the adopted address. For now, we just compose
     //  the link-local from the ethernet MAC.
-    get_device_state(ctx, device_id).mac.to_ipv6_link_local(None)
+    get_device_state(ctx.state(), device_id).mac.to_ipv6_link_local(None)
 }
 
 /// Set the IP address and subnet associated with this device.
 #[specialize_ip_address]
 pub(crate) fn set_ip_addr_subnet<D: EventDispatcher, A: IpAddress>(
     ctx: &mut Context<D>,
-    device_id: u64,
+    device_id: usize,
     addr_sub: AddrSubnet<A>,
 ) {
     #[ipv4addr]
-    get_device_state(ctx, device_id).ipv4_addr_sub = Some(addr_sub);
+    get_device_state_mut(ctx.state_mut(), device_id).ipv4_addr_sub = Some(addr_sub);
     #[ipv6addr]
-    get_device_state(ctx, device_id).ipv6_addr_sub = Some(addr_sub);
+    get_device_state_mut(ctx.state_mut(), device_id).ipv6_addr_sub = Some(addr_sub);
 }
 
 /// Get the MTU associated with this device.
-pub(crate) fn get_mtu<D: EventDispatcher>(ctx: &mut Context<D>, device_id: u64) -> u32 {
-    get_device_state(ctx, device_id).mtu
+pub(crate) fn get_mtu<D: EventDispatcher>(ctx: &mut Context<D>, device_id: usize) -> u32 {
+    get_device_state(ctx.state(), device_id).mtu
 }
 
-/// Insert an entry into this device's ARP table.
-pub(crate) fn insert_arp_table_entry<D: EventDispatcher>(
+/// Insert a static entry into this device's ARP table.
+///
+/// This will cause any conflicting dynamic entry to be removed, and
+/// any future conflicting gratuitous ARPs to be ignored.
+pub(crate) fn insert_static_arp_table_entry<D: EventDispatcher>(
     ctx: &mut Context<D>,
-    device_id: u64,
+    device_id: usize,
     addr: Ipv4Addr,
     mac: Mac,
 ) {
-    crate::device::arp::insert::<D, Ipv4Addr, EthernetArpDevice>(ctx, device_id, addr, mac);
+    crate::device::arp::insert_static::<D, Ipv4Addr, EthernetArpDevice>(ctx, device_id, addr, mac);
 }
 
 /// Insert an entry into this device's NDP table.
 pub(crate) fn insert_ndp_table_entry<D: EventDispatcher>(
     ctx: &mut Context<D>,
-    device_id: u64,
+    device_id: usize,
     addr: Ipv6Addr,
     mac: Mac,
 ) {
     ndp::insert_neighbor::<D, EthernetNdpDevice>(ctx, device_id, addr, mac)
 }
 
-fn get_device_state<D: EventDispatcher>(
-    ctx: &mut Context<D>,
-    device_id: u64,
+fn get_device_state_mut<D: EventDispatcher>(
+    state: &mut StackState<D>,
+    device_id: usize,
 ) -> &mut EthernetDeviceState {
     // TODO(joshlf): Sometimes we want lookups to be infallible (if we know that
     // the device exists), but sometimes we want to report an error to the user.
     // Right now, this is a DoS vector.
-    ctx.state_mut()
+    state
         .device
         .ethernet
-        .get_mut(&device_id)
+        .get_mut(device_id)
+        .unwrap_or_else(|| panic!("no such Ethernet device: {}", device_id))
+}
+
+fn get_device_state<D: EventDispatcher>(
+    state: &StackState<D>,
+    device_id: usize,
+) -> &EthernetDeviceState {
+    // TODO(joshlf): Sometimes we want lookups to be infallible (if we know that
+    // the device exists), but sometimes we want to report an error to the user.
+    // Right now, this is a DoS vector.
+    state
+        .device
+        .ethernet
+        .get(device_id)
         .unwrap_or_else(|| panic!("no such Ethernet device: {}", device_id))
 }
 
@@ -416,40 +462,40 @@ impl ArpDevice<Ipv4Addr> for EthernetArpDevice {
 
     fn send_arp_frame<D: EventDispatcher, S: Serializer>(
         ctx: &mut Context<D>,
-        device_id: u64,
+        device_id: usize,
         dst: Self::HardwareAddr,
         body: S,
     ) -> Result<(), MtuError<S::InnerError>> {
-        let src = get_device_state(ctx, device_id).mac;
+        let src = get_device_state(ctx.state_mut(), device_id).mac;
         let buffer = body
             .encapsulate(EthernetFrameBuilder::new(src, dst, EtherType::Arp))
             .serialize_outer()
             .map_err(|(err, _)| err)?;
-        ctx.dispatcher().send_frame(DeviceId::new_ethernet(device_id), buffer.as_ref());
+        ctx.dispatcher_mut().send_frame(DeviceId::new_ethernet(device_id), buffer.as_ref());
         Ok(())
     }
 
     fn get_arp_state<D: EventDispatcher>(
-        ctx: &mut Context<D>,
-        device_id: u64,
+        state: &mut StackState<D>,
+        device_id: usize,
     ) -> &mut ArpState<Ipv4Addr, Self> {
-        &mut get_device_state(ctx, device_id).ipv4_arp
+        &mut get_device_state_mut(state, device_id).ipv4_arp
     }
 
     fn get_protocol_addr<D: EventDispatcher>(
-        ctx: &mut Context<D>,
-        device_id: u64,
+        state: &StackState<D>,
+        device_id: usize,
     ) -> Option<Ipv4Addr> {
-        get_device_state(ctx, device_id).ipv4_addr_sub.map(AddrSubnet::into_addr)
+        get_device_state(state, device_id).ipv4_addr_sub.map(AddrSubnet::into_addr)
     }
 
-    fn get_hardware_addr<D: EventDispatcher>(ctx: &mut Context<D>, device_id: u64) -> Mac {
-        get_device_state(ctx, device_id).mac
+    fn get_hardware_addr<D: EventDispatcher>(state: &StackState<D>, device_id: usize) -> Mac {
+        get_device_state(state, device_id).mac
     }
 
     fn address_resolved<D: EventDispatcher>(
         ctx: &mut Context<D>,
-        device_id: u64,
+        device_id: usize,
         proto_addr: Ipv4Addr,
         hw_addr: Mac,
     ) {
@@ -458,7 +504,7 @@ impl ArpDevice<Ipv4Addr> for EthernetArpDevice {
 
     fn address_resolution_failed<D: EventDispatcher>(
         ctx: &mut Context<D>,
-        device_id: u64,
+        device_id: usize,
         proto_addr: Ipv4Addr,
     ) {
         mac_resolution_failed(ctx, device_id, IpAddr::V4(proto_addr));
@@ -473,21 +519,24 @@ impl ndp::NdpDevice for EthernetNdpDevice {
     const BROADCAST: Mac = Mac::BROADCAST;
 
     fn get_ndp_state<D: EventDispatcher>(
-        ctx: &mut Context<D>,
-        device_id: u64,
+        state: &mut StackState<D>,
+        device_id: usize,
     ) -> &mut ndp::NdpState<Self> {
-        &mut get_device_state(ctx, device_id).ndp
+        &mut get_device_state_mut(state, device_id).ndp
     }
 
     fn get_link_layer_addr<D: EventDispatcher>(
-        ctx: &mut Context<D>,
-        device_id: u64,
+        state: &StackState<D>,
+        device_id: usize,
     ) -> Self::LinkAddress {
-        get_device_state(ctx, device_id).mac
+        get_device_state(state, device_id).mac
     }
 
-    fn get_ipv6_addr<D: EventDispatcher>(ctx: &mut Context<D>, device_id: u64) -> Option<Ipv6Addr> {
-        let state = get_device_state(ctx, device_id);
+    fn get_ipv6_addr<D: EventDispatcher>(
+        state: &StackState<D>,
+        device_id: usize,
+    ) -> Option<Ipv6Addr> {
+        let state = get_device_state(state, device_id);
         // TODO(brunodalbo) just returning either the configured or EUI
         //  link_local address for now, we need a better structure to keep
         //  a list of IPv6 addresses.
@@ -498,46 +547,46 @@ impl ndp::NdpDevice for EthernetNdpDevice {
     }
 
     fn has_ipv6_addr<D: EventDispatcher>(
-        ctx: &mut Context<D>,
-        device_id: u64,
+        state: &StackState<D>,
+        device_id: usize,
         address: &Ipv6Addr,
     ) -> bool {
-        let state = get_device_state(ctx, device_id);
+        let state = get_device_state(state, device_id);
         state.ipv6_addr_sub.map_or(false, |addr_sub| addr_sub.into_addr() == *address)
             || state.mac.to_ipv6_link_local(None) == *address
     }
 
     fn send_ipv6_frame_to<D: EventDispatcher, S: Serializer>(
         ctx: &mut Context<D>,
-        device_id: u64,
+        device_id: usize,
         dst: Mac,
         body: S,
     ) -> Result<(), MtuError<S::InnerError>> {
-        let src = get_device_state(ctx, device_id).mac;
+        let src = get_device_state(ctx.state(), device_id).mac;
         let buffer = body
             .encapsulate(EthernetFrameBuilder::new(src, dst, EtherType::Ipv6))
             .serialize_outer()
             .map_err(|(err, _)| err)?;
-        ctx.dispatcher().send_frame(DeviceId::new_ethernet(device_id), buffer.as_ref());
+        ctx.dispatcher_mut().send_frame(DeviceId::new_ethernet(device_id), buffer.as_ref());
         Ok(())
     }
 
     fn send_ipv6_frame<D: EventDispatcher, S: Serializer>(
         ctx: &mut Context<D>,
-        device_id: u64,
+        device_id: usize,
         next_hop: Ipv6Addr,
         body: S,
     ) -> Result<(), MtuError<S::InnerError>> {
         send_ip_frame(ctx, device_id, next_hop, body).map_err(|e| e.0)
     }
 
-    fn get_device_id(id: u64) -> DeviceId {
+    fn get_device_id(id: usize) -> DeviceId {
         DeviceId::new_ethernet(id)
     }
 
     fn address_resolved<D: EventDispatcher>(
         ctx: &mut Context<D>,
-        device_id: u64,
+        device_id: usize,
         address: &Ipv6Addr,
         link_address: Self::LinkAddress,
     ) {
@@ -546,7 +595,7 @@ impl ndp::NdpDevice for EthernetNdpDevice {
 
     fn address_resolution_failed<D: EventDispatcher>(
         ctx: &mut Context<D>,
-        device_id: u64,
+        device_id: usize,
         address: &Ipv6Addr,
     ) {
         mac_resolution_failed(ctx, device_id, IpAddr::V6(*address));
@@ -560,11 +609,11 @@ impl ndp::NdpDevice for EthernetNdpDevice {
 /// resolved either by ARP or NDP.
 fn mac_resolved<D: EventDispatcher>(
     ctx: &mut Context<D>,
-    device_id: u64,
+    device_id: usize,
     address: IpAddr,
     dst_mac: Mac,
 ) {
-    let state = get_device_state(ctx, device_id);
+    let state = get_device_state_mut(ctx.state_mut(), device_id);
     let device_id = DeviceId::new_ethernet(device_id);
     let src_mac = state.mac;
     let ether_type = match &address {
@@ -586,7 +635,7 @@ fn mac_resolved<D: EventDispatcher>(
                 .map_err(|(err, _)| err);
 
             match serialized {
-                Ok(buffer) => ctx.dispatcher().send_frame(device_id, buffer.as_ref()),
+                Ok(buffer) => ctx.dispatcher_mut().send_frame(device_id, buffer.as_ref()),
                 Err(e) => debug!("Failed to serialize pending frame {:?}", e),
             }
         }
@@ -600,7 +649,7 @@ fn mac_resolved<D: EventDispatcher>(
 /// fails to resolve either by ARP or NDP.
 fn mac_resolution_failed<D: EventDispatcher>(
     ctx: &mut Context<D>,
-    device_id: u64,
+    device_id: usize,
     address: IpAddr,
 ) {
     // TODO(brunodalbo) what do we do here in regards to the pending frames?
@@ -612,7 +661,7 @@ fn mac_resolution_failed<D: EventDispatcher>(
     //  resolution."
     //  For ARP, we don't have such a clear statement on the RFC, it would make
     //  sense to do the same thing though.
-    let state = get_device_state(ctx, device_id);
+    let state = get_device_state_mut(ctx.state_mut(), device_id);
     if let Some(pending) = state.take_pending_frames(address) {
         log_unimplemented!((), "ethernet mac resolution failed not implemented");
     }
@@ -663,7 +712,7 @@ mod tests {
                 .build::<DummyEventDispatcher>();
             send_ip_frame(
                 &mut ctx,
-                1,
+                0,
                 DUMMY_CONFIG_V4.remote_ip,
                 BufferSerializer::new_vec(Buf::new(&mut vec![0; size], ..)),
             );
@@ -697,5 +746,28 @@ mod tests {
         assert_eq!(0, state.add_pending_frame(ip, vec![255]).unwrap()[0]);
         assert_eq!(1, state.add_pending_frame(ip, vec![255]).unwrap()[0]);
         assert_eq!(2, state.add_pending_frame(ip, vec![255]).unwrap()[0]);
+    }
+
+    #[test]
+    fn test_map_multicast_ip_to_ethernet_mac() {
+        let ipv4 = Ipv4Addr::new([224, 1, 1, 1]);
+        let mac = Mac::from(&MulticastAddr::new(ipv4).unwrap());
+        assert_eq!(mac, Mac::new([0x01, 0x00, 0x5e, 0x1, 0x1, 0x1]));
+        let ipv4 = Ipv4Addr::new([224, 129, 1, 1]);
+        let mac = Mac::from(&MulticastAddr::new(ipv4).unwrap());
+        assert_eq!(mac, Mac::new([0x01, 0x00, 0x5e, 0x1, 0x1, 0x1]));
+        let ipv4 = Ipv4Addr::new([225, 1, 1, 1]);
+        let mac = Mac::from(&MulticastAddr::new(ipv4).unwrap());
+        assert_eq!(mac, Mac::new([0x01, 0x00, 0x5e, 0x1, 0x1, 0x1]));
+
+        let ipv6 = Ipv6Addr::new([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3]);
+        let mac = Mac::from(&MulticastAddr::new(ipv6).unwrap());
+        assert_eq!(mac, Mac::new([0x33, 0x33, 0, 0, 0, 3]));
+        let ipv6 = Ipv6Addr::new([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 3]);
+        let mac = Mac::from(&MulticastAddr::new(ipv6).unwrap());
+        assert_eq!(mac, Mac::new([0x33, 0x33, 0, 0, 0, 3]));
+        let ipv6 = Ipv6Addr::new([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 3]);
+        let mac = Mac::from(&MulticastAddr::new(ipv6).unwrap());
+        assert_eq!(mac, Mac::new([0x33, 0x33, 1, 0, 0, 3]));
     }
 }

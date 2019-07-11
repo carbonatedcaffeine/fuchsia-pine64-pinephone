@@ -8,7 +8,12 @@
 export 'src/audio.dart';
 export 'src/dump.dart';
 export 'src/exceptions.dart';
+export 'src/input.dart';
+export 'src/inspect.dart';
+export 'src/modular.dart';
+export 'src/performance.dart';
 export 'src/scenic.dart';
 export 'src/setui.dart';
 export 'src/sl4f_client.dart';
-export 'src/traceutil.dart';
+export 'src/storage.dart';
+export 'src/webdriver.dart';

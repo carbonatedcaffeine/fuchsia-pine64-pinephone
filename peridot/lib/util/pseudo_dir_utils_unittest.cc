@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "peridot/lib/util/pseudo_dir_utils.h"
+
 #include <gtest/gtest.h>
-#include <peridot/lib/testing/test_with_ledger.h>
+#include <lib/gtest/real_loop_fixture.h>
 #include <peridot/lib/util/pseudo_dir_server.h>
-#include <peridot/lib/util/pseudo_dir_utils.h>
 #include <src/lib/files/directory.h>
 #include <src/lib/files/file.h>
 
@@ -14,7 +15,7 @@ namespace {
 
 constexpr int kDefaultBufferSize = 1024;
 
-class PseudoDirUtilsTest : public testing::TestWithLedger {
+class PseudoDirUtilsTest : public gtest::RealLoopFixture {
  public:
   PseudoDirUtilsTest() = default;
   ~PseudoDirUtilsTest() override = default;
@@ -32,11 +33,11 @@ class PseudoDirUtilsTest : public testing::TestWithLedger {
   }
 };
 
-TEST_F(PseudoDirUtilsTest, FileSmallerThanDefaultBuffer) {
+TEST_F(PseudoDirUtilsTest, DISABLED_FileSmallerThanDefaultBuffer) {
   test_make_file_with_contents_sizes(kDefaultBufferSize - 10);
 }
 
-TEST_F(PseudoDirUtilsTest, FileLargerThanDefaultBuffer) {
+TEST_F(PseudoDirUtilsTest, DISABLED_FileLargerThanDefaultBuffer) {
   test_make_file_with_contents_sizes(kDefaultBufferSize + 10);
 }
 

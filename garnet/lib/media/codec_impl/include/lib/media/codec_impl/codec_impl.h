@@ -412,10 +412,6 @@ class CodecImpl : public fuchsia::media::StreamProcessor,
   // Setup/teardown aspects.
   //
 
-  // Will send an initial Codec.OnOutputConstraints() if the codec can't
-  // tolerate null output config during format detection.
-  void onInputConstraintsReady();
-
   // This starts unbinding.  When unbinding is done and CodecImpl is ready to
   // be destructed, client_error_handler_ is called.
   //
@@ -1007,6 +1003,10 @@ class CodecImpl : public fuchsia::media::StreamProcessor,
   void CoreCodecRecycleOutputPacket(CodecPacket* packet) override;
 
   void CoreCodecEnsureBuffersNotConfigured(CodecPort port) override;
+
+  __WARN_UNUSED_RESULT
+  std::unique_ptr<const fuchsia::media::StreamBufferConstraints> CoreCodecBuildNewInputConstraints()
+      override;
 
   __WARN_UNUSED_RESULT
   std::unique_ptr<const fuchsia::media::StreamOutputConstraints>

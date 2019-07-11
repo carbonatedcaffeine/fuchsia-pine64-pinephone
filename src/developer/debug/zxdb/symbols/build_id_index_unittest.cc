@@ -22,9 +22,7 @@ std::filesystem::path GetTestDataDir() {
   return path;
 }
 
-std::filesystem::path GetSmallTestFile() {
-  return GetTestDataDir() / "small_test_file.elf";
-}
+std::filesystem::path GetSmallTestFile() { return GetTestDataDir() / "small_test_file.elf"; }
 
 }  // namespace
 
@@ -34,13 +32,13 @@ TEST(BuildIDIndex, IndexFile) {
   std::string test_file = GetSmallTestFile();
   index.AddSymbolSource(test_file);
 
-  // The known file should be found.
-  EXPECT_EQ(test_file, index.FileForBuildID(kSmallTestBuildID,
-                                            DebugSymbolFileType::kDebugInfo));
+  // The known file should be found. We have no debug symbols for this binary,
+  // so it shouldn't show as debug info.
+  EXPECT_EQ("", index.FileForBuildID(kSmallTestBuildID, DebugSymbolFileType::kDebugInfo));
+  EXPECT_EQ(test_file, index.FileForBuildID(kSmallTestBuildID, DebugSymbolFileType::kBinary));
 
   // Test some random build ID fails.
-  EXPECT_EQ("", index.FileForBuildID("random build id",
-                                     DebugSymbolFileType::kDebugInfo));
+  EXPECT_EQ("", index.FileForBuildID("random build id", DebugSymbolFileType::kDebugInfo));
 }
 
 // Index all files in a directory.
@@ -49,9 +47,8 @@ TEST(BuildIDIndex, IndexDir) {
   index.AddSymbolSource(GetTestDataDir());
 
   // It should have found the small test file and indexed it.
-  EXPECT_EQ(
-      GetSmallTestFile(),
-      index.FileForBuildID(kSmallTestBuildID, DebugSymbolFileType::kDebugInfo));
+  EXPECT_EQ(GetSmallTestFile(),
+            index.FileForBuildID(kSmallTestBuildID, DebugSymbolFileType::kBinary));
 }
 
 TEST(BuildIDIndex, ParseIDFile) {
@@ -70,18 +67,17 @@ deadb33fbadf00dbaddadbabb relative/path/dummy.elf
   BuildIDIndex::ParseIDs(test_data, GetTestDataDir(), &map);
 
   EXPECT_EQ(4u, map.size());
-  EXPECT_EQ("/home/me/fuchsia/out/x64/exe.unstripped/false",
-            map["ff344c5304043feb"]);
+  EXPECT_EQ("/home/me/fuchsia/out/x64/exe.unstripped/false", map["ff344c5304043feb"].debug_info);
   EXPECT_EQ(
       "/home/me/fuchsia/out/build-zircon/build-x64/system/dev/display/"
       "imx8m-display/libimx8m-display.so",
-      map["ff3a9a920026380f8990a27333ed7634b3db89b9"]);
+      map["ff3a9a920026380f8990a27333ed7634b3db89b9"].debug_info);
   EXPECT_EQ(
       "/home/me/fuchsia/out/build-zircon/build-x64/system/uapp/channel-perf/"
       "channel-perf.elf",
-      map["ffc2990b78544c1cee5092c3bf040b53f2af10cf"]);
+      map["ffc2990b78544c1cee5092c3bf040b53f2af10cf"].debug_info);
   EXPECT_EQ(GetTestDataDir() / "relative/path/dummy.elf",
-            map["deadb33fbadf00dbaddadbabb"]);
+            map["deadb33fbadf00dbaddadbabb"].debug_info);
 }
 
 }  // namespace zxdb

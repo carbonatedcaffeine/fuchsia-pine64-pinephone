@@ -2,20 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <memory>
-
 #include <fuchsia/ui/input/cpp/fidl.h>
 #include <lib/async/cpp/time.h>
 #include <lib/zx/eventpair.h>
 
+#include <memory>
+
 #include "garnet/lib/ui/input/tests/util.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "src/lib/fxl/logging.h"
 #include "lib/gtest/test_loop_fixture.h"
 #include "lib/ui/input/cpp/formatting.h"
 #include "lib/ui/scenic/cpp/resources.h"
 #include "lib/ui/scenic/cpp/session.h"
+#include "src/lib/fxl/logging.h"
 
 // This test exercises the coordinate transform logic applied to pointer events
 // sent to each client. We set up a scene with two translated but overlapping
@@ -46,12 +46,12 @@
 // origin at 'y'), at (4,4) in device space. The touch events move diagonally up
 // and to the right, and we have the following correspondence of coordinates:
 //
-// Event  Mark  Device  View-1  View-2
-// ADD    y     (4,4)   (4,4)   (0, 0)
-// DOWN   y     (4,4)   (4,4)   (0, 0)
-// MOVE   M     (5,3)   (5,3)   (1,-1)
-// UP     U     (6,2)   (6,2)   (2,-2)
-// REMOVE U     (6,2)   (6,2)   (2,-2)
+// Event  Mark  Device  View-1      View-2
+// ADD    y     (4,4)   (4.5,4.5)   (0.5, 0.5)
+// DOWN   y     (4,4)   (4.5,4.5)   (0.5, 0.5)
+// MOVE   M     (5,3)   (5.5,3.5)   (1.5,-0.5)
+// UP     U     (6,2)   (6.5,2.5)   (2.5,-1.5)
+// REMOVE U     (6,2)   (6.5,2.5)   (2.5,-1.5)
 //
 // N.B. View 1 sits *above* View 2 in elevation; hence, View 1 should receive
 // the focus event.
@@ -84,49 +84,55 @@ TEST_F(CoordinateTransformTest, CoordinateTransform) {
 
   // "Presenter" sets up a scene with two ViewHolders.
   uint32_t compositor_id = 0;
-  presenter.RunNow(
-      [this, &compositor_id, vh1 = std::move(vh1), vh2 = std::move(vh2)](
-          scenic::Session* session, scenic::EntityNode* root_node) mutable {
-        // Minimal scene.
-        scenic::Compositor compositor(session);
-        compositor_id = compositor.id();
+  presenter.RunNow([this, &compositor_id, vh1 = std::move(vh1), vh2 = std::move(vh2)](
+                       scenic::Session* session, scenic::EntityNode* root_node) mutable {
+    // Minimal scene.
+    scenic::Compositor compositor(session);
+    compositor_id = compositor.id();
 
-        scenic::Scene scene(session);
-        scenic::Camera camera(scene);
-        scenic::Renderer renderer(session);
-        renderer.SetCamera(camera);
+    scenic::Scene scene(session);
+    scenic::Camera camera(scene);
+    scenic::Renderer renderer(session);
+    renderer.SetCamera(camera);
 
-        scenic::Layer layer(session);
-        layer.SetSize(test_display_width_px(), test_display_height_px());
-        layer.SetRenderer(renderer);
+    scenic::Layer layer(session);
+    layer.SetSize(test_display_width_px(), test_display_height_px());
+    layer.SetRenderer(renderer);
 
-        scenic::LayerStack layer_stack(session);
-        layer_stack.AddLayer(layer);
-        compositor.SetLayerStack(layer_stack);
+    scenic::LayerStack layer_stack(session);
+    layer_stack.AddLayer(layer);
+    compositor.SetLayerStack(layer_stack);
 
-        // Add local root node to the scene. Attach two entity nodes that
-        // perform translation for the two clients; attach ViewHolders.
-        scene.AddChild(*root_node);
-        scenic::EntityNode translate_1(session), translate_2(session);
-        scenic::ViewHolder holder_1(session, std::move(vh1), "holder_1"),
-            holder_2(session, std::move(vh2), "holder_2");
+    // Add local root node to the scene. Attach two entity nodes that
+    // perform translation for the two clients; attach ViewHolders.
+    scene.AddChild(*root_node);
+    scenic::EntityNode translate_1(session), translate_2(session);
+    scenic::ViewHolder holder_1(session, std::move(vh1), "holder_1"),
+        holder_2(session, std::move(vh2), "holder_2");
 
-        root_node->AddChild(translate_1);
-        translate_1.SetTranslation(0, 0, -2);
-        translate_1.Attach(holder_1);
+    // Create the view bounds.
+    const float bbox_min[3] = {0, 0, 0};
+    const float bbox_max[3] = {5, 5, 1};
+    const float inset_min[3] = {0, 0, 0};
+    const float inset_max[3] = {0, 0, 0};
+    holder_1.SetViewProperties(bbox_min, bbox_max, inset_min, inset_max);
+    holder_2.SetViewProperties(bbox_min, bbox_max, inset_min, inset_max);
 
-        root_node->AddChild(translate_2);
-        translate_2.SetTranslation(4, 4, -1);
-        translate_2.Attach(holder_2);
+    root_node->AddChild(translate_1);
+    translate_1.SetTranslation(0, 0, -2);
+    translate_1.Attach(holder_1);
 
-        RequestToPresent(session);
-      });
+    root_node->AddChild(translate_2);
+    translate_2.SetTranslation(4, 4, -1);
+    translate_2.Attach(holder_2);
+
+    RequestToPresent(session);
+  });
 
   // Client 1 vends a View to the global scene.
   SessionWrapper client_1(scenic());
   client_1.RunNow(
-      [this, v1 = std::move(v1)](scenic::Session* session,
-                                 scenic::EntityNode* root_node) mutable {
+      [this, v1 = std::move(v1)](scenic::Session* session, scenic::EntityNode* root_node) mutable {
         scenic::View view_1(session, std::move(v1), "view_1");
         view_1.AddChild(*root_node);
 
@@ -146,8 +152,7 @@ TEST_F(CoordinateTransformTest, CoordinateTransform) {
   // Client 2 vends a View to the global scene.
   SessionWrapper client_2(scenic());
   client_2.RunNow(
-      [this, v2 = std::move(v2)](scenic::Session* session,
-                                 scenic::EntityNode* root_node) mutable {
+      [this, v2 = std::move(v2)](scenic::Session* session, scenic::EntityNode* root_node) mutable {
         scenic::View view_2(session, std::move(v2), "view_2");
         view_2.AddChild(*root_node);
 
@@ -165,8 +170,7 @@ TEST_F(CoordinateTransformTest, CoordinateTransform) {
       });
 
   // Multi-agent scene is now set up, send in the input.
-  presenter.RunNow([this, compositor_id](scenic::Session* session,
-                                         scenic::EntityNode* root_node) {
+  presenter.RunNow([this, compositor_id](scenic::Session* session, scenic::EntityNode* root_node) {
     PointerCommandGenerator pointer(compositor_id, /*device id*/ 1,
                                     /*pointer id*/ 1, PointerEventType::TOUCH);
     // A touch sequence that starts in the direct center of the 9x9 display.
@@ -188,8 +192,7 @@ TEST_F(CoordinateTransformTest, CoordinateTransform) {
 
     // ADD
     EXPECT_TRUE(events[0].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[0].pointer(), 1u, PointerEventPhase::ADD, 4, 4));
+    EXPECT_TRUE(PointerMatches(events[0].pointer(), 1u, PointerEventPhase::ADD, 4.5, 4.5));
 
     // FOCUS
     EXPECT_TRUE(events[1].is_focus());
@@ -197,23 +200,19 @@ TEST_F(CoordinateTransformTest, CoordinateTransform) {
 
     // DOWN
     EXPECT_TRUE(events[2].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[2].pointer(), 1u, PointerEventPhase::DOWN, 4, 4));
+    EXPECT_TRUE(PointerMatches(events[2].pointer(), 1u, PointerEventPhase::DOWN, 4.5, 4.5));
 
     // MOVE
     EXPECT_TRUE(events[3].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[3].pointer(), 1u, PointerEventPhase::MOVE, 5, 3));
+    EXPECT_TRUE(PointerMatches(events[3].pointer(), 1u, PointerEventPhase::MOVE, 5.5, 3.5));
 
     // UP
     EXPECT_TRUE(events[4].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[4].pointer(), 1u, PointerEventPhase::UP, 6, 2));
+    EXPECT_TRUE(PointerMatches(events[4].pointer(), 1u, PointerEventPhase::UP, 6.5, 2.5));
 
     // REMOVE
     EXPECT_TRUE(events[5].is_pointer());
-    EXPECT_TRUE(PointerMatches(events[5].pointer(), 1u,
-                               PointerEventPhase::REMOVE, 6, 2));
+    EXPECT_TRUE(PointerMatches(events[5].pointer(), 1u, PointerEventPhase::REMOVE, 6.5, 2.5));
   });
 
   client_2.ExamineEvents([](const std::vector<InputEvent>& events) {
@@ -221,28 +220,23 @@ TEST_F(CoordinateTransformTest, CoordinateTransform) {
 
     // ADD
     EXPECT_TRUE(events[0].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[0].pointer(), 1u, PointerEventPhase::ADD, 0, 0));
+    EXPECT_TRUE(PointerMatches(events[0].pointer(), 1u, PointerEventPhase::ADD, 0.5, 0.5));
 
     // DOWN
     EXPECT_TRUE(events[1].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[1].pointer(), 1u, PointerEventPhase::DOWN, 0, 0));
+    EXPECT_TRUE(PointerMatches(events[1].pointer(), 1u, PointerEventPhase::DOWN, 0.5, 0.5));
 
     // MOVE
     EXPECT_TRUE(events[2].is_pointer());
-    EXPECT_TRUE(PointerMatches(events[2].pointer(), 1u, PointerEventPhase::MOVE,
-                               1, -1));
+    EXPECT_TRUE(PointerMatches(events[2].pointer(), 1u, PointerEventPhase::MOVE, 1.5, -0.5));
 
     // UP
     EXPECT_TRUE(events[3].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[3].pointer(), 1u, PointerEventPhase::UP, 2, -2));
+    EXPECT_TRUE(PointerMatches(events[3].pointer(), 1u, PointerEventPhase::UP, 2.5, -1.5));
 
     // REMOVE
     EXPECT_TRUE(events[4].is_pointer());
-    EXPECT_TRUE(PointerMatches(events[4].pointer(), 1u,
-                               PointerEventPhase::REMOVE, 2, -2));
+    EXPECT_TRUE(PointerMatches(events[4].pointer(), 1u, PointerEventPhase::REMOVE, 2.5, -1.5));
 
 #if 0
     for (const auto& event : events)

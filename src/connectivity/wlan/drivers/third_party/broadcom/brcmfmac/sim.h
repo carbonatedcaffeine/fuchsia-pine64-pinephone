@@ -17,12 +17,17 @@
 #ifndef SRC_CONNECTIVITY_WLAN_DRIVERS_THIRD_PARTY_BROADCOM_BRCMFMAC_SIM_H_
 #define SRC_CONNECTIVITY_WLAN_DRIVERS_THIRD_PARTY_BROADCOM_BRCMFMAC_SIM_H_
 
+#include <memory>
+
 #include "bus.h"
 #include "device.h"
+#include "sim-fw/sim_fw.h"
 
 struct brcmf_simdev {
-    struct brcmf_device dev;
-    struct brcmf_bus* bus_if;
+    struct brcmf_device dev = {};
+    struct brcmf_bus bus_if;
+
+    std::unique_ptr<SimFirmware> sim_fw;
 };
 
 #endif // SRC_CONNECTIVITY_WLAN_DRIVERS_THIRD_PARTY_BROADCOM_BRCMFMAC_SIM_H_

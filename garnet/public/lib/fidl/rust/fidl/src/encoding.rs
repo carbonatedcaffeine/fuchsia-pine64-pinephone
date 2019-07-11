@@ -162,13 +162,19 @@ impl<'a> Encoder<'a> {
         handles: &'a mut Vec<zx::Handle>,
         x: &mut T,
     ) -> Result<()> {
-        let inline_size = round_up_to_align(x.inline_size(), 8);
-        buf.truncate(0);
-        buf.resize(inline_size, 0);
-        handles.truncate(0);
+        fn prepare_for_encoding<'a>(
+            buf: &'a mut Vec<u8>,
+            handles: &'a mut Vec<zx::Handle>,
+            ty_inline_size: usize,
+        ) -> Encoder<'a> {
+            let inline_size = round_up_to_align(ty_inline_size, 8);
+            buf.truncate(0);
+            buf.resize(inline_size, 0);
+            handles.truncate(0);
+            Encoder { offset: 0, remaining_depth: MAX_RECURSION, buf, handles }
+        }
 
-        let mut encoder = Encoder { offset: 0, remaining_depth: MAX_RECURSION, buf, handles };
-
+        let mut encoder = prepare_for_encoding(buf, handles, x.inline_size());
         x.encode(&mut encoder)
     }
 
@@ -208,12 +214,20 @@ impl<'a> Encoder<'a> {
     /// Adds as many zero bytes as padding as necessary to make sure that the `target` object size
     /// is equal to `inline_size()`. `start_pos` is the position in the `encoder` buffer of where
     /// the encoding started.  See `Encoder::offset`.
-    pub fn tail_padding<Target>(&mut self, target: &mut Target, start_pos: usize) -> Result<()>
+    pub fn tail_padding<Target>(&mut self, target: &Target, start_pos: usize) -> Result<()>
     where
         Target: Encodable
     {
+        self.tail_padding_inner(target.inline_size(), start_pos)
+    }
+
+    fn tail_padding_inner(
+        &mut self,
+        target_inline_size: usize,
+        start_pos: usize,
+    ) -> Result<()> {
         debug_assert!(start_pos <= self.offset);
-        self.padding(target.inline_size() - (self.offset - start_pos))
+        self.padding(target_inline_size - (self.offset - start_pos))
     }
 
     /// Runs the provided closure inside an encoder modified
@@ -228,10 +242,14 @@ impl<'a> Encoder<'a> {
         let old_offset = self.offset;
         self.offset = self.buf.len();
         // Create space for the new data
-        self.buf.resize(self.offset + round_up_to_align(len, 8), 0);
+        self.reserve_out_of_line(len);
         f(self)?;
         self.offset = old_offset;
         Ok(())
+    }
+
+    fn reserve_out_of_line(&mut self, len: usize) {
+        self.buf.resize(self.offset + round_up_to_align(len, 8), 0);
     }
 
     /// Append bytes to the very end (out-of-line) of the buffer.
@@ -307,6 +325,22 @@ impl<'a> Decoder<'a> {
     where
         F: FnOnce(&mut Decoder) -> Result<R>,
     {
+        let (old_buf, old_initial_buf_len) = self.before_read_out_of_line(len)?;
+        let res = f(self);
+
+        // Set the current `buf` back to its original position.
+        //
+        // After this transformation, the final `Decoder` looks like this:
+        // [---------------------------------]
+        //     ^---buf--^               ^ool^ (slices)
+        //                              ^out-of-line-advanced (index)
+        self.buf = old_buf;
+        self.initial_buf_len = old_initial_buf_len;
+        res
+    }
+
+    // Returns old_buf and old_initial_buf_len
+    fn before_read_out_of_line(&mut self, len: usize) -> Result<(&'a [u8], usize)> {
         // Currently, out-of-line points here:
         // [---------------------------------]
         //     ^---buf--^    ^-out-of-line--^ (slices)
@@ -335,17 +369,8 @@ impl<'a> Decoder<'a> {
         let old_initial_buf_len = self.initial_buf_len;
         self.buf = new_buf;
         self.initial_buf_len = new_initial_buf_len;
-        let res = f(self);
 
-        // Set the current `buf` back to its original position.
-        //
-        // After this transformation, the final `Decoder` looks like this:
-        // [---------------------------------]
-        //     ^---buf--^               ^ool^ (slices)
-        //                              ^out-of-line-advanced (index)
-        self.buf = old_buf;
-        self.initial_buf_len = old_initial_buf_len;
-        res
+        Ok((old_buf, old_initial_buf_len))
     }
 
     /// Whether or not the current section of inline bytes has been fully read.
@@ -1464,6 +1489,17 @@ impl<T: AutonullContainer + Encodable> Encodable for Option<T> {
     }
 }
 
+// Presence indicators always include at least one non-zero byte,
+// while absence indicators should always be entirely zeros.
+fn check_for_presence(
+    decoder: &mut Decoder<'_>,
+    inline_size: usize,
+) -> Result<bool> {
+    Ok(decoder.peek_slice(inline_size)?
+        .iter()
+        .any(|byte| *byte != 0))
+}
+
 impl<T: AutonullContainer + Decodable> Decodable for Option<T> {
     fn inline_align() -> usize {
         <T as Decodable>::inline_align()
@@ -1476,13 +1512,7 @@ impl<T: AutonullContainer + Decodable> Decodable for Option<T> {
     }
     fn decode(&mut self, decoder: &mut Decoder) -> Result<()> {
         let inline_size = <T as Decodable>::inline_size();
-        let mut present = false;
-        for byte in decoder.peek_slice(inline_size)? {
-            if *byte != 0 {
-                present = true;
-                break;
-            }
-        }
+        let present = check_for_presence(decoder, inline_size)?;
         if present {
             self.get_or_insert_with(|| T::new_empty()).decode(decoder)?;
             Ok(())
@@ -1681,10 +1711,7 @@ macro_rules! fidl_empty_struct {
 }
 
 /// Encode the provided value behind a FIDL "envelope".
-pub fn encode_in_envelope<T>(val: &mut Option<&mut T>, encoder: &mut Encoder) -> Result<()>
-where
-    T: Encodable + ?Sized,
-{
+pub fn encode_in_envelope(val: &mut Option<&mut dyn Encodable>, encoder: &mut Encoder) -> Result<()> {
     // u32 num_bytes
     // u32 num_handles
     // 64-bit presence indicator
@@ -1716,9 +1743,9 @@ where
     Ok(())
 }
 
-/// A macro which implements the FIDL `Encodable` and `Decodable` traits
-/// for an existing struct whose fields are all `Option`s and may or may not
-/// appear in the wire-format representation.
+/// A macro which implements the table empty constructor and the FIDL `Encodable` and `Decodable`
+/// traits for an existing struct whose fields are all `Option`s and may or may not appear in the
+/// wire-format representation.
 #[macro_export]
 macro_rules! fidl_table {
     (
@@ -1731,6 +1758,14 @@ macro_rules! fidl_table {
             },
         )*},
     ) => {
+        impl $name {
+            fn empty() -> Self {
+                Self {$(
+                        $member_name: None,
+                )*}
+            }
+        }
+
         impl $crate::encoding::Encodable for $name {
             fn inline_align(&self) -> usize { 8 }
             fn inline_size(&self) -> usize { 16 }
@@ -1764,7 +1799,7 @@ macro_rules! fidl_table {
                             }
                             while ordinal > next_ordinal_to_write {
                                 // Fill in envelopes for missing ordinals.
-                                $crate::encoding::encode_in_envelope::<()>(&mut None, encoder)?;
+                                $crate::encoding::encode_in_envelope(&mut None, encoder)?;
                                 next_ordinal_to_write += 1;
                             }
                             $crate::encoding::encode_in_envelope(encodable, encoder)?;
@@ -1780,9 +1815,7 @@ macro_rules! fidl_table {
             fn inline_align() -> usize { 8 }
             fn inline_size() -> usize { 16 }
             fn new_empty() -> Self {
-                Self {$(
-                        $member_name: None,
-                )*}
+                Self::empty()
             }
             fn decode(&mut self, decoder: &mut $crate::encoding::Decoder) -> $crate::Result<()> {
                 // Decode envelope vector header
@@ -1900,6 +1933,8 @@ where
     }
 
     fn encode(&mut self, encoder: &mut Encoder) -> Result<()> {
+        let start_pos = encoder.offset;
+
         match self {
             Ok(val) => {
                 // Encode success tag
@@ -1910,6 +1945,10 @@ where
 
                 // Encode success value
                 fidl_encode!(val, encoder)?;
+
+                // Ok() and Err() branches may be of a different size. We need to make sure we
+                // always encode inline_size() bytes.
+                encoder.tail_padding(self, start_pos)?;
             }
             Err(val) => {
                 // Encode Error tag
@@ -1920,6 +1959,10 @@ where
 
                 // Encode Error value
                 fidl_encode!(val, encoder)?;
+
+                // Ok() and Err() branches may be of a different size. We need to make sure we
+                // always encode inline_size() bytes.
+                encoder.tail_padding(self, start_pos)?;
             }
         }
         Ok(())
@@ -1947,6 +1990,8 @@ where
     }
 
     fn decode(&mut self, decoder: &mut Decoder) -> Result<()> {
+        let start_pos = decoder.inline_pos();
+
         let mut tag: u32 = 0;
         fidl_decode!(&mut tag, decoder)?;
         // TODO(FIDL-598) Switch to `skip_padding` when other bindings are ready.
@@ -1958,6 +2003,7 @@ where
                     match self {
                         Ok(val) => {
                             fidl_decode!(val, decoder)?;
+                            decoder.skip_tail_padding(self, start_pos)?;
                             break;
                         }
                         Err(_) => {
@@ -1975,6 +2021,7 @@ where
                     match self {
                         Err(val) => {
                             fidl_decode!(val, decoder)?;
+                            decoder.skip_tail_padding(self, start_pos)?;
                             break;
                         }
                         Ok(_) => {
@@ -2775,6 +2822,107 @@ mod test {
     }
 
     #[test]
+    fn encode_decode_result_array() {
+        use std::result::Result;
+
+        {
+            let mut input: [Result<_, u32>; 2] = [Ok("a".to_string()), Ok("bcd".to_string())];
+            match encode_decode(&mut input) {
+                [Ok(ref ok1), Ok(ref ok2)]
+                    if *ok1 == "a".to_string() && *ok2 == "bcd".to_string() => {}
+                x => panic!("unexpected decoded value {:?}", x),
+            }
+        }
+
+        {
+            let mut input: [Result<String, u32>; 2] = [Err(7), Err(42)];
+            match encode_decode(&mut input) {
+                [Err(ref err1), Err(ref err2)] if *err1 == 7 && *err2 == 42 => {}
+                x => panic!("unexpected decoded value {:?}", x),
+            }
+        }
+
+        {
+            let mut input = [Ok("abc".to_string()), Err(42)];
+            match encode_decode(&mut input) {
+                [Ok(ref ok1), Err(ref err2)] if *ok1 == "abc".to_string() && *err2 == 42 => {}
+                x => panic!("unexpected decoded value {:?}", x),
+            }
+        }
+    }
+
+    #[test]
+    fn padding_errors_correct_offset() {
+        use std::result::Result;
+
+        // This kind of result uses more bytes for the Ok() branch than for the Err() branch, so we
+        // should have some padding in the Err() values.
+        let mut v: Result<String, u32> = Err(5);
+        let buf = &mut Vec::new();
+        let handle_buf = &mut Vec::new();
+        Encoder::encode(buf, handle_buf, &mut v).expect("Encoding failed");
+
+        // Try to corrupt the second byte of padding after the Err() value content.
+        let break_pos = fidl_inline_align!(Result<String, u32>) + fidl_inline_size!(u32) + 1;
+        buf[break_pos] = 10;
+
+        let res =
+            Decoder::decode_into(buf, handle_buf, &mut v).expect_err("Decoded broken padding");
+        match res {
+            Error::NonZeroPadding { padding_start, non_zero_pos } => {
+                // This check is fragile, as it is trying to mimic what array encoders/decoders do.
+                // If this fails after you update the array encoding, please update the check as
+                // well.
+                assert_eq!(
+                    padding_start,
+                    fidl_inline_align!(Result<String, u32>) + fidl_inline_size!(u32)
+                );
+                assert_eq!(non_zero_pos, break_pos);
+            }
+            _ => panic!("decode_into failed with: {}", res),
+        }
+    }
+
+    #[test]
+    fn padding_errors_correct_offset_for_out_of_line_data() {
+        use std::result::Result;
+
+        // This kind of result uses more bytes for the Ok() branch than for the Err() branch, so we
+        // should have some padding in the Err() values.  Vec is expected to put the Result itself
+        // into the out_of_line area.
+        let mut v: Vec<Result<String, u32>> = vec![Err(5)];
+        let buf = &mut Vec::new();
+        let handle_buf = &mut Vec::new();
+        Encoder::encode(buf, handle_buf, &mut v).expect("Encoding failed");
+
+        // Try to corrupt the second byte of padding after the Err() value content. The object
+        // itself is in the out_of_line area, which follows the inlnie size of the vector.
+        let break_pos = <Vec<Result<String, u32>> as Decodable>::inline_size()
+            + fidl_inline_align!(Result<String, u32>)
+            + fidl_inline_size!(u32)
+            + 1;
+        buf[break_pos] = 10;
+
+        let res =
+            Decoder::decode_into(buf, handle_buf, &mut v).expect_err("Decoded broken padding");
+        match res {
+            Error::NonZeroPadding { padding_start, non_zero_pos } => {
+                // This check is fragile, as it is trying to mimic what array encoders/decoders do.
+                // If this fails after you update the array encoding, please update the check as
+                // well.
+                assert_eq!(
+                    padding_start,
+                    <Vec<Result<String, u32>> as Decodable>::inline_size()
+                        + fidl_inline_align!(Result<String, u32>)
+                        + fidl_inline_size!(u32)
+                );
+                assert_eq!(non_zero_pos, break_pos);
+            }
+            _ => panic!("decode_into failed with: {}", res),
+        }
+    }
+
+    #[test]
     fn encode_decode_union() {
         fidl_union! {
             #[derive(Debug, Clone, Eq, PartialEq)]
@@ -2964,6 +3112,15 @@ mod test {
                 ordinal: 2,
             },
         },
+    }
+
+    #[test]
+    fn empty_table() {
+        let mut table: MyTable = MyTable::empty();
+        assert_eq!(None, table.num);
+        table = MyTable { num: Some(32), ..MyTable::empty() };
+        assert_eq!(Some(32), table.num);
+        assert_eq!(None, table.string);
     }
 
     #[test]

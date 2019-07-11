@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <assert.h>
 #include <stdlib.h>
-#include <sys.h>
-#include <bsp.h>
-#include <ftl_private.h>
+
+#include <zircon/assert.h>
+
+#include "inc/sys.h"
+#include "ftl_private.h"
+#include "utils/bsp.h"
 
 #ifndef CACHE_LINE_SIZE
 #error CACHE_LINE_SIZE is undefined
@@ -19,7 +21,7 @@ void free_clear(void* alloc_ptr_ptr) {
     void** allocpp = alloc_ptr_ptr;
 
     // Free the allocated memory.
-    assert(*allocpp);
+    ZX_DEBUG_ASSERT(*allocpp);
     free(*allocpp);
 
     // Clear the allocation pointer/flag.
@@ -72,4 +74,3 @@ void afree_clear(void* aligned_ptr_addr) {
     *aptr = 0;
 #endif
 }
-

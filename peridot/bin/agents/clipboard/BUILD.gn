@@ -65,11 +65,11 @@ executable("clipboard_impl_unittest") {
     "//garnet/public/lib/gtest",
     "//peridot/lib/testing:test_with_ledger",
     "//sdk/fidl/fuchsia.modular",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 }
 
-tests_package("clipboard_unittests") {
+hermetic_tests_package("clipboard_unittests") {
   deps = [
     ":clipboard_impl_unittest",
   ]

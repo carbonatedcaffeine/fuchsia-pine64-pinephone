@@ -36,6 +36,9 @@ class BrEdrConnection final {
   BrEdrConnection(PeerId peer_id, std::unique_ptr<hci::Connection> link)
       : link_(std::move(link)), peer_id_(peer_id) {}
 
+  BrEdrConnection(BrEdrConnection&&) = default;
+  BrEdrConnection& operator=(BrEdrConnection&&) = default;
+
   const hci::Connection& link() const { return *link_; }
   hci::Connection& link() { return *link_; }
 
@@ -118,9 +121,8 @@ class BrEdrConnectionManager final {
   // Called to cancel an outgoing connection request
   void SendCreateConnectionCancelCommand(DeviceAddress addr);
 
-  // Disconnects any existing BR/EDR connection to |peer_id|. Returns false if
-  // |peer_id| is not a recognized BR/EDR peer or the corresponding peer is
-  // not connected.
+  // Disconnects any existing BR/EDR connection to |peer_id|. Returns true if
+  // the peer is disconnected, false if the peer can not be disconnected.
   bool Disconnect(PeerId peer_id);
 
  private:
@@ -167,10 +169,13 @@ class BrEdrConnectionManager final {
   // the request and initiating the next one in the queue
   void OnRequestTimeout();
 
-  // Cleanup a connection which has been deliberately disconnected, or had all
-  // references to it dropped
-  void CleanupConnection(hci::ConnectionHandle handle, BrEdrConnection& conn,
-                         bool link_already_closed);
+  // Clean up |conn| after it has been deliberately disconnected or after its
+  // link closed. Unregisters the connection from the data domain and marks the
+  // peer's BR/EDR cache state as disconnected. Takes ownership of |conn| and
+  // destroys it. If |close_link| is true, this results in an HCI Disconnect
+  // command.
+  void CleanUpConnection(hci::ConnectionHandle handle, BrEdrConnection conn,
+                         bool close_link);
 
   using ConnectionMap =
       std::unordered_map<hci::ConnectionHandle, BrEdrConnection>;
@@ -196,16 +201,8 @@ class BrEdrConnectionManager final {
   // Holds the connections that are active.
   ConnectionMap connections_;
 
-  // Handler ID for connection events
-  hci::CommandChannel::EventHandlerId conn_complete_handler_id_;
-  hci::CommandChannel::EventHandlerId conn_request_handler_id_;
-  hci::CommandChannel::EventHandlerId disconn_cmpl_handler_id_;
-
-  // Handler IDs for pairing events
-  hci::CommandChannel::EventHandlerId link_key_request_handler_id_;
-  hci::CommandChannel::EventHandlerId link_key_notification_handler_id_;
-  hci::CommandChannel::EventHandlerId io_cap_req_handler_id_;
-  hci::CommandChannel::EventHandlerId user_conf_handler_id_;
+  // Handler IDs for registered events
+  std::vector<hci::CommandChannel::EventHandlerId> event_handler_ids_;
 
   // The current page scan parameters of the controller.
   // Set to 0 when non-connectable.

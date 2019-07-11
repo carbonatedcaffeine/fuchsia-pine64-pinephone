@@ -6,8 +6,10 @@
 #define PERIDOT_BIN_SESSIONMGR_USER_INTELLIGENCE_PROVIDER_IMPL_H_
 
 #include <fuchsia/modular/cpp/fidl.h>
-#include <lib/component/cpp/startup_context.h>
+#include <lib/fidl/cpp/binding_set.h>
+#include <lib/svc/cpp/service_namespace.h>
 #include <lib/svc/cpp/services.h>
+#include <lib/sys/cpp/component_context.h>
 #include <lib/zx/channel.h>
 
 #include <deque>
@@ -23,7 +25,7 @@ class UserIntelligenceProviderImpl
  public:
   // |context| is not owned and must outlive this instance.
   UserIntelligenceProviderImpl(
-      component::StartupContext* context,
+      sys::ComponentContext* context,
       fidl::InterfaceHandle<fuchsia::modular::ContextEngine>
           context_engine_handle,
       fit::function<
@@ -41,10 +43,6 @@ class UserIntelligenceProviderImpl
   void GetComponentIntelligenceServices(
       fuchsia::modular::ComponentScope scope,
       fidl::InterfaceRequest<fuchsia::modular::IntelligenceServices> request)
-      override;
-
-  void GetSuggestionProvider(
-      fidl::InterfaceRequest<fuchsia::modular::SuggestionProvider> request)
       override;
 
   void GetSpeechToText(
@@ -88,26 +86,16 @@ class UserIntelligenceProviderImpl
   using ServiceProviderInitializer = fit::function<void(
       const std::string& url, component::ServiceNamespace* agent_host)>;
   // A ServiceProviderInitializer that adds standard agent services, including
-  // attributed context and suggestion service entry points. Returns the names
+  // attributed context entry point. Returns the names
   // of the services added.
   std::vector<std::string> AddAgentServices(
       const std::string& url, component::ServiceNamespace* agent_host);
 
-  // Starts suggestion engine.
-  void StartSuggestionEngine();
-
   void StartAgent(const std::string& url);
 
-  void StartActionLog(fuchsia::modular::SuggestionEngine* suggestion_engine);
   void StartSessionAgent(const std::string& url);
 
-  component::StartupContext* context_;  // Not owned.
-
   fuchsia::modular::ContextEnginePtr context_engine_;
-
-  component::Services suggestion_services_;
-  component::ServiceProviderImpl suggestion_engine_service_provider_;
-  fuchsia::modular::SuggestionEnginePtr suggestion_engine_;
 
   std::map<std::string, SessionAgentData> session_agents_;
 

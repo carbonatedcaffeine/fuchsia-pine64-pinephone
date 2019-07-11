@@ -4,10 +4,9 @@
 
 test("thread-state") {
   sources = [
-    "thread-state.cpp",
+    "thread-state.cc",
   ]
   deps = [
-    "$zx/system/fidl/fuchsia-sysinfo:c",
     "$zx/system/ulib/fbl",
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/launchpad",

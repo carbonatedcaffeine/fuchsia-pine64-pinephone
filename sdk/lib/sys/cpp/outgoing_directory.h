@@ -24,7 +24,7 @@ namespace sys {
 // The outgoing directory contains several subdirectories with well-known
 // names:
 //
-//  * public. This directory contains the services offered by this component to
+//  * svc. This directory contains the services offered by this component to
 //    other components.
 //  * debug. This directory contains arbitrary debugging output offered by this
 //    component.
@@ -145,7 +145,7 @@ class OutgoingDirectory final {
   template <typename Interface>
   zx_status_t RemovePublicService(
       const std::string& name = Interface::Name_) const {
-    return public_->RemoveEntry(name);
+    return svc_->RemoveEntry(name);
   }
 
   // Gets the directory to publish debug data.
@@ -165,10 +165,10 @@ class OutgoingDirectory final {
   // The root of the outgoing directory itself.
   std::unique_ptr<vfs::PseudoDir> root_;
 
-  // The public subdirectory of the root directory.
+  // The service subdirectory of the root directory.
   //
   // The underlying |vfs::PseudoDir| object is owned by |root_|.
-  vfs::PseudoDir* public_;
+  vfs::PseudoDir* svc_;
 
   // The debug subdirectory of the root directory.
   //

@@ -4,7 +4,7 @@
 
 driver("aml-gxl-gpio") {
   sources = [
-    "aml-gxl-gpio.cpp",
+    "aml-gxl-gpio.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.gpio",
@@ -12,6 +12,7 @@ driver("aml-gxl-gpio") {
     "$zx/system/banjo/ddk.protocol.platform.bus",
     "$zx/system/banjo/ddk.protocol.platform.device",
     "$zx/system/dev/lib/amlogic",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",

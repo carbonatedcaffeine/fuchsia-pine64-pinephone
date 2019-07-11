@@ -5,7 +5,6 @@
 #include "src/developer/debug/zxdb/client/thread.h"
 
 #include "src/developer/debug/zxdb/client/setting_schema_definition.h"
-
 #include "src/developer/debug/zxdb/client/system.h"
 #include "src/developer/debug/zxdb/client/target.h"
 
@@ -32,13 +31,9 @@ Thread::Thread(Session* session)
 
 Thread::~Thread() = default;
 
-void Thread::AddObserver(ThreadObserver* observer) {
-  observers_.AddObserver(observer);
-}
+void Thread::AddObserver(ThreadObserver* observer) { observers_.AddObserver(observer); }
 
-void Thread::RemoveObserver(ThreadObserver* observer) {
-  observers_.RemoveObserver(observer);
-}
+void Thread::RemoveObserver(ThreadObserver* observer) { observers_.RemoveObserver(observer); }
 
 fxl::WeakPtr<Thread> Thread::GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
 

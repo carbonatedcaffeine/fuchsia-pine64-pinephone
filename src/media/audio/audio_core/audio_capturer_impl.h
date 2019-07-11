@@ -10,12 +10,14 @@
 #include <dispatcher-pool/dispatcher-wakeup-event.h>
 #include <fbl/intrusive_double_list.h>
 #include <fbl/slab_allocator.h>
-#include <fbl/unique_ptr.h>
 #include <fuchsia/media/cpp/fidl.h>
+#include <lib/fidl/cpp/binding.h>
+#include <lib/fidl/cpp/binding_set.h>
+#include <lib/media/cpp/timeline_function.h>
+#include <lib/media/cpp/timeline_rate.h>
 
-#include "lib/fidl/cpp/binding.h"
-#include "lib/media/timeline/timeline_function.h"
-#include "lib/media/timeline/timeline_rate.h"
+#include <memory>
+
 #include "src/media/audio/audio_core/audio_driver.h"
 #include "src/media/audio/audio_core/audio_link.h"
 #include "src/media/audio/audio_core/audio_object.h"
@@ -27,21 +29,22 @@ namespace media::audio {
 
 class AudioCoreImpl;
 
-class AudioCapturerImpl
-    : public AudioObject,
-      public fuchsia::media::AudioCapturer,
-      public fuchsia::media::audio::GainControl,
-      public fbl::DoublyLinkedListable<fbl::RefPtr<AudioCapturerImpl>> {
+class AudioCapturerImpl : public AudioObject,
+                          public fuchsia::media::AudioCapturer,
+                          public fuchsia::media::audio::GainControl,
+                          public fbl::DoublyLinkedListable<fbl::RefPtr<AudioCapturerImpl>> {
  public:
   static fbl::RefPtr<AudioCapturerImpl> Create(
-      fidl::InterfaceRequest<fuchsia::media::AudioCapturer>
-          audio_capturer_request,
-      AudioCoreImpl* owner, bool loopback);
+      bool loopback, fidl::InterfaceRequest<fuchsia::media::AudioCapturer> audio_capturer_request,
+      AudioCoreImpl* owner);
 
   bool loopback() const { return loopback_; }
   void SetInitialFormat(fuchsia::media::AudioStreamType format)
       FXL_LOCKS_EXCLUDED(mix_domain_->token());
   void Shutdown() FXL_LOCKS_EXCLUDED(mix_domain_->token());
+
+  void SetUsage(fuchsia::media::AudioCaptureUsage usage) override;
+  fuchsia::media::AudioCaptureUsage GetUsage() { return usage_; };
 
  protected:
   friend class fbl::RefPtr<AudioCapturerImpl>;
@@ -111,13 +114,13 @@ class AudioCapturerImpl
   struct PendingCaptureBuffer;
 
   using PcbAllocatorTraits =
-      fbl::StaticSlabAllocatorTraits<std::unique_ptr<PendingCaptureBuffer>>;
-  using PcbAllocator = fbl::SlabAllocator<PcbAllocatorTraits>;
-  using PcbList = fbl::DoublyLinkedList<std::unique_ptr<PendingCaptureBuffer>>;
+      ::fbl::StaticSlabAllocatorTraits<std::unique_ptr<PendingCaptureBuffer>>;
+  using PcbAllocator = ::fbl::SlabAllocator<PcbAllocatorTraits>;
+  using PcbList = ::fbl::DoublyLinkedList<std::unique_ptr<PendingCaptureBuffer>>;
 
-  struct PendingCaptureBuffer : public fbl::SlabAllocated<PcbAllocatorTraits>,
-                                public fbl::DoublyLinkedListable<
-                                    std::unique_ptr<PendingCaptureBuffer>> {
+  struct PendingCaptureBuffer
+      : public fbl::SlabAllocated<PcbAllocatorTraits>,
+        public fbl::DoublyLinkedListable<std::unique_ptr<PendingCaptureBuffer>> {
     PendingCaptureBuffer(uint32_t of, uint32_t nf, CaptureAtCallback c)
         : offset_frames(of), num_frames(nf), cbk(std::move(c)) {}
 
@@ -135,25 +138,27 @@ class AudioCapturerImpl
 
   friend PcbAllocator;
 
-  AudioCapturerImpl(fidl::InterfaceRequest<fuchsia::media::AudioCapturer>
-                        audio_capturer_request,
-                    AudioCoreImpl* owner, bool loopback);
+  std::vector<fuchsia::media::AudioCaptureUsage> allowed_usages_;
+  fuchsia::media::AudioCaptureUsage usage_;
+
+  AudioCapturerImpl(bool loopback,
+                    fidl::InterfaceRequest<fuchsia::media::AudioCapturer> audio_capturer_request,
+                    AudioCoreImpl* owner);
 
   // AudioCapturer FIDL implementation
   void GetStreamType(GetStreamTypeCallback cbk) final;
   void SetPcmStreamType(fuchsia::media::AudioStreamType stream_type) final;
   void AddPayloadBuffer(uint32_t id, zx::vmo payload_buf_vmo) final;
   void RemovePayloadBuffer(uint32_t id) final;
-  void CaptureAt(uint32_t payload_buffer_id, uint32_t offset_frames,
-                 uint32_t num_frames, CaptureAtCallback cbk) final;
+  void CaptureAt(uint32_t payload_buffer_id, uint32_t offset_frames, uint32_t num_frames,
+                 CaptureAtCallback cbk) final;
   void ReleasePacket(fuchsia::media::StreamPacket packet) final;
   void DiscardAllPackets(DiscardAllPacketsCallback cbk) final;
   void DiscardAllPacketsNoReply() final;
   void StartAsyncCapture(uint32_t frames_per_packet) final;
   void StopAsyncCapture(StopAsyncCaptureCallback cbk) final;
   void StopAsyncCaptureNoReply() final;
-  void BindGainControl(
-      fidl::InterfaceRequest<fuchsia::media::audio::GainControl> request) final;
+  void BindGainControl(fidl::InterfaceRequest<fuchsia::media::audio::GainControl> request) final;
 
   // GainControl interface.
   void SetGain(float gain_db) final;
@@ -166,17 +171,13 @@ class AudioCapturerImpl
 
   // Methods used by capture/mixer thread(s). Must be called from mix_domain.
   zx_status_t Process() FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
-  bool MixToIntermediate(uint32_t mix_frames)
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
-  void UpdateTransformation(Bookkeeping* bk,
-                            const AudioDriver::RingBufferSnapshot& rb_snap)
+  bool MixToIntermediate(uint32_t mix_frames) FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
+  void UpdateTransformation(Bookkeeping* bk, const AudioDriver::RingBufferSnapshot& rb_snap)
       FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
   void DoStopAsyncCapture() FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
-  bool QueueNextAsyncPendingBuffer()
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token())
-          FXL_LOCKS_EXCLUDED(pending_lock_);
-  void ShutdownFromMixDomain()
-      FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
+  bool QueueNextAsyncPendingBuffer() FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token())
+      FXL_LOCKS_EXCLUDED(pending_lock_);
+  void ShutdownFromMixDomain() FXL_EXCLUSIVE_LOCKS_REQUIRED(mix_domain_->token());
 
   // Thunk to send finished buffers back to the user, and to finish an async
   // mode stop operation.
@@ -184,13 +185,11 @@ class AudioCapturerImpl
   void FinishBuffersThunk() FXL_LOCKS_EXCLUDED(mix_domain_->token());
 
   // Helper function used to return a set of pending capture buffers to a user.
-  void FinishBuffers(const PcbList& finished_buffers)
-      FXL_LOCKS_EXCLUDED(mix_domain_->token());
+  void FinishBuffers(const PcbList& finished_buffers) FXL_LOCKS_EXCLUDED(mix_domain_->token());
 
   // Bookkeeping helper.
-  void UpdateFormat(fuchsia::media::AudioSampleFormat sample_format,
-                    uint32_t channels, uint32_t frames_per_second)
-      FXL_LOCKS_EXCLUDED(mix_domain_->token());
+  void UpdateFormat(fuchsia::media::AudioSampleFormat sample_format, uint32_t channels,
+                    uint32_t frames_per_second) FXL_LOCKS_EXCLUDED(mix_domain_->token());
 
   // Select a mixer for the link supplied and return true, or return false if
   // one cannot be found.
@@ -217,9 +216,9 @@ class AudioCapturerImpl
   uint32_t payload_buf_frames_ = 0;
 
   // Execution domain/dispatcher stuff for mixing.
-  fbl::RefPtr<::dispatcher::ExecutionDomain> mix_domain_;
-  fbl::RefPtr<::dispatcher::WakeupEvent> mix_wakeup_;
-  fbl::RefPtr<::dispatcher::Timer> mix_timer_;
+  fbl::RefPtr<dispatcher::ExecutionDomain> mix_domain_;
+  fbl::RefPtr<dispatcher::WakeupEvent> mix_wakeup_;
+  fbl::RefPtr<dispatcher::Timer> mix_timer_;
 
   // Queues of capture buffers supplied by the client and waiting to be filled,
   // or waiting to be returned.
@@ -234,8 +233,7 @@ class AudioCapturerImpl
   // Vector used to hold references to our source links while we are mixing
   // (instead of holding the lock which prevents source_links_ mutation for the
   // entire mix job)
-  std::vector<fbl::RefPtr<AudioLink>> source_link_refs_
-      FXL_GUARDED_BY(mix_domain_->token());
+  std::vector<fbl::RefPtr<AudioLink>> source_link_refs_ FXL_GUARDED_BY(mix_domain_->token());
 
   // Capture bookkeeping
   bool async_mode_ = false;
@@ -250,7 +248,6 @@ class AudioCapturerImpl
 
 }  // namespace media::audio
 
-FWD_DECL_STATIC_SLAB_ALLOCATOR(
-    ::media::audio::AudioCapturerImpl::PcbAllocatorTraits);
+FWD_DECL_STATIC_SLAB_ALLOCATOR(media::audio::AudioCapturerImpl::PcbAllocatorTraits);
 
 #endif  // SRC_MEDIA_AUDIO_AUDIO_CORE_AUDIO_CAPTURER_IMPL_H_

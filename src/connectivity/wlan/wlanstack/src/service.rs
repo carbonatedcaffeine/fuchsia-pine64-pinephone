@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+use core::sync::atomic::AtomicUsize;
 use failure::ResultExt;
 use fidl::encoding::OutOfLine;
 use fidl::endpoints::create_proxy;
@@ -14,19 +15,42 @@ use fuchsia_cobalt::{self, CobaltSender};
 use fuchsia_zircon as zx;
 use futures::prelude::*;
 use log::{error, info};
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
-use crate::device::{self, IfaceDevice, IfaceMap, NewIface, PhyDevice, PhyMap};
+use crate::device::{self, DirectMlmeChannel, IfaceDevice, IfaceMap, NewIface, PhyDevice, PhyMap};
+use crate::inspect;
 use crate::station;
 use crate::stats_scheduler::StatsRef;
 use crate::watcher_service::WatcherService;
+use crate::ServiceCfg;
+
+/// Thread-safe counter for spawned ifaces.
+pub struct IfaceCounter(AtomicUsize);
+
+impl IfaceCounter {
+    pub fn new() -> Self {
+        Self(AtomicUsize::new(0))
+    }
+
+    /// Provides the caller with a new unique id.
+    pub fn next_iface_id(&self) -> usize {
+        self.0.fetch_add(1, Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    pub fn new_with_value(v: usize) -> Self {
+        Self(AtomicUsize::new(v))
+    }
+}
 
 pub async fn serve_device_requests(
+    iface_counter: IfaceCounter,
+    cfg: ServiceCfg,
     phys: Arc<PhyMap>,
     ifaces: Arc<IfaceMap>,
     watcher_service: WatcherService<PhyDevice, IfaceDevice>,
     mut req_stream: fidl_svc::DeviceServiceRequestStream,
-    inspect_root: wlan_inspect::SharedNodePtr,
+    inspect_tree: Arc<inspect::WlanstackTree>,
     cobalt_sender: CobaltSender,
 ) -> Result<(), failure::Error> {
     while let Some(req) = await!(req_stream.try_next()).context("error running DeviceService")? {
@@ -50,26 +74,32 @@ pub async fn serve_device_requests(
                 responder.send(status.into_raw(), response.as_mut().map(OutOfLine))
             }
             DeviceServiceRequest::CreateIface { req, responder } => {
-                match await!(create_iface(&phys, req)) {
+                match await!(create_iface(&iface_counter, &phys, req)) {
                     Ok(new_iface) => {
-                        info!(
-                            "iface #{} started (phy id: {}, local id: {})",
-                            new_iface.id, new_iface.phy_id, new_iface.phy_assigned_id
-                        );
-                        // TODO(WLAN-927): We use the wrong ID use global ID instead.
-                        let iface_id = new_iface.phy_assigned_id;
+                        info!("iface #{} started ({:?})", new_iface.id, new_iface.phy_ownership);
+                        let iface_id = new_iface.id;
                         let resp = fidl_svc::CreateIfaceResponse { iface_id };
                         responder.send(zx::sys::ZX_OK, Some(resp).as_mut().map(OutOfLine))?;
 
                         // TODO(WLAN-927): Remove check once all drivers support SME channels.
-                        if new_iface.mlme_proxy.is_some() {
+                        if let DirectMlmeChannel::Supported(mlme_proxy) = new_iface.mlme_channel {
+                            let inspect_tree = inspect_tree.clone();
+                            let iface_tree_holder = inspect_tree.create_iface_child(iface_id);
+
                             let serve_sme_fut = device::query_and_serve_iface(
-                                new_iface,
+                                cfg.clone(),
+                                iface_id,
+                                new_iface.phy_ownership,
+                                mlme_proxy,
                                 ifaces.clone(),
-                                inspect_root.clone(),
-                                cobalt_sender.clone()
-                            ).map(move |result| if let Err(e) = result {
-                                error!("error serving iface {}: {}", iface_id, e);
+                                iface_tree_holder,
+                                cobalt_sender.clone(),
+                            )
+                            .map(move |result| {
+                                if let Err(e) = result {
+                                    error!("error serving iface {}: {}", iface_id, e);
+                                }
+                                inspect_tree.notify_iface_removed(iface_id);
                             });
                             fasync::spawn(serve_sme_fut);
                         } else {
@@ -80,7 +110,11 @@ pub async fn serve_device_requests(
                     Err(status) => responder.send(status.into_raw(), None),
                 }
             }
-            DeviceServiceRequest::DestroyIface { req: _, responder: _ } => unimplemented!(),
+            DeviceServiceRequest::DestroyIface { req, responder } => {
+                let result = await!(destroy_iface(&phys, &ifaces, req.iface_id));
+                let status = into_status_and_opt(result).0;
+                responder.send(status.into_raw())
+            }
             DeviceServiceRequest::GetClientSme { iface_id, sme, responder } => {
                 let status = get_client_sme(&ifaces, iface_id, sme);
                 responder.send(status.into_raw())
@@ -115,6 +149,10 @@ pub async fn serve_device_requests(
                     .add_watcher(watcher)
                     .unwrap_or_else(|e| error!("error registering a device watcher: {}", e));
                 Ok(())
+            }
+            DeviceServiceRequest::SetCountry { req, responder } => {
+                let status = await!(set_country(&phys, req));
+                responder.send(status.into_raw())
             }
         }?;
     }
@@ -170,6 +208,30 @@ fn list_ifaces(ifaces: &IfaceMap) -> fidl_svc::ListIfacesResponse {
     fidl_svc::ListIfacesResponse { ifaces: list }
 }
 
+async fn destroy_iface<'a>(
+    phys: &'a PhyMap,
+    ifaces: &'a IfaceMap,
+    id: u16,
+) -> Result<(), zx::Status> {
+    info!("destroy_iface(id = {})", id);
+    let iface = ifaces.get(&id).ok_or(zx::Status::NOT_FOUND)?;
+    let phy_ownership = match &iface.phy_ownership {
+        device::DirectMlmeChannel::NotSupported => return Err(zx::Status::NOT_SUPPORTED),
+        device::DirectMlmeChannel::Supported(phy) => phy,
+    };
+
+    let phy = phys.get(&phy_ownership.phy_id).ok_or(zx::Status::NOT_FOUND)?;
+    let mut phy_req = fidl_wlan_dev::DestroyIfaceRequest { id: phy_ownership.phy_assigned_id };
+    let r = await!(phy.proxy.destroy_iface(&mut phy_req)).map_err(move |e| {
+        error!("Error sending 'DestroyIface' request to phy {:?}: {}", phy_ownership, e);
+        zx::Status::INTERNAL
+    })?;
+    let () = zx::Status::ok(r.status)?;
+
+    ifaces.remove(&id);
+    Ok(())
+}
+
 fn query_iface(ifaces: &IfaceMap, id: u16) -> Result<fidl_svc::QueryIfaceResponse, zx::Status> {
     info!("query_iface(id = {})", id);
     let iface = ifaces.get(&id).ok_or(zx::Status::NOT_FOUND)?;
@@ -183,16 +245,41 @@ fn query_iface(ifaces: &IfaceMap, id: u16) -> Result<fidl_svc::QueryIfaceRespons
         Some(device) => device.path().to_string_lossy().into_owned(),
         None => "TODO(WLAN-927)".to_string(),
     };
+
+    let (phy_id, phy_assigned_id) = match &iface.phy_ownership {
+        device::DirectMlmeChannel::NotSupported => (u16::max_value(), u16::max_value()),
+        device::DirectMlmeChannel::Supported(phy) => (phy.phy_id, phy.phy_assigned_id),
+    };
+
     let mac_addr = iface.device_info.mac_addr;
-    Ok(fidl_svc::QueryIfaceResponse { role, id, dev_path, mac_addr })
+    Ok(fidl_svc::QueryIfaceResponse { role, id, dev_path, mac_addr, phy_id, phy_assigned_id })
 }
 
-async fn create_iface(
-    phys: &PhyMap,
+async fn set_country(phys: &PhyMap, req: fidl_svc::SetCountryRequest) -> zx::Status {
+    let phy_id = req.phy_id;
+    let phy = match phys.get(&req.phy_id) {
+        None => return zx::Status::NOT_FOUND,
+        Some(p) => p,
+    };
+
+    let mut phy_req = fidl_wlan_dev::SetCountryRequest { alpha2: req.alpha2 };
+    match await!(phy.proxy.set_country(&mut phy_req)) {
+        Ok(status) => zx::Status::from_raw(status),
+        Err(e) => {
+            error!("Error sending SetCountry set_country request to phy #{}: {}", phy_id, e);
+            zx::Status::INTERNAL
+        }
+    }
+}
+
+async fn create_iface<'a>(
+    iface_counter: &'a IfaceCounter,
+    phys: &'a PhyMap,
     req: fidl_svc::CreateIfaceRequest,
 ) -> Result<NewIface, zx::Status> {
     let phy_id = req.phy_id;
     let phy = phys.get(&req.phy_id).ok_or(zx::Status::NOT_FOUND)?;
+
     let phy_info = await!(phy.proxy.query())
         .map_err(|e| {
             error!("error sending query request to phy #{}: {}", phy_id, e);
@@ -202,15 +289,15 @@ async fn create_iface(
 
     let supports_sme_channel =
         phy_info.driver_features.contains(&DriverFeature::TempDirectSmeChannel);
-    let (mlme_proxy, sme_channel) = if supports_sme_channel {
+    let (mlme_channel, sme_channel) = if supports_sme_channel {
         create_proxy::<MlmeMarker>()
             .map_err(|e| {
                 error!("failed to create MlmeProxy: {}", e);
                 zx::Status::INTERNAL
             })
-            .map(|(p, c)| (Some(p), Some(c.into_channel())))?
+            .map(|(p, c)| (DirectMlmeChannel::Supported(p), Some(c.into_channel())))?
     } else {
-        (None, None)
+        (DirectMlmeChannel::NotSupported, None)
     };
 
     let mut phy_req = fidl_wlan_dev::CreateIfaceRequest { role: req.role, sme_channel };
@@ -221,10 +308,9 @@ async fn create_iface(
     zx::Status::ok(r.status)?;
 
     Ok(NewIface {
-        id: 0, // TODO(WLAN-927): Hand out global IDs for ifaces.
-        phy_id,
-        phy_assigned_id: r.iface_id,
-        mlme_proxy,
+        id: iface_counter.next_iface_id() as u16,
+        phy_ownership: device::PhyOwnership { phy_id, phy_assigned_id: r.iface_id },
+        mlme_channel,
     })
 }
 
@@ -332,6 +418,7 @@ mod tests {
     use fidl_fuchsia_wlan_sme as fidl_sme;
     use fuchsia_async as fasync;
     use fuchsia_wlan_dev as wlan_dev;
+    use fuchsia_zircon as zx;
     use futures::channel::mpsc;
     use futures::task::Poll;
     use pin_utils::pin_mut;
@@ -344,6 +431,15 @@ mod tests {
         mlme_query_proxy::MlmeQueryProxy,
         stats_scheduler::{self, StatsRequest},
     };
+
+    #[test]
+    fn iface_counter() {
+        let iface_counter = IfaceCounter::new();
+        assert_eq!(0, iface_counter.next_iface_id());
+        assert_eq!(1, iface_counter.next_iface_id());
+        assert_eq!(2, iface_counter.next_iface_id());
+        assert_eq!(3, iface_counter.next_iface_id());
+    }
 
     #[test]
     fn list_two_phys() {
@@ -451,12 +547,175 @@ mod tests {
     }
 
     #[test]
+    fn destroy_iface_success() {
+        let mut exec = fasync::Executor::new().expect("Failed to create an executor");
+        let (mut phy_map, _phy_map_events) = PhyMap::new();
+        let (mut iface_map, _iface_map_events) = IfaceMap::new();
+        let mut phy_stream = fake_destroy_iface_env(&mut phy_map, &mut iface_map);
+
+        let destroy_fut = super::destroy_iface(&phy_map, &iface_map, 42);
+        pin_mut!(destroy_fut);
+        assert_eq!(Poll::Pending, exec.run_until_stalled(&mut destroy_fut));
+
+        let (req, responder) = match exec.run_until_stalled(&mut phy_stream.next()) {
+            Poll::Ready(Some(Ok(PhyRequest::DestroyIface { req, responder }))) => (req, responder),
+            _ => panic!("phy_stream returned unexpected result"),
+        };
+
+        // Verify the destroy iface request to the corresponding PHY is correct.
+        assert_eq!(13, req.id);
+
+        responder
+            .send(&mut fidl_wlan_dev::DestroyIfaceResponse { status: zx::sys::ZX_OK })
+            .expect("failed to send DestroyIfaceResponse");
+        assert_eq!(Poll::Ready(Ok(())), exec.run_until_stalled(&mut destroy_fut));
+
+        // Verify iface was removed from available ifaces.
+        if let Some(_) = iface_map.get(&42u16) {
+            panic!("iface expected to be deleted")
+        }
+    }
+
+    #[test]
+    fn destroy_iface_failure() {
+        let mut exec = fasync::Executor::new().expect("Failed to create an executor");
+        let (mut phy_map, _phy_map_events) = PhyMap::new();
+        let (mut iface_map, _iface_map_events) = IfaceMap::new();
+        let mut phy_stream = fake_destroy_iface_env(&mut phy_map, &mut iface_map);
+
+        let destroy_fut = super::destroy_iface(&phy_map, &iface_map, 42);
+        pin_mut!(destroy_fut);
+        assert_eq!(Poll::Pending, exec.run_until_stalled(&mut destroy_fut));
+
+        let (req, responder) = match exec.run_until_stalled(&mut phy_stream.next()) {
+            Poll::Ready(Some(Ok(PhyRequest::DestroyIface { req, responder }))) => (req, responder),
+            _ => panic!("phy_stream returned unexpected result"),
+        };
+
+        // Verify the destroy iface request to the corresponding PHY is correct.
+        assert_eq!(13, req.id);
+
+        responder
+            .send(&mut fidl_wlan_dev::DestroyIfaceResponse { status: zx::sys::ZX_ERR_INTERNAL })
+            .expect("failed to send DestroyIfaceResponse");
+        assert_eq!(
+            Poll::Ready(Err(zx::Status::INTERNAL)),
+            exec.run_until_stalled(&mut destroy_fut)
+        );
+
+        // Verify iface was not removed from available ifaces.
+        if let None = iface_map.get(&42u16) {
+            panic!("iface expected to not be deleted")
+        }
+    }
+
+    #[test]
+    fn destroy_iface_not_supported() {
+        let mut exec = fasync::Executor::new().expect("Failed to create an executor");
+        let (mut phy_map, _phy_map_events) = PhyMap::new();
+        let (mut iface_map, _iface_map_events) = IfaceMap::new();
+        let _phy_stream = fake_destroy_iface_env(&mut phy_map, &mut iface_map);
+
+        let fut = super::destroy_iface(&phy_map, &iface_map, 10);
+        pin_mut!(fut);
+        assert_eq!(Poll::Ready(Err(zx::Status::NOT_SUPPORTED)), exec.run_until_stalled(&mut fut));
+    }
+
+    #[test]
+    fn destroy_iface_not_found() {
+        let mut exec = fasync::Executor::new().expect("Failed to create an executor");
+        let (mut phy_map, _phy_map_events) = PhyMap::new();
+        let (mut iface_map, _iface_map_events) = IfaceMap::new();
+        let _phy_stream = fake_destroy_iface_env(&mut phy_map, &mut iface_map);
+
+        let fut = super::destroy_iface(&phy_map, &iface_map, 43);
+        pin_mut!(fut);
+        assert_eq!(Poll::Ready(Err(zx::Status::NOT_FOUND)), exec.run_until_stalled(&mut fut));
+    }
+
+    #[test]
     fn query_iface_not_found() {
         let (iface_map, _iface_map_events) = IfaceMap::new();
         let iface_map = Arc::new(iface_map);
 
         let status = super::query_iface(&iface_map, 10u16).expect_err("querying iface succeeded");
         assert_eq!(zx::Status::NOT_FOUND, status);
+    }
+
+    #[test]
+    fn create_iface_success_sme_channel() {
+        let mut exec = fasync::Executor::new().expect("Failed to create an executor");
+        let (phy_map, _phy_map_events) = PhyMap::new();
+        let phy_map = Arc::new(phy_map);
+
+        let (phy, mut phy_stream) = fake_phy("/dev/null");
+        phy_map.insert(10, phy);
+
+        // Initiate a CreateIface request. The returned future should not be able
+        // to produce a result immediately
+        let iface_counter = IfaceCounter::new_with_value(5);
+        let create_fut = super::create_iface(
+            &iface_counter,
+            &phy_map,
+            fidl_svc::CreateIfaceRequest { phy_id: 10, role: fidl_wlan_dev::MacRole::Client },
+        );
+        pin_mut!(create_fut);
+        match exec.run_until_stalled(&mut create_fut) {
+            Poll::Pending => (),
+            other => panic!("expected pending iface creation: {:?}", other),
+        };
+
+        // TODO(WLAN-927): SME Channel transition requires querying PHY for driver feature
+        // support. Remove once feature landed.
+        let responder = match exec.run_until_stalled(&mut phy_stream.next()) {
+            Poll::Ready(Some(Ok(PhyRequest::Query { responder }))) => responder,
+            other => panic!("phy_stream returned unexpected result: {:?}", other),
+        };
+        responder
+            .send(&mut fidl_wlan_dev::QueryResponse {
+                status: zx::sys::ZX_OK,
+                info: fidl_wlan_dev::PhyInfo {
+                    driver_features: vec![DriverFeature::TempDirectSmeChannel],
+                    ..fake_phy_info()
+                },
+            })
+            .expect("failed to send QueryResponse");
+
+        // Continue running create iface request.
+        match exec.run_until_stalled(&mut create_fut) {
+            Poll::Pending => (),
+            other => panic!("expected pending iface creation: {:?}", other),
+        };
+
+        let (req, responder) = match exec.run_until_stalled(&mut phy_stream.next()) {
+            Poll::Ready(Some(Ok(PhyRequest::CreateIface { req, responder }))) => (req, responder),
+            other => panic!("phy_stream returned unexpected result: {:?}", other),
+        };
+
+        // Since we requested the Client role, the request to the phy should also have
+        // the Client role
+        assert_eq!(fidl_wlan_dev::MacRole::Client, req.role);
+
+        // Pretend that the interface was created with local id 123.
+        responder
+            .send(&mut fidl_wlan_dev::CreateIfaceResponse { status: zx::sys::ZX_OK, iface_id: 123 })
+            .expect("failed to send CreateIfaceResponse");
+
+        // The original future should resolve into a response.
+        let response = match exec.run_until_stalled(&mut create_fut) {
+            Poll::Ready(Ok(response)) => response,
+            other => panic!("create_fut returned unexpected result: {:?}", other),
+        };
+
+        assert_eq!(5, response.id);
+        assert_eq!(
+            device::PhyOwnership { phy_id: 10, phy_assigned_id: 123 },
+            response.phy_ownership
+        );
+        match response.mlme_channel {
+            DirectMlmeChannel::Supported(_) => (),
+            other => panic!("expected SME Channel to be available: {:?}", other),
+        };
     }
 
     #[test]
@@ -470,7 +729,9 @@ mod tests {
 
         // Initiate a CreateIface request. The returned future should not be able
         // to produce a result immediately
+        let iface_counter = IfaceCounter::new_with_value(2);
         let create_fut = super::create_iface(
+            &iface_counter,
             &phy_map,
             fidl_svc::CreateIfaceRequest { phy_id: 10, role: fidl_wlan_dev::MacRole::Client },
         );
@@ -486,10 +747,12 @@ mod tests {
             Poll::Ready(Some(Ok(PhyRequest::Query { responder }))) => responder,
             _ => panic!("phy_stream returned unexpected result"),
         };
-        responder.send(&mut fidl_wlan_dev::QueryResponse {
-            status: zx::sys::ZX_OK,
-            info: fake_phy_info(),
-        }).expect("failed to send QueryResponse");
+        responder
+            .send(&mut fidl_wlan_dev::QueryResponse {
+                status: zx::sys::ZX_OK,
+                info: fake_phy_info(),
+            })
+            .expect("failed to send QueryResponse");
 
         // Continue running create iface request.
         match exec.run_until_stalled(&mut create_fut) {
@@ -498,9 +761,7 @@ mod tests {
         };
 
         let (req, responder) = match exec.run_until_stalled(&mut phy_stream.next()) {
-            Poll::Ready(Some(Ok(PhyRequest::CreateIface { req, responder }))) => {
-                (req, responder)
-            },
+            Poll::Ready(Some(Ok(PhyRequest::CreateIface { req, responder }))) => (req, responder),
             _ => panic!("phy_stream returned unexpected result"),
         };
 
@@ -520,7 +781,7 @@ mod tests {
         };
         // This assertion likely needs to change once we figure out a solution
         // to the iface id problem.
-        assert_eq!(123, response.phy_assigned_id);
+        assert_eq!(123, response.phy_ownership.phy_assigned_id);
     }
 
     #[test]
@@ -529,7 +790,9 @@ mod tests {
         let (phy_map, _phy_map_events) = PhyMap::new();
         let phy_map = Arc::new(phy_map);
 
+        let iface_counter = IfaceCounter::new_with_value(2);
         let fut = super::create_iface(
+            &iface_counter,
             &phy_map,
             fidl_svc::CreateIfaceRequest { phy_id: 10, role: fidl_wlan_dev::MacRole::Client },
         );
@@ -656,6 +919,112 @@ mod tests {
         assert_eq!(zx::Status::NOT_SUPPORTED, super::get_ap_sme(&iface_map, 10, server));
     }
 
+    #[test]
+    fn test_set_country() {
+        // Setup environment
+        let mut exec = fasync::Executor::new().expect("Failed to create an executor");
+        let (phy_map, _phy_map_events) = PhyMap::new();
+        let phy_map = Arc::new(phy_map);
+        let (phy, mut phy_stream) = fake_phy("/dev/null");
+        let phy_id = 10u16;
+        phy_map.insert(phy_id, phy);
+        let alpha2 = fake_alpah2();
+
+        // Initiate a QueryPhy request. The returned future should not be able
+        // to produce a result immediately
+        // Issue service.fidl::SetCountryRequest()
+        let req_msg = fidl_svc::SetCountryRequest { phy_id, alpha2: alpha2.clone() };
+        let req_fut = super::set_country(&phy_map, req_msg);
+        pin_mut!(req_fut);
+        assert_eq!(Poll::Pending, exec.run_until_stalled(&mut req_fut));
+
+        let (req, responder) = match exec.run_until_stalled(&mut phy_stream.next()) {
+            Poll::Ready(Some(Ok(PhyRequest::SetCountry { req, responder }))) => (req, responder),
+            _ => panic!("phy_stream returned unexpected result"),
+        };
+        assert_eq!(req.alpha2, alpha2.clone());
+
+        // Pretend to be a WLAN PHY to return the result.
+        let resp = zx::Status::OK.into_raw();
+        responder.send(resp).expect("failed to send the response to SetCountry");
+
+        // req_fut should have completed by now. Test the result.
+        let status = match exec.run_until_stalled(&mut req_fut) {
+            Poll::Ready(status) => status,
+            other => panic!("req_fut returned unexpected result: {:?}", other),
+        };
+        assert_eq!(status, zx::Status::OK);
+    }
+
+    #[test]
+    fn test_set_country_failure() {
+        // Setup environment
+        let mut exec = fasync::Executor::new().expect("Failed to create an executor");
+        let (phy_map, _phy_map_events) = PhyMap::new();
+        let phy_map = Arc::new(phy_map);
+        let (phy, mut phy_stream) = fake_phy("/dev/null");
+        let phy_id = 10u16;
+        phy_map.insert(phy_id, phy);
+        let alpha2 = fake_alpah2();
+
+        // Initiate a QueryPhy request. The returned future should not be able
+        // to produce a result immediately
+        // Issue service.fidl::SetCountryRequest()
+        let req_msg = fidl_svc::SetCountryRequest { phy_id, alpha2: alpha2.clone() };
+        let req_fut = super::set_country(&phy_map, req_msg);
+        pin_mut!(req_fut);
+        assert_eq!(Poll::Pending, exec.run_until_stalled(&mut req_fut));
+
+        let (req, responder) = match exec.run_until_stalled(&mut phy_stream.next()) {
+            Poll::Ready(Some(Ok(PhyRequest::SetCountry { req, responder }))) => (req, responder),
+            _ => panic!("phy_stream returned unexpected result"),
+        };
+        assert_eq!(req.alpha2, alpha2.clone());
+
+        // Failure case #1: WLAN PHY not responding
+        let _ = match exec.run_until_stalled(&mut req_fut) {
+            Poll::Ready(status) => {
+                panic!("responder did not respond. Not supposed to receive a status: {:?}", status);
+            }
+            _ => (),
+        };
+
+        // Failure case #2: WLAN PHY has not implemented the feature.
+        assert_eq!(Poll::Pending, exec.run_until_stalled(&mut req_fut));
+        let resp = zx::Status::NOT_SUPPORTED.into_raw();
+        responder.send(resp).expect("failed to send the response to SetCountry");
+        let status = match exec.run_until_stalled(&mut req_fut) {
+            Poll::Ready(status) => status,
+            other => panic!("req_fut returned unexpected result: {:?}", other),
+        };
+        assert_eq!(status, zx::Status::NOT_SUPPORTED);
+    }
+
+    fn fake_destroy_iface_env(phy_map: &mut PhyMap, iface_map: &mut IfaceMap) -> PhyRequestStream {
+        let (phy, phy_stream) = fake_phy("/dev/null");
+        phy_map.insert(10, phy);
+
+        // Insert device which does not support destruction.
+        let iface = fake_client_iface("/dev/null");
+        iface_map.insert(10, iface.iface);
+
+        // Insert device which does support destruction.
+        let iface = fake_client_iface("/dev/null");
+        let iface = FakeClientIface {
+            iface: IfaceDevice {
+                phy_ownership: device::DirectMlmeChannel::Supported(device::PhyOwnership {
+                    phy_id: 10,
+                    phy_assigned_id: 13,
+                }),
+                ..iface.iface
+            },
+            ..iface
+        };
+        iface_map.insert(42, iface.iface);
+
+        phy_stream
+    }
+
     fn fake_phy(path: &str) -> (PhyDevice, PhyRequestStream) {
         let (proxy, server) =
             create_proxy::<fidl_wlan_dev::PhyMarker>().expect("fake_phy: create_proxy() failed");
@@ -680,6 +1049,7 @@ mod tests {
         let mlme_query = MlmeQueryProxy::new(proxy);
         let device_info = fake_device_info();
         let iface = IfaceDevice {
+            phy_ownership: device::DirectMlmeChannel::NotSupported,
             sme_server: device::SmeServer::Client(sme_sender),
             stats_sched,
             device: Some(device),
@@ -704,6 +1074,7 @@ mod tests {
         let mlme_query = MlmeQueryProxy::new(proxy);
         let device_info = fake_device_info();
         let iface = IfaceDevice {
+            phy_ownership: device::DirectMlmeChannel::NotSupported,
             sme_server: device::SmeServer::Ap(sme_sender),
             stats_sched,
             device: Some(device),
@@ -745,5 +1116,11 @@ mod tests {
             password: vec![],
             radio_cfg: RadioConfig::new(Phy::Ht, Cbw::Cbw20, 6).to_fidl(),
         }
+    }
+
+    fn fake_alpah2() -> [u8; 2] {
+        let mut alpha2: [u8; 2] = [0, 0];
+        alpha2.copy_from_slice("MX".as_bytes());
+        alpha2
     }
 }

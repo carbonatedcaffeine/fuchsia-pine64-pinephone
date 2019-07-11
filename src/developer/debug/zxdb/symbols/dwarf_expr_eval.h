@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_BIN_ZXDB_SYMBOLS_DWARF_EXPR_EVAL_H_
-#define GARNET_BIN_ZXDB_SYMBOLS_DWARF_EXPR_EVAL_H_
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DWARF_EXPR_EVAL_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DWARF_EXPR_EVAL_H_
 
 #include <stdint.h>
 
@@ -11,12 +11,12 @@
 #include <memory>
 #include <vector>
 
-#include "src/lib/fxl/macros.h"
-#include "src/lib/fxl/memory/ref_ptr.h"
-#include "src/lib/fxl/memory/weak_ptr.h"
 #include "src/developer/debug/zxdb/common/err.h"
 #include "src/developer/debug/zxdb/symbols/arch.h"
 #include "src/developer/debug/zxdb/symbols/symbol_context.h"
+#include "src/lib/fxl/macros.h"
+#include "src/lib/fxl/memory/ref_ptr.h"
+#include "src/lib/fxl/memory/weak_ptr.h"
 
 namespace llvm {
 class DataExtractor;
@@ -55,8 +55,7 @@ class DwarfExprEval {
   // Storage for opcode data.
   using Expression = std::vector<uint8_t>;
 
-  using CompletionCallback =
-      std::function<void(DwarfExprEval* eval, const Err& err)>;
+  using CompletionCallback = std::function<void(DwarfExprEval* eval, const Err& err)>;
 
   DwarfExprEval();
   ~DwarfExprEval();
@@ -86,9 +85,10 @@ class DwarfExprEval {
   // synchronous completion the callback will have been called reentrantly from
   // within the stack of this function. This does not indicate success as it
   // could succeed or fail both synchronously and asynchronously.
+  //
+  // This class must not be deleted from within the completion callback.
   Completion Eval(fxl::RefPtr<SymbolDataProvider> data_provider,
-                  const SymbolContext& symbol_context, Expression expr,
-                  CompletionCallback cb);
+                  const SymbolContext& symbol_context, Expression expr, CompletionCallback cb);
 
  private:
   // Evaluates the next phases of the expression until an asynchronous operation
@@ -143,6 +143,7 @@ class DwarfExprEval {
   Completion OpAddr();
   Completion OpBra();
   Completion OpBreg(uint8_t op);
+  Completion OpCFA();
   Completion OpDeref();
   Completion OpDiv();
   Completion OpDrop();
@@ -178,6 +179,7 @@ class DwarfExprEval {
   uint32_t expr_index_ = 0;
 
   CompletionCallback completion_callback_;
+  bool in_completion_callback_ = false;  // To check for lifetime errors.
 
   // Allocated on the heap to avoid exposing LLVM headers.
   std::unique_ptr<llvm::DataExtractor> data_extractor_;
@@ -204,4 +206,4 @@ class DwarfExprEval {
 
 }  // namespace zxdb
 
-#endif  // GARNET_BIN_ZXDB_SYMBOLS_DWARF_EXPR_EVAL_H_
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DWARF_EXPR_EVAL_H_

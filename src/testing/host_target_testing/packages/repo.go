@@ -84,12 +84,11 @@ func NewRepositoryFromTar(dst string, src string) (*Repository, error) {
 
 // Open a package from the p
 func (r *Repository) OpenPackage(path string) (Package, error) {
-	target, ok := r.targets.Targets[path]
-	if !ok {
-		return Package{}, fmt.Errorf("could not find package: %q", path)
+	if target, ok := r.targets.Targets[path]; ok {
+		return newPackage(r, target.Custom.Merkle)
 	}
+	return Package{}, fmt.Errorf("could not find package: %q", path)
 
-	return newPackage(r, target.Custom.Merkle)
 }
 
 func (r *Repository) OpenBlob(merkle string) (*os.File, error) {

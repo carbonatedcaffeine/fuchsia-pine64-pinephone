@@ -13,8 +13,7 @@ namespace internal {
 
 PendingResponse::PendingResponse() : txid_(0), weak_sender_(nullptr) {}
 
-PendingResponse::PendingResponse(zx_txid_t txid,
-                                 WeakMessageSender* weak_sender)
+PendingResponse::PendingResponse(zx_txid_t txid, WeakMessageSender* weak_sender)
     : txid_(txid), weak_sender_(weak_sender) {
   if (weak_sender_)
     weak_sender_->AddRef();

@@ -9,7 +9,7 @@
 
 #include <memory>
 
-#include "lib/media/timeline/timeline_function.h"
+#include "lib/media/cpp/timeline_function.h"
 #include "src/media/audio/audio_core/mixer/constants.h"
 #include "src/media/audio/audio_core/mixer/gain.h"
 
@@ -53,10 +53,9 @@ class Mixer {
   // For optimum system performance across changing conditions, callers should
   // take care when directly specifying a resampler type, if they do so at all.
   // The default should be allowed whenever possible.
-  static std::unique_ptr<Mixer> Select(
-      const fuchsia::media::AudioStreamType& src_format,
-      const fuchsia::media::AudioStreamType& dest_format,
-      Resampler resampler_type = Resampler::Default);
+  static std::unique_ptr<Mixer> Select(const fuchsia::media::AudioStreamType& src_format,
+                                       const fuchsia::media::AudioStreamType& dest_format,
+                                       Resampler resampler_type = Resampler::Default);
 
   //
   // Mix
@@ -104,9 +103,8 @@ class Mixer {
   //
   // TODO(mpuryear): Change parameter frac_src_frames to src_frames (change
   // subframes to int frames), as this was never intended to be fractional.
-  virtual bool Mix(float* dest, uint32_t dest_frames, uint32_t* dest_offset,
-                   const void* src, uint32_t frac_src_frames,
-                   int32_t* frac_src_offset, bool accumulate,
+  virtual bool Mix(float* dest, uint32_t dest_frames, uint32_t* dest_offset, const void* src,
+                   uint32_t frac_src_frames, int32_t* frac_src_offset, bool accumulate,
                    Bookkeeping* info) = 0;
   //
   // Reset
@@ -191,7 +189,7 @@ class Mixer {
 // source gain and a snapshot of destination gain (Gain objects correspond with
 // source streams, so the definitive value for destination gain is naturally
 // owned elsewhere). In the future, this object may include explicit Mute
-// states for source and dest stages, a separately controlled Category gain
+// states for source and dest stages, a separately controlled Usage gain
 // stage, and/or the ability to ramp one or more of these gains over time.
 // Gain accepts level in dB, and provides gainscale as float multiplier.
 //
@@ -267,8 +265,7 @@ struct Bookkeeping {
   // TODO(mpuryear): move this into the Mixer or Gain class, along with the
   // other Bookkeeping parameters.
   static constexpr uint32_t kScaleArrLen = 960;
-  std::unique_ptr<Gain::AScale[]> scale_arr =
-      std::make_unique<Gain::AScale[]>(kScaleArrLen);
+  std::unique_ptr<Gain::AScale[]> scale_arr = std::make_unique<Gain::AScale[]>(kScaleArrLen);
 };
 
 }  // namespace media::audio

@@ -4,17 +4,17 @@
 
 #include "garnet/bin/trace/tracer.h"
 
-#include <lib/async/cpp/task.h>
-#include <lib/async/default.h>
-#include <trace-engine/fields.h>
-#include <trace-reader/reader.h>
 #include <utility>
 
-#include "src/lib/fxl/logging.h"
+#include <lib/async/cpp/task.h>
+#include <lib/async/default.h>
+#include <src/lib/fxl/logging.h>
+#include <trace-engine/fields.h>
+#include <trace-reader/reader.h>
 
 namespace tracing {
 
-Tracer::Tracer(fuchsia::tracing::controller::Controller* controller)
+Tracer::Tracer(controller::Controller* controller)
     : controller_(controller), dispatcher_(nullptr), wait_(this) {
   FXL_DCHECK(controller_);
   wait_.set_trigger(ZX_SOCKET_READABLE | ZX_SOCKET_PEER_CLOSED);
@@ -22,8 +22,7 @@ Tracer::Tracer(fuchsia::tracing::controller::Controller* controller)
 
 Tracer::~Tracer() { CloseSocket(); }
 
-void Tracer::Start(fuchsia::tracing::controller::TraceOptions options,
-                   bool binary,
+void Tracer::Start(controller::TraceOptions options, bool binary,
                    BytesConsumer bytes_consumer, RecordConsumer record_consumer,
                    ErrorHandler error_handler, fit::closure start_callback,
                    fit::closure done_callback) {

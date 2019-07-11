@@ -23,7 +23,6 @@ type Config struct {
 	FuchsiaDir             string
 	SshKeyFile             string
 	netaddrPath            string
-	localHostname          string
 	DeviceName             string
 	deviceHostname         string
 	LkgbPath               string
@@ -32,6 +31,7 @@ type Config struct {
 	downgradeBuilderName   string
 	downgradeBuildID       string
 	downgradeAmberFilesDir string
+	upgradeBuilderName     string
 	upgradeBuildID         string
 	upgradeAmberFilesDir   string
 	archive                *artifacts.Archive
@@ -51,7 +51,6 @@ func NewConfig(fs *flag.FlagSet) (*Config, error) {
 	fs.StringVar(&c.FuchsiaDir, "fuchsia-dir", os.Getenv("FUCHSIA_DIR"), "fuchsia dir")
 	fs.StringVar(&c.SshKeyFile, "ssh-private-key", os.Getenv("FUCHSIA_SSH_KEY"), "SSH private key file that can access the device")
 	fs.StringVar(&c.netaddrPath, "netaddr-path", filepath.Join(testDataPath, "netaddr"), "zircon netaddr tool path")
-	fs.StringVar(&c.localHostname, "local-hostname", "", "local hostname")
 	fs.StringVar(&c.DeviceName, "device", os.Getenv("FUCHSIA_NODENAME"), "device name")
 	fs.StringVar(&c.deviceHostname, "device-hostname", os.Getenv("FUCHSIA_IPV4_ADDR"), "device hostname or IPv4/IPv6 address")
 	fs.StringVar(&c.LkgbPath, "lkgb", filepath.Join(testDataPath, "lkgb"), "path to lkgb, default is $FUCHSIA_DIR/prebuilt/tools/lkgb/lkgb")
@@ -59,6 +58,7 @@ func NewConfig(fs *flag.FlagSet) (*Config, error) {
 	fs.StringVar(&c.downgradeBuilderName, "downgrade-builder-name", "", "downgrade to the latest version of this builder")
 	fs.StringVar(&c.downgradeBuildID, "downgrade-build-id", "", "downgrade to this specific build id")
 	fs.StringVar(&c.downgradeAmberFilesDir, "downgrade-amber-files", "", "Path to the downgrade amber-files repository")
+	fs.StringVar(&c.upgradeBuilderName, "upgrade-builder-name", "", "upgrade to the latest version of this builder")
 	fs.StringVar(&c.upgradeBuildID, "upgrade-build-id", os.Getenv("BUILDBUCKET_ID"), "upgrade to this build id (default is $BUILDBUCKET_ID)")
 	fs.StringVar(&c.upgradeAmberFilesDir, "upgrade-amber-files", "", "Path to the upgrade amber-files repository")
 
@@ -77,13 +77,13 @@ func (c *Config) Validate() error {
 	}
 
 	defined = 0
-	for _, s := range []string{c.upgradeBuildID, c.upgradeAmberFilesDir} {
+	for _, s := range []string{c.upgradeBuilderName, c.upgradeBuildID, c.upgradeAmberFilesDir} {
 		if s != "" {
 			defined += 1
 		}
 	}
 	if defined != 1 {
-		return fmt.Errorf("exactly one of -upgrade-build-id or -upgrade-amber-files must be specified")
+		return fmt.Errorf("exactly one of -upgrade-builder-name, -upgrade-build-id, or -upgrade-amber-files must be specified")
 	}
 
 	return nil
@@ -137,6 +137,15 @@ func (c *Config) GetDowngradeRepository() (*packages.Repository, error) {
 }
 
 func (c *Config) GetUpgradeRepository() (*packages.Repository, error) {
+	if c.upgradeBuilderName != "" && c.upgradeBuildID == "" {
+		a := c.BuildArchive()
+		id, err := a.LookupBuildID(c.upgradeBuilderName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to lookup build id: %s", err)
+		}
+		c.upgradeBuildID = id
+	}
+
 	if c.upgradeBuildID != "" {
 		build, err := c.BuildArchive().GetBuildByID(c.upgradeBuildID)
 		if err != nil {
@@ -147,21 +156,6 @@ func (c *Config) GetUpgradeRepository() (*packages.Repository, error) {
 	}
 
 	return packages.NewRepository(c.upgradeAmberFilesDir)
-}
-
-func (c *Config) LocalHostname() (string, error) {
-	if c.localHostname == "" {
-		var err error
-		c.localHostname, err = c.netaddr("--local", c.DeviceName)
-		if err != nil {
-			return "", fmt.Errorf("ERROR: netaddr failed: %s", err)
-		}
-		if c.localHostname == "" {
-			return "", fmt.Errorf("unable to determine the local hostname")
-		}
-	}
-
-	return c.localHostname, nil
 }
 
 func (c *Config) DeviceHostname() (string, error) {

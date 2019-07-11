@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_SHARED_ARCH_ARM64_H_
+#define SRC_DEVELOPER_DEBUG_SHARED_ARCH_ARM64_H_
 
 #include <stdint.h>
 
@@ -10,23 +11,20 @@ namespace debug_ipc {
 
 constexpr uint64_t kMaxArm64HWBreakpoints = 16;
 
-// Overall functionality for interpreting arm64 specific information.
-// This is defined in debug_ipc because both the client and the debug agent
-// need to access this information.
+// Overall functionality for interpreting arm64 specific information. This is defined in debug_ipc
+// because both the client and the debug agent need to access this information.
 
 // Macros for obtaining the mask of an arm64 flag.
 // Usage:
-//    FLAG_MASK(CpsrEL)
+//    FLAG_MASK(Cpsr, EL)
 #define _ARM64_FLAG_MASK(shift, mask) ((uint64_t)((mask) << (shift)))
-#define ARM64_FLAG_MASK(reg, flag)                         \
-  _ARM64_FLAG_MASK(::debug_ipc::k##reg##_##flag##_##Shift, \
-                   ::debug_ipc::k##reg##_##flag##_##Mask)
+#define ARM64_FLAG_MASK(reg, flag) \
+  _ARM64_FLAG_MASK(::debug_ipc::k##reg##_##flag##_##Shift, ::debug_ipc::k##reg##_##flag##_##Mask)
 
 // Macros for obtaining the value of an arm64 flag.
 // Usage:
 //    FLAG_VALUE(value, CpsrV)
-#define _ARM64_FLAG_VALUE(value, shift, mask) \
-  ((uint8_t)((value >> shift) & mask))
+#define _ARM64_FLAG_VALUE(value, shift, mask) ((uint8_t)((value >> shift) & mask))
 #define ARM64_FLAG_VALUE(value, reg, flag)                         \
   _ARM64_FLAG_VALUE(value, ::debug_ipc::k##reg##_##flag##_##Shift, \
                     ::debug_ipc::k##reg##_##flag##_##Mask)
@@ -63,20 +61,77 @@ constexpr uint64_t kCpsr_N_Mask = 0x1;
 
 // DBGBCR ----------------------------------------------------------------------
 
+// Enable/disable the breakpoint.
 constexpr uint64_t kDBGBCR_E_Shift = 0;
 constexpr uint64_t kDBGBCR_E_Mask = 0b1;
+// PMC, HMC, SSC define the environment where the breakpoint will trigger.
 constexpr uint64_t kDBGBCR_PMC_Shift = 1;
 constexpr uint64_t kDBGBCR_PMC_Mask = 0b11;
+// Byte Address Select. Defines which half-words triggers the breakpoint. In AArch64 implementations
+// (which zircon targets), is res1.
 constexpr uint64_t kDBGBCR_BAS_Shift = 5;
 constexpr uint64_t kDBGBCR_BAS_Mask = 0b1111;
+// PMC, HMC, SSC define the environment where the breakpoint will trigger.
 constexpr uint64_t kDBGBCR_HMC_Shift = 13;
 constexpr uint64_t kDBGBCR_HMC_Mask = 0b1;
+// PMC, HMC, SSC define the environment where the breakpoint will trigger.
 constexpr uint64_t kDBGBCR_SSC_Shift = 14;
 constexpr uint64_t kDBGBCR_SSC_Mask = 0b11;
+// Linked Breakpoint Number. Zircon doesn't use this feature. Always zero.
 constexpr uint64_t kDBGBCR_LBN_Shift = 16;
 constexpr uint64_t kDBGBCR_LBN_Mask = 0b1111;
+// Breakpoint Type. Zircon only uses unlinked address match (zero).
 constexpr uint64_t kDBGBCR_BT_Shift = 20;
 constexpr uint64_t kDBGBCR_BT_Mask = 0b1111;
+
+// DBGBVR ----------------------------------------------------------------------
+
+// Enable/disable the watchpoint.
+constexpr uint64_t kDBGWCR_E_Shift = 0u;
+constexpr uint64_t kDBGWCR_E_Mask = 1u;
+// PAC, SSC, HMC define the environment where the watchpoint will trigger.
+constexpr uint64_t kDBGWCR_PAC_SHIFT_Shift = 1u;
+constexpr uint64_t kDBGWCR_PAC_Mask = 0b11u;
+// Load/Store Control.
+//
+// On what event the watchpoint trigger:
+// 01: Read from address.
+// 10: Write to address.
+// 11: Read/Write to address.
+constexpr uint64_t kDBGWCR_LSC_Shift = 3u;
+constexpr uint64_t kDBGWCR_LSC_Mask = 0b11u;
+// Byte Address Select.
+//
+// Each bit defines what bytes to match onto:
+// 0bxxxx'xxx1: Match DBGWVR<n> + 0
+// 0bxxxx'xx1x: Match DBGWVR<n> + 1
+// 0bxxxx'x1xx: Match DBGWVR<n> + 2
+// 0bxxxx'1xxx: Match DBGWVR<n> + 3
+// 0bxxx1'xxxx: Match DBGWVR<n> + 4
+// 0bxx1x'xxxx: Match DBGWVR<n> + 5
+// 0bx1xx'xxxx: Match DBGWVR<n> + 6
+// 0b1xxx'xxxx: Match DBGWVR<n> + 7
+constexpr uint64_t kDBGWCR_BAS_Shift = 5u;
+constexpr uint64_t kDBGWCR_BAS_Mask = 0b11111111u;
+// PAC, SSC, HMC define the environment where the watchpoint will trigger.
+constexpr uint64_t kDBGWCR_HMC_Shift = 13u;
+constexpr uint64_t kDBGWCR_HMC_Mask = 1u;
+// PAC, SSC, HMC define the environment where the watchpoint will trigger.
+constexpr uint64_t kDBGWCR_SSC_Shift = 14u;
+constexpr uint64_t kDBGWCR_SSC_Mask = 0b11u;
+// Linked Breakpoint Number. Zircon doesn't use this feature. Always zero.
+constexpr uint64_t kDBGWCR_LBN_Shift = 16u;
+constexpr uint64_t kDBGWCR_LBN_Mask = 0b1111u;
+// Watchpoint Type. Zircon always use unlinked (0).
+constexpr uint64_t kDBGWCR_WT_Shift = 20u;
+constexpr uint64_t kDBGWCR_WT_Mask = 1u;
+// Mask. How many address bits to mask.
+// This permits the watchpoint to track up to 2G worth of addresses.
+// TODO(donosoc): Initially the debugger is going for parity with x64, which
+// only permits 8 bytes.
+//                Eventually expose the ability to track bigger ranges.
+constexpr uint64_t kDBGWCR_MASK_Shift = 24u;
+constexpr uint64_t kDBGWCR_MASK_Mask = 0b11111u;
 
 // ID_AA64DFR0_EL1 -------------------------------------------------------------
 
@@ -131,3 +186,5 @@ constexpr uint64_t kMDSCR_EL1_RXfull_Shift = 30;
 constexpr uint64_t kMDSCR_EL1_RXfull_Mask = 0b1;
 
 }  // namespace debug_ipc
+
+#endif  // SRC_DEVELOPER_DEBUG_SHARED_ARCH_ARM64_H_

@@ -5,16 +5,13 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <string.h>
+
 #include <future>
 
 #include "guest_test.h"
 
 template <class T>
-T* GuestTest<T>::enclosed_guest_ = nullptr;
-
-template <class T>
-class VsockGuestTest : public GuestTest<T>,
-                       public fuchsia::virtualization::HostVsockAcceptor {
+class VsockGuestTest : public GuestTest<T>, public fuchsia::virtualization::HostVsockAcceptor {
  public:
   struct IncomingRequest {
     uint32_t src_cid;
@@ -60,8 +57,7 @@ class VsockGuestTest : public GuestTest<T>,
 
     fidl::Binding<fuchsia::virtualization::HostVsockAcceptor> binding{this};
     zx_status_t out_status;
-    ASSERT_EQ(vsock_endpoint->Listen(8000, binding.NewBinding(), &out_status),
-              ZX_OK);
+    ASSERT_EQ(vsock_endpoint->Listen(8000, binding.NewBinding(), &out_status), ZX_OK);
     ASSERT_EQ(out_status, ZX_OK);
 
     ASSERT_EQ(binding.WaitForMessage(), ZX_OK);
@@ -85,8 +81,7 @@ class VsockGuestTest : public GuestTest<T>,
 
     // Attempt to connect into the guest
     EXPECT_EQ(zx::socket::create(ZX_SOCKET_STREAM, &socket1, &socket2), ZX_OK);
-    ASSERT_EQ(vsock_endpoint->Connect(this->GetGuestCid(), 8001,
-                                      std::move(socket2), &out_status),
+    ASSERT_EQ(vsock_endpoint->Connect(this->GetGuestCid(), 8001, std::move(socket2), &out_status),
               ZX_OK);
     ASSERT_EQ(out_status, ZX_OK);
 
@@ -97,8 +92,7 @@ class VsockGuestTest : public GuestTest<T>,
 
     // Open another connection.
     EXPECT_EQ(zx::socket::create(ZX_SOCKET_STREAM, &socket1, &socket2), ZX_OK);
-    ASSERT_EQ(vsock_endpoint->Connect(this->GetGuestCid(), 8002,
-                                      std::move(socket2), &out_status),
+    ASSERT_EQ(vsock_endpoint->Connect(this->GetGuestCid(), 8002, std::move(socket2), &out_status),
               ZX_OK);
     ASSERT_EQ(out_status, ZX_OK);
     // Read some data then close the connection
@@ -107,22 +101,19 @@ class VsockGuestTest : public GuestTest<T>,
 
     // Wait for another connection to get accepted
     EXPECT_EQ(zx::socket::create(ZX_SOCKET_STREAM, &socket1, &socket2), ZX_OK);
-    ASSERT_EQ(vsock_endpoint->Connect(this->GetGuestCid(), 8003,
-                                      std::move(socket2), &out_status),
+    ASSERT_EQ(vsock_endpoint->Connect(this->GetGuestCid(), 8003, std::move(socket2), &out_status),
               ZX_OK);
     ASSERT_EQ(out_status, ZX_OK);
     // Keep writing until we get peer closed
     zx_status_t status;
     do {
-      socket1.wait_one(ZX_SOCKET_PEER_CLOSED | ZX_SOCKET_WRITABLE,
-                       zx::time::infinite(), &pending);
+      socket1.wait_one(ZX_SOCKET_PEER_CLOSED | ZX_SOCKET_WRITABLE, zx::time::infinite(), &pending);
       if ((pending & ZX_SOCKET_WRITABLE) != 0) {
         uint8_t buf[1000] = {};
         size_t actual = 0;
         status = socket1.write(0, buf, sizeof(buf), &actual);
       }
-    } while (status != ZX_ERR_PEER_CLOSED &&
-             (pending & ZX_SOCKET_PEER_CLOSED) == 0);
+    } while (status != ZX_ERR_PEER_CLOSED && (pending & ZX_SOCKET_PEER_CLOSED) == 0);
   }
 };
 
@@ -134,7 +125,7 @@ TYPED_TEST(VsockGuestTest, ConnectDisconnect) {
   auto handle = std::async(std::launch::async, [this] { this->TestThread(); });
 
   std::string result;
-  EXPECT_EQ(this->RunUtil("virtio_vsock_test_util", "", &result), ZX_OK);
+  EXPECT_EQ(this->RunUtil("virtio_vsock_test_util", {}, &result), ZX_OK);
 
   handle.wait();
 

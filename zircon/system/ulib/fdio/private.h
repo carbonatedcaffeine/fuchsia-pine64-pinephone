@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef ZIRCON_SYSTEM_ULIB_FDIO_PRIVATE_H_
+#define ZIRCON_SYSTEM_ULIB_FDIO_PRIVATE_H_
 
 #include <errno.h>
-#include <fuchsia/io/c/fidl.h>
+#include <fuchsia/io/llcpp/fidl.h>
 #include <lib/fdio/limits.h>
 #include <lib/fdio/vfs.h>
 #include <lib/zxio/ops.h>
@@ -32,6 +33,9 @@ typedef struct fdio_namespace fdio_ns_t;
 //
 // The NULL protocol absorbs writes and is never readable.
 
+typedef zx_status_t (*two_path_op)(fdio_t* io, const char* src, size_t srclen,
+                                   zx_handle_t dst_token, const char* dst, size_t dstlen);
+
 typedef struct fdio_ops {
     zx_status_t (*close)(fdio_t* io);
     zx_status_t (*open)(fdio_t* io, const char* path, uint32_t flags,
@@ -43,19 +47,18 @@ typedef struct fdio_ops {
     void (*wait_end)(fdio_t* io, zx_signals_t signals, uint32_t* events);
     ssize_t (*ioctl)(fdio_t* io, uint32_t op, const void* in_buf, size_t in_len,
                      void* out_buf, size_t out_len);
-    ssize_t (*posix_ioctl)(fdio_t* io, int req, va_list va);
+    zx_status_t (*posix_ioctl)(fdio_t* io, int req, va_list va);
     zx_status_t (*get_vmo)(fdio_t* io, int flags, zx_handle_t* out);
     zx_status_t (*get_token)(fdio_t* io, zx_handle_t* out);
-    zx_status_t (*get_attr)(fdio_t* io, fuchsia_io_NodeAttributes* out);
-    zx_status_t (*set_attr)(fdio_t* io, uint32_t flags, const fuchsia_io_NodeAttributes* attr);
+    zx_status_t (*get_attr)(fdio_t* io, llcpp::fuchsia::io::NodeAttributes* out);
+    zx_status_t (*set_attr)(fdio_t* io, uint32_t flags,
+                            const llcpp::fuchsia::io::NodeAttributes* attr);
     zx_status_t (*readdir)(fdio_t* io, void* ptr, size_t max, size_t* actual);
     zx_status_t (*rewind)(fdio_t* io);
     zx_status_t (*unlink)(fdio_t* io, const char* path, size_t len);
     zx_status_t (*truncate)(fdio_t* io, off_t off);
-    zx_status_t (*rename)(fdio_t* io, const char* src, size_t srclen,
-                          zx_handle_t dst_token, const char* dst, size_t dstlen);
-    zx_status_t (*link)(fdio_t* io, const char* src, size_t srclen,
-                        zx_handle_t dst_token, const char* dst, size_t dstlen);
+    two_path_op rename;
+    two_path_op link;
     zx_status_t (*get_flags)(fdio_t* io, uint32_t* out_flags);
     zx_status_t (*set_flags)(fdio_t* io, uint32_t flags);
     ssize_t (*recvfrom)(fdio_t* io, void* data, size_t len, int flags,
@@ -65,16 +68,16 @@ typedef struct fdio_ops {
     ssize_t (*recvmsg)(fdio_t* io, struct msghdr* msg, int flags);
     ssize_t (*sendmsg)(fdio_t* io, const struct msghdr* msg, int flags);
     zx_status_t (*shutdown)(fdio_t* io, int how);
+    zx_duration_t (*get_rcvtimeo)(fdio_t* io);
 } fdio_ops_t;
 
 // fdio_t ioflag values
-#define IOFLAG_CLOEXEC              (1 << 0)
-#define IOFLAG_SOCKET               (1 << 1)
-#define IOFLAG_EPOLL                (1 << 2)
-#define IOFLAG_WAITABLE             (1 << 3)
-#define IOFLAG_SOCKET_CONNECTING    (1 << 4)
-#define IOFLAG_SOCKET_CONNECTED     (1 << 5)
-#define IOFLAG_NONBLOCK             (1 << 6)
+#define IOFLAG_CLOEXEC (1 << 0)
+#define IOFLAG_EPOLL (1 << 2)
+#define IOFLAG_WAITABLE (1 << 3)
+#define IOFLAG_SOCKET_CONNECTING (1 << 4)
+#define IOFLAG_SOCKET_CONNECTED (1 << 5)
+#define IOFLAG_NONBLOCK (1 << 6)
 
 // The subset of fdio_t per-fd flags queryable via fcntl.
 // Static assertions in unistd.c ensure we aren't colliding.
@@ -168,12 +171,12 @@ fdio_t* fdio_file_create(zx_handle_t control, zx_handle_t event);
 // Creates a pipe backed by a socket.
 //
 // Takes ownership of |socket|.
-fdio_t* fdio_pipe_create(zx_handle_t socket);
+fdio_t* fdio_pipe_create(zx::socket socket);
 
 // Creates a socketpair backed by a socket.
 //
 // Takes ownership of |socket|.
-fdio_t* fdio_socketpair_create(zx_handle_t socket);
+fdio_t* fdio_socketpair_create(zx::socket socket);
 
 // Creates an |fdio_t| from a VMO.
 //
@@ -194,8 +197,7 @@ fdio_t* fdio_vmofile_create(zx_handle_t control, zx_handle_t vmo,
                             zx_off_t offset, zx_off_t length, zx_off_t seek);
 
 // Wraps a socket with an fdio_t using socket io.
-fdio_t* fdio_socket_create_stream(zx_handle_t s, int flags);
-fdio_t* fdio_socket_create_datagram(zx_handle_t s, int flags);
+fdio_t* fdio_socket_create(zx::socket socket, zx_info_socket_t info);
 
 // creates a message port and pair of simple io fdio_t's
 int fdio_pipe_pair(fdio_t** a, fdio_t** b, uint32_t options);
@@ -227,7 +229,8 @@ fdio_t* fdio_waitable_create(zx_handle_t h, zx_signals_t signals_in,
 
 // unsupported / do-nothing hooks shared by implementations
 zx_status_t fdio_default_get_token(fdio_t* io, zx_handle_t* out);
-zx_status_t fdio_default_set_attr(fdio_t* io, uint32_t flags, const fuchsia_io_NodeAttributes* attr);
+zx_status_t fdio_default_set_attr(fdio_t* io, uint32_t flags,
+                                  const llcpp::fuchsia::io::NodeAttributes* attr);
 zx_status_t fdio_default_readdir(fdio_t* io, void* ptr, size_t max, size_t* actual);
 zx_status_t fdio_default_rewind(fdio_t* io);
 zx_status_t fdio_default_unlink(fdio_t* io, const char* path, size_t len);
@@ -248,7 +251,7 @@ ssize_t fdio_default_sendto(fdio_t* io, const void* _data, size_t len,
                             socklen_t addrlen);
 ssize_t fdio_default_recvmsg(fdio_t* io, struct msghdr* msg, int flags);
 ssize_t fdio_default_sendmsg(fdio_t* io, const struct msghdr* msg, int flags);
-zx_status_t fdio_default_get_attr(fdio_t* io, fuchsia_io_NodeAttributes* out);
+zx_status_t fdio_default_get_attr(fdio_t* io, llcpp::fuchsia::io::NodeAttributes* out);
 zx_status_t fdio_default_close(fdio_t* io);
 zx_status_t fdio_default_open(fdio_t* io, const char* path, uint32_t flags,
                               uint32_t mode, fdio_t** out);
@@ -260,13 +263,13 @@ void fdio_default_wait_begin(fdio_t* io, uint32_t events, zx_handle_t* handle,
 void fdio_default_wait_end(fdio_t* io, zx_signals_t signals, uint32_t* _events);
 zx_status_t fdio_default_unwrap(fdio_t* io, zx_handle_t* out_handle);
 zx_status_t fdio_default_shutdown(fdio_t* io, int how);
-ssize_t fdio_default_posix_ioctl(fdio_t* io, int req, va_list va);
+zx_duration_t fdio_default_get_rcvtimeo(fdio_t* io);
+zx_status_t fdio_default_posix_ioctl(fdio_t* io, int req, va_list va);
 zx_status_t fdio_default_get_vmo(fdio_t* io, int flags, zx_handle_t* out);
 
 typedef struct {
     mtx_t lock;
     mtx_t cwd_lock;
-    bool init;
     mode_t umask;
     fdio_t* root;
     fdio_t* cwd;
@@ -286,7 +289,6 @@ extern fdio_state_t __fdio_global_state;
 #define fdio_cwd_lock (__fdio_global_state.cwd_lock)
 #define fdio_cwd_path (__fdio_global_state.cwd_path)
 #define fdio_fdtab (__fdio_global_state.fdtab)
-#define fdio_root_init (__fdio_global_state.init)
 #define fdio_root_ns (__fdio_global_state.ns)
 
 // Returns an fd number greater than or equal to |starting_fd|, following the
@@ -305,3 +307,5 @@ int fdio_assign_reserved(int fd, fdio_t* io);
 int fdio_release_reserved(int fd);
 
 __END_CDECLS
+
+#endif // ZIRCON_SYSTEM_ULIB_FDIO_PRIVATE_H_

@@ -20,9 +20,14 @@
 namespace zxdb {
 
 DwarfExprEval::DwarfExprEval()
-    : symbol_context_(SymbolContext::ForRelativeAddresses()),
-      weak_factory_(this) {}
-DwarfExprEval::~DwarfExprEval() = default;
+    : symbol_context_(SymbolContext::ForRelativeAddresses()), weak_factory_(this) {}
+
+DwarfExprEval::~DwarfExprEval() {
+  // This assertion verifies that this class was not accidentally deleted from
+  // within the completion callback. This class is not set up to handle this
+  // case.
+  FXL_CHECK(!in_completion_callback_);
+}
 
 DwarfExprEval::ResultType DwarfExprEval::GetResultType() const {
   FXL_DCHECK(is_complete_);
@@ -36,10 +41,9 @@ uint64_t DwarfExprEval::GetResult() const {
   return stack_.back();
 }
 
-DwarfExprEval::Completion DwarfExprEval::Eval(
-    fxl::RefPtr<SymbolDataProvider> data_provider,
-    const SymbolContext& symbol_context, Expression expr,
-    CompletionCallback cb) {
+DwarfExprEval::Completion DwarfExprEval::Eval(fxl::RefPtr<SymbolDataProvider> data_provider,
+                                              const SymbolContext& symbol_context, Expression expr,
+                                              CompletionCallback cb) {
   is_complete_ = false;
   data_provider_ = std::move(data_provider);
   symbol_context_ = symbol_context;
@@ -51,8 +55,8 @@ DwarfExprEval::Completion DwarfExprEval::Eval(
   if (!expr_.empty()) {
     // Assume little-endian.
     data_extractor_ = std::make_unique<llvm::DataExtractor>(
-        llvm::StringRef(reinterpret_cast<const char*>(&expr_[0]), expr_.size()),
-        true, kTargetPointerSize);
+        llvm::StringRef(reinterpret_cast<const char*>(&expr_[0]), expr_.size()), true,
+        kTargetPointerSize);
   }
 
   // Note: ContinueEval() may call callback, which may delete |this|
@@ -81,23 +85,21 @@ bool DwarfExprEval::ContinueEval() {
         is_success_ = true;
       }
 
-      // The callback may delete |this| but we also want to clear the value to
-      // prevent accidental future use. So we need to copy members to local
-      // variables in case |this| goes away.
-      auto is_complete = is_complete_;
-      auto cb = std::move(completion_callback_);
-      cb(this, err);
-      return is_complete;
+      in_completion_callback_ = true;
+      completion_callback_(this, err);
+      completion_callback_ = {};
+      in_completion_callback_ = false;
+      return is_complete_;
     }
 
     if (instruction_count == kMaxInstructionsAtOnce) {
       // Enough instructions have run at once. Schedule a callback to continue
       // execution in the message loop.
-      debug_ipc::MessageLoop::Current()->PostTask(
-          FROM_HERE, [weak_eval = weak_factory_.GetWeakPtr()]() {
-            if (weak_eval)
-              weak_eval->ContinueEval();
-          });
+      debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE,
+                                                  [weak_eval = weak_factory_.GetWeakPtr()]() {
+                                                    if (weak_eval)
+                                                      weak_eval->ContinueEval();
+                                                  });
       return is_complete_;
     }
     instruction_count++;
@@ -169,9 +171,8 @@ DwarfExprEval::Completion DwarfExprEval::EvalOneOp() {
       ReportUnimplementedOpcode(op);
       return Completion::kSync;
     case llvm::dwarf::DW_OP_abs:
-      return OpUnary([](uint64_t a) {
-        return static_cast<uint64_t>(llabs(static_cast<long long>(a)));
-      });
+      return OpUnary(
+          [](uint64_t a) { return static_cast<uint64_t>(llabs(static_cast<long long>(a))); });
     case llvm::dwarf::DW_OP_and:
       return OpBinary([](uint64_t a, uint64_t b) { return a & b; });
     case llvm::dwarf::DW_OP_div:
@@ -183,9 +184,7 @@ DwarfExprEval::Completion DwarfExprEval::EvalOneOp() {
     case llvm::dwarf::DW_OP_mul:
       return OpBinary([](uint64_t a, uint64_t b) { return a * b; });
     case llvm::dwarf::DW_OP_neg:
-      return OpUnary([](uint64_t a) {
-        return static_cast<uint64_t>(-static_cast<int64_t>(a));
-      });
+      return OpUnary([](uint64_t a) { return static_cast<uint64_t>(-static_cast<int64_t>(a)); });
     case llvm::dwarf::DW_OP_not:
       return OpUnary([](uint64_t a) { return ~a; });
     case llvm::dwarf::DW_OP_or:
@@ -200,8 +199,7 @@ DwarfExprEval::Completion DwarfExprEval::EvalOneOp() {
       return OpBinary([](uint64_t a, uint64_t b) { return a >> b; });
     case llvm::dwarf::DW_OP_shra:
       return OpBinary([](uint64_t a, uint64_t b) {
-        return static_cast<uint64_t>(static_cast<int64_t>(a) >>
-                                     static_cast<int64_t>(b));
+        return static_cast<uint64_t>(static_cast<int64_t>(a) >> static_cast<int64_t>(b));
       });
     case llvm::dwarf::DW_OP_xor:
       return OpBinary([](uint64_t a, uint64_t b) { return a ^ b; });
@@ -210,23 +208,17 @@ DwarfExprEval::Completion DwarfExprEval::EvalOneOp() {
     case llvm::dwarf::DW_OP_bra:
       return OpBra();
     case llvm::dwarf::DW_OP_eq:
-      return OpBinary(
-          [](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a == b); });
+      return OpBinary([](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a == b); });
     case llvm::dwarf::DW_OP_ge:
-      return OpBinary(
-          [](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a >= b); });
+      return OpBinary([](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a >= b); });
     case llvm::dwarf::DW_OP_gt:
-      return OpBinary(
-          [](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a > b); });
+      return OpBinary([](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a > b); });
     case llvm::dwarf::DW_OP_le:
-      return OpBinary(
-          [](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a <= b); });
+      return OpBinary([](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a <= b); });
     case llvm::dwarf::DW_OP_lt:
-      return OpBinary(
-          [](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a < b); });
+      return OpBinary([](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a < b); });
     case llvm::dwarf::DW_OP_ne:
-      return OpBinary(
-          [](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a != b); });
+      return OpBinary([](uint64_t a, uint64_t b) { return static_cast<uint64_t>(a != b); });
     case llvm::dwarf::DW_OP_regx:
       return OpRegx();
     case llvm::dwarf::DW_OP_fbreg:
@@ -254,7 +246,11 @@ DwarfExprEval::Completion DwarfExprEval::EvalOneOp() {
     case llvm::dwarf::DW_OP_call4:     // 4-byte offset of DIE.
     case llvm::dwarf::DW_OP_call_ref:  // 4- or 8-byte offset of DIE.
     case llvm::dwarf::DW_OP_form_tls_address:
-    case llvm::dwarf::DW_OP_call_frame_cfa:  // TODO(DX-1510).
+      // TODO(brettw) implement these.
+      ReportUnimplementedOpcode(op);
+      return Completion::kSync;
+    case llvm::dwarf::DW_OP_call_frame_cfa:
+      return OpCFA();
     case llvm::dwarf::DW_OP_bit_piece:       // ULEB128 size + ULEB128 offset.
     case llvm::dwarf::DW_OP_implicit_value:  // ULEB128 size + block of size.
       // TODO(brettw) implement these.
@@ -267,27 +263,39 @@ DwarfExprEval::Completion DwarfExprEval::EvalOneOp() {
       ReportError("TLS not currently supported. See DX-694.");
       return Completion::kSync;
 
+    case 0xf3:  // DW_OP_GNU_entry_value
+      // This GNU extension is a ULEB128 length followed by a sub-expression
+      // of that length. This sub-expression is supposed to be evaluated in
+      // a separate stack using the register values that were present at the
+      // beginning of the function:
+      // https://gcc.gnu.org/ml/gcc-patches/2010-08/txt00152.txt
+      //
+      // Generally if the registers were saved registers it would just encode
+      // those locations. This is really used for non-saved registers and
+      // requires that the debugger have previously saved those registers
+      // separately. This isn't something that we currently do, and can't be
+      // done in general (it could be implemented if you previously single-
+      // stepped into that function though).
+      ReportError("Optimized out");
+      return Completion::kSync;
+
     default:
       // Invalid or unknown opcode.
-      ReportError(
-          fxl::StringPrintf("Invalid opcode 0x%x in DWARF expression.", op));
+      ReportError(fxl::StringPrintf("Invalid opcode 0x%x in DWARF expression.", op));
       return Completion::kSync;
   }
 }
 
-DwarfExprEval::Completion DwarfExprEval::PushRegisterWithOffset(
-    int dwarf_register_number, int64_t offset) {
-  auto reg = debug_ipc::DWARFToRegisterID(data_provider_->GetArch(),
-                                          dwarf_register_number);
+DwarfExprEval::Completion DwarfExprEval::PushRegisterWithOffset(int dwarf_register_number,
+                                                                int64_t offset) {
+  auto reg = debug_ipc::DWARFToRegisterID(data_provider_->GetArch(), dwarf_register_number);
   // This function doesn't set the result_type_ because it is called from
   // different contexts. The callers should set the result_type_ as appropriate
   // for their operation.
-  if (std::optional<uint64_t> reg_data;
-      data_provider_->GetRegister(reg, &reg_data)) {
+  if (std::optional<uint64_t> reg_data; data_provider_->GetRegister(reg, &reg_data)) {
     // State known synchronously (could be available or known unavailable).
     if (!reg_data) {
-      ReportError(fxl::StringPrintf("Register %d not available.",
-                                    dwarf_register_number));
+      ReportError(fxl::StringPrintf("Register %d not available.", dwarf_register_number));
     } else {
       Push(*reg_data + offset);
     }
@@ -296,8 +304,7 @@ DwarfExprEval::Completion DwarfExprEval::PushRegisterWithOffset(
 
   // Must request async.
   data_provider_->GetRegisterAsync(
-      reg, [weak_eval = weak_factory_.GetWeakPtr(), offset](const Err& err,
-                                                            uint64_t value) {
+      reg, [weak_eval = weak_factory_.GetWeakPtr(), offset](const Err& err, uint64_t value) {
         if (!weak_eval)
           return;
         if (err.has_error()) {
@@ -355,27 +362,24 @@ bool DwarfExprEval::ReadLEBUnsigned(uint64_t* output) {
   return true;
 }
 
-void DwarfExprEval::ReportError(const std::string& msg) {
-  ReportError(Err(msg));
-}
+void DwarfExprEval::ReportError(const std::string& msg) { ReportError(Err(msg)); }
 
 void DwarfExprEval::ReportError(const Err& err) {
   data_provider_.reset();
   is_complete_ = true;
 
-  // The callback may delete |this| but we also want to clear the value to
-  // prevent accidental future use.
-  auto cb = std::move(completion_callback_);
-  cb(this, err);
+  // Wrap completion callback with the flag to catch deletions from within the
+  // callback.
+  in_completion_callback_ = true;
+  completion_callback_(this, err);
+  completion_callback_ = {};
+  in_completion_callback_ = false;
 }
 
-void DwarfExprEval::ReportStackUnderflow() {
-  ReportError("Stack underflow for DWARF expression.");
-}
+void DwarfExprEval::ReportStackUnderflow() { ReportError("Stack underflow for DWARF expression."); }
 
 void DwarfExprEval::ReportUnimplementedOpcode(uint8_t op) {
-  ReportError(
-      fxl::StringPrintf("Unimplemented opcode 0x%x in DWARF expression.", op));
+  ReportError(fxl::StringPrintf("Unimplemented opcode 0x%x in DWARF expression.", op));
 }
 
 DwarfExprEval::Completion DwarfExprEval::OpUnary(uint64_t (*op)(uint64_t)) {
@@ -386,8 +390,7 @@ DwarfExprEval::Completion DwarfExprEval::OpUnary(uint64_t (*op)(uint64_t)) {
   return Completion::kSync;
 }
 
-DwarfExprEval::Completion DwarfExprEval::OpBinary(uint64_t (*op)(uint64_t,
-                                                                 uint64_t)) {
+DwarfExprEval::Completion DwarfExprEval::OpBinary(uint64_t (*op)(uint64_t, uint64_t)) {
   if (stack_.size() < 2) {
     ReportStackUnderflow();
   } else {
@@ -446,6 +449,14 @@ DwarfExprEval::Completion DwarfExprEval::OpBreg(uint8_t op) {
   return PushRegisterWithOffset(reg_index, offset);
 }
 
+DwarfExprEval::Completion DwarfExprEval::OpCFA() {
+  if (uint64_t cfa = data_provider_->GetCanonicalFrameAddress())
+    Push(cfa);
+  else
+    ReportError("Frame address is 0.");
+  return Completion::kSync;
+}
+
 DwarfExprEval::Completion DwarfExprEval::OpDiv() {
   if (stack_.size() < 2) {
     ReportStackUnderflow();
@@ -457,8 +468,7 @@ DwarfExprEval::Completion DwarfExprEval::OpDiv() {
     if (b == 0) {
       ReportError("DWARF expression divided by zero.");
     } else {
-      stack_.back() = static_cast<uint64_t>(static_cast<int64_t>(a) /
-                                            static_cast<int64_t>(b));
+      stack_.back() = static_cast<uint64_t>(static_cast<int64_t>(a) / static_cast<int64_t>(b));
     }
   }
   return Completion::kSync;
@@ -500,26 +510,26 @@ DwarfExprEval::Completion DwarfExprEval::OpFbreg() {
   }
 
   // Must request async.
-  data_provider_->GetFrameBaseAsync([weak_eval = weak_factory_.GetWeakPtr(),
-                                     offset](const Err& err, uint64_t value) {
-    if (!weak_eval)
-      return;
-    if (err.has_error()) {
-      weak_eval->ReportError(err);
-      return;
-    }
+  data_provider_->GetFrameBaseAsync(
+      [weak_eval = weak_factory_.GetWeakPtr(), offset](const Err& err, uint64_t value) {
+        if (!weak_eval)
+          return;
+        if (err.has_error()) {
+          weak_eval->ReportError(err);
+          return;
+        }
 
-    if (value == 0) {
-      weak_eval->ReportError("Base Pointer is 0, can't evaluate.");
-      return;
-    }
+        if (value == 0) {
+          weak_eval->ReportError("Base Pointer is 0, can't evaluate.");
+          return;
+        }
 
-    weak_eval->result_type_ = ResultType::kPointer;
-    weak_eval->Push(static_cast<uint64_t>(value + offset));
+        weak_eval->result_type_ = ResultType::kPointer;
+        weak_eval->Push(static_cast<uint64_t>(value + offset));
 
-    // Picks up processing at the next instruction.
-    weak_eval->ContinueEval();
-  });
+        // Picks up processing at the next instruction.
+        weak_eval->ContinueEval();
+      });
 
   return Completion::kAsync;
 }
@@ -560,15 +570,13 @@ DwarfExprEval::Completion DwarfExprEval::OpDeref() {
   stack_.pop_back();
   data_provider_->GetMemoryAsync(
       addr, 8,
-      [addr, weak_eval = weak_factory_.GetWeakPtr()](
-          const Err& err, std::vector<uint8_t> value) {
+      [addr, weak_eval = weak_factory_.GetWeakPtr()](const Err& err, std::vector<uint8_t> value) {
         if (!weak_eval) {
           return;
         } else if (err.has_error()) {
           weak_eval->ReportError(err);
         } else if (value.size() != 8) {
-          weak_eval->ReportError(
-              fxl::StringPrintf("Invalid pointer 0x%" PRIx64 ".", addr));
+          weak_eval->ReportError(fxl::StringPrintf("Invalid pointer 0x%" PRIx64 ".", addr));
         } else {
           // Success reading 8 bytes.
           uint64_t to_push;
@@ -593,8 +601,7 @@ DwarfExprEval::Completion DwarfExprEval::OpMod() {
     if (b == 0) {
       ReportError("DWARF expression divided by zero.");
     } else {
-      stack_.back() = static_cast<uint64_t>(static_cast<int64_t>(a) %
-                                            static_cast<int64_t>(b));
+      stack_.back() = static_cast<uint64_t>(static_cast<int64_t>(a) % static_cast<int64_t>(b));
     }
   }
   return Completion::kSync;

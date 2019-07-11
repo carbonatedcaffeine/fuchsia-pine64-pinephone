@@ -2,17 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef ZIRCON_SYSTEM_ULIB_TRACE_ENGINE_CONTEXT_IMPL_H_
+#define ZIRCON_SYSTEM_ULIB_TRACE_ENGINE_CONTEXT_IMPL_H_
 
 #include <atomic>
+#include <mutex>
 
 #include <zircon/assert.h>
 
-#include <fbl/mutex.h>
+#include <lib/trace-engine/buffer_internal.h>
+#include <lib/trace-engine/context.h>
+#include <lib/trace-engine/handler.h>
 #include <lib/zx/event.h>
-#include <trace-engine/buffer_internal.h>
-#include <trace-engine/context.h>
-#include <trace-engine/handler.h>
 
 // Two preprocessor symbols control what symbols we export in a .so:
 // EXPORT and EXPORT_NO_DDK:
@@ -87,7 +88,12 @@ struct trace_context {
 
     size_t DurableBytesAllocated() const;
 
+    void ResetDurableBufferPointers();
+    void ResetRollingBufferPointers();
+    void ResetBufferPointers();
     void InitBufferHeader();
+    void ClearEntireBuffer();
+    void ClearRollingBuffers();
     void UpdateBufferHeaderAfterStopped();
 
     uint64_t* AllocRecord(size_t num_bytes);
@@ -333,7 +339,7 @@ private:
     // This is used when switching rolling buffers.
     // It's a relatively rare operation, and this simplifies reasoning about
     // correctness.
-    mutable fbl::Mutex buffer_switch_mutex_; // TODO(dje): more guards?
+    mutable std::mutex buffer_switch_mutex_; // TODO(dje): more guards?
 
     // Handler associated with the trace session.
     trace_handler_t* const handler_;
@@ -346,3 +352,5 @@ private:
     std::atomic<trace_string_index_t> next_string_index_{
         TRACE_ENCODED_STRING_REF_MIN_INDEX};
 };
+
+#endif  // ZIRCON_SYSTEM_ULIB_TRACE_ENGINE_CONTEXT_IMPL_H_

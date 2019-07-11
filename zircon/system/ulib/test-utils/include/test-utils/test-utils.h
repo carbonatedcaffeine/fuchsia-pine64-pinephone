@@ -15,9 +15,10 @@
 
 #include <stddef.h>
 #include <threads.h>
-#include <zircon/types.h>
 #include <zircon/compiler.h>
+#include <zircon/syscalls/exception.h>
 #include <zircon/syscalls/object.h>
+#include <zircon/types.h>
 #include <launchpad/launchpad.h>
 
 __BEGIN_CDECLS
@@ -136,9 +137,31 @@ zx_handle_t tu_job_create(zx_handle_t job);
 
 zx_handle_t tu_io_port_create(void);
 
-// Set the exception port for |handle| which is a process or thread.
+// Set/unset the exception port for |handle| which is a process or thread.
+// Passing ZX_HANDLE_INVALID for |handle| means self.
 
 void tu_set_exception_port(zx_handle_t handle, zx_handle_t eport, uint64_t key, uint32_t options);
+void tu_unset_exception_port(zx_handle_t handle);
+
+// Creates an exception channel for |task| which is a job, process, or thread.
+
+zx_handle_t tu_create_exception_channel(zx_handle_t task, uint32_t options);
+
+// Reads an exception from an exception channel.
+
+typedef struct tu_exception {
+    zx_exception_info_t info;
+    zx_handle_t exception;
+} tu_exception_t;
+
+tu_exception_t tu_read_exception(zx_handle_t channel);
+
+// Extracts task handles from an exception.
+
+zx_handle_t tu_exception_get_process(zx_handle_t exception);
+zx_handle_t tu_exception_get_thread(zx_handle_t exception);
+
+void tu_resume_from_exception(zx_handle_t exception_handle);
 
 // Add |handle| to the list of things |port| watches.
 // When |handle| is signaled with a signal in |signals| a zx_packet_signal_t
@@ -195,5 +218,7 @@ int tu_run_command(const char* progname, const char* cmd);
 // Returns the previous value.
 
 int tu_set_timeout_scale(int scale);
+
+const char* tu_exception_to_string(uint32_t exception);
 
 __END_CDECLS

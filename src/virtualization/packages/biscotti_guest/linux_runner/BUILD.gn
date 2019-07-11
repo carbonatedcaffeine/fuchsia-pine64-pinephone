@@ -57,6 +57,7 @@ source_set("lib") {
     "//sdk/lib/sys/cpp",
     "//sdk/lib/virtualization",
     "//src/lib/fxl",
+    "//src/virtualization/lib/grpc",
     "//src/virtualization/packages/biscotti_guest/third_party/protos:vm_cc_proto",
     "//third_party/grpc:grpc++",
     "//third_party/protobuf:protobuf_lite",
@@ -64,7 +65,7 @@ source_set("lib") {
     "//zircon/public/lib/fit",
     "//zircon/public/lib/fs",
     "//zircon/public/lib/fzl",
-    "//zircon/public/lib/trace-provider",
+    "//zircon/public/lib/trace-provider-with-fdio",
   ]
 }
 
@@ -72,6 +73,13 @@ action("extras") {
   visibility = [ ":*" ]
   script = "mkextras.sh"
   testonly = true
+
+  lib_path = "${root_build_dir}/linux_x64-shared"
+  exe_path = "${root_build_dir}/linux_x64"
+  if (is_debug) {
+    lib_path = "${lib_path}/lib.unstripped"
+    exe_path = "${exe_path}/exe.unstripped"
+  }
 
   deps = [
     "//garnet/lib/magma/tests_linux/unit_tests:virtmagma_unit_tests_linux(//build/toolchain:linux_x64)",
@@ -81,10 +89,10 @@ action("extras") {
 
   args = [
     rebase_path(extras_image),
-    rebase_path("${root_build_dir}/linux_x64-shared/libvulkan_intel_linux.so"),  # Intel Vulkan ICD
-    rebase_path("${root_build_dir}/linux_x64/virtmagma_unit_tests_linux"),
-    rebase_path("${root_build_dir}/linux_x64/virtmagma_vulkan_unit_tests"),
-    rebase_path("${root_build_dir}/linux_x64-shared/libvulkan_linux.so"),  # Vulkan Loader
+    rebase_path("${lib_path}/libvulkan_intel_linux.so"),  # Intel Vulkan ICD
+    rebase_path("${lib_path}/libvulkan.so"),  # Vulkan Loader
+    rebase_path("${exe_path}/virtmagma_unit_tests_linux"),
+    rebase_path("${exe_path}/virtmagma_vulkan_unit_tests"),
   ]
 
   outputs = [
@@ -143,7 +151,7 @@ executable("linux_runner_unittests") {
     "//garnet/public/lib/gtest",
     "//sdk/lib/sys/cpp/testing:unit",
     "//sdk/lib/virtualization/testing",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
     "//zircon/public/lib/memfs",
   ]
 }

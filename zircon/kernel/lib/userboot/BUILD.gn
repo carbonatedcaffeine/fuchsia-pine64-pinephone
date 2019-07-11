@@ -6,7 +6,7 @@ import("$zx/kernel/lib/vdso/rodso.gni")
 
 source_set("userboot") {
   sources = [
-    "userboot.cpp",
+    "userboot.cc",
   ]
   include_dirs = [ target_gen_dir ]
   deps = [

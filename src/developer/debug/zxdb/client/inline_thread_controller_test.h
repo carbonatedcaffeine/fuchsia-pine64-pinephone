@@ -2,18 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_INLINE_THREAD_CONTROLLER_TEST_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_INLINE_THREAD_CONTROLLER_TEST_H_
 
 #include <vector>
 
 #include "src/developer/debug/zxdb/client/mock_frame.h"
 #include "src/developer/debug/zxdb/client/thread_controller_test.h"
 #include "src/developer/debug/zxdb/common/address_ranges.h"
-#include "src/lib/fxl/memory/ref_ptr.h"
-#include "src/developer/debug/zxdb/client/mock_frame.h"
-#include "src/developer/debug/zxdb/client/thread_controller_test.h"
-#include "src/developer/debug/zxdb/common/address_ranges.h"
 #include "src/developer/debug/zxdb/symbols/location.h"
+#include "src/lib/fxl/memory/ref_ptr.h"
 
 namespace zxdb {
 
@@ -133,13 +131,10 @@ class InlineThreadControllerTest : public ThreadControllerTest {
 
   // Constructor for frames.
   static std::unique_ptr<MockFrame> GetTopFrame(uint64_t address);
-  static std::unique_ptr<MockFrame> GetTopInlineFrame(uint64_t address,
-                                                      MockFrame* top);
+  static std::unique_ptr<MockFrame> GetTopInlineFrame(uint64_t address, MockFrame* top);
   static std::unique_ptr<MockFrame> GetMiddleFrame(uint64_t address);
-  static std::unique_ptr<MockFrame> GetMiddleInline1Frame(uint64_t address,
-                                                          MockFrame* middle);
-  static std::unique_ptr<MockFrame> GetMiddleInline2Frame(uint64_t address,
-                                                          MockFrame* middle);
+  static std::unique_ptr<MockFrame> GetMiddleInline1Frame(uint64_t address, MockFrame* middle);
+  static std::unique_ptr<MockFrame> GetMiddleInline2Frame(uint64_t address, MockFrame* middle);
   static std::unique_ptr<MockFrame> GetBottomFrame(uint64_t address);
 
   // Constructs a fake stack. Even frame will have the address at the beginning
@@ -157,3 +152,5 @@ class InlineThreadControllerTest : public ThreadControllerTest {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_INLINE_THREAD_CONTROLLER_TEST_H_

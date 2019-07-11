@@ -6,14 +6,6 @@
         "services": [
             "fuchsia.process.Launcher",
             "fidl.examples.echo.Echo"
-        ],
-        "features": [ "system-temp" ]
-    },
-    "facets": {
-        "fuchsia.test": {
-            "injected-services": {
-                "fidl.examples.echo.Echo": "fuchsia-pkg://fuchsia.com/component_manager_tests#meta/echo_server_rust.cmx"
-            }
-        }
+        ]
     }
 }

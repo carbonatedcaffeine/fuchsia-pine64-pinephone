@@ -10,7 +10,7 @@ Create a timer.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_status_t zx_timer_create(uint32_t options,
@@ -36,7 +36,7 @@ The possible values are:
 
 Passing 0 in options is equivalent to **ZX_TIMER_SLACK_CENTER**.
 
-See [timer slack](timer_slack.md) for more information.
+See [timer slack](../timer_slack.md) for more information.
 
 The returned handle has the **ZX_RIGHT_DUPLICATE**, **ZX_RIGHT_TRANSFER**,
 **ZX_RIGHT_READ** and **ZX_RIGHT_WRITE** right.

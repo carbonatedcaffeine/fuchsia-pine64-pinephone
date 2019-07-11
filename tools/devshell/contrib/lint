@@ -1,0 +1,330 @@
+#!/bin/bash
+# Copyright 2019 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+### runs source linters on modified files
+
+## Usage: fx lint
+##           [--dry-run] [--verbose] [--fix]
+##           [--all]
+##           [--files=FILES,[FILES ...]]
+##           [--target=GN_TARGET]
+##           [--git] [-- PATTERN]
+##
+##   --fix     If supported by the linter tool for the target language,
+##             attempt to apply recommended fixes
+##   --dry-run Print the linter commands but don't run them
+##   --verbose Print the linter commands before running them
+##   --all     Lints all code in the git repo under the current working
+##             directory.
+##   --files   Allows the user to specify files separated by commas or (with
+##             quotes) whitespace. Basic globs are supported, for example:
+##                 fx lint --files=foo/*
+##             Or for more advanced filename pattern matching, you can use
+##             double quotes with command substitution:
+##                 fx lint --files="$(find some/path -name '*.cc')"
+##   --target  Allows the user to specify a gn target.
+##   --git     The default; it uses `git diff` against the newest parent
+##             commit in the upstream branch (or against HEAD if no such
+##             commit is found).  Files that are locally modified, staged
+##             or touched by any commits introduced on the local branch are
+##             linted.
+##    -- [PATTERN...] -additional -args -for -linter
+##             For --all or --git, passes along PATTERNs to `git ls-files`
+##             to filter what files are affected. The first argument starting
+##             with a dash, and all arguments thereafter, are passed to the
+##             linter command (positioned before the filename). Used in
+##             combination, the pattern can constrain which linter is selected,
+##             so linter options are only applied to the expected linter
+##             program.
+##
+## Examples:
+##     fx lint -- "*.fidl" --include-check no-trailing-comment
+##     fx lint --files=sdk/fidl/fuchsia.sys/service_provider.fidl \
+##             -- --exclude-check string-bounds-not-specified
+##     fx lint --verbose --files="$(echo sdk/**/*.cc sdk/**/*.fidl)"
+
+set -e
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"/../lib/vars.sh || exit $?
+
+function usage() {
+  fx-command-help
+}
+
+function zap-commas() {
+  echo $1 | tr ',' '\n'
+}
+
+function get-diff-base() {
+  local upstream=$(git rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null)
+  if [[ -z "${upstream}" ]]; then
+    upstream="origin/master"
+  fi
+  local local_commit=$(git rev-list HEAD ^${upstream} --  2>/dev/null | tail -1)
+  if [[ -z "${local_commit}" ]]; then
+    printf "HEAD"
+  else
+    git rev-parse "${local_commit}"^
+  fi
+}
+
+# Removes leading //, resolves to absolute path, and resolves globs.  The first
+# argument is a path prefix, and the remaining arguments are relative to that
+# path prefix.
+function canonicalize() {
+  local root_dir="$1"
+  shift
+  for fileglob in "${@}"; do
+    # // means it comes from gn, [^/]* means it is relative
+    if [[ "${fileglob}" = //* || "${fileglob}" = [^/]* ]]; then
+      local dir="${root_dir}"/
+    else
+      local dir=""
+    fi
+    for file in "${dir}"${fileglob#"//"}; do
+      echo "${file}"
+    done
+  done
+}
+
+DRY_RUN=
+VERBOSE=
+FIX_OPTION=
+
+fx-config-read
+
+GET_FILES=get_git_files
+while [ $# -gt 0 ]; do
+  ARG="$1"
+  case "$1" in
+    --verbose) VERBOSE="1" ;;
+    --dry-run) DRY_RUN="1" ;;
+    --fix) FIX_OPTION="-fix" ;;
+    --all) GET_FILES=get_all_files ;;
+    --git) GET_FILES=get_git_files ;;
+    --files=*)
+      GET_FILES=:
+      FILES=$(canonicalize "${PWD}" $(zap-commas "${ARG#--files=}"))
+      ;;
+    --target=*)
+      GET_FILES=:
+      >&2 echo "Looking up files for target ${ARG#--target=}..."
+      declare -i status=0
+      GN_OUTPUT=(
+         $(fx-buildtool-run gn desc "${FUCHSIA_BUILD_DIR}" "${ARG#--target=}" sources)
+      ) || status=$?
+      if (( ${status} != 0 )); then
+        >&2 echo "${GN_OUTPUT[@]}"
+        exit ${status}
+      fi
+      FILES=$(canonicalize "${FUCHSIA_DIR}" "${GN_OUTPUT[@]}")
+      ;;
+    --)
+      shift
+      break
+      ;;
+    --help) usage && exit 0 ;;
+    *) usage && fx-error "Unknown flag '${ARG}'\n" && exit 1 ;;
+  esac
+  shift
+done
+
+GIT_FILTER=()
+while [ $# -gt 0 ]; do
+  if [[ $1 == -* ]]; then
+    break
+  fi
+  if [[ ${#GIT_FILTER[@]} == 0 ]]; then
+    GIT_FILTER=(--)
+  fi
+  GIT_FILTER+=($1)
+  shift
+done
+
+COMMAND_ARGS=("$@")
+
+get_git_files() {
+  FILES=$(canonicalize $(git rev-parse --show-toplevel) \
+    $(git diff --name-only $(get-diff-base) "${GIT_FILTER[@]}"))
+}
+
+get_all_files() {
+  FILES=$(canonicalize "${PWD}" $(git ls-files "${GIT_FILTER[@]}"))
+}
+
+$GET_FILES
+
+declare BUILDTOOLS_ROOT="${FUCHSIA_DIR}"/buildtools
+declare HOST_OS=$(uname | tr '[:upper:]' '[:lower:]')
+
+[[ "${HOST_OS}" == "darwin" ]] && HOST_OS="mac"
+case $(uname -m) in
+  x86_64) HOST_ARCH="x64" ;;
+  aarch64) HOST_ARCH="arm64" ;;
+  *) fx-error "Unknown arch $(uname -m)" && exit 1 ;;
+esac
+
+declare HOST_PLATFORM="${HOST_OS}-${HOST_ARCH}"
+
+# Specify both the clang-tidy and the clang-apply-replacements binaries to be
+# the ones in //buildtools, so that they'll work properly on the tree.
+declare CLANG_TIDY="${BUILDTOOLS_ROOT}/${HOST_PLATFORM}/clang/bin/clang-tidy"
+declare CLANG_APPLY_REPLACEMENTS="${BUILDTOOLS_ROOT}/${HOST_PLATFORM}/clang/bin/clang-apply-replacements"
+declare RUN_CLANG_TIDY="${BUILDTOOLS_ROOT}/${HOST_PLATFORM}/clang/share/clang/run-clang-tidy.py"
+
+# Suppress the "name-repeats-*" checks for now. These produce a high number of
+# linter warnings, many of which are questionable. The algorithm will be refined.
+declare FIDL_LINT="${ZIRCON_TOOLS_DIR}"/fidl-lint
+
+declare CLANG_TIDY_CMD=(
+  "${RUN_CLANG_TIDY}"
+  -clang-tidy-binary "${CLANG_TIDY}"
+  -clang-apply-replacements-binary "${CLANG_APPLY_REPLACEMENTS}"
+)
+if [[ -z "${FIX_OPTION}" ]]; then
+  CLANG_TIDY_CMD+=( ${FIX_OPTION} )
+fi
+
+declare FIDL_LINT_CMD=( "${FIDL_LINT}" )
+# TODO(fxb/TC-559): add command and args for Dart linter
+declare DART_LINT_CMD=() # "${FUCHSIA_DIR}/topaz/tools/prebuilt-dart-sdk/${HOST_PLATFORM}/bin/dart<cmd?> <options?>"
+# TODO(fxb/TC-542): add command and args for Go linter
+declare GO_LINT_CMD=() # "${BUILDTOOLS_ROOT}/${HOST_PLATFORM}/go/bin/go<cmd?> <options?>"
+# TODO(fxb/TC-543): add command and args for JSON linter
+declare JSON_LINT_CMD=() # "${FUCHSIA_DIR}"/scripts/style/json-<cmd?> <options?>"
+# TODO(fxb/TC-544): add command and args for Rust linter
+declare RUST_LINT_CMD=() # "${BUILDTOOLS_ROOT}/${HOST_PLATFORM}/rust/bin/rust<cmd?> <options?>"
+
+declare CLANG_TIDY_FILES=()
+declare DART_LINT_FILES=()
+declare FIDL_LINT_FILES=()
+declare GO_LINT_FILES=()
+declare JSON_LINT_FILES=()
+declare RUST_LINT_FILES=()
+
+function add_file_to_linter() {
+  local file="$1"
+  # Git reports deleted files, which we don't want to try to lint
+  if [ -f "${file}" ]; then
+    case "${file}" in
+      *.c) CLANG_TIDY_FILES+=(${file}) ;;
+      *.cc) CLANG_TIDY_FILES+=(${file}) ;;
+      *.cmx) JSON_LINT_FILES+=(${file}) ;;
+      *.cpp) CLANG_TIDY_FILES+=(${file}) ;;
+      *.dart) DART_LINT_FILES+=(${file}) ;;
+      *.fidl) FIDL_LINT_FILES+=(${file}) ;;
+      *.go) GO_LINT_FILES+=(${file}) ;;
+      *.h) CLANG_TIDY_FILES+=(${file}) ;;
+      *.hh) CLANG_TIDY_FILES+=(${file}) ;;
+      *.hpp) CLANG_TIDY_FILES+=(${file}) ;;
+      *.rs) RUST_LINT_FILES+=(${file}) ;;
+    esac
+
+    # Note: clang-tidy can produce errors on header files (*.h, *.hh, *.hpp)
+    # clang-tidy uses a compilation database that only contains implementation
+    # files, and so it makes a best-effort guess at what the relevant
+    # implementation file is based on the name. However, if you have a header
+    # with no implementation file or with a different name than the
+    # implementation file (e.g. "functions.h" and "function_a.cpp" that
+    # implements it), clang-tidy will return an error.
+  fi
+}
+
+fidl_lint_is_outdated() {
+  local yes=0
+  local no=1
+  if [[ ! -x "${FIDL_LINT}" ]]; then
+    # "fx build zircon/tools" does not build the "${FIDL_LINT}" hard link
+    # if that is the only missing hard link to the architecture-specific
+    # executable. Touching these files in this order will ensure the
+    # executable is rebuilt and relinked.
+    touch "${FIDL_LINT}"
+    touch "${FUCHSIA_DIR}/zircon/system/host/fidl/linter/main.cpp"
+    return $yes
+  fi
+  local files_out_of_date=$(
+    find "${FUCHSIA_DIR}/zircon/system/host/fidl" -newer "${FIDL_LINT}" | wc -l
+  )
+  if (( ${files_out_of_date} > 0 )); then
+    return $yes
+  fi
+  return $no
+}
+
+ensure_fidl_lint() {
+  if [[ -t 0 ]]; then  # only if interactive
+    # If there is a FIDL file to check, and we don't have an up-to-date
+    # copy of fidl-lint, generate one.
+    for file in ${FILES}; do
+      if [[ ${file} =~ .*\.fidl ]]; then
+        if fidl_lint_is_outdated; then
+          fx-warn "fidl-lint is out of date or missing..."
+          echo -n "OK to run 'fx build zircon/tools' to rebuild it? [Y/n] "
+          if [[ ! -t 1 ]]; then
+            echo  # flush the prompt
+          fi
+          read
+          if [[ $REPLY == "" || $REPLY =~ Y|y ]]; then
+            fx-command-run build zircon/tools || return $?
+          fi
+        fi
+        break
+      fi
+    done
+  fi
+  return 0
+}
+
+ensure_compile_commands() {
+  local compdb="${FUCHSIA_DIR}/compile_commands.json"
+  if [[ ! -f ${compdb} ]]; then
+    fx-error "Missing compdb file: ${compdb}"
+    echo "To generate or refresh the compdb, run: fx compdb"
+    echo "(Note that a valid 'fx set' configuration is required, and a"
+    echo "full build is recommended, prior to running 'fx compdb'.)"
+    return 1
+  fi
+  return 0
+}
+
+execute() {
+  if [[ -n "${VERBOSE}" || -n "${DRY_RUN}" ]]; then
+    echo "$@"
+    echo
+  fi
+
+  if [[ ! -n "${DRY_RUN}" ]]; then
+    "$@"
+  fi
+}
+
+call_linters() {
+  if (( "${#CLANG_TIDY_CMD[@]}" > 0 && "${#CLANG_TIDY_FILES[@]}" > 0 )); then
+    execute ensure_compile_commands || return $?
+    execute "${CLANG_TIDY_CMD[@]}" "${COMMAND_ARGS[@]}" "${CLANG_TIDY_FILES[@]}" || return $?
+  fi
+  if (( "${#DART_LINT_CMD[@]}" > 0 && "${#DART_LINT_FILES[@]}" > 0 )); then
+    execute "${DART_LINT_CMD[@]}" "${COMMAND_ARGS[@]}" "${DART_LINT_FILES[@]}" || return $?
+  fi
+  if (( "${#FIDL_LINT_CMD[@]}" > 0 && "${#FIDL_LINT_FILES[@]}" > 0 )); then
+    execute ensure_fidl_lint || return $?
+    execute "${FIDL_LINT_CMD[@]}" "${COMMAND_ARGS[@]}" "${FIDL_LINT_FILES[@]}" || return $?
+  fi
+  if (( "${#GO_LINT_CMD[@]}" > 0 && "${#GO_LINT_FILES[@]}" > 0 )); then
+    execute "${GO_LINT_CMD[@]}" "${COMMAND_ARGS[@]}" "${GO_LINT_FILES[@]}" || return $?
+  fi
+  if (( "${#JSON_LINT_CMD[@]}" > 0 && "${#JSON_LINT_FILES[@]}" > 0 )); then
+    execute "${JSON_LINT_CMD[@]}" "${COMMAND_ARGS[@]}" "${JSON_LINT_FILES[@]}" || return $?
+  fi
+  if (( "${#RUST_LINT_CMD[@]}" > 0 && "${#RUST_LINT_FILES[@]}" > 0 )); then
+    execute "${RUST_LINT_CMD[@]}" "${COMMAND_ARGS[@]}" "${RUST_LINT_FILES[@]}" || return $?
+  fi
+}
+
+for file in ${FILES}; do
+  add_file_to_linter ${file}
+done
+
+call_linters || exit $?

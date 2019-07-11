@@ -6,6 +6,10 @@
 # in place of // to refer to the root of the flutter source tree.
 flutter_root = "//third_party/flutter"
 
+# The GN files in //third_party/cobalt all use $cobalt_root/
+# in place of // to refer to the root of the cobalt source tree.
+cobalt_root = "//third_party/cobalt"
+
 declare_args() {
   # Debug build.
   is_debug = true
@@ -92,6 +96,7 @@ if (!defined(toolchain_variant.name)) {
 }
 
 is_android = false
+is_chromeos = false
 is_fuchsia = false
 is_fuchsia_host = false
 is_ios = false
@@ -470,24 +475,6 @@ declare_args() {
         {
           variant = "asan"
           host = true
-        },
-      ]
-    },
-
-    # TODO(TC-241): Remove this when TC-241 is fixed.  For now, don't
-    # apply ASan to drivers because all drivers (and nothing else)
-    # use -static-libstdc++ and so hit the TC-241 problem.
-    {
-      name = "asan"
-      select_variant = []
-      select_variant = [
-        {
-          target_type = [ "driver_module" ]
-          variant = false
-        },
-        {
-          variant = "asan"
-          host = false
         },
       ]
     },

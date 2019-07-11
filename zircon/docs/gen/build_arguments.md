@@ -42,7 +42,7 @@ This toolchain is expected to support both Fuchsia targets and the host.
 
 **Current value (from the default):** `""`
 
-From //public/gn/toolchain/clang.gni:14
+From //public/gn/toolchain/clang.gni:16
 
 ### crash_diagnostics_dir
 Clang crash reports directory path. Use empty path to disable altogether.
@@ -64,14 +64,22 @@ Defines the `//:default` target: what `ninja` with no arguments does.
 
 **Current value (from the default):** `[":build-tests", ":ids", ":images", ":tools"]`
 
-From //BUILD.gn:19
+From //BUILD.gn:20
 
 ### detailed_scheduler_tracing
 Enable detailed scheduler traces.
 
 **Current value (from the default):** `false`
 
-From //kernel/params.gni:39
+From //kernel/params.gni:43
+
+### driver_unittest_log_flags
+Log levels to be printed when logs are enabled. Default is ERROR, WARNING, & INFO.
+Refer to zircon/system/public/zircon/syscalls/log.h for levels.
+
+**Current value (from the default):** `"0x7"`
+
+From //system/dev/lib/fake_ddk/BUILD.gn:11
 
 ### enable_acpi_debug
 Enable debug output in the ACPI library (used by the ACPI bus driver).
@@ -80,13 +88,18 @@ Enable debug output in the ACPI library (used by the ACPI bus driver).
 
 From //third_party/lib/acpica/BUILD.gn:9
 
-### enable_fair_scheduler
-Disable fair scheduler by default on all architectures.
-ZX-3959: Disable by default until E2E tests stabilize.
+### enable_driver_unittest_logs
+Enable printing of in driver logs in unittests.
 
 **Current value (from the default):** `false`
 
-From //kernel/params.gni:36
+From //system/dev/lib/fake_ddk/BUILD.gn:7
+
+### enable_fair_scheduler
+
+**Current value (from the default):** `false`
+
+From //kernel/params.gni:37
 
 ### enable_kernel_debugging_features
 Whether to include various features (non-shipping, insecure, etc.) in the
@@ -111,7 +124,7 @@ disabled.
 
 **Current value (from the default):** `false`
 
-From //kernel/params.gni:54
+From //kernel/params.gni:58
 
 ### enable_netsvc_debugging_features
 
@@ -124,7 +137,7 @@ Enable userspace PCI and disable kernel PCI.
 
 **Current value (from the default):** `false`
 
-From //kernel/params.gni:42
+From //kernel/params.gni:46
 
 ### gcc_tool_dir
 Directory where the GCC toolchain binaries ("gcc", "nm", etc.) are
@@ -136,14 +149,15 @@ system-installed tools found by the shell via `PATH` will be used.
 
 **Current value (from the default):** `""`
 
-From //public/gn/toolchain/gcc.gni:17
+From //public/gn/toolchain/gcc.gni:19
 
 ### goma_dir
-Absolute directory containing the Goma source code.
+Directory containing the Goma source code.  This can be a GN
+source-absolute path ("//...") or a system absolute path.
 
 **Current value (from the default):** `"/home/swarming/goma"`
 
-From //public/gn/toolchain/goma.gni:12
+From //public/gn/toolchain/goma.gni:13
 
 ### host_cpu
 
@@ -155,15 +169,15 @@ From //public/gn/toolchain/goma.gni:12
 
 ### kernel_aspace_base
 
-**Current value (from the default):** `"0xffffff8000000000UL"`
+**Current value (from the default):** `"0xffff000000000000"`
 
-From //kernel/params.gni:28
+From //kernel/params.gni:26
 
 ### kernel_base
 
-**Current value (from the default):** `"0xffffffff80100000"`
+**Current value (from the default):** `"0xffffffff00000000"`
 
-From //kernel/params.gni:20
+From //kernel/params.gni:18
 
 ### kernel_extra_defines
 Extra macro definitions for kernel code, e.g. "DISABLE_KASLR",
@@ -171,7 +185,7 @@ Extra macro definitions for kernel code, e.g. "DISABLE_KASLR",
 
 **Current value (from the default):** `[]`
 
-From //kernel/params.gni:46
+From //kernel/params.gni:50
 
 ### kernel_version_string
 Version string embedded in the kernel for `zx_system_get_version`.
@@ -199,11 +213,10 @@ From //third_party/ulib/musl/BUILD.gn:6
 From //public/gn/config/levels.gni:15
 
 ### smp_max_cpus
-Maximum number of CPUs the kernel will run on (others will be ignored).
 
-**Current value (from the default):** `32`
+**Current value (from the default):** `16`
 
-From //kernel/params.gni:7
+From //kernel/params.gni:10
 
 ### symbol_level
 * 0 means no debugging information.
@@ -225,11 +238,11 @@ The empty list (or empty string) means don't use `--sysroot` at all.
 [{
   cpu = "arm64"
   os = "linux"
-  sysroot = "//prebuilt/downloads/sysroot/linux-arm64"
+  sysroot = "//../prebuilt/third_party/sysroot/linux-arm64"
 }, {
   cpu = "x64"
   os = "linux"
-  sysroot = "//prebuilt/downloads/sysroot/linux-x64"
+  sysroot = "//../prebuilt/third_party/sysroot/linux-x64"
 }]
 ```
 
@@ -251,12 +264,12 @@ to be pared down.
 
 **Current value (from the default):** `true`
 
-From //BUILD.gn:16
+From //BUILD.gn:17
 
 ### thinlto_cache_dir
 ThinLTO cache directory path.
 
-**Current value (from the default):** `"host-arm64-linux-thinlto/thinlto-cache"`
+**Current value (from the default):** `"host-arm64-linux-lto/thinlto-cache"`
 
 From //public/gn/config/lto/BUILD.gn:22
 
@@ -305,7 +318,7 @@ Otherwise the tools are just expected to be found by the shell via `PATH`.
 
 **Current value (from the default):** `true`
 
-From //public/gn/toolchain/clang.gni:9
+From //public/gn/toolchain/clang.gni:11
 
 ### use_prebuilt_gcc
 If $gcc_tool_dir is "", then this controls how the GCC toolchain
@@ -314,7 +327,7 @@ the tools are just expected to be found in PATH.
 
 **Current value (from the default):** `true`
 
-From //public/gn/toolchain/gcc.gni:9
+From //public/gn/toolchain/gcc.gni:11
 
 ### variants
 List of "selectors" to request variant builds of certain targets.  Each

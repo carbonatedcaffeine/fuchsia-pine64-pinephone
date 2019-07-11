@@ -27,8 +27,7 @@ constexpr const char* kWavFileExtension = ".wav";
 //
 
 // Encode a 32-bit 'fourcc' value from these 4 byte values
-static inline constexpr uint32_t make_fourcc(uint8_t a, uint8_t b, uint8_t c,
-                                             uint8_t d) {
+static inline constexpr uint32_t make_fourcc(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
   return (static_cast<uint32_t>(d) << 24) | (static_cast<uint32_t>(c) << 16) |
          (static_cast<uint32_t>(b) << 8) | static_cast<uint32_t>(a);
 }
@@ -128,20 +127,18 @@ constexpr const uint32_t kWavHeaderOverhead =
 // cursor is positioned immediately after the headers, at the correct location
 // to write any audio samples we are given.
 // This private function assumes the given file_desc is valid.
-zx_status_t WriteNewHeader(int file_desc,
-                           fuchsia::media::AudioSampleFormat sample_format,
-                           uint32_t channel_count, uint32_t frame_rate,
-                           uint16_t bits_per_sample) {
+zx_status_t WriteNewHeader(int file_desc, fuchsia::media::AudioSampleFormat sample_format,
+                           uint32_t channel_count, uint32_t frame_rate, uint16_t bits_per_sample) {
   if (channel_count > std::numeric_limits<uint16_t>::max()) {
     return ZX_ERR_INVALID_ARGS;
   }
 
-  ::lseek(file_desc, 0, SEEK_SET);
+  lseek(file_desc, 0, SEEK_SET);
   RiffChunkHeader riff_header;
   riff_header.four_cc = RIFF_FOUR_CC;
   riff_header.length = kWavHeaderOverhead;
   riff_header.FixupEndian();
-  if (::write(file_desc, &riff_header, sizeof(riff_header)) < 0) {
+  if (write(file_desc, &riff_header, sizeof(riff_header)) < 0) {
     return ZX_ERR_IO;
   }
 
@@ -154,27 +151,25 @@ zx_status_t WriteNewHeader(int file_desc,
   // fmt_four_cc already set
   // fmt_chunk_len already set
   wave_header.format =
-      (sample_format == fuchsia::media::AudioSampleFormat::FLOAT) ? FORMAT_FLOAT
-                                                                  : FORMAT_LPCM;
+      (sample_format == fuchsia::media::AudioSampleFormat::FLOAT) ? FORMAT_FLOAT : FORMAT_LPCM;
   wave_header.channel_count = channel_count;
   wave_header.frame_rate = frame_rate;
-  wave_header.average_byte_rate =
-      (bits_per_sample >> 3) * channel_count * frame_rate;
+  wave_header.average_byte_rate = (bits_per_sample >> 3) * channel_count * frame_rate;
   wave_header.frame_size = (bits_per_sample >> 3) * channel_count;
   wave_header.bits_per_sample = bits_per_sample;
 
   wave_header.FixupEndian();
-  if (::write(file_desc, &wave_header, sizeof(wave_header)) < 0) {
+  if (write(file_desc, &wave_header, sizeof(wave_header)) < 0) {
     return ZX_ERR_IO;
   }
 
   riff_header.four_cc = DATA_FOUR_CC;
   riff_header.FixupEndian();
-  if (::write(file_desc, &riff_header, sizeof(riff_header)) < 0) {
+  if (write(file_desc, &riff_header, sizeof(riff_header)) < 0) {
     return ZX_ERR_IO;
   }
 
-  ::lseek(file_desc, kWavHeaderOverhead, SEEK_SET);
+  lseek(file_desc, kWavHeaderOverhead, SEEK_SET);
   return ZX_OK;
 }
 
@@ -187,27 +182,25 @@ zx_status_t WriteNewHeader(int file_desc,
 // correctly appended to the file.
 // This private function assumes the given file_desc is valid.
 zx_status_t UpdateHeaderLengths(int file_desc, size_t payload_len) {
-  if (payload_len >
-      (std::numeric_limits<uint32_t>::max() - kWavHeaderOverhead)) {
+  if (payload_len > (std::numeric_limits<uint32_t>::max() - kWavHeaderOverhead)) {
     return ZX_ERR_INVALID_ARGS;
   }
 
   uint32_t file_offset = offsetof(RiffChunkHeader, length);
-  ::lseek(file_desc, file_offset, SEEK_SET);
-  auto new_length =
-      htole32(static_cast<uint32_t>(kWavHeaderOverhead + payload_len));
-  if (::write(file_desc, &new_length, sizeof(new_length)) < 0) {
+  lseek(file_desc, file_offset, SEEK_SET);
+  auto new_length = htole32(static_cast<uint32_t>(kWavHeaderOverhead + payload_len));
+  if (write(file_desc, &new_length, sizeof(new_length)) < 0) {
     return ZX_ERR_IO;
   }
 
   file_offset += sizeof(RiffChunkHeader) + sizeof(WavHeader);
-  ::lseek(file_desc, file_offset, SEEK_SET);
+  lseek(file_desc, file_offset, SEEK_SET);
   new_length = htole32(static_cast<uint32_t>(payload_len));
-  if (::write(file_desc, &new_length, sizeof(new_length)) < 0) {
+  if (write(file_desc, &new_length, sizeof(new_length)) < 0) {
     return ZX_ERR_IO;
   }
 
-  ::lseek(file_desc, kWavHeaderOverhead + payload_len, SEEK_SET);
+  lseek(file_desc, kWavHeaderOverhead + payload_len, SEEK_SET);
   return ZX_OK;
 }
 
@@ -215,7 +208,7 @@ zx_status_t UpdateHeaderLengths(int file_desc, size_t payload_len) {
 // write cursor is correctly placed after any previously written audio data.
 // This private function assumes the given file_desc is valid.
 ssize_t WriteData(int file_desc, const void* const buffer, size_t num_bytes) {
-  return ::write(file_desc, buffer, num_bytes);
+  return write(file_desc, buffer, num_bytes);
 }
 
 }  // namespace
@@ -235,10 +228,10 @@ std::atomic<uint32_t> WavWriter<true>::instance_count_(0u);
 // TODO(mpuryear): leverage utility code elsewhere for bytes-per-sample lookup,
 // for either FIDL-defined sample types and/or driver defined sample packings.
 template <bool enabled>
-bool WavWriter<enabled>::Initialize(
-    const char* const file_name,
-    fuchsia::media::AudioSampleFormat sample_format, uint32_t channel_count,
-    uint32_t frame_rate, uint32_t bits_per_sample) {
+bool WavWriter<enabled>::Initialize(const char* const file_name,
+                                    fuchsia::media::AudioSampleFormat sample_format,
+                                    uint32_t channel_count, uint32_t frame_rate,
+                                    uint32_t bits_per_sample) {
   // Open our output file.
   uint32_t instance_count = instance_count_.fetch_add(1);
   if (file_name == nullptr || strlen(file_name) == 0) {
@@ -248,11 +241,11 @@ bool WavWriter<enabled>::Initialize(
     file_name_ = file_name;
   }
 
-  int file_desc = ::open(file_name_.c_str(), O_CREAT | O_WRONLY | O_TRUNC);
+  int file_desc = open(file_name_.c_str(), O_CREAT | O_WRONLY | O_TRUNC);
   file_.reset(file_desc);
   if (!file_.is_valid()) {
-    FXL_LOG(WARNING) << "::open failed for " << std::quoted(file_name_)
-                     << ", returned " << file_desc << ", errno " << errno;
+    FXL_LOG(WARNING) << "open failed for " << std::quoted(file_name_) << ", returned " << file_desc
+                     << ", errno " << errno;
     return false;
   }
 
@@ -265,8 +258,7 @@ bool WavWriter<enabled>::Initialize(
 
   // Write inital WAV header
   zx_status_t status =
-      WriteNewHeader(file_.get(), sample_format_, channel_count_, frame_rate_,
-                     bits_per_sample_);
+      WriteNewHeader(file_.get(), sample_format_, channel_count_, frame_rate_, bits_per_sample_);
   if (status != ZX_OK) {
     Delete();
     FXL_LOG(WARNING) << "Failed (" << status << ") writing initial header for "
@@ -274,9 +266,9 @@ bool WavWriter<enabled>::Initialize(
     return false;
   }
   FXL_LOG(INFO) << "WavWriter[" << this << "] recording Format "
-                << fidl::ToUnderlying(sample_format_) << ", "
-                << bits_per_sample_ << "-bit, " << frame_rate_ << " Hz, "
-                << channel_count_ << "-chan PCM to " << std::quoted(file_name_);
+                << fidl::ToUnderlying(sample_format_) << ", " << bits_per_sample_ << "-bit, "
+                << frame_rate_ << " Hz, " << channel_count_ << "-chan PCM to "
+                << std::quoted(file_name_);
   return true;
 }
 
@@ -291,8 +283,7 @@ bool WavWriter<enabled>::Write(void* const buffer, uint32_t num_bytes) {
 
   ssize_t amt = WriteData(file_.get(), buffer, num_bytes);
   if (amt < 0) {
-    FXL_LOG(WARNING) << "Failed (" << amt << ") while writing to "
-                     << std::quoted(file_name_);
+    FXL_LOG(WARNING) << "Failed (" << amt << ") while writing to " << std::quoted(file_name_);
     return false;
   }
 
@@ -339,7 +330,7 @@ bool WavWriter<enabled>::Reset() {
     return false;
   }
 
-  if (::ftruncate(file_.get(), kWavHeaderOverhead) < 0) {
+  if (ftruncate(file_.get(), kWavHeaderOverhead) < 0) {
     FXL_LOG(WARNING) << "Failed to truncate " << std::quoted(file_name_)
                      << ", in WavWriter::Reset().";
     Close();
@@ -379,7 +370,7 @@ bool WavWriter<enabled>::Delete() {
     return true;
   }
 
-  if (::unlink(file_name_.c_str()) < 0) {
+  if (unlink(file_name_.c_str()) < 0) {
     FXL_LOG(WARNING) << "Could not delete " << std::quoted(file_name_);
     return false;
   }

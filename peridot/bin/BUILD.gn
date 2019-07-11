@@ -12,8 +12,6 @@ group("bin") {
     "module_resolver",
     "sessionctl",
     "sessionmgr",
-    "suggestion_engine",
-    "test_driver",
     "voila",
   ]
 }

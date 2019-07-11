@@ -18,16 +18,19 @@ use crate::server::sl4f_types::{AsyncRequest, AsyncResponse, FacadeType};
 // Translation layers go here (i.e netstack_method_to_fidl)
 use crate::audio::commands::audio_method_to_fidl;
 use crate::auth::commands::auth_method_to_fidl;
+use crate::basemgr::commands::base_manager_method_to_fidl;
 use crate::bluetooth::commands::ble_advertise_method_to_fidl;
 use crate::bluetooth::commands::ble_method_to_fidl;
 use crate::bluetooth::commands::bt_control_method_to_fidl;
 use crate::bluetooth::commands::gatt_client_method_to_fidl;
 use crate::bluetooth::commands::gatt_server_method_to_fidl;
+use crate::file::commands::file_method_to_fidl;
 use crate::logging::commands::logging_method_to_fidl;
 use crate::netstack::commands::netstack_method_to_fidl;
 use crate::scenic::commands::scenic_method_to_fidl;
 use crate::setui::commands::setui_method_to_fidl;
 use crate::traceutil::commands::traceutil_method_to_fidl;
+use crate::webdriver::commands::webdriver_method_to_fidl;
 use crate::wlan::commands::wlan_method_to_fidl;
 
 pub async fn run_fidl_loop(
@@ -91,6 +94,11 @@ async fn method_to_fidl(
         FacadeType::AuthFacade => {
             await!(auth_method_to_fidl(method_name, args, sl4f_session.read().get_auth_facade(),))
         }
+        FacadeType::BaseManagerFacade => await!(base_manager_method_to_fidl(
+            method_name,
+            args,
+            sl4f_session.read().get_basemgr_facade(),
+        )),
         FacadeType::BleAdvertiseFacade => await!(ble_advertise_method_to_fidl(
             method_name,
             args,
@@ -104,6 +112,9 @@ async fn method_to_fidl(
             args,
             sl4f_session.read().get_bt_control_facade(),
         )),
+        FacadeType::FileFacade => {
+            await!(file_method_to_fidl(method_name, args, sl4f_session.read().get_file_facade(),))
+        }
         FacadeType::GattClientFacade => await!(gatt_client_method_to_fidl(
             method_name,
             args,
@@ -135,7 +146,12 @@ async fn method_to_fidl(
         FacadeType::TraceutilFacade => await!(traceutil_method_to_fidl(
             method_name,
             args,
-            sl4f_session.read().get_traceutil_facade(),
+            sl4f_session.read().get_traceutil_facade()
+        )),
+        FacadeType::WebdriverFacade => await!(webdriver_method_to_fidl(
+            method_name,
+            args,
+            sl4f_session.read().get_webdriver_facade(),
         )),
         FacadeType::Wlan => {
             await!(wlan_method_to_fidl(method_name, args, sl4f_session.read().get_wlan_facade()))

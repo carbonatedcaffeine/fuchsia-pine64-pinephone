@@ -3,19 +3,21 @@ package metrics
 import (
 	"app/context"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"strings"
-	"syscall/zx"
 	"time"
 
 	"fidl/fuchsia/cobalt"
-	"fidl/fuchsia/mem"
 )
 
 const (
-	metricConfigPath = "/pkg/data/cobalt_config.pb"
-	releaseStage     = cobalt.ReleaseStageDebug
+	// This means that this code is considered GA (Generally Available) and so it
+	// will not be allowed to use any Cobalt metrics that are marked as being only
+	// for "DEBUG" or "FISHFOOD" etc.
+	releaseStage = cobalt.ReleaseStageGa
+	// This must match the name of our project as specified in Cobalt's metrics registry:
+	// https://cobalt-analytics.googlesource.com/config/+/refs/heads/master/projects.yaml
+	projectName = "software_delivery"
 )
 
 var (
@@ -91,23 +93,9 @@ func newDoubleValue(name string, value float64) cobalt.CustomEventValue {
 }
 
 func connect() error {
-	config, err := ioutil.ReadFile(metricConfigPath)
-	if err != nil {
-		return fmt.Errorf("read cobalt config: %s", err)
-	}
-
-	configVmo, err := zx.NewVMO(uint64(len(config)), 0)
-	if err != nil {
-		return err
-	}
-	if err := configVmo.Write(config, 0); err != nil {
-		configVmo.Close()
-		return fmt.Errorf("write cobalt vmo: %s", err)
-	}
 
 	factoryRequest, factory, err := cobalt.NewLoggerFactoryInterfaceRequest()
 	if err != nil {
-		configVmo.Close()
 		return err
 	}
 	ctx.ConnectToEnvService(factoryRequest)
@@ -115,19 +103,10 @@ func connect() error {
 
 	loggerRequest, proxy, err := cobalt.NewLoggerInterfaceRequest()
 	if err != nil {
-		configVmo.Close()
 		return err
 	}
 
-	profile := cobalt.ProjectProfile{
-		Config: mem.Buffer{
-			Vmo:  configVmo,
-			Size: uint64(len(config)),
-		},
-		ReleaseStage: releaseStage,
-	}
-
-	status, err := factory.CreateLogger(profile, loggerRequest)
+	status, err := factory.CreateLoggerFromProjectName(projectName, releaseStage, loggerRequest)
 	if err != nil {
 		proxy.Close()
 		return err
@@ -163,6 +142,41 @@ func logString(metric metricID, value string) {
 	}
 }
 
+// logEventMulti() invokes logEventCountMulti() using periodDurationMicros=0
+// and count=1. Cobalt's simple EVENT_OCCURRED metric type does not support
+// multiple dimensions of event codes or a component string. When one wants to
+// use these features one is supposed to use the EVENT_COUNT metric type,
+// always setting the count=1 and the duration=0.
+func logEventMulti(metric metricID, eventCodes []uint32, component string) {
+	logEventCountMulti(metric, 0, 1, eventCodes, component)
+}
+
+func logEventCountMulti(metric metricID, periodDurationMicros int64, count int64,
+	eventCodes []uint32, component string) {
+	if !ensureConnection() {
+		return
+	}
+
+	event := cobalt.CobaltEvent{
+		MetricId:   uint32(metric),
+		EventCodes: eventCodes,
+		Component:  &component,
+		Payload: cobalt.EventPayload{
+			EventPayloadTag: cobalt.EventPayloadEventCount,
+			EventCount: cobalt.CountEvent{
+				PeriodDurationMicros: periodDurationMicros,
+				Count:                count,
+			},
+		},
+	}
+	status, err := logger.LogCobaltEvent(event)
+	if err != nil {
+		log.Printf("logEventCountMulti: %s", err)
+	} else if err := mapErrCobalt(status); err != nil {
+		log.Printf("logEventCountMulti: %s", err)
+	}
+}
+
 func logElapsedTime(metric metricID, duration time.Duration, index uint32, component string) {
 	if !ensureConnection() {
 		return
@@ -175,6 +189,28 @@ func logElapsedTime(metric metricID, duration time.Duration, index uint32, compo
 		log.Printf("logElapsedTime: %s", err)
 	} else if err := mapErrCobalt(status); err != nil {
 		log.Printf("logElapsedTime: %s", err)
+	}
+}
+
+func logElapsedTimeMulti(metric metricID, duration time.Duration, eventCodes []uint32, component string) {
+	if !ensureConnection() {
+		return
+	}
+
+	event := cobalt.CobaltEvent{
+		MetricId:   uint32(metric),
+		EventCodes: eventCodes,
+		Component:  &component,
+		Payload: cobalt.EventPayload{
+			EventPayloadTag: cobalt.EventPayloadElapsedMicros,
+			ElapsedMicros:   duration.Nanoseconds() / time.Microsecond.Nanoseconds(),
+		},
+	}
+	status, err := logger.LogCobaltEvent(event)
+	if err != nil {
+		log.Printf("logElapsedTimeMulti: %s", err)
+	} else if err := mapErrCobalt(status); err != nil {
+		log.Printf("logElapsedTimeMulti: %s", err)
 	}
 }
 

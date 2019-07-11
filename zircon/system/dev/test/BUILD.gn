@@ -5,7 +5,10 @@
 group("test") {
   testonly = true
   deps = [
+    "ddk-fidl-test",
+    "ddk-runcompatibilityhook",
     "ddk-test",
+    "isolateddevmgr",
     "mock-device",
     "operation",
     "sysdev",

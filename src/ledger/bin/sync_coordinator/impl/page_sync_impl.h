@@ -22,8 +22,7 @@ namespace sync_coordinator {
 
 class PageSyncImpl : public PageSync, public storage::PageSyncDelegate {
  public:
-  PageSyncImpl(storage::PageStorage* storage,
-               storage::PageSyncClient* sync_client);
+  PageSyncImpl(storage::PageStorage* storage, storage::PageSyncClient* sync_client);
   ~PageSyncImpl() override;
 
   // Creates a PageSyncClient for cloud synchronization. This method should be
@@ -48,13 +47,11 @@ class PageSyncImpl : public PageSync, public storage::PageSyncDelegate {
   void SetSyncWatcher(SyncStateWatcher* watcher) override;
 
   // PageSyncDelegate:
-  void GetObject(
-      storage::ObjectIdentifier object_identifier,
-      fit::function<void(storage::Status status,
-                         storage::ChangeSource change_source,
-                         storage::IsObjectSynced is_object_synced,
-                         std::unique_ptr<storage::DataSource::DataChunk>)>
-          callback) override;
+  void GetObject(storage::ObjectIdentifier object_identifier,
+                 fit::function<void(ledger::Status status, storage::ChangeSource change_source,
+                                    storage::IsObjectSynced is_object_synced,
+                                    std::unique_ptr<storage::DataSource::DataChunk>)>
+                     callback) override;
 
  private:
   class CloudSyncHolder;

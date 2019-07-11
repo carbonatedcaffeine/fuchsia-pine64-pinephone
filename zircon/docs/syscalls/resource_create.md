@@ -10,7 +10,7 @@ Create a resource object.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_status_t zx_resource_create(zx_handle_t parent_rsrc,
@@ -24,7 +24,7 @@ zx_status_t zx_resource_create(zx_handle_t parent_rsrc,
 
 ## DESCRIPTION
 
-`zx_resource_create()` creates an resource object for use with other DDK
+`zx_resource_create()` creates a resource object for use with other DDK
 syscalls. Resources are typically handed out to bus drivers and rarely need to
 be interacted with directly by drivers using driver protocols. Resource objects
 grant access to an address space range starting at *base* up to but not
@@ -32,7 +32,9 @@ including *base* + *size*. Two special values for *kind* exist:
 **ZX_RSRC_KIND_ROOT** and **ZX_RSRC_KIND_HYPERVISOR**. These resources have no
 range associated with them and are used as a privilege check.
 
-*parent_rsrc* must be a handle to a resource of *kind* **ZX_RSRC_KIND_ROOT**.
+*parent_rsrc* must be a handle to a resource of *kind* **ZX_RSRC_KIND_ROOT**, or
+a resource that matches the requested *kind* and contains [*base*, *base*+size*]
+in its range.
 
 *options* must specify which kind of resource to create and may contain optional
 flags. Valid kinds of resources are **ZX_RSRC_KIND_MMIO**, **ZX_RSRC_KIND_IRQ**,
@@ -59,9 +61,9 @@ On success, a valid resource handle is returned in *resource_out*.
 negative error value is returned.
 
 The returned handle will have **ZX_RIGHT_TRANSFER** (allowing it to be sent to
-another process via channel write), **ZX_RIGHT_DUPLICATE** (allowing the handle
-to be duplicated), **ZX_RIGHT_INSPECT** (to allow inspection of the object with
-[object_get_info](object_get_info.md) and **ZX_RIGHT_WRITE** which is checked by
+another process via [`zx_channel_write()`]), **ZX_RIGHT_DUPLICATE** (allowing
+the handle to be duplicated), **ZX_RIGHT_INSPECT** (to allow inspection of the
+object with [`zx_object_get_info()`] and **ZX_RIGHT_WRITE** which is checked by
 `zx_resource_create()` itself.
 
 ## RIGHTS
@@ -72,15 +74,15 @@ to be duplicated), **ZX_RIGHT_INSPECT** (to allow inspection of the object with
 
 ## ERRORS
 
-**ZX_ERR_BAD_HANDLE** the *src_obj* handle is invalid.
+**ZX_ERR_BAD_HANDLE** the *parent_rsrc* handle is invalid.
 
-**ZX_ERR_WRONG_TYPE** the *src_obj* handle is not a resource handle.
+**ZX_ERR_WRONG_TYPE** the *parent_rsrc* handle is not a resource handle.
 
-**ZX_ERR_ACCESS_DENIED** The *src_obj* handle is not a resource of *kind*
-**ZX_RSRC_KIND_ROOT**.
+**ZX_ERR_ACCESS_DENIED** The *parent_rsrc* handle is not a resource of either
+*kind* or **ZX_RSRC_KIND_ROOT**.
 
 **ZX_ERR_INVALID_ARGS** *options* contains an invalid kind or flag combination,
-*name* is an invalid pointer, or the kind specified is one of
+*name* is an invalid pointer, or the *kind* specified is one of
 **ZX_RSRC_KIND_ROOT** or **ZX_RSRC_KIND_HYPERVISOR** but *base* and *size* are
 not 0.
 
@@ -97,7 +99,9 @@ longer occur.
 
 <!-- References updated by update-docs-from-abigen, do not edit. -->
 
+[`zx_channel_write()`]: channel_write.md
 [`zx_handle_close()`]: handle_close.md
 [`zx_interrupt_create()`]: interrupt_create.md
 [`zx_ioports_request()`]: ioports_request.md
+[`zx_object_get_info()`]: object_get_info.md
 [`zx_vmo_create_physical()`]: vmo_create_physical.md

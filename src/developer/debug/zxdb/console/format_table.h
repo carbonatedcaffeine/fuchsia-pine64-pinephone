@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_FORMAT_TABLE_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_FORMAT_TABLE_H_
 
 #include <string>
 #include <vector>
@@ -17,11 +18,7 @@ struct ColSpec {
   explicit ColSpec(Align align = Align::kLeft, int max_width = 0,
                    const std::string& head = std::string(), int pad_left = 0,
                    Syntax syntax = Syntax::kNormal)
-      : align(align),
-        max_width(max_width),
-        head(head),
-        pad_left(pad_left),
-        syntax(syntax) {}
+      : align(align), max_width(max_width), head(head), pad_left(pad_left), syntax(syntax) {}
 
   Align align = Align::kLeft;
 
@@ -51,22 +48,20 @@ struct ColSpec {
 // won't affect other columns (like you used colspan in HTML). Such items will
 // always be left-aligned.
 void FormatTable(const std::vector<ColSpec>& spec,
-                 const std::vector<std::vector<std::string>>& rows,
-                 OutputBuffer* out);
+                 const std::vector<std::vector<std::string>>& rows, OutputBuffer* out);
 void FormatTable(const std::vector<ColSpec>& spec,
-                 const std::vector<std::vector<OutputBuffer>>& rows,
-                 OutputBuffer* out);
+                 const std::vector<std::vector<OutputBuffer>>& rows, OutputBuffer* out);
 
 // Helper function to save some typing for static column specs.
 inline void FormatTable(std::initializer_list<ColSpec> spec,
-                        const std::vector<std::vector<std::string>>& rows,
-                        OutputBuffer* out) {
+                        const std::vector<std::vector<std::string>>& rows, OutputBuffer* out) {
   return FormatTable(std::vector<ColSpec>(spec), rows, out);
 }
 inline void FormatTable(std::initializer_list<ColSpec> spec,
-                        const std::vector<std::vector<OutputBuffer>>& rows,
-                        OutputBuffer* out) {
+                        const std::vector<std::vector<OutputBuffer>>& rows, OutputBuffer* out) {
   return FormatTable(std::vector<ColSpec>(spec), rows, out);
 }
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_FORMAT_TABLE_H_

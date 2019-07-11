@@ -6,6 +6,12 @@ import("//third_party/flatbuffers/flatbuffer.gni")
 
 declare_args() {
   scenic_ignore_vsync = false
+
+  # Draws the current frame number in the top-left corner.
+  scenic_display_frame_number = false
+
+  # Turns on view bound clipping for all of Scenic.
+  scenic_enforce_view_bound_clipping = false
 }
 
 config("common_include_dirs") {
@@ -16,7 +22,16 @@ config("common_include_dirs") {
 }
 
 config("swapchain") {
-  defines = [ "SCENIC_IGNORE_VSYNC=$scenic_ignore_vsync" ]
+  defines = [
+    "SCENIC_IGNORE_VSYNC=$scenic_ignore_vsync",
+    "SCENIC_DISPLAY_FRAME_NUMBER=$scenic_display_frame_number",
+  ]
+}
+
+config("feature_flags") {
+  defines = [
+    "SCENIC_ENFORCE_VIEW_BOUND_CLIPPING=$scenic_enforce_view_bound_clipping",
+  ]
 }
 
 source_set("common_gfx_config_source_set") {
@@ -43,8 +58,8 @@ source_set("gfx_always_optimized") {
     "//src/ui/lib/escher",
   ]
   deps = [
-    "//garnet/lib/ui/yuv",
     "//sdk/lib/images/cpp",
+    "//src/ui/lib/yuv",
   ]
 }
 
@@ -175,7 +190,10 @@ source_set("gfx") {
     "swapchain/swapchain_factory.h",
   ]
 
-  public_configs = [ ":common_include_dirs" ]
+  public_configs = [
+    ":common_include_dirs",
+    ":feature_flags",
+  ]
 
   configs += [ ":swapchain" ]
 
@@ -192,6 +210,7 @@ source_set("gfx") {
     "//garnet/public/lib/vulkan",
     "//sdk/fidl/fuchsia.math",
     "//sdk/fidl/fuchsia.ui.gfx",
+    "//sdk/fidl/fuchsia.ui.views",
     "//sdk/lib/fidl/cpp",
     "//sdk/lib/sys/cpp",
     "//src/lib/fxl",
@@ -200,6 +219,7 @@ source_set("gfx") {
 
   deps = [
     ":object_linker",
+    "//garnet/lib/ui/gfx:validate_eventpair",
     "//garnet/lib/ui/scenic/util",
     "//garnet/public/lib/inspect",
     "//garnet/public/lib/ui/scenic/cpp",
@@ -230,10 +250,10 @@ source_set("display") {
     "displays/color_transform.h",
     "displays/display.cc",
     "displays/display.h",
+    "displays/display_controller_watcher.cc",
+    "displays/display_controller_watcher.h",
     "displays/display_manager.cc",
     "displays/display_manager.h",
-    "displays/display_watcher.cc",
-    "displays/display_watcher.h",
   ]
   public_deps = [
     "//zircon/public/fidl/fuchsia-hardware-display",
@@ -254,13 +274,15 @@ source_set("display") {
 source_set("frame_scheduler") {
   sources = [
     # TODO(SCN-1398): Move files out of engine/.
-    "engine/duration_predictor.cc",
-    "engine/duration_predictor.h",
     "engine/default_frame_scheduler.cc",
     "engine/default_frame_scheduler.h",
-    "engine/frame_scheduler.h",
+    "engine/duration_predictor.cc",
+    "engine/duration_predictor.h",
     "engine/frame_predictor.cc",
     "engine/frame_predictor.h",
+    "engine/frame_scheduler.h",
+    "engine/frame_stats.cc",
+    "engine/frame_stats.h",
     "engine/frame_timings.cc",
     "engine/frame_timings.h",
 
@@ -271,6 +293,7 @@ source_set("frame_scheduler") {
   ]
   deps = [
     ":display",
+    ":util",
     "//garnet/public/lib/inspect",
     "//sdk/fidl/fuchsia.images",
     "//src/lib/fxl",
@@ -282,6 +305,7 @@ source_set("frame_scheduler") {
 
 source_set("util") {
   sources = [
+    "util/collection_utils.h",
     "util/event_timestamper.cc",
     "util/event_timestamper.h",
     "util/time.h",
@@ -289,6 +313,10 @@ source_set("util") {
     "util/wrap.h",
   ]
   deps = [
+    # TODO(SCN-1398): Needed by EventTimestamper.  Move to separate source_set?
+    "//sdk/lib/sys/cpp",
+
+    # Placeholder comment so that Tricium doesn't try to group with the above.
     "//src/lib/fxl",
 
     # TODO(SCN-1398): Needed by wrap/unwrap.  Move to separate source_set?
@@ -296,6 +324,18 @@ source_set("util") {
 
     # TODO(SCN-1398): Needed by EventTimestamper.  Move to separate source_set?
     "//zircon/public/fidl/fuchsia-scheduler",
+  ]
+}
+
+source_set("validate_eventpair") {
+  sources = [
+    "util/validate_eventpair.cc",
+    "util/validate_eventpair.h",
+  ]
+  deps = [
+    "//sdk/fidl/fuchsia.ui.views",
+    "//zircon/public/lib/zx",
+    "//zircon/system/public",
   ]
 }
 

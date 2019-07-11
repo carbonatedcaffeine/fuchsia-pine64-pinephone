@@ -119,9 +119,8 @@ public:
 
     // Returns the number of commands that will fit within |max_bytes|.
     static int FitCommands(const size_t max_bytes, const int num_buffers,
-                           const magma_system_inline_command_buffer* buffers,
-                           const int starting_index, uint64_t* command_bytes,
-                           uint32_t* num_semaphores)
+                           const magma_inline_command_buffer* buffers, const int starting_index,
+                           uint64_t* command_bytes, uint32_t* num_semaphores)
     {
         int buffer_count = 0;
         uint64_t bytes_used = 0;
@@ -139,7 +138,7 @@ public:
     }
 
     void ExecuteImmediateCommands(uint32_t context_id, uint64_t num_buffers,
-                                  magma_system_inline_command_buffer* buffers) override
+                                  magma_inline_command_buffer* buffers) override
     {
         DLOG("ZirconPlatformConnectionClient: ExecuteImmediateCommands");
         uint64_t buffers_sent = 0;
@@ -161,7 +160,7 @@ public:
                 const auto& buffer = buffers[buffers_sent + i];
                 const auto buffer_data = static_cast<uint8_t*>(buffer.data);
                 std::copy(buffer_data, buffer_data + buffer.size, std::back_inserter(command_vec));
-                std::copy(buffer.semaphores, buffer.semaphores + buffer.semaphore_count,
+                std::copy(buffer.semaphore_ids, buffer.semaphore_ids + buffer.semaphore_count,
                           std::back_inserter(semaphore_vec));
             }
             magma_status_t result = MagmaChannelStatus(magma_fidl_->ExecuteImmediateCommands(
@@ -292,6 +291,22 @@ bool PlatformConnectionClient::Query(int fd, uint64_t query_id, uint64_t* result
 
     if (status != ZX_OK)
         return DRETF(false, "magma_DeviceQuery failed: %d", status);
+
+    return true;
+}
+
+bool PlatformConnectionClient::QueryReturnsBuffer(int fd, uint64_t query_id, uint32_t* buffer_out)
+{
+    fdio_t* fdio = fdio_unsafe_fd_to_io(fd);
+    if (!fdio)
+        return DRETF(false, "invalid fd: %d", fd);
+    *buffer_out = ZX_HANDLE_INVALID;
+    zx_status_t status = fuchsia_gpu_magma_DeviceQueryReturnsBuffer(
+        fdio_unsafe_borrow_channel(fdio), query_id, buffer_out);
+    fdio_unsafe_release(fdio);
+
+    if (status != ZX_OK)
+        return DRETF(false, "magma_DeviceQueryReturnsBuffer failed: %d", status);
 
     return true;
 }

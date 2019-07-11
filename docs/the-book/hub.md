@@ -85,7 +85,7 @@ The hub is organized as follows:
 > their own, which are not reflected here.
 
 **\<component instance id\>/system\_objects**: system-level component inspection
-> A directory tree exposing objects conforming to the [Inspect API](/garnet/docs/inspect/README.md).
+> A directory tree exposing objects conforming to the [Inspect API](/docs/development/inspect/README.md).
 > This directory tree is managed by the system to expose system-level
 > information about the components.
 
@@ -104,7 +104,7 @@ The hub is organized as follows:
 > services.  May be absent if the component exports nothing.  May contain
 > read-write objects.
 
-**\<component instance id\>/out/public**: component’s exported public object directory
+**\<component instance id\>/out/svc**: component’s exported public object directory
 > A directory containing objects which the component has exported to its host,
 > such as its services.  May contain read-write objects.
 
@@ -118,7 +118,7 @@ The hub is organized as follows:
 > objects.
 
 **\<component instance id\>/out/objects**: component’s exported structured objects
-> A directory tree exposing objects conforming to the [Inspect API](/garnet/docs/inspect/README.md).
+> A directory tree exposing objects conforming to the [Inspect API](/docs/development/inspect/README.md).
 > This directory tree is exposed by the component itself to allow inspection
 > of component-specific data.
 

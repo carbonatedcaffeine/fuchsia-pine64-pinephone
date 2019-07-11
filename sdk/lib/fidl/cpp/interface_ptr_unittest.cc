@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#define FIDL_ENABLE_LEGACY_WAIT_FOR_RESPONSE
-
 #include "lib/fidl/cpp/interface_ptr.h"
 
 #include <lib/async-loop/cpp/loop.h>
@@ -43,8 +41,6 @@ TEST(InterfacePtr, Control) {
   EXPECT_FALSE(ptr.is_bound());
   EXPECT_EQ(ZX_OK, ptr.Bind(std::move(handle)));
   EXPECT_TRUE(ptr.is_bound());
-
-  EXPECT_EQ(ZX_ERR_TIMED_OUT, ptr.WaitForResponseUntil(zx::time()));
 }
 
 TEST(InterfacePtr, BindToSpecificDispatcher) {
@@ -54,8 +50,7 @@ TEST(InterfacePtr, BindToSpecificDispatcher) {
   Binding<fidl::test::frobinator::Frobinator> binding(&impl);
 
   fidl::test::frobinator::FrobinatorPtr ptr;
-  EXPECT_EQ(ZX_OK,
-            binding.Bind(ptr.NewRequest(loop.dispatcher()), loop.dispatcher()));
+  EXPECT_EQ(ZX_OK, binding.Bind(ptr.NewRequest(loop.dispatcher()), loop.dispatcher()));
   EXPECT_TRUE(ptr.is_bound());
 
   ptr->Frob("one");
@@ -137,16 +132,14 @@ TEST(InterfacePtr, MoveConstructWithOutstandingTransaction) {
   EXPECT_EQ(ZX_OK, message.Write(h2.get(), 0));
 
   EXPECT_EQ(0, reply_count);
-  EXPECT_EQ(ZX_ERR_BAD_STATE, ptr.WaitForResponse());
-  EXPECT_EQ(0, reply_count);
-  EXPECT_EQ(ZX_OK, ptr2.WaitForResponse());
+  loop.RunUntilIdle();
   EXPECT_EQ(1, reply_count);
 
   EXPECT_EQ(0, error_count);
   EXPECT_EQ(ZX_OK, h2.write(0, "a", 1, nullptr, 0));
   EXPECT_EQ(0, error_count);
   EXPECT_TRUE(ptr2.is_bound());
-  EXPECT_EQ(ZX_ERR_INVALID_ARGS, ptr2.WaitForResponse());
+  loop.RunUntilIdle();
   EXPECT_EQ(1, reply_count);
   EXPECT_EQ(1, error_count);
   EXPECT_FALSE(ptr2.is_bound());
@@ -189,16 +182,14 @@ TEST(InterfacePtr, MoveAssignWithOutstandingTransaction) {
   EXPECT_EQ(ZX_OK, message.Write(h2.get(), 0));
 
   EXPECT_EQ(0, reply_count);
-  EXPECT_EQ(ZX_ERR_BAD_STATE, ptr.WaitForResponse());
-  EXPECT_EQ(0, reply_count);
-  EXPECT_EQ(ZX_OK, ptr2.WaitForResponse());
+  loop.RunUntilIdle();
   EXPECT_EQ(1, reply_count);
 
   EXPECT_EQ(0, error_count);
   EXPECT_EQ(ZX_OK, h2.write(0, "a", 1, nullptr, 0));
   EXPECT_EQ(0, error_count);
   EXPECT_TRUE(ptr2.is_bound());
-  EXPECT_EQ(ZX_ERR_INVALID_ARGS, ptr2.WaitForResponse());
+  loop.RunUntilIdle();
   EXPECT_EQ(1, reply_count);
   EXPECT_EQ(1, error_count);
   EXPECT_FALSE(ptr2.is_bound());
@@ -262,9 +253,7 @@ TEST(InterfacePtr, MoveIntoMethodCapture) {
   EXPECT_EQ(ZX_OK, binding.Bind(ptr.NewRequest()));
 
   std::vector<std::string> grobs;
-  ptr->Grob("one", [moved = std::move(ptr), &grobs](StringPtr s) {
-    grobs.push_back(s);
-  });
+  ptr->Grob("one", [moved = std::move(ptr), &grobs](StringPtr s) { grobs.push_back(s); });
   EXPECT_FALSE(ptr.is_bound());
   EXPECT_TRUE(grobs.empty());
 
@@ -306,23 +295,21 @@ TEST(InterfacePtr, InterfaceCanHandleGeneratedOrdinal) {
   EXPECT_EQ(ZX_OK, message.Read(h2.get(), 0));
 
   // Cribbed from generated .cc file.
-  constexpr uint32_t kFrobinator_Grob_GenOrdinal = 1499796418u;
-  fidl_message_header_t *header =
-      reinterpret_cast<fidl_message_header_t *>(buffer.bytes());
+  constexpr uint64_t kFrobinator_Grob_GenOrdinal = 1499796418lu << 32;
+  fidl_message_header_t *header = reinterpret_cast<fidl_message_header_t *>(buffer.bytes());
   header->ordinal = kFrobinator_Grob_GenOrdinal;
 
   test::FrobinatorImpl impl;
   zx::channel h3, server;
   EXPECT_EQ(ZX_OK, zx::channel::create(0, &h3, &server));
-  Binding<fidl::test::frobinator::Frobinator> binding(&impl, std::move(server),
-                                                      loop.dispatcher());
+  Binding<fidl::test::frobinator::Frobinator> binding(&impl, std::move(server), loop.dispatcher());
   fidl::MessageBuffer response_buffer;
   fidl::Message response = response_buffer.CreateEmptyMessage();
   EXPECT_EQ(ZX_OK, message.Write(h3.get(), 0));
   loop.RunUntilIdle();
   EXPECT_EQ(ZX_OK, response.Read(h3.get(), 0));
   EXPECT_EQ(ZX_OK, response.Write(h2.get(), 0));
-  EXPECT_EQ(ZX_OK, ptr.WaitForResponse());
+  loop.RunUntilIdle();
   EXPECT_EQ(1, reply_count);
 }
 

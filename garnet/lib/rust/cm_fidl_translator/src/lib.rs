@@ -28,47 +28,21 @@ trait CmInto<T> {
     fn cm_into(self) -> Result<T, Error>;
 }
 
-/// Generates a `CmInto` implementation for `Vec<type>` that calls `cm_into()` on each element.
-macro_rules! cm_into_vec {
-    ($into_type:ty, $from_type:ty) => {
-        impl CmInto<Vec<$into_type>> for Vec<$from_type> {
-            fn cm_into(self) -> Result<Vec<$into_type>, Error> {
-                let mut out = vec![];
-                for e in self.into_iter() {
-                    out.push(e.cm_into()?);
-                }
-                Ok(out)
-            }
-        }
-    };
+impl<T,U> CmInto<Option<Vec<U>>> for Option<Vec<T>>
+    where T: CmInto<U>
+{
+    fn cm_into(self) -> Result<Option<Vec<U>>, Error> {
+        self.and_then(|x| if x.is_empty() { None } else { Some(x.cm_into()) } ).transpose()
+    }
 }
 
-/// Generates a `CmInto` implementation for `Opt<Vec<type>>` that calls `cm_into()` on each element.
-macro_rules! cm_into_opt_vec {
-    ($into_type:ty, $from_type:ty) => {
-        impl CmInto<Option<Vec<$into_type>>> for Option<Vec<$from_type>> {
-            fn cm_into(self) -> Result<Option<Vec<$into_type>>, Error> {
-                match self {
-                    Some(from) => {
-                        let mut out = vec![];
-                        for e in from.into_iter() {
-                            out.push(e.cm_into()?);
-                        }
-                        Ok(Some(out))
-                    }
-                    None => Ok(None),
-                }
-            }
-        }
-    };
+impl<T,U> CmInto<Vec<U>> for Vec<T>
+    where T: CmInto<U>
+{
+    fn cm_into(self) -> Result<Vec<U>, Error> {
+        self.into_iter().map(|x| x.cm_into()).collect()
+    }
 }
-
-cm_into_opt_vec!(fsys::UseDecl, cm::Use);
-cm_into_opt_vec!(fsys::ExposeDecl, cm::Expose);
-cm_into_opt_vec!(fsys::OfferDecl, cm::Offer);
-cm_into_opt_vec!(fsys::ChildDecl, cm::Child);
-cm_into_opt_vec!(fsys::CollectionDecl, cm::Collection);
-cm_into_vec!(fsys::OfferTarget, cm::Target);
 
 impl CmInto<fsys::ComponentDecl> for cm::Document {
     fn cm_into(self) -> Result<fsys::ComponentDecl, Error> {
@@ -80,7 +54,7 @@ impl CmInto<fsys::ComponentDecl> for cm::Document {
             children: self.children.cm_into()?,
             collections: self.collections.cm_into()?,
             facets: self.facets.cm_into()?,
-            storage: None,
+            storage: self.storage.cm_into()?,
         })
     }
 }
@@ -90,6 +64,7 @@ impl CmInto<fsys::UseDecl> for cm::Use {
         Ok(match self {
             cm::Use::Service(s) => fsys::UseDecl::Service(s.cm_into()?),
             cm::Use::Directory(d) => fsys::UseDecl::Directory(d.cm_into()?),
+            cm::Use::Storage(s) => fsys::UseDecl::Storage(s.cm_into()?),
         })
     }
 }
@@ -108,6 +83,7 @@ impl CmInto<fsys::OfferDecl> for cm::Offer {
         Ok(match self {
             cm::Offer::Service(s) => fsys::OfferDecl::Service(s.cm_into()?),
             cm::Offer::Directory(d) => fsys::OfferDecl::Directory(d.cm_into()?),
+            cm::Offer::Storage(s) => fsys::OfferDecl::Storage(s.cm_into()?),
         })
     }
 }
@@ -130,11 +106,20 @@ impl CmInto<fsys::UseDirectoryDecl> for cm::UseDirectory {
     }
 }
 
+impl CmInto<fsys::UseStorageDecl> for cm::UseStorage {
+    fn cm_into(self) -> Result<fsys::UseStorageDecl, Error> {
+        Ok(fsys::UseStorageDecl {
+            type_: Some(self.type_.cm_into()?),
+            target_path: self.target_path,
+        })
+    }
+}
+
 impl CmInto<fsys::ExposeServiceDecl> for cm::ExposeService {
     fn cm_into(self) -> Result<fsys::ExposeServiceDecl, Error> {
         Ok(fsys::ExposeServiceDecl {
-            source_path: Some(self.source_path),
             source: Some(self.source.cm_into()?),
+            source_path: Some(self.source_path),
             target_path: Some(self.target_path),
         })
     }
@@ -143,8 +128,8 @@ impl CmInto<fsys::ExposeServiceDecl> for cm::ExposeService {
 impl CmInto<fsys::ExposeDirectoryDecl> for cm::ExposeDirectory {
     fn cm_into(self) -> Result<fsys::ExposeDirectoryDecl, Error> {
         Ok(fsys::ExposeDirectoryDecl {
-            source_path: Some(self.source_path),
             source: Some(self.source.cm_into()?),
+            source_path: Some(self.source_path),
             target_path: Some(self.target_path),
         })
     }
@@ -153,9 +138,10 @@ impl CmInto<fsys::ExposeDirectoryDecl> for cm::ExposeDirectory {
 impl CmInto<fsys::OfferServiceDecl> for cm::OfferService {
     fn cm_into(self) -> Result<fsys::OfferServiceDecl, Error> {
         Ok(fsys::OfferServiceDecl {
-            source_path: Some(self.source_path),
             source: Some(self.source.cm_into()?),
-            targets: Some(self.targets.cm_into()?),
+            source_path: Some(self.source_path),
+            target: Some(self.target.cm_into()?),
+            target_path: Some(self.target_path),
         })
     }
 }
@@ -163,10 +149,31 @@ impl CmInto<fsys::OfferServiceDecl> for cm::OfferService {
 impl CmInto<fsys::OfferDirectoryDecl> for cm::OfferDirectory {
     fn cm_into(self) -> Result<fsys::OfferDirectoryDecl, Error> {
         Ok(fsys::OfferDirectoryDecl {
-            source_path: Some(self.source_path),
             source: Some(self.source.cm_into()?),
-            targets: Some(self.targets.cm_into()?),
+            source_path: Some(self.source_path),
+            target: Some(self.target.cm_into()?),
+            target_path: Some(self.target_path),
         })
+    }
+}
+
+impl CmInto<fsys::OfferStorageDecl> for cm::OfferStorage {
+    fn cm_into(self) -> Result<fsys::OfferStorageDecl, Error> {
+        Ok(fsys::OfferStorageDecl {
+            type_: Some(self.type_.cm_into()?),
+            source: Some(self.source.cm_into()?),
+            target: Some(self.target.cm_into()?),
+        })
+    }
+}
+
+impl CmInto<fsys::StorageType> for cm::StorageType {
+    fn cm_into(self) -> Result<fsys::StorageType, Error> {
+        match self {
+            cm::StorageType::Data => Ok(fsys::StorageType::Data),
+            cm::StorageType::Cache => Ok(fsys::StorageType::Cache),
+            cm::StorageType::Meta => Ok(fsys::StorageType::Meta),
+        }
     }
 }
 
@@ -189,21 +196,12 @@ impl CmInto<fsys::CollectionDecl> for cm::Collection {
     }
 }
 
-impl CmInto<fsys::ExposeSource> for cm::ExposeSource {
-    fn cm_into(self) -> Result<fsys::ExposeSource, Error> {
-        Ok(match self {
-            cm::ExposeSource::Myself(s) => fsys::ExposeSource::Myself(s.cm_into()?),
-            cm::ExposeSource::Child(c) => fsys::ExposeSource::Child(c.cm_into()?),
-        })
-    }
-}
-
-impl CmInto<fsys::OfferSource> for cm::OfferSource {
-    fn cm_into(self) -> Result<fsys::OfferSource, Error> {
-        Ok(match self {
-            cm::OfferSource::Realm(r) => fsys::OfferSource::Realm(r.cm_into()?),
-            cm::OfferSource::Myself(s) => fsys::OfferSource::Myself(s.cm_into()?),
-            cm::OfferSource::Child(c) => fsys::OfferSource::Child(c.cm_into()?),
+impl CmInto<fsys::StorageDecl> for cm::Storage {
+    fn cm_into(self) -> Result<fsys::StorageDecl, Error> {
+        Ok(fsys::StorageDecl {
+            name: Some(self.name),
+            source_path: Some(self.source_path),
+            source: Some(self.source.cm_into()?),
         })
     }
 }
@@ -222,7 +220,7 @@ impl CmInto<fsys::SelfRef> for cm::SelfRef {
 
 impl CmInto<fsys::ChildRef> for cm::ChildRef {
     fn cm_into(self) -> Result<fsys::ChildRef, Error> {
-        Ok(fsys::ChildRef { name: Some(self.name) })
+        Ok(fsys::ChildRef { name: Some(self.name), collection: None })
     }
 }
 
@@ -232,20 +230,20 @@ impl CmInto<fsys::CollectionRef> for cm::CollectionRef {
     }
 }
 
-impl CmInto<fsys::OfferTarget> for cm::Target {
-    fn cm_into(self) -> Result<fsys::OfferTarget, Error> {
-        Ok(fsys::OfferTarget {
-            target_path: Some(self.target_path),
-            dest: Some(self.dest.cm_into()?),
-        })
+impl CmInto<fsys::StorageRef> for cm::StorageRef {
+    fn cm_into(self) -> Result<fsys::StorageRef, Error> {
+        Ok(fsys::StorageRef { name: Some(self.name) })
     }
 }
 
-impl CmInto<fsys::OfferDest> for cm::OfferDest {
-    fn cm_into(self) -> Result<fsys::OfferDest, Error> {
+impl CmInto<fsys::Ref> for cm::Ref {
+    fn cm_into(self) -> Result<fsys::Ref, Error> {
         Ok(match self {
-            cm::OfferDest::Child(c) => fsys::OfferDest::Child(c.cm_into()?),
-            cm::OfferDest::Collection(c) => fsys::OfferDest::Collection(c.cm_into()?),
+            cm::Ref::Realm(r) => fsys::Ref::Realm(r.cm_into()?),
+            cm::Ref::Self_(s) => fsys::Ref::Self_(s.cm_into()?),
+            cm::Ref::Child(c) => fsys::Ref::Child(c.cm_into()?),
+            cm::Ref::Collection(c) => fsys::Ref::Collection(c.cm_into()?),
+            cm::Ref::Storage(r) => fsys::Ref::Storage(r.cm_into()?),
         })
     }
 }
@@ -489,9 +487,21 @@ mod tests {
                         }
                     },
                     {
+                        "service": {
+                            "source_path": "/svc/fuchsia.sys2.Realm",
+                            "target_path": "/svc/fuchsia.sys2.Realm"
+                        }
+                    },
+                    {
                         "directory": {
                             "source_path": "/data/assets",
                             "target_path": "/data"
+                        }
+                    },
+                    {
+                        "storage": {
+                            "type": "cache",
+                            "target_path": "/cache"
                         }
                     }
                 ]
@@ -502,9 +512,17 @@ mod tests {
                         source_path: Some("/fonts/CoolFonts".to_string()),
                         target_path: Some("/svc/fuchsia.fonts.Provider".to_string()),
                     }),
+                    fsys::UseDecl::Service(fsys::UseServiceDecl {
+                        source_path: Some("/svc/fuchsia.sys2.Realm".to_string()),
+                        target_path: Some("/svc/fuchsia.sys2.Realm".to_string()),
+                    }),
                     fsys::UseDecl::Directory(fsys::UseDirectoryDecl {
                         source_path: Some("/data/assets".to_string()),
                         target_path: Some("/data".to_string()),
+                    }),
+                    fsys::UseDecl::Storage(fsys::UseStorageDecl {
+                        type_: Some(fsys::StorageType::Cache),
+                        target_path: Some("/cache".to_string()),
                     }),
                 ];
                 let mut decl = new_component_decl();
@@ -529,7 +547,7 @@ mod tests {
                     {
                         "directory": {
                             "source": {
-                                "myself": {}
+                                "self": {}
                             },
                             "source_path": "/volumes/blobfs",
                             "target_path": "/volumes/blobfs"
@@ -548,14 +566,15 @@ mod tests {
                 let exposes = vec![
                     fsys::ExposeDecl::Service(fsys::ExposeServiceDecl {
                         source_path: Some("/loggers/fuchsia.logger.Log".to_string()),
-                        source: Some(fsys::ExposeSource::Child(fsys::ChildRef {
+                        source: Some(fsys::Ref::Child(fsys::ChildRef {
                             name: Some("logger".to_string()),
+                            collection: None,
                         })),
                         target_path: Some("/svc/fuchsia.logger.Log".to_string()),
                     }),
                     fsys::ExposeDecl::Directory(fsys::ExposeDirectoryDecl {
                         source_path: Some("/volumes/blobfs".to_string()),
-                        source: Some(fsys::ExposeSource::Myself(fsys::SelfRef{})),
+                        source: Some(fsys::Ref::Self_(fsys::SelfRef{})),
                         target_path: Some("/volumes/blobfs".to_string()),
                     }),
                 ];
@@ -581,42 +600,40 @@ mod tests {
                                 "realm": {}
                             },
                             "source_path": "/data/assets",
-                            "targets": [
-                                {
-                                    "target_path": "/data/realm_assets",
-                                    "dest": {
-                                        "child": {
-                                            "name": "logger"
-                                        }
-                                    }
-                                },
-                                {
-                                    "target_path": "/data/assets",
-                                    "dest": {
-                                        "collection": {
-                                            "name": "modular"
-                                        }
-                                    }
+                            "target": {
+                                "child": {
+                                    "name": "logger"
                                 }
-                            ]
-                        }
+                            },
+                            "target_path": "/data/realm_assets"
+                        },
                     },
                     {
                         "directory": {
                             "source": {
-                                "myself": {}
+                                "self": {}
                             },
                             "source_path": "/data/config",
-                            "targets": [
-                                {
-                                    "target_path": "/data/config",
-                                    "dest": {
-                                        "child": {
-                                            "name": "netstack"
-                                        }
-                                    }
+                            "target": {
+                                "collection": {
+                                    "name": "modular"
                                 }
-                            ]
+                            },
+                            "target_path": "/data/config"
+                        }
+                    },
+                    {
+                        "service": {
+                            "source": {
+                                "self": {}
+                            },
+                            "source_path": "/svc/fuchsia.netstack.Netstack",
+                            "target": {
+                                "child": {
+                                    "name": "logger"
+                                }
+                            },
+                            "target_path": "/svc/fuchsia.netstack.Netstack"
                         }
                     },
                     {
@@ -627,16 +644,68 @@ mod tests {
                                 }
                             },
                             "source_path": "/svc/fuchsia.logger.Log",
-                            "targets": [
-                                {
-                                    "target_path": "/svc/fuchsia.logger.SysLog",
-                                    "dest": {
-                                        "collection": {
-                                            "name": "modular"
-                                        }
-                                    }
+                            "target": {
+                                "collection": {
+                                    "name": "modular"
                                 }
-                            ]
+                            },
+                            "target_path": "/svc/fuchsia.logger.SysLog"
+                        }
+                    },
+                    {
+                        "storage": {
+                            "type": "data",
+                            "source": {
+                                "storage": {
+                                    "name": "memfs"
+                                }
+                            },
+                            "target": {
+                                "collection": {
+                                    "name": "modular"
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "storage": {
+                            "type": "data",
+                            "source": {
+                                "storage": {
+                                    "name": "memfs"
+                                }
+                            },
+                            "target": {
+                                "child": {
+                                    "name": "logger"
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "storage": {
+                            "type": "meta",
+                            "source": {
+                                "realm": {}
+                            },
+                            "target": {
+                                "collection": {
+                                    "name": "modular"
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "storage": {
+                            "type": "meta",
+                            "source": {
+                                "realm": {}
+                            },
+                            "target": {
+                                "child": {
+                                    "name": "logger"
+                                }
+                            }
                         }
                     }
                 ],
@@ -658,52 +727,94 @@ mod tests {
                         "durability": "persistent"
                     }
                 ],
+                "storage": [
+                    {
+                        "name": "memfs",
+                        "source_path": "/memfs",
+                        "source": {
+                            "self": {}
+                        }
+                    }
+                ],
             }),
             output = {
                 let offers = vec![
                     fsys::OfferDecl::Directory(fsys::OfferDirectoryDecl {
+                        source: Some(fsys::Ref::Realm(fsys::RealmRef {})),
                         source_path: Some("/data/assets".to_string()),
-                        source: Some(fsys::OfferSource::Realm(fsys::RealmRef{})),
-                        targets: Some(vec![
-                            fsys::OfferTarget {
-                                target_path: Some("/data/realm_assets".to_string()),
-                                dest: Some(fsys::OfferDest::Child(
-                                   fsys::ChildRef { name: Some("logger".to_string()) }
-                                )),
-                            },
-                            fsys::OfferTarget {
-                                target_path: Some("/data/assets".to_string()),
-                                dest: Some(fsys::OfferDest::Collection(
-                                   fsys::CollectionRef { name: Some("modular".to_string()) }
-                                )),
-                            },
-                        ]),
+                        target: Some(fsys::Ref::Child(
+                           fsys::ChildRef {
+                               name: Some("logger".to_string()),
+                               collection: None,
+                           }
+                        )),
+                        target_path: Some("/data/realm_assets".to_string()),
                     }),
                     fsys::OfferDecl::Directory(fsys::OfferDirectoryDecl {
+                        source: Some(fsys::Ref::Self_(fsys::SelfRef {})),
                         source_path: Some("/data/config".to_string()),
-                        source: Some(fsys::OfferSource::Myself(fsys::SelfRef{})),
-                        targets: Some(vec![
-                            fsys::OfferTarget{
-                                target_path: Some("/data/config".to_string()),
-                                dest: Some(fsys::OfferDest::Child(
-                                   fsys::ChildRef { name: Some("netstack".to_string()) }
-                                )),
-                            },
-                        ]),
+                        target: Some(fsys::Ref::Collection(
+                           fsys::CollectionRef {
+                               name: Some("modular".to_string()),
+                           }
+                        )),
+                        target_path: Some("/data/config".to_string()),
                     }),
                     fsys::OfferDecl::Service(fsys::OfferServiceDecl {
-                        source_path: Some("/svc/fuchsia.logger.Log".to_string()),
-                        source: Some(fsys::OfferSource::Child(fsys::ChildRef {
+                        source: Some(fsys::Ref::Self_(fsys::SelfRef {})),
+                        source_path: Some("/svc/fuchsia.netstack.Netstack".to_string()),
+                        target: Some(fsys::Ref::Child(
+                           fsys::ChildRef {
+                               name: Some("logger".to_string()),
+                               collection: None,
+                           }
+                        )),
+                        target_path: Some("/svc/fuchsia.netstack.Netstack".to_string()),
+                    }),
+                    fsys::OfferDecl::Service(fsys::OfferServiceDecl {
+                        source: Some(fsys::Ref::Child(fsys::ChildRef {
                             name: Some("logger".to_string()),
+                            collection: None,
                         })),
-                        targets: Some(vec![
-                            fsys::OfferTarget{
-                                target_path: Some("/svc/fuchsia.logger.SysLog".to_string()),
-                                dest: Some(fsys::OfferDest::Collection(
-                                   fsys::CollectionRef { name: Some("modular".to_string()) }
-                                )),
-                            },
-                        ]),
+                        source_path: Some("/svc/fuchsia.logger.Log".to_string()),
+                        target: Some(fsys::Ref::Collection(
+                           fsys::CollectionRef {
+                               name: Some("modular".to_string()),
+                           }
+                        )),
+                        target_path: Some("/svc/fuchsia.logger.SysLog".to_string()),
+                    }),
+                    fsys::OfferDecl::Storage(fsys::OfferStorageDecl {
+                        type_: Some(fsys::StorageType::Data),
+                        source: Some(fsys::Ref::Storage(fsys::StorageRef {
+                            name: Some("memfs".to_string()),
+                        })),
+                        target: Some(fsys::Ref::Collection(
+                            fsys::CollectionRef { name: Some("modular".to_string()) }
+                        )),
+                    }),
+                    fsys::OfferDecl::Storage(fsys::OfferStorageDecl {
+                        type_: Some(fsys::StorageType::Data),
+                        source: Some(fsys::Ref::Storage(fsys::StorageRef {
+                            name: Some("memfs".to_string()),
+                        })),
+                        target: Some(fsys::Ref::Child(
+                           fsys::ChildRef { name: Some("logger".to_string()), collection: None }
+                        )),
+                    }),
+                    fsys::OfferDecl::Storage(fsys::OfferStorageDecl {
+                        type_: Some(fsys::StorageType::Meta),
+                        source: Some(fsys::Ref::Realm(fsys::RealmRef { })),
+                        target: Some(fsys::Ref::Collection(
+                            fsys::CollectionRef { name: Some("modular".to_string()) }
+                        )),
+                    }),
+                    fsys::OfferDecl::Storage(fsys::OfferStorageDecl {
+                        type_: Some(fsys::StorageType::Meta),
+                        source: Some(fsys::Ref::Realm(fsys::RealmRef { })),
+                        target: Some(fsys::Ref::Child(
+                           fsys::ChildRef { name: Some("logger".to_string()), collection: None }
+                        )),
                     }),
                 ];
                 let children = vec![
@@ -724,10 +835,18 @@ mod tests {
                         durability: Some(fsys::Durability::Persistent),
                     },
                 ];
+                let storages = vec![
+                    fsys::StorageDecl {
+                        name: Some("memfs".to_string()),
+                        source_path: Some("/memfs".to_string()),
+                        source: Some(fsys::Ref::Self_(fsys::SelfRef{})),
+                    },
+                ];
                 let mut decl = new_component_decl();
                 decl.offers = Some(offers);
                 decl.children = Some(children);
                 decl.collections = Some(collections);
+                decl.storage = Some(storages);
                 decl
             },
         },
@@ -828,6 +947,32 @@ mod tests {
                 decl
             },
         },
+        test_translate_storage => {
+            input = json!({
+                "storage": [
+                    {
+                        "name": "memfs",
+                        "source": {
+                            "self": {}
+                        },
+                        "source_path": "/memfs"
+                    }
+                ]
+            }),
+            output = {
+                let storages = vec![
+                    fsys::StorageDecl {
+                        name: Some("memfs".to_string()),
+                        source_path: Some("/memfs".to_string()),
+                        source: Some(fsys::Ref::Self_(fsys::SelfRef{})),
+                    },
+                ];
+                let mut decl = new_component_decl();
+                decl.storage = Some(storages);
+                decl
+
+            },
+        },
         test_translate_all_sections => {
             input = json!({
                 "program": {
@@ -845,7 +990,7 @@ mod tests {
                     {
                         "directory": {
                             "source": {
-                                "myself": {}
+                                "self": {}
                             },
                             "source_path": "/volumes/blobfs",
                             "target_path": "/volumes/blobfs"
@@ -861,24 +1006,12 @@ mod tests {
                                 }
                             },
                             "source_path": "/svc/fuchsia.logger.Log",
-                            "targets": [
-                                {
-                                    "target_path": "/svc/fuchsia.logger.Log",
-                                    "dest": {
-                                        "child": {
-                                            "name": "netstack"
-                                        }
-                                    },
-                                },
-                                {
-                                    "target_path": "/svc/fuchsia.logger.Log",
-                                    "dest": {
-                                        "collection": {
-                                            "name": "modular"
-                                        }
-                                    },
+                            "target": {
+                                "child": {
+                                    "name": "netstack"
                                 }
-                            ]
+                            },
+                            "target_path": "/svc/fuchsia.logger.Log"
                         }
                     }
                 ],
@@ -903,7 +1036,16 @@ mod tests {
                 "facets": {
                     "author": "Fuchsia",
                     "year": 2018
-                }
+                },
+                "storage": [
+                    {
+                        "name": "memfs",
+                        "source_path": "/memfs",
+                        "source": {
+                            "self": {}
+                        }
+                    }
+                ]
             }),
             output = {
                 let program = fdata::Dictionary {entries: vec![
@@ -920,31 +1062,25 @@ mod tests {
                 ];
                 let exposes = vec![
                     fsys::ExposeDecl::Directory(fsys::ExposeDirectoryDecl {
-                        source: Some(fsys::ExposeSource::Myself(fsys::SelfRef{})),
+                        source: Some(fsys::Ref::Self_(fsys::SelfRef{})),
                         source_path: Some("/volumes/blobfs".to_string()),
                         target_path: Some("/volumes/blobfs".to_string()),
                     }),
                 ];
                 let offers = vec![
                     fsys::OfferDecl::Service(fsys::OfferServiceDecl {
-                        source: Some(fsys::OfferSource::Child(fsys::ChildRef {
+                        source: Some(fsys::Ref::Child(fsys::ChildRef {
                             name: Some("logger".to_string()),
+                            collection: None,
                         })),
                         source_path: Some("/svc/fuchsia.logger.Log".to_string()),
-                        targets: Some(vec![
-                            fsys::OfferTarget{
-                                target_path: Some("/svc/fuchsia.logger.Log".to_string()),
-                                dest: Some(fsys::OfferDest::Child(
-                                   fsys::ChildRef { name: Some("netstack".to_string()) }
-                                )),
-                            },
-                            fsys::OfferTarget{
-                                target_path: Some("/svc/fuchsia.logger.Log".to_string()),
-                                dest: Some(fsys::OfferDest::Collection(
-                                   fsys::CollectionRef { name: Some("modular".to_string()) }
-                                )),
-                            },
-                        ]),
+                        target: Some(fsys::Ref::Child(
+                           fsys::ChildRef {
+                               name: Some("netstack".to_string()),
+                               collection: None,
+                           }
+                        )),
+                        target_path: Some("/svc/fuchsia.logger.Log".to_string()),
                     }),
                 ];
                 let children = vec![
@@ -965,7 +1101,7 @@ mod tests {
                         durability: Some(fsys::Durability::Persistent),
                     },
                 ];
-                let facets = fdata::Dictionary{entries: vec![
+                let facets = fdata::Dictionary {entries: vec![
                     fdata::Entry {
                         key: "author".to_string(),
                         value: Some(Box::new(fdata::Value::Str("Fuchsia".to_string()))),
@@ -975,6 +1111,13 @@ mod tests {
                         value: Some(Box::new(fdata::Value::Inum(2018))),
                     },
                 ]};
+                let storages = vec![
+                    fsys::StorageDecl {
+                        name: Some("memfs".to_string()),
+                        source_path: Some("/memfs".to_string()),
+                        source: Some(fsys::Ref::Self_(fsys::SelfRef{})),
+                    },
+                ];
                 fsys::ComponentDecl {
                     program: Some(program),
                     uses: Some(uses),
@@ -983,7 +1126,7 @@ mod tests {
                     children: Some(children),
                     collections: Some(collections),
                     facets: Some(facets),
-                    storage: None,
+                    storage: Some(storages),
                 }
             },
         },

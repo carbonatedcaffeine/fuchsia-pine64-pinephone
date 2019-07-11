@@ -28,7 +28,7 @@ pub struct ChildMarker;
 impl fidl::endpoints::ServiceMarker for ChildMarker {
 	type Proxy = ChildProxy;
 	type RequestStream = ChildRequestStream;
-	const NAME: &'static str = "";
+	const DEBUG_NAME: &'static str = "(anonymous) Child";
 }
 
 pub trait ChildProxyInterface: Send + Sync {
@@ -126,7 +126,7 @@ impl futures::Stream for ChildEventStream {
 		futures::Poll::Ready(Some(match tx_header.ordinal {
 			_ => Err(fidl::Error::UnknownOrdinal {
 				ordinal: tx_header.ordinal,
-				service_name: <ChildMarker as fidl::endpoints::ServiceMarker>::NAME,
+				service_name: <ChildMarker as fidl::endpoints::ServiceMarker>::DEBUG_NAME,
 			})
 		}))
 	}
@@ -139,13 +139,20 @@ pub enum ChildEvent {
 impl ChildEvent {
 }
 
+/// A type which can be used to send events into a borrowed channel.
+///
+/// Note: this should only be used when the channel must be temporarily
+/// borrowed. For a typical sending of events, use the send_ methods
+/// on the ControlHandle types, which can be acquired through a
+/// RequestStream or Responder type.
 pub struct ChildEventSender<'a> {
 	// Some protocols don't define events which would render this channel unused.
 	#[allow(unused)]
-	channel: zx::Unowned<'a, zx::Channel>,
+	channel: &'a zx::Channel,
 }
+
 impl <'a> ChildEventSender<'a> {
-	pub fn new(channel: zx::Unowned<'a, zx::Channel>) -> Self {
+	pub fn new(channel: &'a zx::Channel) -> Self {
 		Self { channel }
 	}
 }
@@ -227,7 +234,7 @@ impl futures::Stream for ChildRequestStream {
 			futures::Poll::Ready(Some(match header.ordinal {
 				_ => Err(fidl::Error::UnknownOrdinal {
 					ordinal: header.ordinal,
-					service_name: <ChildMarker as fidl::endpoints::ServiceMarker>::NAME,
+					service_name: <ChildMarker as fidl::endpoints::ServiceMarker>::DEBUG_NAME,
 				}),
 			}))
 		})
@@ -238,6 +245,12 @@ pub enum ChildRequest {
 }
 
 impl ChildRequest {
+
+        /// Name of the method defined in FIDL
+        pub fn method_name(&self) -> &'static str {
+          match *self {
+          }
+        }
 }
 
 pub struct ChildEncoder;
@@ -270,7 +283,7 @@ pub struct ParentMarker;
 impl fidl::endpoints::ServiceMarker for ParentMarker {
 	type Proxy = ParentProxy;
 	type RequestStream = ParentRequestStream;
-	const NAME: &'static str = "";
+	const DEBUG_NAME: &'static str = "(anonymous) Parent";
 }
 
 pub trait ParentProxyInterface: Send + Sync {
@@ -440,7 +453,7 @@ impl futures::Stream for ParentEventStream {
 		futures::Poll::Ready(Some(match tx_header.ordinal {
 			_ => Err(fidl::Error::UnknownOrdinal {
 				ordinal: tx_header.ordinal,
-				service_name: <ParentMarker as fidl::endpoints::ServiceMarker>::NAME,
+				service_name: <ParentMarker as fidl::endpoints::ServiceMarker>::DEBUG_NAME,
 			})
 		}))
 	}
@@ -457,13 +470,20 @@ pub enum ParentEvent {
 impl ParentEvent {
 }
 
+/// A type which can be used to send events into a borrowed channel.
+///
+/// Note: this should only be used when the channel must be temporarily
+/// borrowed. For a typical sending of events, use the send_ methods
+/// on the ControlHandle types, which can be acquired through a
+/// RequestStream or Responder type.
 pub struct ParentEventSender<'a> {
 	// Some protocols don't define events which would render this channel unused.
 	#[allow(unused)]
-	channel: zx::Unowned<'a, zx::Channel>,
+	channel: &'a zx::Channel,
 }
+
 impl <'a> ParentEventSender<'a> {
-	pub fn new(channel: zx::Unowned<'a, zx::Channel>) -> Self {
+	pub fn new(channel: &'a zx::Channel) -> Self {
 		Self { channel }
 	}
 }
@@ -589,7 +609,7 @@ impl futures::Stream for ParentRequestStream {
 				}
 				_ => Err(fidl::Error::UnknownOrdinal {
 					ordinal: header.ordinal,
-					service_name: <ParentMarker as fidl::endpoints::ServiceMarker>::NAME,
+					service_name: <ParentMarker as fidl::endpoints::ServiceMarker>::DEBUG_NAME,
 				}),
 			}))
 		})
@@ -613,24 +633,22 @@ pub enum ParentRequest {
 
 impl ParentRequest {
 	#[allow(irrefutable_let_patterns)]
-	pub fn into_get_child(self) -> Option<(ParentGetChildResponder,
+	pub fn into_get_child(self) -> Option<(ParentGetChildResponder
 	)> {
 		if let ParentRequest::GetChild {responder,
 		} = self {
-			Some((responder,
-			))
+			Some((responder))
 		} else {
 			None
 		}
 	}
 	
 	#[allow(irrefutable_let_patterns)]
-	pub fn into_get_child_request(self) -> Option<(ParentGetChildRequestResponder,
+	pub fn into_get_child_request(self) -> Option<(ParentGetChildRequestResponder
 	)> {
 		if let ParentRequest::GetChildRequest {responder,
 		} = self {
-			Some((responder,
-			))
+			Some((responder))
 		} else {
 			None
 		}
@@ -639,16 +657,13 @@ impl ParentRequest {
 	#[allow(irrefutable_let_patterns)]
 	pub fn into_take_child(self) -> Option<(
 		fidl::endpoints::ClientEnd<ChildMarker>,
-		ParentControlHandle,
+		ParentControlHandle
 	)> {
 		if let ParentRequest::TakeChild {
 			c,
 			control_handle,
 		} = self {
-			Some((
-				c,
-				control_handle,
-			))
+			Some((c,control_handle))
 		} else {
 			None
 		}
@@ -657,21 +672,28 @@ impl ParentRequest {
 	#[allow(irrefutable_let_patterns)]
 	pub fn into_take_child_request(self) -> Option<(
 		fidl::endpoints::ServerEnd<ChildMarker>,
-		ParentControlHandle,
+		ParentControlHandle
 	)> {
 		if let ParentRequest::TakeChildRequest {
 			r,
 			control_handle,
 		} = self {
-			Some((
-				r,
-				control_handle,
-			))
+			Some((r,control_handle))
 		} else {
 			None
 		}
 	}
 	
+
+        /// Name of the method defined in FIDL
+        pub fn method_name(&self) -> &'static str {
+          match *self {
+                ParentRequest::GetChild{..} => "get_child",
+                ParentRequest::GetChildRequest{..} => "get_child_request",
+                ParentRequest::TakeChild{..} => "take_child",
+                ParentRequest::TakeChildRequest{..} => "take_child_request",
+          }
+        }
 }
 
 pub struct ParentEncoder;

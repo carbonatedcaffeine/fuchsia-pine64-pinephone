@@ -9,10 +9,10 @@
 #include <lib/fdio/io.h>
 #include <zircon/processargs.h>
 
-#include "src/lib/fxl/logging.h"
 #include "lib/sys/cpp/service_directory.h"
 #include "src/developer/debug/shared/component_utils.h"
 #include "src/developer/debug/shared/logging/logging.h"
+#include "src/lib/fxl/logging.h"
 
 namespace debug_agent {
 
@@ -51,7 +51,7 @@ zx::socket AddStdio(int fd, fuchsia::sys::LaunchInfo* launch_info) {
 
 ComponentLauncher::ComponentLauncher(
     std::shared_ptr<sys::ServiceDirectory> services)
-   : services_(std::move(services)) {}
+    : services_(std::move(services)) {}
 
 zx_status_t ComponentLauncher::Prepare(std::vector<std::string> argv,
                                        ComponentDescription* description,
@@ -66,12 +66,11 @@ zx_status_t ComponentLauncher::Prepare(std::vector<std::string> argv,
     return ZX_ERR_INVALID_ARGS;
   }
 
-  // Prepare the launch info.
+  // Prepare the launch info. The parameters to the component do not include
+  // the component URL.
   launch_info_.url = argv.front();
-  launch_info_.arguments->reserve(argv.size());
-  for (auto& arg : argv) {
-    launch_info_.arguments->push_back(std::move(arg));
-  }
+  for (size_t i = 1; i < argv.size(); i++)
+    launch_info_.arguments->push_back(std::move(argv[i]));
 
   *description = {};
   description->component_id = kNextComponentId++;

@@ -7,7 +7,9 @@
 
 #include <fuchsia/math/cpp/fidl.h>
 #include <fuchsia/ui/input/cpp/fidl.h>
+#include <fuchsia/ui/input2/cpp/fidl.h>
 #include <fuchsia/ui/policy/cpp/fidl.h>
+#include <fuchsia/ui/shortcut/cpp/fidl.h>
 #include <fuchsia/ui/views/cpp/fidl.h>
 #include <lib/fidl/cpp/binding.h>
 #include <lib/fit/function.h>
@@ -56,11 +58,9 @@ class Presentation : protected fuchsia::ui::policy::Presentation {
   Presentation(fuchsia::ui::scenic::Scenic* scenic, scenic::Session* session,
                scenic::ResourceId compositor_id,
                fuchsia::ui::views::ViewHolderToken view_holder_token,
-               fidl::InterfaceRequest<fuchsia::ui::policy::Presentation>
-                   presentation_request,
-               RendererParams renderer_params,
-               int32_t display_startup_rotation_adjustment,
-               YieldCallback yield_callback);
+               fidl::InterfaceRequest<fuchsia::ui::policy::Presentation> presentation_request,
+               fuchsia::ui::shortcut::Manager* shortcut_manager, RendererParams renderer_params,
+               int32_t display_startup_rotation_adjustment, YieldCallback yield_callback);
   ~Presentation();
 
   void OnReport(uint32_t device_id, fuchsia::ui::input::InputReport report);
@@ -68,18 +68,16 @@ class Presentation : protected fuchsia::ui::policy::Presentation {
   void OnDeviceRemoved(uint32_t device_id);
 
   // Used internally by Presenter. Allows overriding of renderer params.
-  void OverrideRendererParams(RendererParams renderer_params,
-                              bool present_changes = true);
+  void OverrideRendererParams(RendererParams renderer_params, bool present_changes = true);
+
+  // Used internally by Presenter. Reset shortcut manager in case of error.
+  void ResetShortcutManager();
 
   const scenic::Layer& layer() const { return layer_; }
   const scenic::ViewHolder& view_holder() const { return view_holder_; }
 
  private:
-  enum SessionPresentState {
-    kNoPresentPending,
-    kPresentPending,
-    kPresentPendingAndSceneDirty
-  };
+  enum SessionPresentState { kNoPresentPending, kPresentPending, kPresentPendingAndSceneDirty };
   friend class DisplayRotater;
   friend class DisplayUsageSwitcher;
   friend class PerspectiveDemoMode;
@@ -90,26 +88,20 @@ class Presentation : protected fuchsia::ui::policy::Presentation {
   void EnableClipping(bool enabled) override;
   void UseOrthographicView() override;
   void UsePerspectiveView() override;
-  void SetRendererParams(
-      ::std::vector<fuchsia::ui::gfx::RendererParam> params) override;
+  void SetRendererParams(::std::vector<fuchsia::ui::gfx::RendererParam> params) override;
   void SetDisplayUsage(fuchsia::ui::policy::DisplayUsage usage) override;
   void SetDisplaySizeInMm(float width_in_mm, float height_in_mm) override;
-  void SetDisplayRotation(float display_rotation_degrees,
-                          bool animate) override;
+  void SetDisplayRotation(float display_rotation_degrees, bool animate) override;
   void CaptureKeyboardEventHACK(
       fuchsia::ui::input::KeyboardEvent event_to_capture,
-      fidl::InterfaceHandle<fuchsia::ui::policy::KeyboardCaptureListenerHACK>
-          listener) override;
+      fidl::InterfaceHandle<fuchsia::ui::policy::KeyboardCaptureListenerHACK> listener) override;
   void CapturePointerEventsHACK(
-      fidl::InterfaceHandle<fuchsia::ui::policy::PointerCaptureListenerHACK>
-          listener) override;
+      fidl::InterfaceHandle<fuchsia::ui::policy::PointerCaptureListenerHACK> listener) override;
   void GetPresentationMode(GetPresentationModeCallback callback) override;
   void SetPresentationModeListener(
-      fidl::InterfaceHandle<fuchsia::ui::policy::PresentationModeListener>
-          listener) override;
+      fidl::InterfaceHandle<fuchsia::ui::policy::PresentationModeListener> listener) override;
   void RegisterMediaButtonsListener(
-      fidl::InterfaceHandle<fuchsia::ui::policy::MediaButtonsListener> listener)
-      override;
+      fidl::InterfaceHandle<fuchsia::ui::policy::MediaButtonsListener> listener) override;
   void InjectPointerEventHACK(fuchsia::ui::input::PointerEvent event) override;
 
   // Sets |display_metrics_| and updates Scenic.  Returns false if the updates
@@ -119,13 +111,11 @@ class Presentation : protected fuchsia::ui::policy::Presentation {
 
   void InitializeDisplayModel(fuchsia::ui::gfx::DisplayInfo display_info);
 
-  void SetDisplayUsageWithoutApplyingChanges(
-      fuchsia::ui::policy::DisplayUsage usage_);
+  void SetDisplayUsageWithoutApplyingChanges(fuchsia::ui::policy::DisplayUsage usage_);
 
   // Returns false if the operation failed (e.g. the requested size is bigger
   // than the actual display size).
-  bool SetDisplaySizeInMmWithoutApplyingChanges(float width_in_mm,
-                                                float height_in_mm,
+  bool SetDisplaySizeInMmWithoutApplyingChanges(float width_in_mm, float height_in_mm,
                                                 bool print_errors);
 
   // Returns true if the event was consumed and the scene is to be invalidated.
@@ -150,6 +140,9 @@ class Presentation : protected fuchsia::ui::policy::Presentation {
   fuchsia::ui::scenic::Scenic* const scenic_;
   scenic::Session* const session_;
   scenic::ResourceId compositor_id_;
+  // Today, a DeviceState is owned by each Presentation, and we need to
+  // connect the output of DeviceState to shortcut_manager_.
+  fuchsia::ui::shortcut::Manager* shortcut_manager_;
 
   scenic::Layer layer_;
   scenic::Renderer renderer_;
@@ -224,8 +217,7 @@ class Presentation : protected fuchsia::ui::policy::Presentation {
   };
 
   std::map<uint32_t, CursorState> cursors_;
-  std::map<uint32_t, std::pair<ui_input::InputDeviceImpl*,
-                               std::unique_ptr<ui_input::DeviceState>>>
+  std::map<uint32_t, std::pair<ui_input::InputDeviceImpl*, std::unique_ptr<ui_input::DeviceState>>>
       device_states_by_id_;
 
   // A registry of listeners who want to be notified when their keyboard
@@ -252,8 +244,7 @@ class Presentation : protected fuchsia::ui::policy::Presentation {
   // be global state.
   std::vector<uint32_t> media_buttons_ids_;
   // A registry of listeners for media button events.
-  std::vector<fuchsia::ui::policy::MediaButtonsListenerPtr>
-      media_buttons_listeners_;
+  std::vector<fuchsia::ui::policy::MediaButtonsListenerPtr> media_buttons_listeners_;
 
   fxl::WeakPtrFactory<Presentation> weak_factory_;
 

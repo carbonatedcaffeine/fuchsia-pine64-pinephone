@@ -6,6 +6,7 @@
 #define SRC_MEDIA_PLAYBACK_MEDIAPLAYER_DEMUX_READER_H_
 
 #include <lib/fit/function.h>
+#include <zircon/types.h>
 
 #include <limits>
 #include <memory>
@@ -15,10 +16,8 @@ namespace media_player {
 // Abstract base class for objects that read raw data on behalf of demuxes.
 class Reader {
  public:
-  using DescribeCallback =
-      fit::function<void(zx_status_t status, size_t size, bool can_seek)>;
-  using ReadAtCallback =
-      fit::function<void(zx_status_t status, size_t bytes_read)>;
+  using DescribeCallback = fit::function<void(zx_status_t status, size_t size, bool can_seek)>;
+  using ReadAtCallback = fit::function<void(zx_status_t status, size_t bytes_read)>;
 
   static constexpr size_t kUnknownSize = std::numeric_limits<size_t>::max();
 

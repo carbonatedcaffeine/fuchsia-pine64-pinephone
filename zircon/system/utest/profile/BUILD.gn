@@ -4,13 +4,14 @@
 
 test("profile") {
   sources = [
-    "profile.cpp",
+    "profile.cc",
   ]
   deps = [
     "$zx/system/fidl/fuchsia-scheduler:c",
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/profile",
-    "$zx/system/ulib/unittest",
     "$zx/system/ulib/zircon",
+    "$zx/system/ulib/zx",
+    "$zx/system/ulib/zxtest",
   ]
 }

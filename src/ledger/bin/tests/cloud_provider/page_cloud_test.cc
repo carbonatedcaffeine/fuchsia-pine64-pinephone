@@ -8,10 +8,10 @@
 #include <lib/fsl/vmo/sized_vmo.h>
 #include <lib/fsl/vmo/strings.h>
 
-#include "peridot/lib/commit_pack/commit_pack.h"
 #include "src/ledger/bin/tests/cloud_provider/convert.h"
 #include "src/ledger/bin/tests/cloud_provider/types.h"
 #include "src/ledger/bin/tests/cloud_provider/validation_test.h"
+#include "src/ledger/lib/commit_pack/commit_pack.h"
 #include "src/lib/uuid/uuid.h"
 
 namespace cloud_provider {
@@ -19,9 +19,8 @@ namespace {
 
 // Verifies that the given array of commits contains a commit of the given id
 // and data.
-::testing::AssertionResult CheckThatCommitsContain(
-    const std::vector<CommitPackEntry>& entries, const std::string& id,
-    const std::string& data) {
+::testing::AssertionResult CheckThatCommitsContain(const std::vector<CommitPackEntry>& entries,
+                                                   const std::string& id, const std::string& data) {
   for (auto& entry : entries) {
     if (entry.id != id) {
       continue;
@@ -29,10 +28,9 @@ namespace {
 
     if (entry.data != data) {
       return ::testing::AssertionFailure()
-             << "The commit of the expected id: 0x" << ToHex(id) << " (" << id
-             << ") "
-             << " was found but its data doesn't match - expected: 0x"
-             << ToHex(data) << " but found: " << ToHex(entry.data);
+             << "The commit of the expected id: 0x" << ToHex(id) << " (" << id << ") "
+             << " was found but its data doesn't match - expected: 0x" << ToHex(data)
+             << " but found: " << ToHex(entry.data);
     }
 
     return ::testing::AssertionSuccess();
@@ -56,28 +54,24 @@ class PageCloudTest : public ValidationTest, public PageCloudWatcher {
     Status status = Status::INTERNAL_ERROR;
 
     if (cloud_provider_->GetPageCloud(std::move(app_id), std::move(page_id),
-                                      page_cloud->NewRequest(),
-                                      &status) != ZX_OK) {
+                                      page_cloud->NewRequest(), &status) != ZX_OK) {
       return ::testing::AssertionFailure()
              << "Failed to retrieve the page cloud due to channel error.";
     }
 
     if (status != Status::OK) {
-      return ::testing::AssertionFailure()
-             << "Failed to retrieve the page cloud, received status: "
-             << fidl::ToUnderlying(status);
+      return ::testing::AssertionFailure() << "Failed to retrieve the page cloud, received status: "
+                                           << fidl::ToUnderlying(status);
     }
 
     return ::testing::AssertionSuccess();
   }
 
   ::testing::AssertionResult GetLatestPositionToken(
-      PageCloudSyncPtr* page_cloud,
-      std::unique_ptr<cloud_provider::Token>* token) {
+      PageCloudSyncPtr* page_cloud, std::unique_ptr<cloud_provider::PositionToken>* token) {
     Status status = Status::INTERNAL_ERROR;
     std::unique_ptr<cloud_provider::CommitPack> commit_pack;
-    if ((*page_cloud)->GetCommits(nullptr, &status, &commit_pack, token) !=
-        ZX_OK) {
+    if ((*page_cloud)->GetCommits(nullptr, &status, &commit_pack, token) != ZX_OK) {
       return ::testing::AssertionFailure()
              << "Failed to retrieve the position token due to channel error.";
     }
@@ -93,21 +87,20 @@ class PageCloudTest : public ValidationTest, public PageCloudWatcher {
 
   int on_new_commits_calls_ = 0;
   std::vector<CommitPackEntry> on_new_commits_commits_;
-  cloud_provider::Token on_new_commits_position_token_;
+  cloud_provider::PositionToken on_new_commits_position_token_;
   OnNewCommitsCallback on_new_commits_commits_callback_;
 
   cloud_provider::Status on_error_status_ = cloud_provider::Status::OK;
 
  private:
   // PageCloudWatcher:
-  void OnNewCommits(CommitPack commits, cloud_provider::Token position_token,
+  void OnNewCommits(CommitPack commits, cloud_provider::PositionToken position_token,
                     OnNewCommitsCallback callback) override {
     std::vector<CommitPackEntry> entries;
     ASSERT_TRUE(DecodeCommitPack(commits, &entries));
 
     on_new_commits_calls_++;
-    std::move(entries.begin(), entries.end(),
-              std::back_inserter(on_new_commits_commits_));
+    std::move(entries.begin(), entries.end(), std::back_inserter(on_new_commits_commits_));
     on_new_commits_position_token_ = std::move(position_token);
     on_new_commits_commits_callback_ = std::move(callback);
   }
@@ -119,9 +112,7 @@ class PageCloudTest : public ValidationTest, public PageCloudWatcher {
     FXL_NOTIMPLEMENTED();
   }
 
-  void OnError(cloud_provider::Status status) override {
-    on_error_status_ = status;
-  }
+  void OnError(cloud_provider::Status status) override { on_error_status_ = status; }
 };
 
 TEST_F(PageCloudTest, GetPageCloud) {
@@ -134,10 +125,9 @@ TEST_F(PageCloudTest, GetNoCommits) {
   ASSERT_TRUE(GetPageCloud(ToArray("app_id"), ToArray("page_id"), &page_cloud));
 
   std::unique_ptr<cloud_provider::CommitPack> commit_pack;
-  std::unique_ptr<Token> token;
+  std::unique_ptr<PositionToken> token;
   Status status = Status::INTERNAL_ERROR;
-  ASSERT_EQ(ZX_OK,
-            page_cloud->GetCommits(nullptr, &status, &commit_pack, &token));
+  ASSERT_EQ(ZX_OK, page_cloud->GetCommits(nullptr, &status, &commit_pack, &token));
   EXPECT_EQ(Status::OK, status);
   ASSERT_TRUE(commit_pack);
   std::vector<CommitPackEntry> entries;
@@ -158,7 +148,7 @@ TEST_F(PageCloudTest, AddAndGetCommits) {
   EXPECT_EQ(Status::OK, status);
 
   std::unique_ptr<CommitPack> result;
-  std::unique_ptr<Token> token;
+  std::unique_ptr<PositionToken> token;
   ASSERT_EQ(ZX_OK, page_cloud->GetCommits(nullptr, &status, &result, &token));
   EXPECT_EQ(Status::OK, status);
   ASSERT_TRUE(result);
@@ -182,7 +172,7 @@ TEST_F(PageCloudTest, GetCommitsByPositionToken) {
   EXPECT_EQ(Status::OK, status);
 
   // Retrieve the position token of the newest of the two (`id1`).
-  std::unique_ptr<cloud_provider::Token> token;
+  std::unique_ptr<cloud_provider::PositionToken> token;
   ASSERT_TRUE(GetLatestPositionToken(&page_cloud, &token));
   EXPECT_TRUE(token);
 
@@ -194,8 +184,7 @@ TEST_F(PageCloudTest, GetCommitsByPositionToken) {
 
   // Retrieve the commits again with the position token of `id1`.
   std::unique_ptr<CommitPack> result;
-  ASSERT_EQ(ZX_OK,
-            page_cloud->GetCommits(std::move(token), &status, &result, &token));
+  ASSERT_EQ(ZX_OK, page_cloud->GetCommits(std::move(token), &status, &result, &token));
   EXPECT_EQ(Status::OK, status);
   ASSERT_TRUE(result);
   ASSERT_TRUE(DecodeCommitPack(*result, &entries));
@@ -218,8 +207,7 @@ TEST_F(PageCloudTest, AddAndGetObjects) {
   // TODO(ppi): use a fixed ID here once the cloud provider implementations
   // support erasing objects.
   const std::string id = uuid::Generate();
-  ASSERT_EQ(ZX_OK, page_cloud->AddObject(
-                       ToArray(id), std::move(data).ToTransport(), &status));
+  ASSERT_EQ(ZX_OK, page_cloud->AddObject(ToArray(id), std::move(data).ToTransport(), {}, &status));
   EXPECT_EQ(Status::OK, status);
 
   ::fuchsia::mem::BufferPtr buffer_ptr;
@@ -238,15 +226,13 @@ TEST_F(PageCloudTest, AddSameObjectTwice) {
   ASSERT_TRUE(fsl::VmoFromString("bazinga!", &data));
   Status status = Status::INTERNAL_ERROR;
   const std::string id = "some id";
-  ASSERT_EQ(ZX_OK, page_cloud->AddObject(
-                       ToArray(id), std::move(data).ToTransport(), &status));
+  ASSERT_EQ(ZX_OK, page_cloud->AddObject(ToArray(id), std::move(data).ToTransport(), {}, &status));
   EXPECT_EQ(Status::OK, status);
   // Adding the same object again must succeed as per cloud provider contract.
   fsl::SizedVmo more_data;
   ASSERT_TRUE(fsl::VmoFromString("bazinga!", &more_data));
   ASSERT_EQ(ZX_OK,
-            page_cloud->AddObject(ToArray(id),
-                                  std::move(more_data).ToTransport(), &status));
+            page_cloud->AddObject(ToArray(id), std::move(more_data).ToTransport(), {}, &status));
   EXPECT_EQ(Status::OK, status);
 }
 
@@ -257,8 +243,7 @@ TEST_F(PageCloudTest, WatchAndReceiveCommits) {
   fidl::Binding<PageCloudWatcher> binding(this);
   PageCloudWatcherPtr watcher;
   binding.Bind(watcher.NewRequest());
-  ASSERT_EQ(ZX_OK,
-            page_cloud->SetWatcher(nullptr, std::move(watcher), &status));
+  ASSERT_EQ(ZX_OK, page_cloud->SetWatcher(nullptr, std::move(watcher), &status));
   EXPECT_EQ(Status::OK, status);
 
   std::vector<CommitPackEntry> entries{{"id0", "data0"}, {"id1", "data1"}};
@@ -295,8 +280,7 @@ TEST_F(PageCloudTest, WatchWithBacklog) {
   fidl::Binding<PageCloudWatcher> binding(this);
   PageCloudWatcherPtr watcher;
   binding.Bind(watcher.NewRequest());
-  ASSERT_EQ(ZX_OK,
-            page_cloud->SetWatcher(nullptr, std::move(watcher), &status));
+  ASSERT_EQ(ZX_OK, page_cloud->SetWatcher(nullptr, std::move(watcher), &status));
   EXPECT_EQ(Status::OK, status);
 
   while (on_new_commits_commits_.size() < 2u) {
@@ -320,7 +304,7 @@ TEST_F(PageCloudTest, WatchWithPositionToken) {
   EXPECT_EQ(Status::OK, status);
 
   // Retrieve the position token of the newest of the two (`id1`).
-  std::unique_ptr<cloud_provider::Token> token;
+  std::unique_ptr<cloud_provider::PositionToken> token;
   ASSERT_TRUE(GetLatestPositionToken(&page_cloud, &token));
   EXPECT_TRUE(token);
 
@@ -328,8 +312,7 @@ TEST_F(PageCloudTest, WatchWithPositionToken) {
   fidl::Binding<PageCloudWatcher> binding(this);
   PageCloudWatcherPtr watcher;
   binding.Bind(watcher.NewRequest());
-  ASSERT_EQ(ZX_OK, page_cloud->SetWatcher(std::move(token), std::move(watcher),
-                                          &status));
+  ASSERT_EQ(ZX_OK, page_cloud->SetWatcher(std::move(token), std::move(watcher), &status));
   EXPECT_EQ(Status::OK, status);
 
   // Add one more commit.
@@ -368,7 +351,7 @@ TEST_F(PageCloudTest, WatchWithPositionTokenBatch) {
   EXPECT_EQ(Status::OK, status);
 
   // Retrieve the position token of the newest of the two (`id1`).
-  std::unique_ptr<cloud_provider::Token> token;
+  std::unique_ptr<cloud_provider::PositionToken> token;
   ASSERT_TRUE(GetLatestPositionToken(&page_cloud, &token));
   EXPECT_TRUE(token);
 
@@ -376,8 +359,7 @@ TEST_F(PageCloudTest, WatchWithPositionTokenBatch) {
   fidl::Binding<PageCloudWatcher> binding(this);
   PageCloudWatcherPtr watcher;
   binding.Bind(watcher.NewRequest());
-  ASSERT_EQ(ZX_OK, page_cloud->SetWatcher(std::move(token), std::move(watcher),
-                                          &status));
+  ASSERT_EQ(ZX_OK, page_cloud->SetWatcher(std::move(token), std::move(watcher), &status));
   EXPECT_EQ(Status::OK, status);
 
   // Add two commits at once.

@@ -42,6 +42,10 @@ impl Cohort {
     pub fn new(id: &str) -> Cohort {
         Cohort { id: Some(id.to_string()), hint: None, name: None }
     }
+
+    pub fn from_hint(hint: &str) -> Cohort {
+        Cohort { id: None, hint: Some(hint.to_string()), name: None }
+    }
 }
 
 #[cfg(test)]
@@ -49,7 +53,7 @@ mod tests {
     use super::*;
 
     #[test]
-    pub fn test_cohort_new() {
+    fn test_cohort_new() {
         let cohort = Cohort::new("my_cohort");
         assert_eq!(Some("my_cohort".to_string()), cohort.id);
         assert_eq!(None, cohort.hint);

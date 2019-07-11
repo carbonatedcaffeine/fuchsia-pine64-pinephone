@@ -10,17 +10,10 @@ namespace zxdb {
 
 // Schema Definition -----------------------------------------------------------
 
-const char* ClientSettings::Job::kFilters = "filters";
-static const char* kFiltersDescription =
-    R"(  List of filters to be applied to a job. Filters are used against each new
-  process being spawned under the attached job. If there is match, zxdb will
-  automatically attach to the process.)";
-
 namespace {
 
 fxl::RefPtr<SettingSchema> CreateSchema() {
   auto schema = fxl::MakeRefCounted<SettingSchema>();
-  schema->AddList(ClientSettings::Job::kFilters, kFiltersDescription, {});
   return schema;
 }
 
@@ -35,9 +28,7 @@ JobContext::JobContext(Session* session)
       weak_factory_(this) {}
 JobContext::~JobContext() = default;
 
-fxl::WeakPtr<JobContext> JobContext::GetWeakPtr() {
-  return weak_factory_.GetWeakPtr();
-}
+fxl::WeakPtr<JobContext> JobContext::GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
 
 fxl::RefPtr<SettingSchema> JobContext::GetSchema() {
   // Will only run initialization once.

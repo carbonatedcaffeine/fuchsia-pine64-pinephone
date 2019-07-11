@@ -1,6 +1,5 @@
 // Copyright 2018 The Fuchsia Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 #include <fuchsia/crash/cpp/fidl.h>
 #include <lib/async-loop/cpp/loop.h>
@@ -18,8 +17,7 @@ int main(int argc, const char** argv) {
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
   auto context = sys::ComponentContext::Create();
   std::unique_ptr<fuchsia::crash::CrashpadAgent> agent =
-      fuchsia::crash::CrashpadAgent::TryCreate(loop.dispatcher(),
-                                               context->svc());
+      fuchsia::crash::CrashpadAgent::TryCreate(loop.dispatcher(), context->svc());
   if (!agent) {
     return EXIT_FAILURE;
   }

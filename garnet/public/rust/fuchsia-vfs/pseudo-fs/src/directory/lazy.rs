@@ -4,15 +4,18 @@
 
 //! Implementation of a "lazy" pseudo directory.  See [`Lazy`] for details.
 
-use {
-    crate::common::{send_on_open_with_error, try_inherit_rights_for_clone},
-    crate::directory::{
-        common::{encode_dirent, validate_and_split_path},
+use crate::{
+    common::{inherit_rights_for_clone, send_on_open_with_error},
+    directory::{
+        common::{check_child_connection_flags, encode_dirent, validate_and_split_path},
         connection::DirectoryConnection,
         entry::{DirectoryEntry, EntryInfo},
         watchers::{Watchers, WatchersAddError, WatchersSendError},
         DEFAULT_DIRECTORY_PROTECTION_ATTRIBUTES,
     },
+};
+
+use {
     failure::Fail,
     fidl::endpoints::ServerEnd,
     fidl_fuchsia_io::{
@@ -338,6 +341,16 @@ where
 }
 
 /// Return type for Lazy::handle_request().
+struct HandleRequestResult {
+    /// Current connection state.
+    connection_state: ConnectionState,
+
+    /// If the command may have an effect on the children we will need to make sure we execute
+    /// their `poll` method after processing this command.
+    may_affect_children: bool,
+}
+
+#[derive(PartialEq, Eq)]
 enum ConnectionState {
     Alive,
     Closed,
@@ -355,15 +368,9 @@ where
     GetEntry: FnMut(&str) -> Result<Box<DirectoryEntry + 'entries>, Status> + Send,
     WatcherEvents: Stream<Item = WatcherEvent> + FusedStream + Unpin + Send,
 {
-    fn add_connection(
-        &mut self,
-        parent_flags: u32,
-        flags: u32,
-        mode: u32,
-        server_end: ServerEnd<NodeMarker>,
-    ) {
+    fn add_connection(&mut self, flags: u32, mode: u32, server_end: ServerEnd<NodeMarker>) {
         if let Some(connection) =
-            DirectoryConnection::<TraversalPosition>::connect(parent_flags, flags, mode, server_end)
+            DirectoryConnection::<TraversalPosition>::connect(flags, mode, server_end)
         {
             self.connections.push(connection);
         }
@@ -373,19 +380,19 @@ where
         &mut self,
         req: DirectoryRequest,
         connection: &mut DirectoryConnection<TraversalPosition>,
-    ) -> Result<ConnectionState, failure::Error> {
+    ) -> Result<HandleRequestResult, failure::Error> {
+        let mut may_affect_children = false;
+
         match req {
             DirectoryRequest::Clone { flags, object, control_handle: _ } => {
-                match try_inherit_rights_for_clone(connection.flags, flags) {
-                    Ok(clone_flags) => {
-                        self.add_connection(connection.flags, clone_flags, 0, object)
-                    }
-                    Err(status) => send_on_open_with_error(flags, object, status),
-                }
+                self.handle_clone(connection.flags, flags, 0, object);
             }
             DirectoryRequest::Close { responder } => {
                 responder.send(ZX_OK)?;
-                return Ok(ConnectionState::Closed);
+                return Ok(HandleRequestResult {
+                    connection_state: ConnectionState::Closed,
+                    may_affect_children,
+                });
             }
             DirectoryRequest::Describe { responder } => {
                 let mut info = NodeInfo::Directory(DirectoryObject);
@@ -416,7 +423,10 @@ where
                 responder.send(ZX_ERR_NOT_SUPPORTED, &mut iter::empty(), &mut iter::empty())?;
             }
             DirectoryRequest::Open { flags, mode, path, object, control_handle: _ } => {
-                self.handle_open(flags, mode, &path, object);
+                self.handle_open(connection.flags, flags, mode, &path, object);
+                // As we optimize our `Open` requests by navigating multiple path components at
+                // once, we may attach a connected to a child node.
+                may_affect_children = true;
             }
             DirectoryRequest::Unlink { path: _, responder } => {
                 responder.send(ZX_ERR_NOT_SUPPORTED)?;
@@ -453,11 +463,30 @@ where
                 }
             }
         }
-        Ok(ConnectionState::Alive)
+        Ok(HandleRequestResult { connection_state: ConnectionState::Alive, may_affect_children })
+    }
+
+    fn handle_clone(
+        &mut self,
+        parent_flags: u32,
+        flags: u32,
+        mode: u32,
+        server_end: ServerEnd<NodeMarker>,
+    ) {
+        let flags = match inherit_rights_for_clone(parent_flags, flags) {
+            Ok(updated) => updated,
+            Err(status) => {
+                send_on_open_with_error(flags, server_end, status);
+                return;
+            }
+        };
+
+        self.add_connection(flags, mode, server_end);
     }
 
     fn handle_open(
         &mut self,
+        parent_flags: u32,
         flags: u32,
         mut mode: u32,
         path: &str,
@@ -468,8 +497,8 @@ where
             return;
         }
 
-        if path == "." {
-            self.open(flags, mode, &mut iter::empty(), server_end);
+        if path == "." || path == "./" {
+            self.handle_clone(parent_flags, flags, mode, server_end);
             return;
         }
 
@@ -484,6 +513,14 @@ where
         if is_dir {
             mode |= MODE_TYPE_DIRECTORY;
         }
+
+        let flags = match check_child_connection_flags(parent_flags, flags) {
+            Ok(updated) => updated,
+            Err(status) => {
+                send_on_open_with_error(flags, server_end, status);
+                return;
+            }
+        };
 
         // It is up to the open method to handle OPEN_FLAG_DESCRIBE from this point on.
         self.open(flags, mode, &mut names, server_end);
@@ -635,28 +672,23 @@ where
         }
     }
 
-    fn poll_connections(&mut self, cx: &mut Context<'_>) {
-        // This loop is needed to make sure we do not miss any activations of the futures we are
-        // managing.  For example, if a stream was activated and has several outstanding items, if
-        // we do not loop, we would only process the first item and then exit the `poll` method.
-        // And we would leave item(s) in the stream and would not process them until the next
-        // activation due to another item been added.  So we need to poll the stream while we
-        // receive Poll::Pending.
-        //
-        // This approach has a downside, as we do not give up control while we have more items
-        // coming in.  Ideally, we would want to check if there is anything else left in the stream
-        // and just set the waker to activate us again, giving control to the executor (and other
-        // futures sharing this task).  Unfortunately, Stream does not provide an ability to see if
-        // there are any items pending.
+    fn poll_connections(&mut self, cx: &mut Context<'_>) -> bool {
+        // NOTE See `Simple::poll` for discussion on why we need a loop here, as well as to the
+        // details on `rerun_children`.
+
+        let mut rerun_children = false;
+
         loop {
             match self.connections.poll_next_unpin(cx) {
                 Poll::Ready(Some((maybe_request, mut connection))) => {
                     if let Some(Ok(request)) = maybe_request {
                         match self.handle_request(request, &mut connection) {
-                            Ok(ConnectionState::Alive) => {
-                                self.connections.push(connection.into_future())
+                            Ok(HandleRequestResult { connection_state, may_affect_children }) => {
+                                rerun_children |= may_affect_children;
+                                if connection_state == ConnectionState::Alive {
+                                    self.connections.push(connection.into_future())
+                                }
                             }
-                            Ok(ConnectionState::Closed) => (),
                             // An error occurred while processing a request.  We will just close
                             // the connection, effectively closing the underlying channel in the
                             // destructor.
@@ -673,6 +705,8 @@ where
                 Poll::Ready(None) | Poll::Pending => break,
             }
         }
+
+        rerun_children
     }
 
     fn poll_watchers(&mut self, cx: &mut Context<'_>) {
@@ -741,7 +775,7 @@ where
         let name = match path.next() {
             Some(name) => name,
             None => {
-                self.add_connection(!0, flags, mode, server_end);
+                self.add_connection(flags, mode, server_end);
                 return;
             }
         };
@@ -819,9 +853,16 @@ where
     type Output = Void;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.poll_connections(cx);
-        self.poll_watchers(cx);
-        self.poll_live_entries(cx);
+        // NOTE Ordering is important here.  See `Simple::poll` for discussion.
+        loop {
+            self.poll_live_entries(cx);
+            self.poll_watchers(cx);
+
+            let rerun_children = self.poll_connections(cx);
+            if !rerun_children {
+                break;
+            }
+        }
 
         Poll::Pending
     }
@@ -856,12 +897,7 @@ where
             return false;
         }
 
-        // As a pseudo directory blocks when no connections are available, it can not use
-        // `connections.is_terminated()`.  `FuturesUnordered::is_terminated()` will return `false`
-        // for an empty set of connections for the first time, while `Lazy::poll()` will return
-        // `Pending` in the same situation.  If we do not return `true` here for the empty
-        // connections case for the first time instead, we will hang.
-        self.connections.len() == 0
+        self.connections.is_terminated()
     }
 }
 
@@ -1315,6 +1351,8 @@ mod tests {
                 }
 
                 assert_read_dirents!(root, 100, vec![]);
+
+                assert_close!(root);
             },
         );
     }
@@ -1335,6 +1373,8 @@ mod tests {
                     expected.add(DIRENT_TYPE_DIRECTORY, b".").add(DIRENT_TYPE_FILE, b"file");
                     assert_read_dirents!(root, 100, expected.into_vec());
                 }
+
+                assert_close!(root);
             },
         );
     }
@@ -1354,6 +1394,7 @@ mod tests {
 
             assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
 
+            drop(watcher_client);
             assert_close!(root);
         });
     }
@@ -1383,6 +1424,7 @@ mod tests {
             );
             assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
 
+            drop(watcher_client);
             assert_close!(root);
         });
     }
@@ -1423,6 +1465,8 @@ mod tests {
             );
             assert_watcher_one_message_watched_events!(watcher2_client, { IDLE, vec![] });
 
+            drop(watcher1_client);
+            drop(watcher2_client);
             assert_close!(root);
         });
     }
@@ -1444,6 +1488,7 @@ mod tests {
 
             assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
 
+            drop(watcher_client);
             assert_close!(root);
         });
     }

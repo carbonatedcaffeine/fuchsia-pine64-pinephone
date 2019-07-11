@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/package.gni")
+import("//garnet/lib/magma/include/virtio/virtmagma_debug.gni")
 
 source_set("device") {
   sources = [
@@ -37,7 +38,7 @@ source_set("virtio") {
     "//garnet/public/lib/fsl",
     "//sdk/fidl/fuchsia.virtualization.hardware",
     "//zircon/public/lib/async-loop-cpp",
-    "//zircon/public/lib/trace-provider",
+    "//zircon/public/lib/trace-provider-with-fdio",
   ]
 }
 
@@ -195,6 +196,84 @@ package("virtio_gpu") {
   ]
 }
 
+source_set("virtio_magma_lib") {
+  visibility = [ ":*" ]
+
+  sources = [
+    "../bits.h",
+    "virtio_magma.cc",
+    "virtio_magma.h",
+  ]
+  deps = [
+    ":virtio",
+    ":virtio_magma_generic",
+    "//garnet/lib/magma/include:magma_abi",
+    "//garnet/lib/magma/include/virtio",
+    "//garnet/lib/magma/src/magma_util",
+  ]
+
+  if (virtmagma_debug) {
+    defines = [ "VIRTMAGMA_DEBUG=1" ]
+  }
+}
+
+executable("virtio_magma_bin") {
+  visibility = [ ":*" ]
+  output_name = "virtio_magma"
+  deps = [
+    ":virtio_magma_lib",
+    "//garnet/lib/magma/src/libmagma",
+  ]
+}
+
+executable("virtio_magma_bin_mock_system") {
+  visibility = [ ":*" ]
+  testonly = true
+  output_name = "virtio_magma_mock_system"
+  deps = [
+    ":virtio_magma_lib",
+    "//garnet/lib/magma/tests/mock:magma_system",
+  ]
+}
+
+package("virtio_magma") {
+  binary = "virtio_magma"
+  deps = [
+    ":virtio_magma_bin",
+    "//third_party/mesa/src/intel/vulkan:vulkan_intel_linux(//build/toolchain:linux_x64-shared)",
+  ]
+
+  # TODO(MA-520): don't hard-code the driver
+  resources = [
+    {
+      path = rebase_path(
+              "${root_build_dir}/linux_x64-shared/libvulkan_intel_linux.so")
+      dest = "drivers/libvulkan_intel_linux.so"
+    },
+  ]
+  meta = [
+    {
+      path = rebase_path("//src/virtualization/bin/vmm/meta/virtio_magma.cmx")
+      dest = "virtio_magma.cmx"
+    },
+  ]
+}
+
+package("virtio_magma_mock_system") {
+  testonly = true
+  binary = "virtio_magma_mock_system"
+  deps = [
+    ":virtio_magma_bin_mock_system",
+  ]
+
+  meta = [
+    {
+      path = rebase_path("//src/virtualization/bin/vmm/meta/virtio_magma.cmx")
+      dest = "virtio_magma_mock_system.cmx"
+    },
+  ]
+}
+
 executable("virtio_net_bin") {
   visibility = [ ":*" ]
 
@@ -256,15 +335,11 @@ executable("virtio_wl_bin") {
   output_name = "virtio_wl"
   sources = [
     "../bits.h",
-    "virtio_magma.cc",
-    "virtio_magma.h",
     "virtio_wl.cc",
     "virtio_wl.h",
   ]
   deps = [
     ":virtio",
-    "//garnet/lib/magma/src/libmagma",
-    "//garnet/lib/magma/src/magma_util",
   ]
 }
 
@@ -272,17 +347,8 @@ package("virtio_wl") {
   binary = "virtio_wl"
   deps = [
     ":virtio_wl_bin",
-    "//third_party/mesa/src/intel/vulkan:vulkan_intel_linux(//build/toolchain:linux_x64-shared)",
   ]
 
-  # TODO(MA-520): don't hard-code the driver
-  resources = [
-    {
-      path = rebase_path(
-              "${root_build_dir}/linux_x64-shared/libvulkan_intel_linux.so")
-      dest = "drivers/libvulkan_intel_linux.so"
-    },
-  ]
   meta = [
     {
       path = rebase_path("//src/virtualization/bin/vmm/meta/virtio_wl.cmx")
@@ -303,6 +369,7 @@ executable("device_tests") {
     "virtio_console_test.cc",
     "virtio_gpu_test.cc",
     "virtio_input_test.cc",
+    "virtio_magma_test.cc",
     "virtio_net_test.cc",
     "virtio_queue_fake.cc",
     "virtio_queue_fake.h",
@@ -313,12 +380,14 @@ executable("device_tests") {
 
   deps = [
     ":device",
+    "//garnet/lib/magma/include:magma_abi",
+    "//garnet/lib/magma/include/virtio:headers",
     "//sdk/fidl/fuchsia.netstack",
     "//sdk/fidl/fuchsia.virtualization.hardware",
     "//sdk/lib/sys/cpp/testing:integration",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
     "//zircon/public/lib/fzl",
-    "//zircon/public/lib/trace-provider",
+    "//zircon/public/lib/trace-provider-with-fdio",
     "//zircon/public/lib/virtio",
   ]
 
@@ -347,7 +416,23 @@ executable("device_unittests") {
   deps = [
     ":qcow_test_data",
     "//src/lib/fxl",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
     "//zircon/public/lib/fbl",
+  ]
+}
+
+action("virtio_magma_generic") {
+  out_file = "$target_gen_dir/virtio_magma_generic.h"
+  script = "virtio_magma_generic.h.gen.py"
+  args = [
+    rebase_path("//garnet/lib/magma/include/magma_abi/magma.json",
+                root_build_dir),
+    rebase_path(out_file, root_build_dir),
+  ]
+  inputs = [
+    "//garnet/lib/magma/include/magma_abi/magma.json",
+  ]
+  outputs = [
+    "$out_file",
   ]
 }

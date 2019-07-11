@@ -1,0 +1,81 @@
+# Copyright 2018 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/rust/rustc_artifact.gni")
+
+# Defines a Rust unit test, without also compiling a separate binary or library
+# target.
+#
+# Parameters
+#
+#   name
+#     Name of the test binary, also used as the crate name as defined in its
+#     manifest file. If not specified, it is assumed to be the same as the
+#     target name.
+#
+#   version
+#     Semver version of the crate as seen on crates.io.
+#
+#   edition
+#     Edition of the Rust language to be used.
+#     Options are "2015" and "2018". If unsure, choose "2018".
+#
+#   deps (optional)
+#     List of rust_library GN targets on which this crate depends.
+#     Third party crates can be included through paths like
+#     "//third_party/rust_crates:<cratename>",
+#
+#   non_rust_deps (optional)
+#     List of non-rust_library GN targets on which this crate depends.
+#
+#   test_environments (optional)
+#     What environments the unit test should target. Only used here
+#     for linux and mac tests, with a default value of a general linux/mac
+#     environment (as a function of $current_os).
+#     See environments parameter on //build/testing/test_spec.gni for more
+#     details.
+#
+#   source_root (optional)
+#     Location of the crate root (e.g. `src/main.rs` or `src/lib.rs`).
+#     This defaults to `./src/main.rs` for binaries and `./src/lib.rs` for libraries,
+#     and should only be changed when absolutely necessary
+#     (such as in the case of generated code).
+#
+#   features (optional)
+#     A list of conditional compilation flags to enable. This can be used to set features for crates
+#     built in-tree which are also published to crates.io. This would be passed to rustc as
+#     '--cfg feature=XXX'
+#
+# Example of usage:
+#
+#   rustc_test("foo_test") {
+#     source_root = "src/foo_test.rs",
+#     deps = [
+#       "//garnet/public/rust/bar",
+#       "//third_party/rust_crates:clap",
+#       "//third_party/rust_crates:serde",
+#       "//third_party/rust_crates:slab",
+#     ]
+#   }
+template("rustc_test") {
+  rustc_artifact(target_name) {
+    forward_variables_from(
+        invoker,
+        [
+          "name",
+          "version",
+          "edition",
+          "deps",
+          "non_rust_deps",
+          "test_environments",
+          "source_root",
+          "features",
+          "visibility",
+          "__unstable_recovery_netstack_only_specialization_bypass",
+        ])
+    type = "lib"
+    only_unit_tests = true
+    testonly = true
+  }
+}

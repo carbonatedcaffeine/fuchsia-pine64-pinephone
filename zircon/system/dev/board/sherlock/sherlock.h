@@ -22,18 +22,21 @@ namespace sherlock {
 // BTI IDs for our devices
 enum {
     BTI_BOARD,
-    BTI_USB_XHCI,
+    BTI_USB,
     BTI_EMMC,
     BTI_SDIO,
     BTI_MALI,
     BTI_CANVAS,
     BTI_VIDEO,
-    BTI_CAMERA,
+    BTI_ISP,
+    BTI_MIPI,
+    BTI_GDC,
     BTI_DISPLAY,
     BTI_AUDIO_OUT,
     BTI_AUDIO_IN,
     BTI_SYSMEM,
     BTI_THERMAL,
+    BTI_TEE,
 };
 
 // MAC address metadata indices
@@ -47,6 +50,12 @@ enum {
     SHERLOCK_I2C_A0_0,
     SHERLOCK_I2C_2,
     SHERLOCK_I2C_3,
+};
+
+// These should match the mmio table defined in sherlock-spi.c
+enum {
+    SHERLOCK_SPICC0,
+    SHERLOCK_SPICC1
 };
 
 // From the schematic.
@@ -65,7 +74,7 @@ public:
     explicit Sherlock(zx_device_t* parent, pbus_protocol_t* pbus, iommu_protocol_t* iommu)
         : SherlockType(parent), pbus_(pbus), iommu_(iommu) {}
 
-    static zx_status_t Create(zx_device_t* parent);
+    static zx_status_t Create(void* ctx, zx_device_t* parent);
 
     // Device protocol implementation.
     void DdkRelease();
@@ -79,6 +88,7 @@ private:
     zx_status_t BoardInit();
     zx_status_t CanvasInit();
     zx_status_t I2cInit();
+    zx_status_t SpiInit();
     zx_status_t UsbInit();
     zx_status_t EmmcInit();
     zx_status_t BCM43458LpoClockInit(); // required for BCM43458 wifi/bluetooth chip.
@@ -87,12 +97,14 @@ private:
     zx_status_t ClkInit();
     zx_status_t CameraInit();
     zx_status_t MaliInit();
+    zx_status_t TeeInit();
     zx_status_t VideoInit();
     zx_status_t ButtonsInit();
     zx_status_t DisplayInit();
     zx_status_t AudioInit();
     zx_status_t ThermalInit();
     zx_status_t TouchInit();
+    zx_status_t LightInit();
     int Thread();
 
     ddk::PBusProtocolClient pbus_;
@@ -102,7 +114,3 @@ private:
 };
 
 } // namespace sherlock
-
-__BEGIN_CDECLS
-zx_status_t sherlock_bind(void* ctx, zx_device_t* parent);
-__END_CDECLS

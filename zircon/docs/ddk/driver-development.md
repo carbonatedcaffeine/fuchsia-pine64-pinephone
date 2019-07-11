@@ -86,7 +86,7 @@ In that case, a driver can be bound to a device using
 
 ## Driver binding
 
-A driver’s `bind()` function is called when it is matched to a device.
+A driver's `bind()` function is called when it is matched to a device.
 Generally a driver will initialize any data structures needed for the device
 and initialize hardware in this function. It should not perform any
 time-consuming tasks or block in this function, because it is invoked from the
@@ -120,7 +120,7 @@ cannot be supported (maybe due to checking hw version bits or whatnot) and
 returns an error.
 
 3. The driver needs to do further initialization before the device is ready or
-it’s sure it can support it, so it publishes an invisible device and kicks off
+it's sure it can support it, so it publishes an invisible device and kicks off
 a thread to keep working, while returning `ZX_OK`. That thread will eventually
 make the device visible or, if it cannot successfully initialize it, remove it.
 
@@ -208,7 +208,7 @@ return handles. The `IOCTL_KIND_*` defines in
 [zircon/device/ioctl.h](../../system/public/zircon/device/ioctl.h), used in
 the ioctl declaration, defines whether the ioctl accepts or returns handles
 and how many. The driver owns the handles passed in and should close the
-handles when they’re no longer needed, unless it returns
+handles when they're no longer needed, unless it returns
 `ZX_ERR_NOT_SUPPORTED` in which case the devhost RPC layer will close the
 handles.
 
@@ -223,10 +223,10 @@ those functions.
 
 Devices that are added with `DEVICE_ADD_MUST_ISOLATE` spawn a new proxy devhost.
 The device exists in both the parent devhost and as the root of the new devhost.
-Devmgr attempts to load <driver>.proxy.so into this proxy devhost. For example,
-PCI is supplied by libpci.so so devmgr would look to load libpci.proxy.so. The
+Devmgr attempts to load **driver**`.proxy.so` into this proxy devhost. For example,
+PCI is supplied by `libpci.so` so devmgr would look to load `libpci.proxy.so`. The
 driver is provided a channel in `create()` when it creates the proxy device
-(the “bottom half” that runs in the new devhost). The proxy device should cache
+(the "bottom half" that runs in the new devhost). The proxy device should cache
 this channel for when it needs to communicate with the top half (e.g. if
 it needs to call API on the parent device).
 
@@ -234,7 +234,7 @@ it needs to call API on the parent device).
 bottom half. There is no common wire protocol for this channel. For an
 example, refer to the [PCI driver](../../system/dev/bus/pci).
 
-NOTE: This is a mechanism used by various bus devices and not something
+Note: This is a mechanism used by various bus devices and not something
 general drivers should have to worry about. (please ping swetland if you think
 you need to use this)
 
@@ -250,9 +250,36 @@ level for a driver by passing the boot cmdline
 disable the `INFO` logs for the sdhci driver.
 
 The log levels prefixed by "L" (`LERROR`, `LINFO`, etc.) do not get sent over
-the network and is useful for network logging.
+the network and are useful for network logging.
 
 ## Driver testing
+
+### Manual hardware unit tests
+
+A driver may choose to implement the `run_unit_tests()` driver op, which
+provides the driver a hook in which it may run unit tests at system
+initialization with access to the parent device. This means the driver may test
+its bind and unbind hooks, as well as any interactions with real hardware. If
+the tests pass (the driver returns `true` from the hook) then operation will
+continue as normal and `bind()` will execute. If the tests fail then the device
+manager will assume that the driver is invalid and never attempt to bind it.
+
+Since these tests must run at system initialization (in order to not interfere
+with the usual operation of the driver) they are activated via a [kernel command
+line flag](../kernel_cmdline.md). To enable the hook for a specific driver, use
+`driver.<name>.tests.enable`. Or for all drivers: `driver.tests.enable`. If a
+driver doesn't implement `run_unit_tests()` then these flags will have no
+effect.
+
+`run_unit_tests()` passes the driver a channel for it to write test output to.
+Test output should be in the form of `fuchsia.driver.test.Logger` FIDL messages.
+The driver-unit-test library contains a [helper class][] that integrates with
+zxtest and handles logging for you.
+
+[helper class]: ../../system/ulib/driver-unit-test/include/lib/driver-unit-test/logger.h
+
+
+### Integration tests
 
 `ZX_PROTOCOL_TEST` provides a mechanism to test drivers by running the driver
 under test in an emulated environment. Write a driver that binds to a

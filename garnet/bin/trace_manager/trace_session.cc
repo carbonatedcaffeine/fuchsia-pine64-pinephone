@@ -5,20 +5,20 @@
 #include "garnet/bin/trace_manager/trace_session.h"
 
 #include <lib/async/default.h>
+#include <lib/fidl/cpp/clone.h>
+#include <src/lib/fxl/logging.h>
+#include <trace-engine/fields.h>
 
 #include <numeric>
 
 #include "garnet/bin/trace_manager/util.h"
-#include "lib/fidl/cpp/clone.h"
-#include "src/lib/fxl/logging.h"
-#include "trace-engine/fields.h"
 
 namespace tracing {
 
 TraceSession::TraceSession(zx::socket destination,
                            std::vector<std::string> categories,
                            size_t trace_buffer_size_megabytes,
-                           fuchsia::tracelink::BufferingMode buffering_mode,
+                           provider::BufferingMode buffering_mode,
                            TraceProviderSpecMap&& provider_specs,
                            fit::closure abort_handler)
     : destination_(std::move(destination)),

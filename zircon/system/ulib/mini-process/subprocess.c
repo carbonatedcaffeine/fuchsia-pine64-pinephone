@@ -3,7 +3,19 @@
 // found in the LICENSE file.
 
 #include "subprocess.h"
+
+#include <lib/backtrace-request/backtrace-request.h>
 #include <mini-process/mini-process.h>
+
+static uintptr_t ReadFromThreadPointer(void) {
+#ifdef __x86_64__
+    uintptr_t word;
+    __asm__("mov %%fs:0, %0" : "=r" (word));
+    return word;
+#else
+    return *(uintptr_t*)__builtin_thread_pointer();
+#endif
+}
 
 // This function is the entire program that the child process will execute. It
 // gets directly mapped into the child process via zx_vmo_write() so it,
@@ -33,11 +45,11 @@ void minipr_thread_loop(zx_handle_t channel, uintptr_t fnptr) {
 
         uint32_t actual = 0u;
         uint32_t actual_handles = 0u;
-        zx_handle_t handle[2] = {ZX_HANDLE_INVALID, ZX_HANDLE_INVALID};
+        zx_handle_t original_handle = ZX_HANDLE_INVALID;
         minip_ctx_t ctx = {0};
 
         zx_status_t status = (*read_fn)(
-                channel, 0u, &ctx, handle, sizeof(ctx), 1, &actual, &actual_handles);
+                channel, 0u, &ctx, &original_handle, sizeof(ctx), 1, &actual, &actual_handles);
         if ((status != ZX_OK) || (actual != sizeof(ctx)))
             __builtin_trap();
 
@@ -74,8 +86,7 @@ void minipr_thread_loop(zx_handle_t channel, uintptr_t fnptr) {
                 // makes it likely it will reference the data section which
                 // is outside the memory copied to the child.
 
-                handle[0] = ZX_HANDLE_INVALID;
-                handle[1] = ZX_HANDLE_INVALID;
+                zx_handle_t handle[2] = {ZX_HANDLE_INVALID, ZX_HANDLE_INVALID};
 
                 if (what & MINIP_CMD_ECHO_MSG) {
                     what &= ~MINIP_CMD_ECHO_MSG;
@@ -97,7 +108,7 @@ void minipr_thread_loop(zx_handle_t channel, uintptr_t fnptr) {
                     // zx_profile_info_t. That's to prevent the compiler from getting smart and
                     // using a pre-computed structure in the data segment. This function is
                     // "injected" into the mini-process so there can be no external dependencies.
-                    cmd.status = ctx.profile_create(ZX_HANDLE_INVALID, NULL, &handle[0]);
+                    cmd.status = ctx.profile_create(ZX_HANDLE_INVALID, 0u, NULL, &handle[0]);
                     goto reply;
                 }
                 if (what & MINIP_CMD_CREATE_CHANNEL) {
@@ -179,6 +190,48 @@ void minipr_thread_loop(zx_handle_t channel, uintptr_t fnptr) {
                     // This call will fail because we don't have a mmio resource, but that's OK
                     // because we only care about *how* it fails.
                     cmd.status = ctx.vmo_physical_create(ZX_HANDLE_INVALID, 0u, 0u, &handle[0]);
+                    goto reply;
+                }
+                if (what & MINIP_CMD_CHANNEL_WRITE) {
+                    what &= ~MINIP_CMD_CHANNEL_WRITE;
+
+                    uint8_t val = 0;
+                    cmd.status = ctx.channel_write(original_handle, 0, &val, 1, NULL, 0u);
+                    goto reply;
+                }
+                if (what & MINIP_CMD_BACKTRACE_REQUEST) {
+                    what &= ~MINIP_CMD_BACKTRACE_REQUEST;
+
+                    backtrace_request();
+                    cmd.status = ZX_OK;
+                    goto reply;
+                }
+                if (what & MINIP_CMD_ATTEMPT_AMBIENT_EXECUTABLE) {
+                    what &= ~MINIP_CMD_ATTEMPT_AMBIENT_EXECUTABLE;
+                    zx_handle_t vmo = ZX_HANDLE_INVALID;
+                    zx_handle_t pager = ZX_HANDLE_INVALID;
+                    zx_handle_t port = ZX_HANDLE_INVALID;
+
+                    // We use builtin_trap to kill off the process in a way
+                    // that distinguishes a failure in these calls from an
+                    // intended failure.
+                    if (ctx.pager_create(0u, &pager) != ZX_OK)
+                        __builtin_trap();
+                    if (ctx.port_create(0u, &port) != ZX_OK)
+                        __builtin_trap();
+                    if (ctx.pager_create_vmo(pager, 0u, port, 0u, 0u, &vmo) != ZX_OK)
+                        __builtin_trap();
+
+                    cmd.status = ctx.vmo_replace_as_executable(vmo, ZX_HANDLE_INVALID, &vmo);
+                    goto reply;
+                }
+                if (what & MINIP_CMD_CHECK_THREAD_POINTER) {
+                    what &= ~MINIP_CMD_CHECK_THREAD_POINTER;
+                    if (ReadFromThreadPointer() == MINIP_THREAD_POINTER_CHECK_VALUE) {
+                        cmd.status = ZX_OK;
+                    } else {
+                        cmd.status = ZX_ERR_BAD_STATE;
+                    }
                     goto reply;
                 }
 

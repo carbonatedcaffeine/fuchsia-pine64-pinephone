@@ -6,15 +6,15 @@ assert(current_cpu == "x64")
 
 driver("intel-i915") {
   sources = [
-    "display-device.cpp",
-    "dp-display.cpp",
-    "gtt.cpp",
-    "hdmi-display.cpp",
-    "igd.cpp",
-    "intel-i915.cpp",
-    "interrupts.cpp",
-    "pipe.cpp",
-    "power.cpp",
+    "display-device.cc",
+    "dp-display.cc",
+    "gtt.cc",
+    "hdmi-display.cc",
+    "igd.cc",
+    "intel-i915.cc",
+    "interrupts.cc",
+    "pipe.cc",
+    "power.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.display.controller",
@@ -22,6 +22,7 @@ driver("intel-i915") {
     "$zx/system/banjo/ddk.protocol.intelgpucore",
     "$zx/system/banjo/ddk.protocol.pci",
     "$zx/system/banjo/ddk.protocol.sysmem",
+    "$zx/system/dev/lib/device-protocol-pci",
     "$zx/system/dev/lib/mmio",
     "$zx/system/fidl/fuchsia-hardware-backlight:c",
     "$zx/system/fidl/fuchsia-sysmem:c",

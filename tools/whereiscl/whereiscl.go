@@ -2,96 +2,91 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// whereiscl is a command-line utility that answers "Where is my CL?".
+// Given a Gerrit review URL, it will answer
+//   - Whether the CL was merged (or abandoned)
+//   - Whether the CL passed Global Integration (if merged)
 package main
 
 import (
-	"encoding/json"
-	"errors"
+	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
-	"regexp"
+
+	"fuchsia.googlesource.com/fuchsia/tools/whereiscl/lib"
 )
 
-const fuchsiaURL = "https://fuchsia-review.googlesource.com"
+var gitRevision = flag.String("rev", "", "git revision (anything that 'git rev-parse' can parse)")
 
-// fuchsiaRE is a regexp for matching CL review URLs and extracting the CL numbers.
-// Supports various forms. E.g.,
-//   - https://fuchsia-review.googlesource.com/c/fuchsia/+/123456789
-//   - fuchsia-review.googlesource.com/c/fuchsia/+/123456789/some/file
-//   - http://fxr/123456789
-//   - fxr/123456789/some/file
-var fuchsiaRE = regexp.MustCompile(`^(?:https?://)?(?:fxr|fuchsia-review.googlesource.com/c/.+/\+)/(\d+).*`)
+func init() {
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), `Usage: whereiscl [<review URL>|--rev <git revision>]
 
-type queryInfo struct{ apiEndpoint, cl string }
+Answers whether a CL is merged (or abandoned) and whether it passed Global Integration.
+Review URL can be various review URL forms as below. It can also be a raw CL number, a Change-Id, or a git commit hash.
 
-func parseReviewURL(str string) (queryInfo, error) {
-	match := fuchsiaRE.FindStringSubmatch(str)
-	if match != nil {
-		return queryInfo{
-			apiEndpoint: fuchsiaURL,
-			cl:          match[1],
-		}, nil
+Examples:
+  $ whereiscl https://fuchsia-review.googlesource.com/c/fuchsia/+/123456789
+  $ whereiscl fuchsia-review.googlesource.com/c/fuchsia/+/123456789/some/file
+  $ whereiscl https://fuchsia-review.googlesource.com/c/fuchsia/+/Ie8dddbce1eeb01a561f3b36e1685f4136fb61378
+  $ whereiscl http://fxr/123456789
+  $ whereiscl http://fxr/Ie8dddbce1eeb01a561f3b36e1685f4136fb61378
+  $ whereiscl fxr/123456789/some/file
+  $ whereiscl 123456789
+  $ whereiscl Ie8dddbce1eeb01a561f3b36e1685f4136fb61378
+  $ whereiscl cd83861
+
+`)
+		flag.PrintDefaults()
 	}
-
-	return queryInfo{}, errors.New("not a valid review URL")
 }
 
-// changeInfo is a JSON struct for ChangeInfo responses from Gerrit.
-// https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#change-info.
-// Only fields of interest are listed here.
-type changeInfo struct {
-	Status string `json:"status"`
-}
-
-func getCLStatus(qi queryInfo) (string, error) {
-	query := fmt.Sprintf("%s/changes/?q=%s", qi.apiEndpoint, qi.cl)
-	resp, err := http.Get(query)
-	if err != nil {
-		return "", err
+func validateArgs() {
+	if *gitRevision == "" && flag.NArg() == 0 {
+		// TODO: Consider alternatives. E.g., show all outstanding CLs
+		// of the current user, or show all CLs that are pending in
+		// Global Integration.
+		flag.Usage()
+		os.Exit(1)
 	}
-	defer resp.Body.Close()
-
-	b, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var cis []changeInfo
-	// Responses start with )]}' to prevent XSSI attacks. Discard them.
-	// See https://gerrit-review.googlesource.com/Documentation/rest-api.html#output
-	if err := json.Unmarshal(b[4:], &cis); err != nil {
-		return "", err
-	}
-
-	switch len(cis) {
-	case 0:
-		return "", errors.New("CL not found")
-	case 1:
-		return cis[0].Status, nil
-	default:
-		return "", fmt.Errorf("Got %d CLs while expecting only one", len(cis))
+	if *gitRevision != "" && flag.NArg() > 0 {
+		log.Fatal("Either --rev or a raw argument must be provided, but not both")
 	}
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		// TODO: Consider alternatives. E.g., show all outstanding CLs
-		// of the current user, or show all CLs that are pending in
-		// Global Integration.
-		log.Fatal("Review URL must be provided")
+	flag.Parse()
+	validateArgs()
+
+	var queryInfo *lib.QueryInfo
+	var err error
+	if *gitRevision == "" {
+		queryInfo, err = lib.ParseReviewURL(flag.Arg(0))
+		if err != nil {
+			log.Fatalf("Error parsing query: %v", err)
+		}
+	} else {
+		queryInfo, err = lib.ParseGitRevision(*gitRevision)
+		if err != nil {
+			log.Fatalf("Error parsing git revision: %v", err)
+		}
 	}
 
-	queryInfo, err := parseReviewURL(os.Args[1])
-	if err != nil {
-		log.Fatalf("Error parsing the review URL: %v", err)
-	}
-
-	status, err := getCLStatus(queryInfo)
+	ci, err := lib.GetChangeInfo(queryInfo)
 	if err != nil {
 		log.Fatalf("Error getting change info: %v", err)
 	}
-	fmt.Printf("CL status: %v\n", status)
+	fmt.Printf("https://fuchsia-review.googlesource.com/c/%v/+/%v\n\n", ci.Project, ci.Number)
+	fmt.Printf("CL status: %v\n", ci.Status)
+
+	if ci.Status != lib.CLStatusMerged {
+		return
+	}
+
+	gs, err := lib.GetGIStatus(ci)
+	if err != nil {
+		log.Fatalf("Error getting GI status: %v", err)
+	}
+	fmt.Printf("GI status: %v\n", gs)
 }

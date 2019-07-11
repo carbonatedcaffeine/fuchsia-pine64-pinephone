@@ -22,6 +22,11 @@ std::string FidlEnumToString(E e) {
   return ss.str();
 }
 
+template <>
+std::string FidlEnumToString<zx_status_t>(zx_status_t status) {
+  return zx_status_get_string(status);
+}
+
 template <typename R>
 std::string FidlResultToString(const R& r) {
   if (r.is_response()) {
@@ -38,24 +43,20 @@ StatusTranslater::StatusTranslater(zx_status_t status)
     : ok_(status == ZX_OK || status == ZX_ERR_PEER_CLOSED),
       description_(zx_status_get_string(status)) {}
 
-StatusTranslater::StatusTranslater(CreateReferenceStatus status)
-    : ok_(status == CreateReferenceStatus::OK),
-      description_(FidlEnumToString(status)) {}
-
 StatusTranslater::StatusTranslater(
-    const fuchsia::ledger::PageSnapshot_Get_Result& result)
+    const fuchsia::ledger::Page_CreateReferenceFromBuffer_Result& result)
     : ok_(result.is_response()), description_(FidlResultToString(result)) {}
 
-StatusTranslater::StatusTranslater(
-    const fuchsia::ledger::PageSnapshot_GetInline_Result& result)
+StatusTranslater::StatusTranslater(const fuchsia::ledger::PageSnapshot_Get_Result& result)
     : ok_(result.is_response()), description_(FidlResultToString(result)) {}
 
-StatusTranslater::StatusTranslater(
-    const fuchsia::ledger::PageSnapshot_Fetch_Result& result)
+StatusTranslater::StatusTranslater(const fuchsia::ledger::PageSnapshot_GetInline_Result& result)
     : ok_(result.is_response()), description_(FidlResultToString(result)) {}
 
-StatusTranslater::StatusTranslater(
-    const fuchsia::ledger::PageSnapshot_FetchPartial_Result& result)
+StatusTranslater::StatusTranslater(const fuchsia::ledger::PageSnapshot_Fetch_Result& result)
+    : ok_(result.is_response()), description_(FidlResultToString(result)) {}
+
+StatusTranslater::StatusTranslater(const fuchsia::ledger::PageSnapshot_FetchPartial_Result& result)
     : ok_(result.is_response()), description_(FidlResultToString(result)) {}
 }  // namespace internal
 
@@ -64,8 +65,7 @@ bool QuitOnError(fit::closure quit_callback, internal::StatusTranslater status,
   if (status.ok()) {
     return false;
   }
-  FXL_LOG(ERROR) << description << " failed with status "
-                 << status.description() << ".";
+  FXL_LOG(ERROR) << description << " failed with status " << status.description() << ".";
   quit_callback();
   return true;
 }

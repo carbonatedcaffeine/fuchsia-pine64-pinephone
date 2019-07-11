@@ -42,16 +42,16 @@
 
 static inline bool iwl_have_debug_level(uint32_t level) {
 #ifdef CPTCFG_IWLWIFI_DEBUG
-    return iwlwifi_mod_params.debug_level & level;
+  return iwlwifi_mod_params.debug_level & level;
 #else
-    return false;
+  return false;
 #endif
 }
 
 struct device;
 
 #define __iwl_err(dev, rfkill_prefix, only_trace, fmt, ...) \
-    zxlogf(ERROR, "iwlwifi: " fmt, ##__VA_ARGS__)
+  zxlogf(ERROR, "iwlwifi: " fmt, ##__VA_ARGS__)
 #define __iwl_warn(dev, fmt, args...) zxlogf(WARN, "iwlwifi: " fmt, ##args)
 #define __iwl_info(dev, fmt, args...) zxlogf(INFO, "iwlwifi: " fmt, ##args)
 #define __iwl_crit(dev, fmt, args...) zxlogf(ERROR, "iwlwifi: " fmt, ##args)
@@ -60,56 +60,56 @@ struct device;
 #define CHECK_FOR_NEWLINE(f) BUILD_BUG_ON(f[sizeof(f) - 2] != '\n')
 
 /* No matter what is m (priv, bus, trans), this will work */
-#define IWL_ERR_DEV(d, f, a...)               \
-    do {                                      \
-        CHECK_FOR_NEWLINE(f);                 \
-        __iwl_err((d), false, false, f, ##a); \
-    } while (0)
+#define IWL_ERR_DEV(d, f, a...)           \
+  do {                                    \
+    CHECK_FOR_NEWLINE(f);                 \
+    __iwl_err((d), false, false, f, ##a); \
+  } while (0)
 #define IWL_WARN_DEV(d, f, a...) \
-    do {                         \
-        CHECK_FOR_NEWLINE(f);    \
-        __iwl_warn((d), f, ##a); \
-    } while (0)
+  do {                           \
+    CHECK_FOR_NEWLINE(f);        \
+    __iwl_warn((d), f, ##a);     \
+  } while (0)
 #define IWL_ERR(m, f, a...) IWL_ERR_DEV((m)->dev, f, ##a)
-#define IWL_WARN(m, f, a...)          \
-    do {                              \
-        CHECK_FOR_NEWLINE(f);         \
-        __iwl_warn((m)->dev, f, ##a); \
-    } while (0)
-#define IWL_INFO(m, f, a...)          \
-    do {                              \
-        CHECK_FOR_NEWLINE(f);         \
-        __iwl_info((m)->dev, f, ##a); \
-    } while (0)
-#define IWL_CRIT(m, f, a...)          \
-    do {                              \
-        CHECK_FOR_NEWLINE(f);         \
-        __iwl_crit((m)->dev, f, ##a); \
-    } while (0)
+#define IWL_WARN(m, f, a...)      \
+  do {                            \
+    CHECK_FOR_NEWLINE(f);         \
+    __iwl_warn((m)->dev, f, ##a); \
+  } while (0)
+#define IWL_INFO(m, f, a...)      \
+  do {                            \
+    CHECK_FOR_NEWLINE(f);         \
+    __iwl_info((m)->dev, f, ##a); \
+  } while (0)
+#define IWL_CRIT(m, f, a...)      \
+  do {                            \
+    CHECK_FOR_NEWLINE(f);         \
+    __iwl_crit((m)->dev, f, ##a); \
+  } while (0)
 
 #define __iwl_dbg(dev, level, limit, function, fmt, args...) \
-    zxlogf(DEBUG1, "iwlwifi (%s): " fmt, function, ##args)
+  zxlogf(DEBUG1, "iwlwifi (%s): " fmt, function, ##args)
 
-#define iwl_print_hex_error(m, p, len)                                                \
-    do {                                                                              \
-        print_hex_dump(KERN_ERR, "iwl data: ", DUMP_PREFIX_OFFSET, 16, 1, p, len, 1); \
-    } while (0)
+#define iwl_print_hex_error(m, p, len)                                            \
+  do {                                                                            \
+    print_hex_dump(KERN_ERR, "iwl data: ", DUMP_PREFIX_OFFSET, 16, 1, p, len, 1); \
+  } while (0)
 
-#define __IWL_DEBUG_DEV(dev, level, limit, fmt, args...)     \
-    do {                                                     \
-        CHECK_FOR_NEWLINE(fmt);                              \
-        __iwl_dbg(dev, level, limit, __func__, fmt, ##args); \
-    } while (0)
+#define __IWL_DEBUG_DEV(dev, level, limit, fmt, args...) \
+  do {                                                   \
+    CHECK_FOR_NEWLINE(fmt);                              \
+    __iwl_dbg(dev, level, limit, __func__, fmt, ##args); \
+  } while (0)
 #define IWL_DEBUG(m, level, fmt, args...) __IWL_DEBUG_DEV((m)->dev, level, false, fmt, ##args)
 #define IWL_DEBUG_DEV(dev, level, fmt, args...) __IWL_DEBUG_DEV(dev, level, false, fmt, ##args)
 #define IWL_DEBUG_LIMIT(m, level, fmt, args...) __IWL_DEBUG_DEV((m)->dev, level, true, fmt, ##args)
 
 #ifdef CPTCFG_IWLWIFI_DEBUG
-#define iwl_print_hex_dump(m, level, p, len)                                                \
-    do {                                                                                    \
-        if (iwl_have_debug_level(level))                                                    \
-            print_hex_dump(KERN_DEBUG, "iwl data: ", DUMP_PREFIX_OFFSET, 16, 1, p, len, 1); \
-    } while (0)
+#define iwl_print_hex_dump(m, level, p, len)                                          \
+  do {                                                                                \
+    if (iwl_have_debug_level(level))                                                  \
+      print_hex_dump(KERN_DEBUG, "iwl data: ", DUMP_PREFIX_OFFSET, 16, 1, p, len, 1); \
+  } while (0)
 #else
 #define iwl_print_hex_dump(m, level, p, len)
 #endif /* CPTCFG_IWLWIFI_DEBUG */

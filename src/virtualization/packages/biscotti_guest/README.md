@@ -6,7 +6,7 @@ The `biscotti_guest` is a guest system based off the
 ## Building the Kernel
 
 This will build a kernel and deposit the image at
-`//garnet/bin/guest/pkg/biscotti_guest/images/x64/Image`.
+`//prebuilt/virtualization/ garnet/bin/guest/pkg/biscotti_guest/images/x64/Image`.
 
 ```
  (host) $ cd $BISCOTTI_GUEST_DIR
@@ -36,9 +36,9 @@ can proceed:
 
 ```
  (host) $ cd $FUCHSIA_DIR
- (host) $ fx set x64 --product "garnet/products/default" \
-                     --monolith "garnet/packages/experimental/disabled/biscotti"
- (host) $ fx full-build
+ (host) $ fx set core.x64 
+                     --with-base //src/virtualization,//src/virtualization/packages/biscotti_guest
+ (host) $ fx build
 ```
 
 ## Boot to Termina

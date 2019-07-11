@@ -14,8 +14,16 @@ pub struct {{ $interface.Name }}Marker;
 impl fidl::endpoints::ServiceMarker for {{ $interface.Name }}Marker {
 	type Proxy = {{ $interface.Name }}Proxy;
 	type RequestStream = {{ $interface.Name }}RequestStream;
-	const NAME: &'static str = "{{ $interface.ServiceName }}";
+{{- if .ServiceName }}
+	const DEBUG_NAME: &'static str = "{{ $interface.ServiceName }}";
+{{- else }}
+	const DEBUG_NAME: &'static str = "(anonymous) {{ $interface.Name }}";
+{{- end }}
 }
+
+{{- if $interface.ServiceName }}
+impl fidl::endpoints::DiscoverableService for {{ $interface.Name }}Marker {}
+{{- end }}
 
 pub trait {{ $interface.Name }}ProxyInterface: Send + Sync {
 	{{- range $method := $interface.Methods }}
@@ -263,7 +271,7 @@ impl futures::Stream for {{ $interface.Name }}EventStream {
 			{{- end }}
 			_ => Err(fidl::Error::UnknownOrdinal {
 				ordinal: tx_header.ordinal,
-				service_name: <{{ $interface.Name }}Marker as fidl::endpoints::ServiceMarker>::NAME,
+				service_name: <{{ $interface.Name }}Marker as fidl::endpoints::ServiceMarker>::DEBUG_NAME,
 			})
 		}))
 	}
@@ -287,8 +295,9 @@ impl {{ $interface.Name }}Event {
 	{{- if not $method.HasRequest }}
 	#[allow(irrefutable_let_patterns)]
 	pub fn into_{{ $method.Name }}(self) -> Option<(
-		{{- range $param := $method.Response }}
-		{{ $param.Type }},
+		{{- range $index, $param := $method.Response }}
+		{{- if (eq $index 0) -}} {{ $param.Type }}
+		{{- else -}}, {{ $param.Type }} {{- end -}}
 		{{ end }}
 	)> {
 		if let {{ $interface.Name }}Event::{{ $method.CamelName }} {
@@ -297,9 +306,10 @@ impl {{ $interface.Name }}Event {
 			{{ end }}
 		} = self {
 			Some((
-				{{- range $param := $method.Response }}
-				{{ $param.Name }},
-				{{ end }}
+				{{- range $index, $param := $method.Response -}}
+				{{- if (eq $index 0) -}} {{ $param.Name -}}
+				{{- else -}}, {{ $param.Name }} {{- end -}}
+				{{- end -}}
 			))
 		} else {
 			None
@@ -309,13 +319,20 @@ impl {{ $interface.Name }}Event {
 	{{- end }}
 }
 
+/// A type which can be used to send events into a borrowed channel.
+///
+/// Note: this should only be used when the channel must be temporarily
+/// borrowed. For a typical sending of events, use the send_ methods
+/// on the ControlHandle types, which can be acquired through a
+/// RequestStream or Responder type.
 pub struct {{ $interface.Name }}EventSender<'a> {
 	// Some protocols don't define events which would render this channel unused.
 	#[allow(unused)]
-	channel: zx::Unowned<'a, zx::Channel>,
+	channel: &'a zx::Channel,
 }
+
 impl <'a> {{ $interface.Name }}EventSender<'a> {
-	pub fn new(channel: zx::Unowned<'a, zx::Channel>) -> Self {
+	pub fn new(channel: &'a zx::Channel) -> Self {
 		Self { channel }
 	}
 	{{- range $method := $interface.Methods }}
@@ -453,7 +470,7 @@ impl futures::Stream for {{ $interface.Name }}RequestStream {
 				{{- end }}
 				_ => Err(fidl::Error::UnknownOrdinal {
 					ordinal: header.ordinal,
-					service_name: <{{ $interface.Name }}Marker as fidl::endpoints::ServiceMarker>::NAME,
+					service_name: <{{ $interface.Name }}Marker as fidl::endpoints::ServiceMarker>::DEBUG_NAME,
 				}),
 			}))
 		})
@@ -493,9 +510,9 @@ impl {{ $interface.Name }}Request {
 		{{ $param.Type }},
 		{{ end }}
 		{{- if $method.HasResponse -}}
-		{{ $interface.Name }}{{ $method.CamelName }}Responder,
+		{{ $interface.Name }}{{ $method.CamelName }}Responder
 		{{- else -}}
-		{{ $interface.Name }}ControlHandle,
+		{{ $interface.Name }}ControlHandle
 		{{- end }}
 	)> {
 		if let {{ $interface.Name }}Request::{{ $method.CamelName }} {
@@ -509,14 +526,14 @@ impl {{ $interface.Name }}Request {
 			{{- end }}
 		} = self {
 			Some((
-				{{- range $param := $method.Request }}
-				{{ $param.Name }},
-				{{ end }}
+				{{- range $param := $method.Request -}}
+				{{- $param.Name -}},
+				{{- end -}}
 				{{- if $method.HasResponse -}}
-				responder,
+				responder
 				{{- else -}}
-				control_handle,
-				{{- end }}
+				control_handle
+				{{- end -}}
 			))
 		} else {
 			None
@@ -524,6 +541,17 @@ impl {{ $interface.Name }}Request {
 	}
 	{{ end }}
 	{{- end }}
+
+        /// Name of the method defined in FIDL
+        pub fn method_name(&self) -> &'static str {
+          match *self {
+            {{- range $method := $interface.Methods }}
+              {{- if $method.HasRequest }}
+                {{ $interface.Name }}Request::{{ $method.CamelName }}{..} => "{{ $method.Name }}",
+              {{- end }}
+            {{- end }}
+          }
+        }
 }
 
 pub struct {{ $interface.Name }}Encoder;

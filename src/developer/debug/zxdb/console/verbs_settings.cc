@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/developer/debug/zxdb/console/verbs.h"
-
 #include "src/developer/debug/zxdb/client/session.h"
 #include "src/developer/debug/zxdb/client/setting_schema.h"
 #include "src/developer/debug/zxdb/client/thread.h"
@@ -12,6 +10,7 @@
 #include "src/developer/debug/zxdb/console/console.h"
 #include "src/developer/debug/zxdb/console/format_settings.h"
 #include "src/developer/debug/zxdb/console/output_buffer.h"
+#include "src/developer/debug/zxdb/console/verbs.h"
 #include "src/lib/fxl/strings/string_printf.h"
 
 namespace zxdb {
@@ -126,8 +125,8 @@ Examples
 
 constexpr int kGetSystemSwitch = 0;
 
-Err SettingToOutput(const Command& cmd, const std::string& key,
-                    ConsoleContext* context, OutputBuffer* out) {
+Err SettingToOutput(const Command& cmd, const std::string& key, ConsoleContext* context,
+                    OutputBuffer* out) {
   // We search in the following order: Thread -> Target -> Job -> System.
   if (Thread* thread = cmd.thread()) {
     Setting setting = thread->settings().GetSetting(key);
@@ -162,31 +161,27 @@ Err SettingToOutput(const Command& cmd, const std::string& key,
   return Err("Could not find setting %s", key.c_str());
 }
 
-Err CompleteSettingsToOutput(const Command& cmd, ConsoleContext* context,
-                             OutputBuffer* out) {
+Err CompleteSettingsToOutput(const Command& cmd, ConsoleContext* context, OutputBuffer* out) {
   // Output in the following order: System -> Job -> Target -> Thread
   out->Append(OutputBuffer(Syntax::kHeading, "Global\n"));
   out->Append(FormatSettingStore(context->session()->system().settings()));
   out->Append("\n");
 
-  if (JobContext* job = cmd.job_context();
-      job && !job->settings().schema()->empty()) {
+  if (JobContext* job = cmd.job_context(); job && !job->settings().schema()->empty()) {
     auto title = fxl::StringPrintf("Job %d\n", context->IdForJobContext(job));
     out->Append(OutputBuffer(Syntax::kHeading, std::move(title)));
     out->Append(FormatSettingStore(job->settings()));
     out->Append("\n");
   }
 
-  if (Target* target = cmd.target();
-      target && !target->settings().schema()->empty()) {
+  if (Target* target = cmd.target(); target && !target->settings().schema()->empty()) {
     auto title = fxl::StringPrintf("Target %d\n", context->IdForTarget(target));
     out->Append(OutputBuffer(Syntax::kHeading, std::move(title)));
     out->Append(FormatSettingStore(target->settings()));
     out->Append("\n");
   }
 
-  if (Thread* thread = cmd.thread();
-      thread && !thread->settings().schema()->empty()) {
+  if (Thread* thread = cmd.thread(); thread && !thread->settings().schema()->empty()) {
     auto title = fxl::StringPrintf("Thread %d\n", context->IdForThread(thread));
     out->Append(OutputBuffer(Syntax::kHeading, std::move(title)));
     out->Append(FormatSettingStore(thread->settings()));
@@ -334,33 +329,28 @@ struct SetContext {
   std::vector<std::string> elements_changed;
 };
 
-Err SetBool(SettingStore* store, const std::string& setting_name,
-            const std::string& value) {
+Err SetBool(SettingStore* store, const std::string& setting_name, const std::string& value) {
   if (value == "0" || value == "false") {
     store->SetBool(setting_name, false);
   } else if (value == "1" || value == "true") {
     store->SetBool(setting_name, true);
   } else {
-    return Err("%s expects a boolean. See \"help set\" for valid values.",
-               setting_name.data());
+    return Err("%s expects a boolean. See \"help set\" for valid values.", setting_name.data());
   }
   return Err();
 }
 
-Err SetInt(SettingStore* store, const std::string& setting_name,
-           const std::string& value) {
+Err SetInt(SettingStore* store, const std::string& setting_name, const std::string& value) {
   int out;
   Err err = StringToInt(value, &out);
   if (err.has_error()) {
-    return Err("%s expects a valid int: %s", setting_name.data(),
-               err.msg().data());
+    return Err("%s expects a valid int: %s", setting_name.data(), err.msg().data());
   }
 
   return store->SetInt(setting_name, out);
 }
 
-Err SetList(const SetContext& context,
-            const std::vector<std::string>& elements_to_set,
+Err SetList(const SetContext& context, const std::vector<std::string>& elements_to_set,
             SettingStore* store, std::vector<std::string>* elements_changed) {
   if (context.assign_type == AssignType::kAssign)
     return store->SetList(context.setting.info.name, elements_to_set);
@@ -402,13 +392,10 @@ Err SetList(const SetContext& context,
 // |elements_changed| are all the values that changed. This is used afterwards
 // for user feedback.
 // |out| is the resultant setting, which is used for user feedback.
-Err SetSetting(const SetContext& context,
-               const std::vector<std::string>& elements_to_set,
-               SettingStore* store, std::vector<std::string>* elements_changed,
-               Setting* out) {
+Err SetSetting(const SetContext& context, const std::vector<std::string>& elements_to_set,
+               SettingStore* store, std::vector<std::string>* elements_changed, Setting* out) {
   Err err;
-  if (context.assign_type != AssignType::kAssign &&
-      !context.setting.value.is_list())
+  if (context.assign_type != AssignType::kAssign && !context.setting.value.is_list())
     return Err("Appending/removing only works for list options.");
 
   switch (context.setting.value.type) {
@@ -436,8 +423,7 @@ Err SetSetting(const SetContext& context,
   return Err();
 }
 
-OutputBuffer FormatSetFeedback(ConsoleContext* context,
-                               const SetContext& set_context) {
+OutputBuffer FormatSetFeedback(ConsoleContext* context, const SetContext& set_context) {
   std::string verb;
   switch (set_context.assign_type) {
     case AssignType::kAssign:
@@ -464,15 +450,14 @@ OutputBuffer FormatSetFeedback(ConsoleContext* context,
     }
     case SetContext::Level::kTarget: {
       int target_id = context->IdForTarget(set_context.target);
-      message =
-          fxl::StringPrintf("%s for process %d:\n", verb.data(), target_id);
+      message = fxl::StringPrintf("%s for process %d:\n", verb.data(), target_id);
       break;
     }
     case SetContext::Level::kThread: {
       int target_id = context->IdForTarget(set_context.target);
       int thread_id = context->IdForThread(set_context.thread);
-      message = fxl::StringPrintf("%s for thread %d of process %d:\n",
-                                  verb.data(), thread_id, target_id);
+      message =
+          fxl::StringPrintf("%s for thread %d of process %d:\n", verb.data(), thread_id, target_id);
       break;
     }
     default:
@@ -482,8 +467,7 @@ OutputBuffer FormatSetFeedback(ConsoleContext* context,
   return OutputBuffer(std::move(message));
 }
 
-Err GetSetContext(const Command& cmd, const std::string& setting_name,
-                  SetContext* out) {
+Err GetSetContext(const Command& cmd, const std::string& setting_name, SetContext* out) {
   SettingStore* store = nullptr;
   JobContext* job_context = cmd.job_context();
   Target* target = cmd.target();
@@ -518,15 +502,13 @@ Err GetSetContext(const Command& cmd, const std::string& setting_name,
     if (system.settings().schema()->HasSetting(setting_name)) {
       store = &system.settings();
       out->level = SetContext::Level::kGlobal;
-    } else if (job_context &&
-               job_context->settings().schema()->HasSetting(setting_name)) {
+    } else if (job_context && job_context->settings().schema()->HasSetting(setting_name)) {
       store = &job_context->settings();
       out->level = SetContext::Level::kJob;
     } else if (target->settings().schema()->HasSetting(setting_name)) {
       store = &target->settings();
       out->level = SetContext::Level::kTarget;
-    } else if (thread &&
-               thread->settings().schema()->HasSetting(setting_name)) {
+    } else if (thread && thread->settings().schema()->HasSetting(setting_name)) {
       store = &thread->settings();
       out->level = SetContext::Level::kThread;
     }
@@ -553,6 +535,36 @@ Err DoSet(ConsoleContext* context, const Command& cmd) {
   Err err;
   const std::string& setting_name = cmd.args()[0];
 
+  // Manually warn on this legacy setting name. This code can be removed after ~Aug 1, 2019.
+  if (setting_name == "filters") {
+    // Try to write the setting name the user typed. We don't bother handling all of the syntax if
+    // they did something more complex.
+    std::string setting_content = "<my_process>";
+    if (cmd.args().size() == 2)
+      setting_content = cmd.args()[1];
+
+    OutputBuffer out;
+    out.Append(Syntax::kError, "========================================\n");
+    out.Append(Syntax::kHeading, "The process filter interface has changed\n");
+    out.Append(Syntax::kError, "========================================\n");
+    out.Append(
+        fxl::StringPrintf("\n"
+                          "The old way:\n"
+                          "\n"
+                          "  set filters %s\n"
+                          "\n"
+                          "has now changed to\n"
+                          "\n",
+                          setting_content.c_str()));
+    out.Append(Syntax::kHeading, fxl::StringPrintf("  attach %s\n", setting_content.c_str()));
+    out.Append(
+        "\n"
+        "The semantics have not changed (it will attach to processes launched in the\n"
+        "future with that name). To see the current filters, type \"filter\" by itself.");
+    Console::get()->Output(out);
+    return Err();
+  }
+
   // See where this setting would be stored.
   SetContext set_context;
   err = GetSetContext(cmd, setting_name, &set_context);
@@ -569,16 +581,15 @@ Err DoSet(ConsoleContext* context, const Command& cmd) {
   set_context.assign_type = assign_type;
 
   // Validate that the operations makes sense.
-  if (assign_type != AssignType::kAssign &&
-      !set_context.setting.value.is_list())
+  if (assign_type != AssignType::kAssign && !set_context.setting.value.is_list())
     return Err("List assignment (+=, -=) used on a non-list option.");
 
   if (elements_to_set.size() > 1u && !set_context.setting.value.is_list())
     return Err("Multiple values on a non-list option.");
 
   Setting out;  // Used for showing the new value.
-  err = SetSetting(set_context, elements_to_set, set_context.store,
-                   &set_context.elements_changed, &out);
+  err = SetSetting(set_context, elements_to_set, set_context.store, &set_context.elements_changed,
+                   &out);
   if (!err.ok())
     return err;
 
@@ -602,15 +613,13 @@ Err DoSet(ConsoleContext* context, const Command& cmd) {
 void AppendSettingsVerbs(std::map<Verb, VerbRecord>* verbs) {
   // get.
   SwitchRecord get_system(kGetSystemSwitch, false, "system", 's');
-  VerbRecord get(&DoGet, {"get"}, kGetShortHelp, kGetHelp,
-                 CommandGroup::kGeneral);
+  VerbRecord get(&DoGet, {"get"}, kGetShortHelp, kGetHelp, CommandGroup::kGeneral);
   get.switches.push_back(std::move(get_system));
   (*verbs)[Verb::kGet] = std::move(get);
 
   // set.
   SwitchRecord set_system(kSetSystemSwitch, false, "system", 's');
-  VerbRecord set(&DoSet, {"set"}, kSetShortHelp, kSetHelp,
-                 CommandGroup::kGeneral);
+  VerbRecord set(&DoSet, {"set"}, kSetShortHelp, kSetHelp, CommandGroup::kGeneral);
   set.switches.push_back(std::move(set_system));
   (*verbs)[Verb::kSet] = std::move(set);
 }

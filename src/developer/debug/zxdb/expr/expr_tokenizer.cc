@@ -16,16 +16,17 @@ namespace zxdb {
 namespace {
 
 bool IsNameFirstChar(char c) {
-  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || c == '~';
+  // Note that "@" is used to annotate some special things:
+  //  - "PLT" breakpoints which are breakpoints set on ELF imports rather than
+  //    DWARF symbols (for example, "__stack_chk_fail@plt"). So it needs to
+  //    count as a name character. This
+  //  - "@main" special location for the program entrypoint.
+  //    can be changed in the future if we have a better way of identifying
+  //    these.
+  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || c == '~' || c == '@';
 }
 
-bool IsNameContinuingChar(char c) {
-  // Note that "@" is used to annotate "PLT" breakpoints which are breakpoints
-  // set on ELF imports rather than DWARF symbols (for example,
-  // "__stack_chk_fail@plt"). So it needs to count as a name character. This
-  // can be changed in the future if we have a better way of identifying these.
-  return IsNameFirstChar(c) || (c >= '0' && c <= '9') || c == '@';
-}
+bool IsNameContinuingChar(char c) { return IsNameFirstChar(c) || (c >= '0' && c <= '9'); }
 
 bool IsIntegerFirstChar(char c) { return isdigit(c); }
 
@@ -45,8 +46,7 @@ const std::vector<const ExprTokenRecord*>& TokensWithFirstChar(char c) {
     // Construct the lookup table.
     initialized = true;
     for (size_t i = 0; i < kNumExprTokenTypes; i++) {
-      const ExprTokenRecord& record =
-          RecordForTokenType(static_cast<ExprTokenType>(i));
+      const ExprTokenRecord& record = RecordForTokenType(static_cast<ExprTokenType>(i));
       if (!record.static_value.empty())
         mapping[static_cast<size_t>(record.static_value[0])].push_back(&record);
     }
@@ -61,7 +61,8 @@ const std::vector<const ExprTokenRecord*>& TokensWithFirstChar(char c) {
 
 }  // namespace
 
-ExprTokenizer::ExprTokenizer(const std::string& input) : input_(input) {}
+ExprTokenizer::ExprTokenizer(const std::string& input, ExprLanguage lang)
+    : input_(input), language_(lang) {}
 
 bool ExprTokenizer::Tokenize() {
   while (!done()) {
@@ -86,8 +87,7 @@ bool ExprTokenizer::Tokenize() {
 }
 
 // static
-std::string ExprTokenizer::GetErrorContext(const std::string& input,
-                                           size_t byte_offset) {
+std::string ExprTokenizer::GetErrorContext(const std::string& input, size_t byte_offset) {
   // Index should be in range of the input string. Also allow indicating one
   // character past the end.
   FXL_DCHECK(byte_offset <= input.size());
@@ -145,14 +145,16 @@ void ExprTokenizer::AdvanceToEndOfToken(const ExprTokenRecord& record) {
   }
 }
 
-bool ExprTokenizer::CurrentMatchesTokenRecord(
-    const ExprTokenRecord& record) const {
+bool ExprTokenizer::CurrentMatchesTokenRecord(const ExprTokenRecord& record) const {
   // Non-statically-known tokens shouldn't use this code path.
   FXL_DCHECK(!record.static_value.empty());
 
   const size_t size = record.static_value.size();
   if (!can_advance(size))
     return false;  // Not enought room.
+
+  if (!(record.languages & static_cast<unsigned>(language_)))
+    return false;  // Doesn't apply to this language.
 
   if (std::string_view(&input_[cur_], size) != record.static_value)
     return false;  // Doesn't match the token static value.

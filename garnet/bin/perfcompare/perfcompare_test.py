@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import sys
+import tarfile
 import tempfile
 import unittest
 
@@ -120,8 +121,8 @@ def GenerateTestData(mean, stddev):
 
 class PerfCompareTest(TempDirTestCase):
 
-    def ExampleDataDir(self, mean=1000, stddev=100, drop_one=False):
-        dir_path = self.MakeTempDir()
+    def WriteExampleDataDir(self, dir_path, mean=1000, stddev=100,
+                            drop_one=False):
         results = [('ClockGetTimeExample', GenerateTestData(mean, stddev))]
         if not drop_one:
             results.append(('SecondExample', GenerateTestData(2000, 300)))
@@ -142,7 +143,41 @@ class PerfCompareTest(TempDirTestCase):
         with open(os.path.join(dir_path, 'foo.catapult_json'), 'w') as fh:
             fh.write('dummy_data')
 
+    def ExampleDataDir(self, **kwargs):
+        dir_path = self.MakeTempDir()
+        self.WriteExampleDataDir(dir_path, **kwargs)
         return dir_path
+
+    def test_reading_results_from_dir(self):
+        dir_path = self.ExampleDataDir()
+        results = perfcompare.ResultsFromDir(dir_path)
+        self.assertEquals(
+            results['ClockGetTimeExample'].FormatConfidenceInterval(),
+            '991 +/- 26')
+
+    def test_reading_results_from_multi_boot_dir(self):
+        dir_path = self.MakeTempDir()
+        subdir = os.path.join(dir_path, 'by_boot', 'boot000000')
+        os.makedirs(subdir)
+        self.WriteExampleDataDir(subdir)
+        results = perfcompare.ResultsFromDir(dir_path)
+        self.assertEquals(
+            results['ClockGetTimeExample'].FormatConfidenceInterval(),
+            '991 +/- 26')
+
+    def test_reading_results_from_tar_file(self):
+        dir_path = self.ExampleDataDir()
+        # Test the uncompressed and gzipped cases.
+        for write_mode in ('w', 'w:gz'):
+            # Create a tar file containing the example results files.
+            tar_filename = os.path.join(self.MakeTempDir(), 'out.tar')
+            with tarfile.open(tar_filename, write_mode) as tar:
+                for name in os.listdir(dir_path):
+                    tar.add(os.path.join(dir_path, name), arcname=name)
+            results = perfcompare.ResultsFromDir(tar_filename)
+            self.assertEquals(
+                results['ClockGetTimeExample'].FormatConfidenceInterval(),
+                '991 +/- 26')
 
     # Returns the output of compare_perf when run on the given directories.
     def ComparePerf(self, before_dir, after_dir):
@@ -212,6 +247,21 @@ class PerfCompareTest(TempDirTestCase):
         after_dir = self.ExampleDataDir(drop_one=True)
         output = self.ComparePerf(before_dir, after_dir)
         GOLDEN.AssertCaseEq('removing_test', output)
+
+    def test_mismatch_rate(self):
+        self.assertEquals(perfcompare.MismatchRate([(0,1), (2,3)]), 1)
+        self.assertEquals(perfcompare.MismatchRate([(0,2), (1,3)]), 0)
+        self.assertEquals(perfcompare.MismatchRate([(0,2), (1,3), (4,5)]), 2./3)
+
+    def test_validate_perfcompare(self):
+        # This is an example input dataset that gives a high mismatch rate,
+        # because the data is drawn from two very different distributions.
+        results_dirs = ([self.ExampleDataDir(mean=100, stddev=10)] * 10 +
+                        [self.ExampleDataDir(mean=200, stddev=10)] * 10)
+        stdout = StringIO.StringIO()
+        perfcompare.Main(['validate_perfcompare'] + results_dirs, stdout)
+        output = stdout.getvalue()
+        GOLDEN.AssertCaseEq('validate_perfcompare', output)
 
 
 if __name__ == '__main__':

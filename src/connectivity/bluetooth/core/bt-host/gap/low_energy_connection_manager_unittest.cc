@@ -162,13 +162,13 @@ TEST_F(GAP_LowEnergyConnectionManagerTest, ConnectUnknownPeer) {
 }
 
 TEST_F(GAP_LowEnergyConnectionManagerTest, ConnectClassicPeer) {
-  auto* dev = peer_cache()->NewPeer(kAddress2, true);
-  EXPECT_FALSE(conn_mgr()->Connect(dev->identifier(), {}));
+  auto* peer = peer_cache()->NewPeer(kAddress2, true);
+  EXPECT_FALSE(conn_mgr()->Connect(peer->identifier(), {}));
 }
 
 TEST_F(GAP_LowEnergyConnectionManagerTest, ConnectNonConnectablePeer) {
-  auto* dev = peer_cache()->NewPeer(kAddress0, false);
-  EXPECT_FALSE(conn_mgr()->Connect(dev->identifier(), {}));
+  auto* peer = peer_cache()->NewPeer(kAddress0, false);
+  EXPECT_FALSE(conn_mgr()->Connect(peer->identifier(), {}));
 }
 
 // An error is received via the HCI Command cb_status event
@@ -716,12 +716,32 @@ TEST_F(GAP_LowEnergyConnectionManagerTest, Destructor) {
   EXPECT_EQ(1u, canceled_peers().count(kAddress1));
 }
 
-TEST_F(GAP_LowEnergyConnectionManagerTest, DisconnectError) {
+TEST_F(GAP_LowEnergyConnectionManagerTest, DisconnectPendingConnections) {
+  auto* dev0 = peer_cache()->NewPeer(kAddress0, true);
+  auto* dev1 = peer_cache()->NewPeer(kAddress1, true);
+
+  auto callback = [](auto, auto) {};  // no-op
+
+  EXPECT_TRUE(conn_mgr()->Connect(dev0->identifier(), callback));
+  EXPECT_TRUE(conn_mgr()->Connect(dev1->identifier(), callback));
+  EXPECT_EQ(Peer::ConnectionState::kInitializing,
+            dev0->le()->connection_state());
+
+  EXPECT_FALSE(conn_mgr()->Disconnect(dev0->identifier()));
+  EXPECT_FALSE(conn_mgr()->Disconnect(dev1->identifier()));
+}
+
+TEST_F(GAP_LowEnergyConnectionManagerTest, DisconnectUnknownPeer) {
+  // Unknown peers are inherently "not connected."
+  EXPECT_TRUE(conn_mgr()->Disconnect(PeerId(999)));
+}
+
+TEST_F(GAP_LowEnergyConnectionManagerTest, DisconnectUnconnectedPeer) {
   auto* peer = peer_cache()->NewPeer(kAddress0, true);
   test_device()->AddPeer(std::make_unique<FakePeer>(kAddress0));
 
-  // This should fail as |peer0| is not connected.
-  EXPECT_FALSE(conn_mgr()->Disconnect(peer->identifier()));
+  // This returns true so long the peer is not connected.
+  EXPECT_TRUE(conn_mgr()->Disconnect(peer->identifier()));
 }
 
 TEST_F(GAP_LowEnergyConnectionManagerTest, Disconnect) {
@@ -756,6 +776,41 @@ TEST_F(GAP_LowEnergyConnectionManagerTest, Disconnect) {
   EXPECT_TRUE(canceled_peers().empty());
 }
 
+TEST_F(GAP_LowEnergyConnectionManagerTest, DisconnectThrice) {
+  auto* peer = peer_cache()->NewPeer(kAddress0, true);
+  test_device()->AddPeer(std::make_unique<FakePeer>(kAddress0));
+
+  int closed_count = 0;
+  auto closed_cb = [&closed_count] { closed_count++; };
+
+  LowEnergyConnectionRefPtr conn_ref;
+  auto success_cb = [&closed_cb, &conn_ref](auto status, auto cb_conn_ref) {
+    EXPECT_TRUE(status);
+    conn_ref = std::move(cb_conn_ref);
+    ASSERT_TRUE(conn_ref);
+    conn_ref->set_closed_callback(closed_cb);
+  };
+
+  EXPECT_TRUE(conn_mgr()->Connect(peer->identifier(), success_cb));
+
+  RunLoopUntilIdle();
+
+  EXPECT_TRUE(conn_mgr()->Disconnect(peer->identifier()));
+
+  // Try to disconnect again while the first disconnection is in progress.
+  EXPECT_TRUE(conn_mgr()->Disconnect(peer->identifier()));
+
+  RunLoopUntilIdle();
+
+  // The single ref should get only one "closed" call.
+  EXPECT_EQ(1, closed_count);
+  EXPECT_TRUE(connected_peers().empty());
+  EXPECT_TRUE(canceled_peers().empty());
+
+  // Try to disconnect once more, now that the link is gone.
+  EXPECT_TRUE(conn_mgr()->Disconnect(peer->identifier()));
+}
+
 // Tests when a link is lost without explicitly disconnecting
 TEST_F(GAP_LowEnergyConnectionManagerTest, DisconnectEvent) {
   auto* peer = peer_cache()->NewPeer(kAddress0, true);
@@ -787,6 +842,32 @@ TEST_F(GAP_LowEnergyConnectionManagerTest, DisconnectEvent) {
   RunLoopUntilIdle();
 
   EXPECT_EQ(2, closed_count);
+}
+
+TEST_F(GAP_LowEnergyConnectionManagerTest, DisconnectAfterRefsReleased) {
+  auto* peer = peer_cache()->NewPeer(kAddress0, true);
+  test_device()->AddPeer(std::make_unique<FakePeer>(kAddress0));
+
+  LowEnergyConnectionRefPtr conn_ref;
+  auto success_cb = [&conn_ref](auto status, auto cb_conn_ref) {
+    EXPECT_TRUE(status);
+    conn_ref = std::move(cb_conn_ref);
+  };
+
+  EXPECT_TRUE(conn_mgr()->Connect(peer->identifier(), success_cb));
+
+  RunLoopUntilIdle();
+
+  ASSERT_TRUE(conn_ref);
+  conn_ref.reset();
+
+  // Try to disconnect while the zero-refs connection is being disconnected.
+  EXPECT_TRUE(conn_mgr()->Disconnect(peer->identifier()));
+
+  RunLoopUntilIdle();
+
+  EXPECT_TRUE(connected_peers().empty());
+  EXPECT_TRUE(canceled_peers().empty());
 }
 
 TEST_F(GAP_LowEnergyConnectionManagerTest, DisconnectWhileRefPending) {
@@ -858,6 +939,38 @@ TEST_F(GAP_LowEnergyConnectionManagerTest, DisconnectEventWhileRefPending) {
 
   test_device()->Disconnect(kAddress0);
   RunLoopUntilIdle();
+}
+
+TEST_F(GAP_LowEnergyConnectionManagerTest,
+       RemovePeerFromPeerCacheDuringDisconnection) {
+  auto* peer = peer_cache()->NewPeer(kAddress0, true);
+  test_device()->AddPeer(std::make_unique<FakePeer>(kAddress0));
+
+  LowEnergyConnectionRefPtr conn_ref;
+  auto success_cb = [&conn_ref](auto status, auto cb_conn_ref) {
+    EXPECT_TRUE(status);
+    ASSERT_TRUE(cb_conn_ref);
+    EXPECT_TRUE(cb_conn_ref->active());
+
+    conn_ref = std::move(cb_conn_ref);
+  };
+
+  EXPECT_TRUE(conn_mgr()->Connect(peer->identifier(), success_cb));
+  RunLoopUntilIdle();
+  ASSERT_TRUE(conn_ref);
+
+  // This should invalidate the ref that was bound to |ref_cb|.
+  const PeerId id = peer->identifier();
+  EXPECT_TRUE(conn_mgr()->Disconnect(id));
+  ASSERT_FALSE(peer->le()->connected());
+  EXPECT_FALSE(conn_ref->active());
+
+  EXPECT_TRUE(peer_cache()->RemoveDisconnectedPeer(id));
+
+  RunLoopUntilIdle();
+
+  EXPECT_FALSE(peer_cache()->FindById(id));
+  EXPECT_FALSE(peer_cache()->FindByAddress(kAddress0));
 }
 
 // Listener receives remote initiated connection ref.

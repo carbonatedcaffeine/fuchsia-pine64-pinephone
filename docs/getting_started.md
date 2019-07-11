@@ -5,15 +5,10 @@ Pink + Purple == Fuchsia (a new Operating System)
 Welcome to Fuchsia! This document has everything you need to get started with
 Fuchsia.
 
-*** note
-NOTE: The Fuchsia source includes
-[Zircon](/zircon/README.md),
-the core platform that underpins Fuchsia.
-The Fuchsia build process will build Zircon as a side-effect;
-to work on Zircon only, read and follow Zircon's
-[Getting Started](/zircon/docs/getting_started.md)
-doc.
-***
+Note: The Fuchsia source includes [Zircon](/zircon/README.md),
+the core platform that underpins Fuchsia. The Fuchsia build process will
+build Zircon as a side-effect; to work on Zircon only, read and follow
+Zircon's [Getting Started](/zircon/docs/getting_started.md) doc.
 
 [TOC]
 
@@ -60,7 +55,7 @@ fx build
 
 The first command selects the build configuration you wish to build and
 generates the build system itself in an output directory (e.g., `out/x64`).
-Fuchsia can ephemerally download [packages](development/build/packages.md) over the network;
+Fuchsia can ephemerally download [packages](development/build/boards_and_products.md) over the network;
 here we use the `--available` flag to make the necessary packages covered in this guide
 available for download.
 
@@ -127,6 +122,7 @@ fx run
 ```
 
 There are various flags for `fx run` to control QEMU's configuration:
+
 * `-m` sets QEMU's memory size in MB.
 * `-g` enables graphics (see below).
 * `-N` enables networking (see below).
@@ -252,7 +248,7 @@ you can launch the [term](https://fuchsia.googlesource.com/topaz/+/master/app/te
 
 ## Running tests
 
-Compiled test binaries are installed in `/pkgfs/packages/`, and are referenced by a URI.
+Compiled test binaries are cached in pkgfs like other components, and are referenced by a URI.
 You can run a test by invoking it in the terminal. E.g.
 
 ```

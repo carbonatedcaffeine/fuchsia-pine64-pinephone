@@ -4,7 +4,7 @@
 
 test("device-enumeration") {
   sources = [
-    "main.cpp",
+    "main.cc",
   ]
   deps = [
     "$zx/system/fidl/fuchsia-sysinfo:c",
@@ -12,7 +12,7 @@ test("device-enumeration") {
     "$zx/system/ulib/devmgr-launcher",
     "$zx/system/ulib/fbl",
     "$zx/system/ulib/fdio",
-    "$zx/system/ulib/unittest",
+    "$zx/system/ulib/zxtest",
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",
   ]

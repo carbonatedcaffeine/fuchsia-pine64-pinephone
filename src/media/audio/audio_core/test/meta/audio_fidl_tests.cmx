@@ -2,9 +2,11 @@
     "facets": {
         "fuchsia.test": {
             "injected-services": {
-                "fuchsia.media.Audio": "fuchsia-pkg://fuchsia.com/audio#meta/audio.cmx",
                 "fuchsia.media.AudioCore": "fuchsia-pkg://fuchsia.com/audio_core#meta/audio_core.cmx"
-            }
+            },
+            "system-services": [
+                "fuchsia.scheduler.ProfileProvider"
+            ]
         }
     },
     "program": {
@@ -12,7 +14,7 @@
     },
     "sandbox": {
         "services": [
-            "fuchsia.media.Audio"
+            "fuchsia.media.AudioCore"
         ]
     }
 }

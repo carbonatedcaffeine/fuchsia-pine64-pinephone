@@ -5,7 +5,7 @@
 #pragma once
 
 #include <ddk/debug.h>
-#include <ddktl/i2c-channel.h>
+#include <lib/device-protocol/i2c-channel.h>
 #include <fbl/unique_ptr.h>
 
 namespace audio {
@@ -41,6 +41,7 @@ public:
     zx_status_t Reset();
     zx_status_t Standby();
     zx_status_t ExitStandby();
+    zx_status_t Mute(bool mute);
 
 private:
     friend class std::default_delete<Tas27xx>;

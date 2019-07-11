@@ -10,101 +10,61 @@ library fuchsia.sys2;
 xunion OfferDecl {
     OfferServiceDecl service;
     OfferDirectoryDecl directory;
+    OfferStorageDecl storage;
 };
 
 /// Declares a service offered by a component to one of its children, which may
 /// have been offered by the component's containing realm, the component itself,
 /// or one of its other children.
 table OfferServiceDecl {
-    /// The provider of the capability relative to the component itself.
-    1: OfferSource source;
+    /// The provider of the capability relative to the component itself. Must be
+    /// `realm`, `self`, or `child`.
+    1: Ref source;
 
     /// Path identifying the service being offered.
     2: string:MAX_PATH_LENGTH source_path;
 
-    /// The list of children to which the capability should be offered.
-    3: vector<OfferTarget> targets;
+    /// Reference to the target. Must be `child` or `collection`.
+    3: Ref target;
+
+    /// The path under which the capability is being offered.
+    ///
+    /// Must be an absolute path starting with /.
+    4: string:MAX_PATH_LENGTH target_path;
 };
 
 /// Declares a directory offered by a component to one of its children, which may
 /// have been offered by the component's containing realm, the component itself,
 /// or one of its other children.
 table OfferDirectoryDecl {
+    /// The provider of the capability relative to the component itself. Must be
+    /// `realm`, `self`, or `child`.
+    1: Ref source;
+
     /// Path identifying the directory being offered.
-    1: string:MAX_PATH_LENGTH source_path;
+    2: string:MAX_PATH_LENGTH source_path;
 
-    /// The provider of the capability relative to the component itself.
-    2: OfferSource source;
+    /// Reference to the target of the capability. Must be `child` or
+    /// `collection`.
+    3: Ref target;
 
-    /// The list of children to which the capability should be offered.
-    3: vector<OfferTarget> targets;
+    /// The path under which the capability is being offered.
+    ///
+    /// Must be an absolute path starting with /.
+    4: string:MAX_PATH_LENGTH target_path;
 };
-
 
 /// Declares a storage capability offered by a component to one of its children,
 /// such as meta storage offered by the component's containing realm or cache
 /// storage offered by the component itself.
-table StorageOfferDecl {
+table OfferStorageDecl {
     /// The type of storage being offered.
-    1: StorageType storage_type;
+    1: StorageType type;
 
-    /// The source of the storage capability.
-    2: StorageOfferSource source;
+    /// The source of the storage capability. Must be `realm` or `storage`.
+    2: Ref source;
 
-    /// The list of children to which the capability should be offered.
-    3: vector<StorageOfferTarget> targets;
+    /// Reference to the target of the capability. Must be `child` or
+    /// `collection`.
+    3: Ref target;
 };
-
-/// The type of storage offered by this component.
-enum StorageType {
-    /// General data storage.
-    DATA = 1;
-
-    /// Cache storage that may be deleted at any time by the system.
-    CACHE = 2;
-
-    /// Meta storage that will be used by component manager to provide
-    /// additional functionality for the component.
-    META = 3;
-};
-
-/// The source of an offered storage capability, which may be either the realm
-/// or the name of a storage section on the component itself.
-xunion StorageOfferSource {
-    RealmRef realm;
-    StorageRef storage_section;
-};
-
-/// Describes a target for the offering of a storage capability.
-table StorageOfferTarget {
-    /// The name of the child component to which this storage capability is
-    /// being offered.
-    1: string:MAX_CHILD_NAME_LENGTH child_name;
-};
-
-/// Identifies a source component of an OfferDecl.
-// TODO: Split OfferSource by capability type.
-xunion OfferSource {
-  RealmRef realm;
-  SelfRef myself;
-  ChildRef child;
-};
-
-/// Describes a target for a capability offering.
-// TODO: Split OfferTarget by capability type.
-table OfferTarget {
-    /// The path under which the capability is being offered.
-    ///
-    /// Must be an absolute path starting with /.
-    1: string:MAX_PATH_LENGTH target_path;
-
-    /// Reference to the destination.
-    2: OfferDest dest;
-};
-
-/// References the destination of an OfferTarget.
-xunion OfferDest {
-    ChildRef child;
-    CollectionRef collection;
-};
-

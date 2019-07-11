@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/lib/fxl/memory/weak_ptr.h"
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DWARF_SYMBOL_FACTORY_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DWARF_SYMBOL_FACTORY_H_
+
 #include "src/developer/debug/zxdb/symbols/dwarf_tag.h"
 #include "src/developer/debug/zxdb/symbols/symbol_factory.h"
+#include "src/lib/fxl/memory/weak_ptr.h"
 
 namespace llvm {
 class DWARFDie;
@@ -33,6 +36,9 @@ class DwarfSymbolFactory : public SymbolFactory {
   // Internal version that creates a symbol from a Die.
   fxl::RefPtr<Symbol> DecodeSymbol(const llvm::DWARFDie& die);
 
+  // As with SymbolFactory::CreateSymbol, these should never return null
+  // but rather an empty Symbol implementation on error.
+  //
   // is_specification will be set when this function recursively calls itself
   // to parse the specification of a function implementation.
   //
@@ -45,6 +51,7 @@ class DwarfSymbolFactory : public SymbolFactory {
   fxl::RefPtr<Symbol> DecodeArrayType(const llvm::DWARFDie& die);
   fxl::RefPtr<Symbol> DecodeBaseType(const llvm::DWARFDie& die);
   fxl::RefPtr<Symbol> DecodeCollection(const llvm::DWARFDie& die);
+  fxl::RefPtr<Symbol> DecodeCompileUnit(const llvm::DWARFDie& die);
   fxl::RefPtr<Symbol> DecodeDataMember(const llvm::DWARFDie& die);
   fxl::RefPtr<Symbol> DecodeEnum(const llvm::DWARFDie& die);
   fxl::RefPtr<Symbol> DecodeFunctionType(const llvm::DWARFDie& die);
@@ -55,8 +62,9 @@ class DwarfSymbolFactory : public SymbolFactory {
   fxl::RefPtr<Symbol> DecodeModifiedType(const llvm::DWARFDie& die);
   fxl::RefPtr<Symbol> DecodeNamespace(const llvm::DWARFDie& die);
   fxl::RefPtr<Symbol> DecodeUnspecifiedType(const llvm::DWARFDie& die);
-  fxl::RefPtr<Symbol> DecodeVariable(const llvm::DWARFDie& die,
-                                     bool is_specification = false);
+  fxl::RefPtr<Symbol> DecodeVariable(const llvm::DWARFDie& die, bool is_specification = false);
+  fxl::RefPtr<Symbol> DecodeVariant(const llvm::DWARFDie& die);
+  fxl::RefPtr<Symbol> DecodeVariantPart(const llvm::DWARFDie& die);
 
   // This can be null if the module is unloaded but there are still some
   // dangling type references to it.
@@ -64,3 +72,5 @@ class DwarfSymbolFactory : public SymbolFactory {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DWARF_SYMBOL_FACTORY_H_

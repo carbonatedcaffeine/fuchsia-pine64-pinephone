@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_FINISH_PHYSICAL_FRAME_THREAD_CONTROLLER_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_FINISH_PHYSICAL_FRAME_THREAD_CONTROLLER_H_
 
 #include <optional>
 #include <vector>
@@ -38,12 +39,10 @@ class FinishPhysicalFrameThreadController : public ThreadController {
   ~FinishPhysicalFrameThreadController() override;
 
   // ThreadController implementation.
-  void InitWithThread(Thread* thread,
-                      std::function<void(const Err&)> cb) override;
+  void InitWithThread(Thread* thread, std::function<void(const Err&)> cb) override;
   ContinueOp GetContinueOp() override;
-  StopOp OnThreadStop(
-      debug_ipc::NotifyException::Type stop_type,
-      const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) override;
+  StopOp OnThreadStop(debug_ipc::NotifyException::Type stop_type,
+                      const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) override;
   const char* GetName() const override { return "Finish Physical"; }
 
  private:
@@ -68,3 +67,5 @@ class FinishPhysicalFrameThreadController : public ThreadController {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_FINISH_PHYSICAL_FRAME_THREAD_CONTROLLER_H_

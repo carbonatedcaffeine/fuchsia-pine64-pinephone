@@ -1,0 +1,17 @@
+{
+    "program": {
+        "binary": "test/pmd_pkgfs_test"
+    },
+    "sandbox": {
+        "dev": [
+            "misc/ramctl"
+        ],
+        "features": [
+            "system-temp"
+        ],
+        "services": [
+            "fuchsia.tracing.provider.Registry",
+            "fuchsia.process.Launcher"
+        ]
+    }
+}

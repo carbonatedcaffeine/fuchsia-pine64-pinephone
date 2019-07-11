@@ -5,12 +5,12 @@
 #ifndef LIB_FIDL_CPP_INTERNAL_HEADER_H_
 #define LIB_FIDL_CPP_INTERNAL_HEADER_H_
 
+#include <lib/fit/function.h>
+#include <lib/fit/variant.h>
+
 #include <array>
 #include <functional>
 #include <ostream>
-
-#include <lib/fit/function.h>
-#include <lib/fit/variant.h>
 
 #ifdef __Fuchsia__
 #include <lib/zx/bti.h>
@@ -18,6 +18,7 @@
 #include <lib/zx/debuglog.h>
 #include <lib/zx/event.h>
 #include <lib/zx/eventpair.h>
+#include <lib/zx/exception.h>
 #include <lib/zx/fifo.h>
 #include <lib/zx/guest.h>
 #include <lib/zx/handle.h>
@@ -59,19 +60,5 @@
 // defined, so that calls to Clone in clone.h are referencing the ADL
 // implementation and are not ambiguous.
 #include "lib/fidl/cpp/clone.h"
-
-// This is defined to temporarily allow external users to know if they're
-// compiled against a version of the FIDL library that uses std::vector and
-// std::string. This will be removed once the transition is complete.
-#define USE_STD_FOR_NON_NULLABLE_FIDL_FIELDS
-
-// This is defined temporarily to allow a soft transition for the change API
-// for table accessors. See FIDL-484.
-#define FIDL_NEW_STYLE_TABLE_MEMBER_ACCESSORS
-
-// This is defined temporarily to enable comparison operators to be generated
-// for FIDL types. They should be replaced by calls to fidl::Equals.
-// See FIDL-563.
-#define FIDL_OPERATOR_EQUALS
 
 #endif  // LIB_FIDL_CPP_INTERNAL_HEADER_H_

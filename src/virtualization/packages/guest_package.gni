@@ -27,7 +27,8 @@ template("guest_package") {
   guest_config_file = "${target_out_dir}/guest.cfg"
 
   action(guest_config_target_name) {
-    testonly = true
+    testonly = defined(invoker.testonly) && invoker.testonly
+
     script = "//src/virtualization/packages/generate_guest_config.py"
     outputs = [
       guest_config_file,
@@ -88,7 +89,8 @@ template("guest_package") {
   }
 
   package(target_name) {
-    testonly = true
+    testonly = defined(invoker.testonly) && invoker.testonly
+
     deps = [
       ":${guest_config_target_name}",
     ]
@@ -97,6 +99,10 @@ template("guest_package") {
 
     if (defined(invoker.deps)) {
       deps += invoker.deps
+    }
+
+    if (defined(invoker.metadata)) {
+      metadata = invoker.metadata
     }
 
     meta = [
@@ -164,5 +170,45 @@ template("guest_package") {
     if (defined(invoker.resources)) {
       resources += invoker.resources
     }
+  }
+}
+
+# Defines a guest prebuilt.
+#
+# Parameters
+#   source (string, required)
+#   output (string, required)
+template("guest_prebuilt") {
+  assert(defined(invoker.source), "")
+  assert(defined(invoker.output), "")
+  action(target_name) {
+    visibility = [ ":*" ]
+    script = "//src/virtualization/packages/check_image.sh"
+
+    # If the input file exists, we want to copy it to the output.
+    # Otherwise, we want to generate an empty file.
+    #
+    # GN has no way to specify an "optional input" -- we can either
+    # specify an input (causing GN to error out if the file doesn't
+    # exist); or not specify an input (meaning that GN will not rebuild
+    # when the input image changes).
+    #
+    # We work around this by not specifying the input file as
+    # a dependency explicitly, but having the "check_image.sh" script
+    # out a depfile the first time it is run. This gives the script
+    # a chance to run and generate a fake empty image file the first
+    # time it runs, and after that, GN will correctly rebuild when
+    # required.
+    depfile = "${invoker.output}.d"
+
+    args = [
+      rebase_path(invoker.source, root_build_dir),
+      rebase_path(invoker.output, root_build_dir),
+      rebase_path(depfile, root_build_dir),
+    ]
+
+    outputs = [
+      invoker.output,
+    ]
   }
 }

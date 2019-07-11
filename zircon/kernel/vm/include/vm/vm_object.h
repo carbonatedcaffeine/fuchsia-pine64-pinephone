@@ -76,15 +76,18 @@ public:
     // Returns true if the VMO was created vma CreatePagerVmo().
     virtual bool is_pager_backed() const { return false; }
 
-    // Returns the number of physical pages currently allocated to the
+    // Returns true if the vmo is a hidden paged vmo.
+    virtual bool is_hidden() const { return false; }
+
+    // Returns the number of physical pages currently attributed to the
     // object where (offset <= page_offset < offset+len).
     // |offset| and |len| are in bytes.
-    virtual size_t AllocatedPagesInRange(uint64_t offset, uint64_t len) const {
+    virtual size_t AttributedPagesInRange(uint64_t offset, uint64_t len) const {
         return 0;
     }
-    // Returns the number of physical pages currently allocated to the object.
-    size_t AllocatedPages() const {
-        return AllocatedPagesInRange(0, size());
+    // Returns the number of physical pages currently attributed to the object.
+    size_t AttributedPages() const {
+        return AttributedPagesInRange(0, size());
     }
 
     // find physical pages to back the range of the object
@@ -167,7 +170,9 @@ public:
     virtual uint64_t parent_user_id() const = 0;
 
     // Sets the value returned by |user_id()|. May only be called once.
-    void set_user_id(uint64_t user_id);
+    //
+    // Derived types overriding this method are expected to call it from their override.
+    virtual void set_user_id(uint64_t user_id);
 
     virtual void Dump(uint depth, bool verbose) = 0;
 
@@ -187,6 +192,11 @@ public:
     virtual zx_status_t CreateCowClone(Resizability resizable, CloneType type,
                                        uint64_t offset, uint64_t size, bool copy_name,
                                        fbl::RefPtr<VmObject>* child_vmo) {
+        return ZX_ERR_NOT_SUPPORTED;
+    }
+
+    virtual zx_status_t CreateChildSlice(uint64_t offset, uint64_t size, bool copy_name,
+                                         fbl::RefPtr<VmObject>* child_vmo) {
         return ZX_ERR_NOT_SUPPORTED;
     }
 
@@ -245,10 +255,14 @@ public:
     // Notifies the child observer that there is one child.
     void NotifyOneChild() TA_EXCL(lock_);
 
+    // Removes the child |child| from this vmo.
+    //
+    // Subclasses which override this function should be sure that ::DropChildLocked
+    // and ::OnUserChildRemoved are called where appropraite.
+    //
     // |guard| must be this vmo's lock.
-    void RemoveChild(VmObjectPaged* r, Guard<Mutex>&& guard)
-        // Analysis doesn't know |guard| is this vmo's lock.
-        TA_NO_THREAD_SAFETY_ANALYSIS;
+    virtual void RemoveChild(VmObjectPaged* child, Guard<Mutex>&& guard) TA_REQ(lock_);
+
     // Drops |c| from the child list without going through the full removal
     // process. ::RemoveChild is probably what you want here.
     void DropChildLocked(VmObjectPaged* c) TA_REQ(lock_);
@@ -256,15 +270,11 @@ public:
     uint32_t num_user_children() const;
     uint32_t num_children() const;
 
-    // Called by RemoveChild. VmObject::OnChildRemoved eventually needs to be invoked
-    // on the VmObject which is held by the dispatcher which matches |user_id|. Implementations
-    // should forward this call towards that VmObject and eventually call this class's
-    // implementation.
+    // Function that should be invoked when a userspace visible child of
+    // this vmo is removed. Updates state and notifies userspace if necessary.
     //
     // The guard passed to this function is the vmo's lock.
-    virtual void OnChildRemoved(Guard<Mutex>&& guard)
-        // Analysis doesn't know |guard| is this vmo's lock.
-        TA_NO_THREAD_SAFETY_ANALYSIS;
+    void OnUserChildRemoved(Guard<Mutex>&& guard) TA_REQ(lock_);
 
     // Called by AddChildLocked. VmObject::OnChildAddedLocked eventually needs to be invoked
     // on the VmObject which is held by the dispatcher which matches |user_id|. Implementations

@@ -55,6 +55,19 @@ magma_status_t magma_query(int fd, uint64_t id, uint64_t* value_out)
     return MAGMA_STATUS_OK;
 }
 
+magma_status_t magma_query_returns_buffer(int fd, uint64_t id, uint32_t* result_out)
+{
+    if (!result_out)
+        return DRET_MSG(MAGMA_STATUS_INVALID_ARGS, "bad result_out address");
+
+    if (!magma::PlatformConnectionClient::QueryReturnsBuffer(fd, id, result_out))
+        return DRET_MSG(MAGMA_STATUS_INTERNAL_ERROR,
+                        "magma::PlatformConnectionClient::QueryReturnsBuffer failed");
+
+    DLOG("magma_query_returns_buffer id %" PRIu64 " returned buffer 0x%x", id, *result_out);
+    return MAGMA_STATUS_OK;
+}
+
 void magma_create_context(magma_connection_t connection, uint32_t* context_id_out)
 {
     magma::PlatformConnectionClient::cast(connection)->CreateContext(context_id_out);
@@ -95,6 +108,18 @@ magma_status_t magma_set_cache_policy(magma_buffer_t buffer, magma_cache_policy_
 {
     bool result = reinterpret_cast<magma::PlatformBuffer*>(buffer)->SetCachePolicy(policy);
     return result ? MAGMA_STATUS_OK : MAGMA_STATUS_INTERNAL_ERROR;
+}
+
+magma_status_t magma_set_buffer_mapping_address_range(magma_buffer_t buffer, uint32_t handle)
+{
+    auto address_range =
+        magma::PlatformBuffer::MappingAddressRange::Create(magma::PlatformHandle::Create(handle));
+    if (!address_range)
+        return DRET(MAGMA_STATUS_INVALID_ARGS);
+
+    magma::Status status = reinterpret_cast<magma::PlatformBuffer*>(buffer)->SetMappingAddressRange(
+        std::move(address_range));
+    return status.get();
 }
 
 uint64_t magma_get_buffer_id(magma_buffer_t buffer)
@@ -279,13 +304,6 @@ magma_status_t magma_create_command_buffer(magma_connection_t connection, uint64
     if (!platform_buffer)
         return DRET(MAGMA_STATUS_MEMORY_ERROR);
 
-    // Mapping can be expensive (mostly due to aslr);
-    // and we want to map this buffer on submit to pull out the batch buffer id (see below).
-    // To avoid mapping twice, we do an initial map here, so that when the client does map-unmap
-    // then submits, the mapping will probably still be alive inside the platform buffer.
-    void* data;
-    platform_buffer->MapCpu(&data);
-
     *buffer_out =
         reinterpret_cast<magma_buffer_t>(platform_buffer.release()); // Ownership passed across abi
 
@@ -317,6 +335,17 @@ void magma_submit_command_buffer(magma_connection_t connection, magma_buffer_t c
         magma::PlatformBuffer* platform_buffer_;
     };
 
+    // The CommandBufferInterpreter maps the command buffer in order to validate its contents
+    // and retrieve the batch buffer resource index.
+    // A virtualized client may have mapped the command buffer into a different vmar, so here we
+    // ensure to map into the root vmar.
+    magma::Status status = platform_buffer->SetMappingAddressRange(
+        magma::PlatformBuffer::MappingAddressRange::CreateDefault());
+    if (!status.ok()) {
+        DLOG("Failed to set mapping address range");
+        return;
+    }
+
     CommandBufferInterpreter interpreter(platform_buffer);
     if (!interpreter.Initialize()) {
         DLOG("failed to initialize interpreter");
@@ -339,9 +368,20 @@ void magma_submit_command_buffer(magma_connection_t connection, magma_buffer_t c
     delete platform_buffer;
 }
 
+// TODO(MA-580): remove (deprecated)
 void magma_execute_immediate_commands(magma_connection_t connection, uint32_t context_id,
                                       uint64_t command_count,
                                       magma_system_inline_command_buffer* command_buffers)
+{
+    // magma_inline_command_buffer is just renamed magma_system_inline_command_buffer
+    magma::PlatformConnectionClient::cast(connection)
+        ->ExecuteImmediateCommands(context_id, command_count,
+                                   reinterpret_cast<magma_inline_command_buffer*>(command_buffers));
+}
+
+void magma_execute_immediate_commands2(magma_connection_t connection, uint32_t context_id,
+                                       uint64_t command_count,
+                                       magma_inline_command_buffer* command_buffers)
 {
     magma::PlatformConnectionClient::cast(connection)
         ->ExecuteImmediateCommands(context_id, command_count, command_buffers);
@@ -497,15 +537,19 @@ void magma_buffer_format_description_release(magma_buffer_format_description_t d
 }
 
 // |image_planes_out| must be an array with MAGMA_MAX_IMAGE_PLANES elements.
-magma_status_t magma_get_buffer_format_plane_info(magma_buffer_format_description_t description,
-                                                  magma_image_plane_t* image_planes_out)
+magma_status_t
+magma_get_buffer_format_plane_info_with_size(magma_buffer_format_description_t description,
+                                             uint32_t width, uint32_t height,
+                                             magma_image_plane_t* image_planes_out)
 {
     if (!description) {
         return DRET_MSG(MAGMA_STATUS_INVALID_ARGS, "Null description");
     }
     auto buffer_description =
         reinterpret_cast<magma_sysmem::PlatformBufferDescription*>(description);
-    memcpy(image_planes_out, buffer_description->planes, sizeof(buffer_description->planes));
+    if (!buffer_description->GetPlanes(width, height, image_planes_out)) {
+        return DRET(MAGMA_STATUS_INVALID_ARGS);
+    }
     return MAGMA_STATUS_OK;
 }
 
@@ -518,8 +562,8 @@ magma_status_t magma_get_buffer_format_modifier(magma_buffer_format_description_
     }
     auto buffer_description =
         reinterpret_cast<magma_sysmem::PlatformBufferDescription*>(description);
-    *has_format_modifier_out = buffer_description->has_format_modifier;
-    *format_modifier_out = buffer_description->format_modifier;
+    *has_format_modifier_out = buffer_description->has_format_modifier();
+    *format_modifier_out = buffer_description->format_modifier();
     return MAGMA_STATUS_OK;
 }
 
@@ -531,7 +575,7 @@ magma_status_t magma_get_buffer_coherency_domain(magma_buffer_format_description
     }
     auto buffer_description =
         reinterpret_cast<magma_sysmem::PlatformBufferDescription*>(description);
-    *coherency_domain_out = buffer_description->coherency_domain;
+    *coherency_domain_out = buffer_description->coherency_domain();
     return MAGMA_STATUS_OK;
 }
 
@@ -543,7 +587,7 @@ magma_status_t magma_get_buffer_count(magma_buffer_format_description_t descript
     }
     auto buffer_description =
         reinterpret_cast<magma_sysmem::PlatformBufferDescription*>(description);
-    *count_out = buffer_description->count;
+    *count_out = buffer_description->count();
     return MAGMA_STATUS_OK;
 }
 
@@ -555,7 +599,7 @@ magma_status_t magma_get_buffer_is_secure(magma_buffer_format_description_t desc
     }
     auto buffer_description =
         reinterpret_cast<magma_sysmem::PlatformBufferDescription*>(description);
-    *is_secure_out = buffer_description->is_secure;
+    *is_secure_out = buffer_description->is_secure();
     return MAGMA_STATUS_OK;
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Fuchsia Authors. All rights reserved.
+// Copyright 2019 The Fuchsia Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include <iostream>
 
 #include "garnet/bin/iquery/modes.h"
+#include "lib/inspect_deprecated/query/discover.h"
 
 int main(int argc, const char** argv) {
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
@@ -33,14 +34,23 @@ int main(int argc, const char** argv) {
     }
   }
 
-  if (command_line.HasOption("help") || options.paths.size() == 0) {
+  if (options.report) {
+    for (const auto& path : inspect_deprecated::SyncFindPaths("/hub")) {
+      auto file_path = path.AbsoluteFilePath();
+      if (file_path.find("/system_objects/") == std::string::npos) {
+        options.paths.emplace_back(file_path);
+      }
+    }
+  }
+
+  if (command_line.HasOption("help") || options.paths.empty()) {
     options.Usage(command_line.argv0());
     return 0;
   }
 
-  fit::promise<std::vector<inspect::Source>> results;
+  fit::promise<std::vector<inspect_deprecated::Source>> results;
   // Dispatch to the correct mode.
-  if (options.mode == iquery::Options::Mode::CAT) {
+  if (options.mode == iquery::Options::Mode::CAT || options.mode == iquery::Options::Mode::HEALTH) {
     results = iquery::RunCat(&options);
   } else if (options.mode == iquery::Options::Mode::FIND) {
     results = iquery::RunFind(&options);
@@ -53,7 +63,7 @@ int main(int argc, const char** argv) {
 
   executor.schedule_task(
       results
-          .and_then([&options, &loop](std::vector<inspect::Source>& results) {
+          .and_then([&options, &loop](std::vector<inspect_deprecated::Source>& results) {
             // Sort the hierarchies if requested.
             if (options.sort) {
               for (auto& source : results) {
@@ -65,6 +75,8 @@ int main(int argc, const char** argv) {
               std::cout << options.formatter->FormatSourcesRecursive(results);
             } else if (options.mode == iquery::Options::Mode::FIND) {
               std::cout << options.formatter->FormatSourceLocations(results);
+            } else if (options.mode == iquery::Options::Mode::HEALTH) {
+              std::cout << options.formatter->FormatHealth(results);
             } else if (options.mode == iquery::Options::Mode::LS) {
               std::cout << options.formatter->FormatChildListing(results);
             }

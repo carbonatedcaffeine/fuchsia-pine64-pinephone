@@ -5,6 +5,7 @@
 #pragma once
 
 #include <fuchsia/overnet/protocol/cpp/fidl.h>
+
 #include "src/connectivity/overnet/lib/endpoint/router_endpoint.h"
 #include "src/connectivity/overnet/lib/vocabulary/optional.h"
 
@@ -56,7 +57,7 @@ class Decoder {
     return *reinterpret_cast<const fidl_message_header_t*>(
         message_.bytes.data());
   }
-  uint32_t ordinal() const { return header().ordinal; }
+  uint64_t ordinal() const { return header().ordinal; }
 
  private:
   fuchsia::overnet::protocol::ZirconChannelMessage message_;

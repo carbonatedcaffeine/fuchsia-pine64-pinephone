@@ -46,6 +46,7 @@ fn fake_bss_description(ssid: Ssid, rsn: Option<Vec<u8>>) -> fidl_mlme::BssDescr
         op_rate_set: vec![],
         country: None,
         rsn,
+        vendor_ies: None,
 
         rcpi_dbmh: 0,
         rsni_dbh: 0,
@@ -149,7 +150,7 @@ impl Supplicant for MockSupplicant {
     fn on_eapol_frame(
         &mut self,
         update_sink: &mut UpdateSink,
-        _frame: &eapol::Frame,
+        _frame: eapol::Frame<&[u8]>,
     ) -> Result<(), failure::Error> {
         if let Some(cb) = self.on_eapol_frame_cb.lock().unwrap().as_mut() {
             cb();

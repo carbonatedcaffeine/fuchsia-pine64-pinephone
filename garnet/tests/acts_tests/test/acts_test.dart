@@ -65,14 +65,19 @@ Future<Process> runActs(final String tmpDirPath, final String tests) {
   Process.runSync('chmod', ['+x', actsBinAbsPath]);
 
   return Process.start(actsBinAbsPath, actsArgs, environment: {
-    'PYTHONPATH': '$tmpDirPath/$actsFrameworkRelPath'
+    'PYTHONPATH': '$tmpDirPath/$actsFrameworkRelPath',
+    // Required for some Wifi testcases
+    'LANG': 'C.UTF-8',
+    'LC_ALL': 'C.UTF-8'
   });
 }
 
 void main(final List<String> args) {
   final argResults = (ArgParser()
         ..addOption('tests',
-            help: 'Space delimited string of ACTS tests to run.'))
+            help: 'Space delimited string of ACTS tests to run.')
+        ..addOption('timeout',
+            help: 'Timeout in minutes for ACTS test execution.'))
       .parse(args);
 
   // Fetch env var
@@ -105,5 +110,5 @@ void main(final List<String> args) {
     final data = jsonDecode(json);
     expect(data, contains('Results'));
     expect(data['Summary']['Executed'], isNonZero);
-  }, timeout: Timeout(Duration(minutes: 15)));
+  }, timeout: Timeout(Duration(minutes: int.parse(argResults['timeout']))));
 }

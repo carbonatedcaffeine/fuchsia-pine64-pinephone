@@ -44,14 +44,16 @@ class FirebaseAuthImpl : public FirebaseAuth {
     std::string api_key;
     // The user profile id to use with the |token_manager|.
     std::string user_profile_id;
+    // Whether Cobalt metrics are to be collected.
+    bool collect_cobalt_metrics = true;
     // Name of the client to record during Cobalt error reporting.
     std::string cobalt_client_name;
     // Maximum number of retries on non-fatal errors.
     int max_retries = 5;
   };
 
-  FirebaseAuthImpl(Config config, async_dispatcher_t* dispatcher,
-                   rng::Random* random,
+  // Creates an instance of FirebaseAuthImpl.
+  FirebaseAuthImpl(Config config, async_dispatcher_t* dispatcher, rng::Random* random,
                    fuchsia::auth::TokenManagerPtr token_manager,
                    sys::ComponentContext* component_context);
   // For tests.
@@ -64,21 +66,18 @@ class FirebaseAuthImpl : public FirebaseAuth {
   void set_error_handler(fit::closure on_error) override;
 
   fxl::RefPtr<callback::Cancellable> GetFirebaseToken(
-      fit::function<void(firebase_auth::AuthStatus, std::string)> callback)
-      override;
+      fit::function<void(firebase_auth::AuthStatus, std::string)> callback) override;
 
   fxl::RefPtr<callback::Cancellable> GetFirebaseUserId(
-      fit::function<void(firebase_auth::AuthStatus, std::string)> callback)
-      override;
+      fit::function<void(firebase_auth::AuthStatus, std::string)> callback) override;
 
  private:
   // Retrieves the Firebase token from the fuchsia::auth::TokenManager,
   // transparently retrying the request up to |max_retries| times in case of
   // non-fatal errors.
-  void GetToken(int max_retries,
-                fit::function<void(firebase_auth::AuthStatus,
-                                   fuchsia::auth::FirebaseTokenPtr)>
-                    callback);
+  void GetToken(
+      int max_retries,
+      fit::function<void(firebase_auth::AuthStatus, fuchsia::auth::FirebaseTokenPtr)> callback);
 
   // Sends a Cobalt event for metric |metric_id| counting the error code
   // |status|, unless |cobalt_client_name_| is empty.

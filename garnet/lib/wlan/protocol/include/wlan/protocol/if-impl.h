@@ -5,10 +5,11 @@
 #ifndef GARNET_LIB_WLAN_PROTOCOL_INCLUDE_WLAN_PROTOCOL_IF_IMPL_H_
 #define GARNET_LIB_WLAN_PROTOCOL_INCLUDE_WLAN_PROTOCOL_IF_IMPL_H_
 
+#include <ddk/hw/wlan/ieee80211.h>
+#include <ddk/hw/wlan/wlaninfo.h>
 #include <ddk/protocol/ethernet.h>
 #include <net/ethernet.h>
 #include <wlan/protocol/info.h>
-#include <wlan/protocol/mac.h>
 #include <zircon/compiler.h>
 
 __BEGIN_CDECLS
@@ -34,7 +35,7 @@ typedef struct wlanif_scan_req {
     uint8_t scan_type;  // WLAN_SCAN_TYPE_*
     uint32_t probe_delay;
     size_t num_channels;
-    uint8_t channel_list[WLAN_CHANNELS_MAX_LEN];
+    uint8_t channel_list[WLAN_INFO_CHANNEL_LIST_MAX_CHANNELS];
     uint32_t min_channel_time;
     uint32_t max_channel_time;
     size_t num_ssids;
@@ -405,14 +406,14 @@ typedef struct wlanif_eapol_indication {
 typedef struct wlanif_band_capabilities {
     uint8_t band_id; // Values from enum Band (WLAN_BAND_*)
     size_t num_basic_rates;
-    uint16_t basic_rates[WLAN_BASIC_RATES_MAX_LEN];
+    uint16_t basic_rates[WLAN_INFO_BAND_INFO_MAX_BASIC_RATES];
     uint16_t base_frequency;
     size_t num_channels;
-    uint8_t channels[WLAN_CHANNELS_MAX_LEN];
+    uint8_t channels[WLAN_INFO_CHANNEL_LIST_MAX_CHANNELS];
     bool ht_supported;
-    wlan_ht_caps_t ht_caps;
+    ieee80211_ht_capabilities_t ht_caps;
     bool vht_supported;
-    wlan_vht_caps_t vht_caps;
+    ieee80211_vht_capabilities_t vht_caps;
 } wlanif_band_capabilities_t;
 
 enum {
@@ -425,13 +426,13 @@ typedef struct wlanif_query_info {
     uint8_t role;       // WLAN_MAC_ROLE_*
     uint32_t features;  // WLANIF_FEATURE_*
     size_t num_bands;
-    wlanif_band_capabilities_t bands[WLAN_MAX_BANDS];
+    wlanif_band_capabilities_t bands[WLAN_INFO_MAX_BANDS];
     uint32_t driver_features;  // WLAN_DRIVER_FEATURE_*
 } wlanif_query_info_t;
 
 typedef struct wlanif_counter {
     uint64_t count;
-    char* name;
+    const char* name;
 } wlanif_counter_t;
 
 typedef struct wlanif_packet_count {
@@ -521,7 +522,7 @@ typedef struct wlanif_impl_ifc {
 
     // Data operations
     void (*data_recv)(void* cookie, void* data, size_t length, uint32_t flags);
-    void (*data_complete_tx)(void* cookie, ethmac_netbuf_t* netbuf, zx_status_t status);
+    void (*data_complete_tx)(void* cookie, ethernet_netbuf_t* netbuf, zx_status_t status);
 } wlanif_impl_ifc_t;
 
 typedef struct wlanif_impl_protocol_ops {
@@ -555,8 +556,11 @@ typedef struct wlanif_impl_protocol_ops {
                                  wlanif_start_capture_frames_resp_t* resp);
     void (*stop_capture_frames)(void* ctx);
 
+    // Configuration operations
+    zx_status_t (*set_multicast_promisc)(void* ctx, bool enable);
+
     // Data operations
-    zx_status_t (*data_queue_tx)(void* ctx, uint32_t options, ethmac_netbuf_t* netbuf);
+    zx_status_t (*data_queue_tx)(void* ctx, uint32_t options, ethernet_netbuf_t* netbuf);
 
 } wlanif_impl_protocol_ops_t;
 

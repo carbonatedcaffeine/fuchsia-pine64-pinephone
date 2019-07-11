@@ -3,8 +3,11 @@
 // found in the LICENSE file.
 
 #include "garnet/lib/ui/gfx/tests/frame_scheduler_test.h"
+
 #include <lib/gtest/test_loop_fixture.h>
+
 #include "garnet/lib/ui/gfx/engine/default_frame_scheduler.h"
+#include "garnet/lib/ui/gfx/engine/frame_predictor.h"
 
 namespace scenic_impl {
 namespace gfx {
@@ -23,11 +26,14 @@ void FrameSchedulerTest::TearDown() {
   mock_renderer_.reset();
 }
 
-std::unique_ptr<DefaultFrameScheduler>
-FrameSchedulerTest::CreateDefaultFrameScheduler() {
-  auto scheduler = std::make_unique<DefaultFrameScheduler>(fake_display_.get());
-  scheduler->SetDelegate({.session_updater = mock_updater_->GetWeakPtr(),
-                          .frame_renderer = mock_renderer_->GetWeakPtr()});
+std::unique_ptr<DefaultFrameScheduler> FrameSchedulerTest::CreateDefaultFrameScheduler() {
+  auto scheduler = std::make_unique<DefaultFrameScheduler>(
+      fake_display_.get(),
+      std::make_unique<FramePredictor>(DefaultFrameScheduler::kInitialRenderDuration,
+                                       DefaultFrameScheduler::kInitialUpdateDuration));
+  scheduler->SetFrameRenderer(mock_renderer_->GetWeakPtr());
+  scheduler->AddSessionUpdater(mock_updater_->GetWeakPtr());
+
   return scheduler;
 }
 
@@ -36,6 +42,7 @@ void FrameSchedulerTest::SetupDefaultVsyncValues() {
   // in the frame.
   const auto vsync_interval = zx::msec(100).get();
   fake_display_->SetVsyncInterval(vsync_interval);
+  fake_display_->SetLastVsyncTime(0);
 }
 
 }  // namespace test

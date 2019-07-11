@@ -17,7 +17,21 @@ static constexpr TimeDelta kPollLinkChangeTimeout =
 Router::Router(Timer* timer, NodeId node_id, bool allow_non_determinism)
     : timer_(timer),
       node_id_(node_id),
-      rng_(allow_non_determinism ? std::random_device()() : 0),
+      primary_rng_(
+          allow_non_determinism
+              ? fit::function<uint64_t()>(
+                    [rng = std::make_unique<std::random_device>(),
+                     dist =
+                         std::uniform_int_distribution<uint64_t>()]() mutable {
+                      return dist(*rng);
+                    })
+              : fit::function<uint64_t()>(
+                    [rng = std::make_unique<std::mt19937_64>(node_id.get()),
+                     dist =
+                         std::uniform_int_distribution<uint64_t>()]() mutable {
+                      return dist(*rng);
+                    })),
+      rng_(primary_rng_()),
       routing_table_(node_id, timer, allow_non_determinism),
       own_node_status_{node_id.as_fidl(), 1} {
   std::vector<fuchsia::overnet::protocol::NodeStatus> node_status;
@@ -215,7 +229,8 @@ void Router::MaybeStartPollingLinkChanges() {
                 // Set routing information for other links.
                 for (const auto& sl : selected_links) {
                   OVERNET_TRACE(DEBUG)
-                      << "Select: " << sl.first << " " << sl.second.link_id
+                      << node_id() << " Select: dest=" << sl.first << " link"
+                      << sl.second.target_node << "#" << sl.second.link_id
                       << " (route_mss=" << sl.second.route_mss << ")";
                   auto it = owned_links_.find(
                       OwnedLabel{sl.second.target_node, sl.second.link_id});
@@ -255,7 +270,7 @@ Status Router::RegisterStream(NodeId peer, StreamId stream_id,
                        << " at " << stream_handler
                        << " shutting_down=" << shutting_down_;
   if (shutting_down_) {
-    return Status(StatusCode::FAILED_PRECONDITION, "Router shutting down");
+    return Status::FailedPrecondition("Router shutting down");
   }
   return stream_holder(peer, stream_id)->SetHandler(stream_handler);
 }
@@ -268,7 +283,7 @@ Status Router::UnregisterStream(NodeId peer, StreamId stream_id,
                        << " shutting_down=" << shutting_down_;
   auto it = streams_.find(LocalStreamId{peer, stream_id});
   if (it == streams_.end()) {
-    return Status(StatusCode::FAILED_PRECONDITION, "Stream not registered");
+    return Status::FailedPrecondition("Stream not registered");
   }
   Status status = it->second.ClearHandler(stream_handler);
   streams_.erase(it);
@@ -312,6 +327,7 @@ std::vector<T> TakeVector(std::vector<T>* vec) {
 void Router::RegisterLink(LinkPtr<> link) {
   ScopedModule<Router> scoped_module(this);
   auto status = link->GetLinkStatus();
+  OVERNET_TRACE(DEBUG) << node_id() << " RegisterLink: " << status;
   assert(status.from == node_id());
   owned_links_.emplace(OwnedLabel{status.to, status.local_id}, std::move(link));
   auto target = status.to;
@@ -340,7 +356,7 @@ bool Router::StreamHolder::HandleMessage(SeqNum seq, TimeStamp received,
 
 Status Router::StreamHolder::SetHandler(StreamHandler* handler) {
   if (handler_ != nullptr) {
-    return Status(StatusCode::FAILED_PRECONDITION, "Handler already set");
+    return Status::FailedPrecondition("Handler already set");
   }
   handler_ = handler;
   if (buffered_) {
@@ -352,7 +368,7 @@ Status Router::StreamHolder::SetHandler(StreamHandler* handler) {
 
 Status Router::StreamHolder::ClearHandler(StreamHandler* handler) {
   if (handler_ != handler) {
-    return Status(StatusCode::FAILED_PRECONDITION, "Invalid clear handler");
+    return Status::FailedPrecondition("Invalid clear handler");
   }
   handler_ = nullptr;
   return Status::Ok();

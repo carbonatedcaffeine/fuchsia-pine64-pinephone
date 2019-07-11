@@ -1,6 +1,7 @@
 // Copyright 2018 The Fuchsia Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+#![feature(async_await, await_macro)]
 
 use failure::{Error, ResultExt};
 use fidl::endpoints::ClientEnd;
@@ -293,6 +294,52 @@ fn spawn_log_sink(state: LogManager, stream: LogSinkRequestStream) {
     )
 }
 
+const USAGE: &'static str = "\
+USAGE: logger [options]
+
+available options:
+    --disable-klog: disables proxying kernel logger
+    --help: shows this help page
+";
+
+struct Opt {
+    disable_klog: bool,
+}
+
+impl Default for Opt {
+    fn default() -> Self {
+        Self { disable_klog: false }
+    }
+}
+
+impl Opt {
+    /// Parses options structure from command line.
+    // NOTE: we're manually parsing the command line to avoid the binary bloat
+    // caused by command line parsing argument libraries.
+    // See TC-378 for background.
+    fn from_args() -> Self {
+        let mut opt = Self::default();
+        let args = std::env::args().skip(1);
+        for arg in args {
+            match arg.as_ref() {
+                "--disable-klog" => {
+                    opt.disable_klog = true;
+                }
+                "--help" => {
+                    eprint!("{}", USAGE);
+                    std::process::exit(0);
+                }
+                other => {
+                    eprintln!("Unrecognized option {}", other);
+                    eprint!("{}", USAGE);
+                    std::process::exit(1);
+                }
+            }
+        }
+        opt
+    }
+}
+
 fn main() {
     if let Err(e) = main_wrapper() {
         eprintln!("LoggerService: Error: {:?}", e);
@@ -300,19 +347,44 @@ fn main() {
 }
 
 fn main_wrapper() -> Result<(), Error> {
+    let opt = Opt::from_args();
+
     let mut executor = fasync::Executor::new().context("unable to create executor")?;
     let shared_members = Arc::new(Mutex::new(LogManagerShared {
         listeners: Vec::new(),
         log_msg_buffer: MemoryBoundedBuffer::new(OLD_MSGS_BUF_SIZE),
     }));
-    let shared_members_clone = shared_members.clone();
-    let shared_members_clone2 = shared_members.clone();
-    klogger::add_listener(move |log_msg, size| {
-        process_log(shared_members_clone2.clone(), log_msg, size);
-    })
-    .context("failed to read kernel logs")?;
+
+    if !opt.disable_klog {
+        let mut kernel_logger =
+            klogger::KernelLogger::create().context("failed to read kernel logs")?;
+
+        let mut itr = kernel_logger.log_stream();
+        while let Some(res) = itr.next() {
+            match res {
+                Ok((log_msg, size)) => process_log(shared_members.clone(), log_msg, size),
+                Err(e) => {
+                    println!("encountered an error from the kernel log iterator: {}", e);
+                    break;
+                }
+            }
+        }
+
+        let shared_members_clone = shared_members.clone();
+        let klog_stream = klogger::listen(kernel_logger);
+        fasync::spawn(
+            klog_stream
+                .map_ok(move |(log_msg, size)| {
+                    process_log(shared_members_clone.clone(), log_msg, size);
+                })
+                .try_collect::<()>()
+                .unwrap_or_else(|e| eprintln!("failed to read kernel logs: {:?}", e)),
+        );
+    }
+
     let mut fs = ServiceFs::new();
-    fs.dir("public")
+    let shared_members_clone = shared_members.clone();
+    fs.dir("svc")
         .add_fidl_service(move |stream| {
             let ls = LogManager { shared_members: shared_members.clone() };
             spawn_log_manager(ls, stream);
@@ -340,6 +412,7 @@ mod tests {
         LogFilterOptions, LogListenerMarker, LogListenerRequest, LogListenerRequestStream,
         LogMarker, LogProxy, LogSinkMarker, LogSinkProxy,
     };
+    use fuchsia_async::DurationExt;
     use fuchsia_zircon::prelude::*;
 
     mod memory_bounded_buffer {

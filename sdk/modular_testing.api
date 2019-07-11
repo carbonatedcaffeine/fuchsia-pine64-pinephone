@@ -1,7 +1,6 @@
 sdk://docs/metadata_schemas
 sdk://fidl/fuchsia.auth
 sdk://fidl/fuchsia.images
-sdk://fidl/fuchsia.intl
 sdk://fidl/fuchsia.io
 sdk://fidl/fuchsia.ledger
 sdk://fidl/fuchsia.mem
@@ -15,4 +14,3 @@ sdk://fidl/fuchsia.ui.gfx
 sdk://fidl/fuchsia.ui.input
 sdk://fidl/fuchsia.ui.policy
 sdk://fidl/fuchsia.ui.views
-sdk://fidl/fuchsia.ui.viewsv1token

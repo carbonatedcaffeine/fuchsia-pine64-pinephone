@@ -12,3 +12,12 @@ group("bin") {
     "vmm",
   ]
 }
+
+group("tests") {
+  testonly = true
+
+  deps = [
+    "guest_manager:tests",
+    "vmm:tests",
+  ]
+}

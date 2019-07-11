@@ -16,6 +16,7 @@
 import("//build/cipd.gni")
 import("//build/config/fuchsia/rules.gni")
 import("//build/package.gni")
+import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
 
 driver_module("ath10k_driver") {
@@ -70,8 +71,12 @@ driver_module("ath10k_driver") {
 
   deps = [
     "//garnet/lib/wlan/protocol",
+    "//zircon/public/banjo/ddk.hw.wlan.ieee80211",
+    "//zircon/public/banjo/ddk.hw.wlan.wlaninfo",
     "//zircon/public/banjo/ddk.protocol.pci",
+    "//zircon/public/banjo/ddk.protocol.wlanphyimpl",
     "//zircon/public/lib/ddk",
+    "//zircon/public/lib/device-protocol-pci",
     "//zircon/public/lib/driver",
     "//zircon/public/lib/sync",
     "//zircon/public/lib/zircon-internal",
@@ -79,6 +84,9 @@ driver_module("ath10k_driver") {
   ]
 
   configs += [ "//build/config/fuchsia:enable_zircon_asserts" ]
+
+  configs -= [ "//build/config/fuchsia:no_cpp_standard_library" ]
+  configs += [ "//build/config/fuchsia:static_cpp_standard_library" ]
 }
 
 if (internal_access) {
@@ -163,7 +171,7 @@ executable("sparse_array_tests") {
   ]
 
   deps = [
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 }
 
@@ -177,13 +185,11 @@ executable("bitarr_tests") {
   ]
 
   deps = [
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 }
 
-package("ath10k_test") {
-  testonly = true
-
+unittest_package("ath10k_test") {
   package_name = "ath10k_test"
 
   deps = [

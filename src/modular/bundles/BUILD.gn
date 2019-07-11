@@ -6,6 +6,7 @@ group("bundles") {
   testonly = true
   deps = [
     ":framework",
+    ":framework_experimental",
     ":tools",
   ]
 }
@@ -29,11 +30,20 @@ group("framework") {
   ]
 }
 
+# Framework bundle including experimental functionality.
+group("framework_experimental") {
+  testonly = true
+  public_deps = [
+    ":framework",
+    "//peridot/packages/prod:discover",
+  ]
+}
+
 # Packages used for authoring and running integration tests.
 group("testing") {
   testonly = true
   public_deps = [
-    "//peridot/packages/tests:modular_test_harness",
+    "//peridot/packages/testing:modular_test_harness",
   ]
 }
 
@@ -41,7 +51,17 @@ group("testing") {
 group("tests") {
   testonly = true
   public_deps = [
+    ":testing",
     "//peridot/packages/tests:modular_test_harness",
     "//src/modular:tests",
+  ]
+}
+
+# Packages which contain benchmarks.
+group("benchmarks") {
+  testonly = true
+  public_deps = [
+    ":testing",
+    "//src/modular:benchmarks",
   ]
 }

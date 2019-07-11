@@ -20,7 +20,7 @@ use wlan_sme::client::{
     BssInfo, ConnectResult, ConnectionAttemptId, DiscoveryError, EssDiscoveryResult, EssInfo,
     InfoEvent, ScanTxnId,
 };
-use wlan_sme::{client as client_sme, DeviceInfo, InfoStream};
+use wlan_sme::{self as sme, client as client_sme, DeviceInfo, InfoStream};
 
 use crate::fidl_util::is_peer_closed;
 use crate::stats_scheduler::StatsRequest;
@@ -40,18 +40,21 @@ struct ConnectionTimes {
 }
 
 pub async fn serve<S>(
+    cfg: sme::Config,
     proxy: MlmeProxy,
     device_info: DeviceInfo,
     event_stream: MlmeEventStream,
     new_fidl_clients: mpsc::UnboundedReceiver<Endpoint>,
     stats_requests: S,
     cobalt_sender: CobaltSender,
-    inspect_sme: wlan_inspect::nodes::SharedNodePtr,
+    iface_tree_holder: Arc<wlan_inspect::iface_mgr::IfaceTreeHolder>,
 ) -> Result<(), failure::Error>
 where
     S: Stream<Item = StatsRequest> + Unpin,
 {
-    let (sme, mlme_stream, info_stream, time_stream) = Sme::new(device_info, inspect_sme);
+    let cfg = client_sme::ClientConfig::from_config(cfg);
+    let (sme, mlme_stream, info_stream, time_stream) =
+        Sme::new(cfg, device_info, iface_tree_holder);
     let sme = Arc::new(Mutex::new(sme));
     let mlme_sme = super::serve_mlme_sme(
         proxy,
@@ -160,7 +163,7 @@ async fn connect(
         Some(txn) => Some(txn.into_stream()?.control_handle()),
     };
     let receiver = sme.lock().unwrap().on_connect_command(req);
-    let result = await!(receiver).unwrap_or(ConnectResult::Failed);
+    let result = await!(receiver).ok();
     let send_result = send_connect_result(handle, result);
     filter_out_peer_closed(send_result)?;
     Ok(())
@@ -202,7 +205,7 @@ fn handle_info_event(
         InfoEvent::ConnectStarted => {
             connection_times.connect_started_time = Some(zx::Time::get(zx::ClockId::Monotonic));
         }
-        InfoEvent::ConnectFinished { result, failure } => {
+        InfoEvent::ConnectFinished { result } => {
             if let Some(connect_started_time) = connection_times.connect_started_time {
                 let connection_finished_time = zx::Time::get(zx::ClockId::Monotonic);
                 telemetry::report_connection_delay(
@@ -210,7 +213,6 @@ fn handle_info_event(
                     connect_started_time,
                     connection_finished_time,
                     &result,
-                    &failure,
                 );
                 connection_times.connect_started_time = None;
             }
@@ -322,14 +324,13 @@ fn convert_bss_info(bss: BssInfo) -> fidl_sme::BssInfo {
 
 fn send_connect_result(
     handle: Option<fidl_sme::ConnectTransactionControlHandle>,
-    result: ConnectResult,
+    result: Option<ConnectResult>,
 ) -> Result<(), fidl::Error> {
     if let Some(handle) = handle {
         let code = match result {
-            ConnectResult::Success => fidl_sme::ConnectResultCode::Success,
-            ConnectResult::Canceled => fidl_sme::ConnectResultCode::Canceled,
-            ConnectResult::Failed => fidl_sme::ConnectResultCode::Failed,
-            ConnectResult::BadCredentials => fidl_sme::ConnectResultCode::BadCredentials,
+            Some(ConnectResult::Success) => fidl_sme::ConnectResultCode::Success,
+            Some(ConnectResult::Canceled) => fidl_sme::ConnectResultCode::Canceled,
+            Some(ConnectResult::Failed(..)) | None => fidl_sme::ConnectResultCode::Failed,
         };
         handle.send_on_finished(code)?;
     }

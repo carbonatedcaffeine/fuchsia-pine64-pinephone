@@ -4,13 +4,13 @@
 
 driver("sdmmc") {
   sources = [
-    "mmc.cpp",
-    "sd.cpp",
-    "sdio-controller-device.cpp",
-    "sdio-function-device.cpp",
-    "sdmmc-block-device.cpp",
-    "sdmmc-device.cpp",
-    "sdmmc-root-device.cpp",
+    "mmc.cc",
+    "sd.cc",
+    "sdio-controller-device.cc",
+    "sdio-function-device.cc",
+    "sdmmc-block-device.cc",
+    "sdmmc-device.cc",
+    "sdmmc-root-device.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.block",
@@ -33,17 +33,20 @@ driver("sdmmc") {
     # legacy complications.
     "$zx/system/ulib/trace:headers",
   ]
+
+  # TODO(ZX-2863): This driver violates the allowed shlib deps policy.
+  deprecated_inhibit_driver_shlib_allowlist = true
 }
 
 test("sdmmc-test") {
   output_name = "sdmmc-test"
   sources = [
-    "sdio-controller-device-test.cpp",
-    "sdio-controller-device.cpp",
-    "sdio-function-device.cpp",
-    "sdmmc-block-device-test.cpp",
-    "sdmmc-block-device.cpp",
-    "sdmmc-device.cpp",
+    "sdio-controller-device-test.cc",
+    "sdio-controller-device.cc",
+    "sdio-function-device.cc",
+    "sdmmc-block-device-test.cc",
+    "sdmmc-block-device.cc",
+    "sdmmc-device.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.block",
@@ -58,6 +61,7 @@ test("sdmmc-test") {
     "$zx/system/ulib/fzl",
     "$zx/system/ulib/mock-function",
     "$zx/system/ulib/pretty",
+    "$zx/system/ulib/sync",
     "$zx/system/ulib/trace:trace-driver",
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",

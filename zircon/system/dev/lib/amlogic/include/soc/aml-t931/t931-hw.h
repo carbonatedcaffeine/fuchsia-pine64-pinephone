@@ -17,6 +17,8 @@
 #define T931_I2C1_BASE                  (T931_CBUS_BASE + 0x1e000)
 #define T931_I2C2_BASE                  (T931_CBUS_BASE + 0x1d000)
 #define T931_I2C3_BASE                  (T931_CBUS_BASE + 0x1c000)
+#define T931_SPICC0_BASE                (T931_CBUS_BASE + 0x13000)
+#define T931_SPICC1_BASE                (T931_CBUS_BASE + 0x15000)
 
 #define T931_PWM_LENGTH                 0x1000 // applies to each PWM bank
 #define T931_PWM_AB_BASE                0xffd1b000
@@ -126,12 +128,25 @@
 #define T931_USB0_BASE                  0xff500000
 #define T931_USB0_LENGTH                0x100000
 
+#define T931_USB1_BASE                  0xff400000
+#define T931_USB1_LENGTH                0x40000
+
+#define T931_USBCTRL_BASE               0xffe09000
+#define T931_USBCTRL_LENGTH             0x2000
+
+#define T931_USBPHY20_BASE              0xff636000
+#define T931_USBPHY20_LENGTH            0x2000
+
 #define T931_USBPHY21_BASE              0xff63a000
 #define T931_USBPHY21_LENGTH            0x2000
 
 // ISP
 #define T931_ISP_BASE                   0xff140000
 #define T931_ISP_LENGTH                 0x00040000
+
+// GDC
+#define T931_GDC_BASE                   0xFF950000
+#define T931_GDC_LENGTH                 0x100
 
 // eMMC/SD register blocks
 #define T931_SD_EMMC_A_BASE             0xffE03000
@@ -166,10 +181,12 @@
 
 // IRQs
 #define T931_VIU1_VSYNC_IRQ             35
+#define T931_USB_IDDIG_IRQ              48
 #define T931_I2C0_IRQ                   53
 #define T931_DEMUX_IRQ                  55
 #define T931_UART_A_IRQ                 58
 #define T931_USB0_IRQ                   62
+#define T931_USB1_IRQ                   63
 #define T931_PARSER_IRQ                 64
 #define T931_TS_PLL_IRQ                 67
 #define T931_I2C3_IRQ                   71
@@ -185,9 +202,12 @@
 #define T931_GPIO_IRQ_6                 102
 #define T931_GPIO_IRQ_7                 103
 #define T931_UART_B_IRQ                 107
+#define T931_SPICC0_IRQ                 113
 #define T931_RDMA_DONE                  121
+#define T931_SPICC1_IRQ                 122
 #define T931_UART_C_IRQ                 125
 #define T931_MALI_ISP_IRQ               174
+#define T931_MALI_GDC_IRQ               176
 #define T931_MALI_IRQ_GP                192
 #define T931_MALI_IRQ_GPMMU             193
 #define T931_MALI_IRQ_PP                194

@@ -9,10 +9,6 @@ import("//build/sdk/sdk.gni")
 import("//build/sdk/sdk_documentation.gni")
 import("config.gni")
 
-declare_args() {
-  export_x64_sdk_images = false
-}
-
 # This default target should contain all public or partner SDKs.
 group("sdk") {
   testonly = true
@@ -20,7 +16,6 @@ group("sdk") {
   public_deps = [
     ":core",
     ":ddk",
-    ":images",
     ":zircon_sysroot",
   ]
 }
@@ -77,7 +72,7 @@ sdk_documentation("vulkan_license") {
 }
 
 sdk("zircon_sysroot") {
-  category = "partner"
+  category = "internal"
 
   export = true
 
@@ -87,7 +82,7 @@ sdk("zircon_sysroot") {
 }
 
 sdk("ddk") {
-  category = "partner"
+  category = "internal"
 
   deps = [
     "tools:banjo_sdk($host_toolchain)",
@@ -141,31 +136,14 @@ sdk("e2e_testing") {
 
   category = "partner"
 
+  api = "e2e_testing.api"
+
   deps = [
     "//sdk/testing/sl4f/client:client_sdk($dart_toolchain)",
   ]
 }
 
-sdk("images") {
-  # TODO(DX-1314): this id should not be necessary.
-  id = sdk_id
-
-  category = "partner"
-
-  testonly = true
-
-  deps = [
-    "//build/images:images_sdk",
-  ]
-  if (export_x64_sdk_images) {
-    deps += [
-      "//build/images:fvm.sparse.blk_sdk",
-      "//build/images:local.esp.blk_sdk",
-      "//build/images:zircon.vboot_sdk",
-    ]
-  }
-}
-
+# TODO(DX-1667): break this target down into smaller chunks.
 sdk("core") {
   id = sdk_id
 
@@ -179,10 +157,10 @@ sdk("core") {
     ":musl_license",
     ":open_source",
     ":vulkan_license",
+    "devices",
     "docs",
     "tools:dev_finder_sdk($host_toolchain)",
     "tools:symbolize_sdk($host_toolchain)",
-    "//garnet/bin/cmc:cmc_sdk($host_toolchain)",
     "//garnet/bin/far:bin_sdk($host_toolchain)",
     "//garnet/go/src/fidl:fidlgen_sdk($host_toolchain)",
     "//garnet/go/src/pm:pm_bin_sdk($host_toolchain)",
@@ -194,6 +172,7 @@ sdk("core") {
     "//sdk/fidl/fuchsia.castauth:fuchsia.castauth_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.castsetup:fuchsia.castsetup_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.castsysteminfo:fuchsia.castsysteminfo_sdk($fidl_toolchain)",
+    "//sdk/fidl/fuchsia.deprecatedtimezone:fuchsia.deprecatedtimezone_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.developer.tiles:fuchsia.developer.tiles_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.feedback:fuchsia.feedback_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.fonts:fuchsia.fonts_sdk($fidl_toolchain)",
@@ -211,9 +190,11 @@ sdk("core") {
     "//sdk/fidl/fuchsia.netstack:fuchsia.netstack_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.simplecamera:fuchsia.simplecamera_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.sys:fuchsia.sys_sdk($fidl_toolchain)",
+    "//sdk/fidl/fuchsia.sys.test:fuchsia.sys.test_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.ui.app:fuchsia.ui.app_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.ui.gfx:fuchsia.ui.gfx_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.ui.input:fuchsia.ui.input_sdk($fidl_toolchain)",
+    "//sdk/fidl/fuchsia.ui.input2:fuchsia.ui.input2_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.ui.policy:fuchsia.ui.policy_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.ui.scenic:fuchsia.ui.scenic_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.ui.views:fuchsia.ui.views_sdk($fidl_toolchain)",
@@ -227,23 +208,33 @@ sdk("core") {
     "//sdk/lib/sys/cpp/testing:unit_sdk",
     "//sdk/lib/ui/scenic/cpp:cpp_sdk",
     "//sdk/lib/vfs/cpp:cpp_sdk",
+    "//src/developer/bugreport:client_sdk($host_toolchain)",
     "//src/developer/debug/zxdb:zxdb_sdk($host_toolchain)",
+    "//src/sys/cmc:cmc_sdk($host_toolchain)",
     "//third_party/vulkan_loader_and_validation_layers/loader:loader_sdk",
     "//zircon/public/fidl/fuchsia-cobalt:fuchsia-cobalt_sdk($fidl_toolchain)",
     "//zircon/public/fidl/fuchsia-crash:fuchsia-crash_sdk($fidl_toolchain)",
+    "//zircon/public/fidl/fuchsia-hardware-goldfish-address-space:fuchsia-hardware-goldfish-address-space_sdk($fidl_toolchain)",
+    "//zircon/public/fidl/fuchsia-hardware-goldfish-control:fuchsia-hardware-goldfish-control_sdk($fidl_toolchain)",
+    "//zircon/public/fidl/fuchsia-hardware-goldfish-pipe:fuchsia-hardware-goldfish-pipe_sdk($fidl_toolchain)",
     "//zircon/public/fidl/fuchsia-logger:fuchsia-logger_sdk($fidl_toolchain)",
     "//zircon/public/fidl/fuchsia-mem:fuchsia-mem_sdk($fidl_toolchain)",
     "//zircon/public/fidl/fuchsia-process:fuchsia-process_sdk($fidl_toolchain)",
+    "//zircon/public/fidl/fuchsia-tracing-provider:fuchsia-tracing-provider_sdk($fidl_toolchain)",
     "//zircon/public/fidl/fuchsia-sysinfo:fuchsia-sysinfo_sdk($fidl_toolchain)",
     "//zircon/public/lib/async:async_sdk",
     "//zircon/public/lib/async-cpp:async-cpp_sdk",
     "//zircon/public/lib/async-default:async-default_sdk",
     "//zircon/public/lib/async-loop:async-loop_sdk",
     "//zircon/public/lib/async-loop-cpp:async-loop-cpp_sdk",
+    "//zircon/public/lib/async-testing:async-testing_sdk",
     "//zircon/public/lib/fdio:fdio_sdk",
     "//zircon/public/lib/memfs:memfs_sdk",
     "//zircon/public/lib/sync:sync_sdk",
     "//zircon/public/lib/syslog:syslog_sdk",
+    "//zircon/public/lib/trace:trace_sdk",
+    "//zircon/public/lib/trace-engine:trace-engine_sdk",
+    "//zircon/public/lib/trace-provider-so:trace-provider-so_sdk",
     "//zircon/public/sysroot:sysroot_sdk",
     "//zircon/public/tool/bootserver:bootserver_sdk($host_toolchain)",
     "//zircon/public/tool/fidl-format:fidl-format_sdk($host_toolchain)",
@@ -256,6 +247,9 @@ sdk("core") {
   ]
 }
 
+# This SDK provides FIDL protocols and C++ libraries for writing hermetic
+# integration tests which use modular.
+#
 # This SDK has runtime dependencies on the following fuchsia packages:
 #  * environment_delegating_runner
 #  * modular_test_harness

@@ -6,11 +6,11 @@
 
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/async/cpp/task.h>
-#include <src/lib/fxl/logging.h>
 #include <lib/zx/time.h>
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
 #include <rapidjson/istreamwrapper.h>
+#include <src/lib/fxl/logging.h>
 #include <trace/event.h>
 #include <trace/observer.h>
 #include <zircon/status.h>
@@ -27,9 +27,6 @@ const char kCategoryMemberName[] = "cat";
 // The name of the event name member in the json output file.
 const char kEventNameMemberName[] = "name";
 
-// Category for events we generate.
-#define CATEGORY_NAME "trace:test"
-
 // Name to use in instant events.
 #define INSTANT_EVENT_NAME "instant"
 
@@ -43,12 +40,12 @@ constexpr size_t kRecordSize = 64;
 
 bool CreateProviderSynchronously(
     async::Loop& loop, const char* name,
-    fbl::unique_ptr<trace::TraceProvider>* out_provider) {
+    fbl::unique_ptr<trace::TraceProviderWithFdio>* out_provider) {
   async_dispatcher_t* dispatcher = loop.dispatcher();
 
-  fbl::unique_ptr<trace::TraceProvider> provider;
+  fbl::unique_ptr<trace::TraceProviderWithFdio> provider;
   bool already_started;
-  if (!trace::TraceProvider::CreateSynchronously(dispatcher, name, &provider,
+  if (!trace::TraceProviderWithFdio::CreateSynchronously(dispatcher, name, &provider,
                                                  &already_started)) {
     FXL_LOG(ERROR) << "Failed to create provider " << name;
     return false;

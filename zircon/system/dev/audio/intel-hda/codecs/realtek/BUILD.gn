@@ -2,11 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-driver("realtek") {
+group("realtek") {
+  deps = [
+    ":realtek-audio-codec",
+  ]
+}
+
+driver("realtek-audio-codec") {
   sources = [
-    "binding.c",
-    "realtek-codec.cpp",
-    "realtek-stream.cpp",
+    "realtek-codec.cc",
+    "realtek-stream.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.pci",

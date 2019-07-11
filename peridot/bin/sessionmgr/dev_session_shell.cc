@@ -13,10 +13,10 @@
 #include <lib/app_driver/cpp/app_driver.h>
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/component/cpp/connect.h>
-#include <lib/component/cpp/startup_context.h>
 #include <lib/fidl/cpp/binding.h>
 #include <lib/fidl/cpp/binding_set.h>
 #include <lib/fsl/vmo/strings.h>
+#include <lib/sys/cpp/component_context.h>
 
 #include <memory>
 #include <utility>
@@ -24,7 +24,6 @@
 #include "peridot/lib/fidl/single_service_app.h"
 #include "peridot/lib/fidl/view_host.h"
 #include "peridot/lib/rapidjson/rapidjson.h"
-#include "peridot/lib/testing/test_driver.h"
 #include "src/lib/fxl/command_line.h"
 #include "src/lib/fxl/logging.h"
 #include "src/lib/fxl/macros.h"
@@ -38,47 +37,33 @@ class Settings {
         command_line.GetOptionValueWithDefault("root_module", "example_recipe");
     root_link = command_line.GetOptionValueWithDefault("root_link", "");
     story_id = command_line.GetOptionValueWithDefault("story_id", "story");
-    module_under_test_url =
-        command_line.GetOptionValueWithDefault("module_under_test_url", "");
-    test_driver_url =
-        command_line.GetOptionValueWithDefault("test_driver_url", "");
   }
 
   std::string root_module;
   std::string root_link;
   std::string story_id;
-  std::string module_under_test_url;
-  std::string test_driver_url;
 };
 
 class DevSessionShellApp : fuchsia::modular::StoryWatcher,
-                           fuchsia::modular::InterruptionListener,
-                           fuchsia::modular::NextListener,
                            fuchsia::modular::SessionShell,
                            public modular::ViewApp {
  public:
-  explicit DevSessionShellApp(component::StartupContext* const startup_context,
+  explicit DevSessionShellApp(sys::ComponentContext* const component_context,
                               Settings settings)
-      : ViewApp(startup_context),
+      : ViewApp(component_context),
         settings_(std::move(settings)),
         story_watcher_binding_(this) {
-    startup_context->ConnectToEnvironmentService(puppet_master_.NewRequest());
-    startup_context->ConnectToEnvironmentService(
-        session_shell_context_.NewRequest());
+    component_context->svc()->Connect(puppet_master_.NewRequest());
+    component_context->svc()->Connect(session_shell_context_.NewRequest());
     session_shell_context_->GetStoryProvider(story_provider_.NewRequest());
-    session_shell_context_->GetSuggestionProvider(
-        suggestion_provider_.NewRequest());
     session_shell_context_->GetFocusController(focus_controller_.NewRequest());
     session_shell_context_->GetVisibleStoriesController(
         visible_stories_controller_.NewRequest());
 
-    suggestion_provider_->SubscribeToInterruptions(
-        interruption_listener_bindings_.AddBinding(this));
-    suggestion_provider_->SubscribeToNext(
-        next_listener_bindings_.AddBinding(this), 3);
-
-    startup_context->outgoing().AddPublicService(
+    component_context->outgoing()->AddPublicService(
         session_shell_bindings_.GetHandler(this));
+
+    startup_context_ = component::StartupContext::CreateFromStartupInfo();
   }
 
   ~DevSessionShellApp() override = default;
@@ -104,13 +89,12 @@ class DevSessionShellApp : fuchsia::modular::StoryWatcher,
                   << settings_.root_link;
 
     auto scenic =
-        startup_context()
-            ->ConnectToEnvironmentService<fuchsia::ui::scenic::Scenic>();
+        component_context()->svc()->Connect<fuchsia::ui::scenic::Scenic>();
     scenic::ViewContext context = {
         .session_and_listener_request =
             scenic::CreateScenicSessionPtrAndListenerRequest(scenic.get()),
         .view_token = std::move(view_token_),
-        .startup_context = startup_context(),
+        .startup_context = startup_context_.get(),
     };
 
     view_ = std::make_unique<modular::ViewHost>(std::move(context));
@@ -123,7 +107,6 @@ class DevSessionShellApp : fuchsia::modular::StoryWatcher,
     add_mod.mod_name_transitional = "root";
     add_mod.intent.handler = settings_.root_module;
     add_mod.intent.action = "action";
-    add_mod.intent.parameters = CreateIntentParameters();
 
     fuchsia::modular::StoryCommand command;
     command.set_add_mod(std::move(add_mod));
@@ -134,42 +117,6 @@ class DevSessionShellApp : fuchsia::modular::StoryWatcher,
         [this](fuchsia::modular::ExecuteResult result) {
           StartStoryById(settings_.story_id);
         });
-  }
-
-  fidl::VectorPtr<fuchsia::modular::IntentParameter> CreateIntentParameters() {
-    if (settings_.module_under_test_url.empty() ||
-        settings_.test_driver_url.empty()) {
-      // For debugging: log that both items must be set in the event that one is
-      // set and the other is not. It may be unclear why the intent is not being
-      // created with the intended links if one is forgotten by accident.
-      if (settings_.module_under_test_url.empty() !=
-          settings_.test_driver_url.empty()) {
-        FXL_LOG(WARNING) << "Both the module_under_test_url and "
-                            "test_driver_url must be set";
-      }
-      return nullptr;
-    }
-    auto intent_params =
-        fidl::VectorPtr<fuchsia::modular::IntentParameter>::New(0);
-    fuchsia::modular::IntentParameterData test_driver_link_data;
-
-    rapidjson::Document document;
-    document.SetObject();
-    document.AddMember(modular::testing::kModuleUnderTestPath,
-                       settings_.module_under_test_url,
-                       document.GetAllocator());
-    document.AddMember(modular::testing::kTestDriverPath,
-                       settings_.test_driver_url, document.GetAllocator());
-    fsl::SizedVmo vmo;
-    FXL_CHECK(fsl::VmoFromString(modular::JsonValueToString(document), &vmo));
-    test_driver_link_data.set_json(std::move(vmo).ToTransport());
-
-    fuchsia::modular::IntentParameter test_driver_link_param;
-    test_driver_link_param.name = modular::testing::kTestDriverLinkName;
-    test_driver_link_param.data = std::move(test_driver_link_data);
-    intent_params.push_back(std::move(test_driver_link_param));
-
-    return intent_params;
   }
 
   void StartStoryById(const fidl::StringPtr& story_id) {
@@ -235,31 +182,6 @@ class DevSessionShellApp : fuchsia::modular::StoryWatcher,
   // |fuchsia::modular::StoryWatcher|
   void OnModuleFocused(std::vector<std::string> /*module_path*/) override {}
 
-  // |fuchsia::modular::NextListener|
-  void OnNextResults(
-      std::vector<fuchsia::modular::Suggestion> suggestions) override {
-    FXL_VLOG(4)
-        << "DevSessionShell/fuchsia::modular::NextListener::OnNextResults()";
-    for (auto& suggestion : suggestions) {
-      FXL_LOG(INFO) << "  " << suggestion.uuid << " "
-                    << suggestion.display.headline;
-    }
-  }
-
-  // |fuchsia::modular::InterruptionListener|
-  void OnInterrupt(fuchsia::modular::Suggestion suggestion) override {
-    FXL_VLOG(4) << "DevSessionShell/"
-                   "fuchsia::modular::InterruptionListener::OnInterrupt() "
-                << suggestion.uuid;
-  }
-
-  // |fuchsia::modular::NextListener|
-  void OnProcessingChange(bool processing) override {
-    FXL_VLOG(4)
-        << "DevSessionShell/fuchsia::modular::NextListener::OnProcessingChange("
-        << processing << ")";
-  }
-
   const Settings settings_;
 
   fidl::BindingSet<fuchsia::modular::SessionShell> session_shell_bindings_;
@@ -277,10 +199,7 @@ class DevSessionShellApp : fuchsia::modular::StoryWatcher,
 
   fidl::Binding<fuchsia::modular::StoryWatcher> story_watcher_binding_;
 
-  fuchsia::modular::SuggestionProviderPtr suggestion_provider_;
-  fidl::BindingSet<fuchsia::modular::InterruptionListener>
-      interruption_listener_bindings_;
-  fidl::BindingSet<fuchsia::modular::NextListener> next_listener_bindings_;
+  std::unique_ptr<component::StartupContext> startup_context_;
 
   FXL_DISALLOW_COPY_AND_ASSIGN(DevSessionShellApp);
 };
@@ -293,9 +212,9 @@ int main(int argc, const char** argv) {
 
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
 
-  auto context = component::StartupContext::CreateFromStartupInfo();
+  auto context = sys::ComponentContext::Create();
   modular::AppDriver<DevSessionShellApp> driver(
-      context->outgoing().deprecated_services(),
+      context->outgoing(),
       std::make_unique<DevSessionShellApp>(context.get(), std::move(settings)),
       [&loop] { loop.Quit(); });
 

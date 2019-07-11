@@ -6,6 +6,7 @@
 #define PERIDOT_BIN_BASEMGR_BASEMGR_IMPL_H_
 
 #include <fuchsia/auth/cpp/fidl.h>
+#include <fuchsia/device/manager/cpp/fidl.h>
 #include <fuchsia/devicesettings/cpp/fidl.h>
 #include <fuchsia/modular/auth/cpp/fidl.h>
 #include <fuchsia/modular/cpp/fidl.h>
@@ -15,17 +16,19 @@
 #include <fuchsia/ui/policy/cpp/fidl.h>
 #include <fuchsia/wlan/service/cpp/fidl.h>
 #include <lib/async/cpp/future.h>
-#include <lib/component/cpp/startup_context.h>
 #include <lib/fidl/cpp/binding.h>
 #include <lib/fidl/cpp/interface_request.h>
 #include <lib/fidl/cpp/string.h>
 #include <lib/fit/function.h>
+#include <lib/svc/cpp/service_namespace.h>
+#include <lib/sys/cpp/component_context.h>
 #include <src/lib/fxl/macros.h>
 
 #include <memory>
 
 #include "peridot/bin/basemgr/basemgr_settings.h"
 #include "peridot/bin/basemgr/cobalt/cobalt.h"
+#include "peridot/bin/basemgr/noop_clipboard_impl.h"
 #include "peridot/bin/basemgr/presentation_container.h"
 #include "peridot/bin/basemgr/session_provider.h"
 #include "peridot/bin/basemgr/session_user_provider_impl.h"
@@ -36,7 +39,7 @@ namespace modular {
 // Basemgr is the parent process of the modular framework, and it is started by
 // the sysmgr as part of the boot sequence.
 //
-// It has several high-level responsibilites:
+// It has several high-level responsibilities:
 // 1) Initializes and owns the system's root view and presentation.
 // 2) Sets up the interactive flow for user authentication and login.
 // 3) Manages the lifecycle of sessions, represented as |sessionmgr| processes.
@@ -57,11 +60,13 @@ class BasemgrImpl : fuchsia::modular::BaseShellContext,
   // |on_shutdown| Callback invoked when this basemgr instance is shutdown.
   explicit BasemgrImpl(
       fuchsia::modular::session::BasemgrConfig config,
-      fuchsia::sys::Launcher* const launcher,
+      const std::shared_ptr<sys::ServiceDirectory> incoming_services,
+      fuchsia::sys::LauncherPtr launcher,
       fuchsia::ui::policy::PresenterPtr presenter,
       fuchsia::devicesettings::DeviceSettingsManagerPtr device_settings_manager,
       fuchsia::wlan::service::WlanPtr wlan,
       fuchsia::auth::account::AccountManagerPtr account_manager,
+      fuchsia::device::manager::AdministratorPtr device_administrator,
       fit::function<void()> on_shutdown);
 
   ~BasemgrImpl() override;
@@ -144,8 +149,11 @@ class BasemgrImpl : fuchsia::modular::BaseShellContext,
   std::vector<fuchsia::modular::session::SessionShellConfig>::size_type
       active_session_shell_configs_index_{};
 
+  // Retained to be used in creating a `SessionProvider`.
+  const std::shared_ptr<sys::ServiceDirectory> component_context_services_;
+
   // Used to launch component instances, such as the base shell.
-  fuchsia::sys::Launcher* const launcher_;  // Not owned.
+  fuchsia::sys::LauncherPtr launcher_;
   // Used to connect the |presentation_container_| to scenic.
   fuchsia::ui::policy::PresenterPtr presenter_;
   // Used to look-up whether device needs a factory reset.
@@ -154,6 +162,8 @@ class BasemgrImpl : fuchsia::modular::BaseShellContext,
   fuchsia::wlan::service::WlanPtr wlan_;
   // Used for account management in the framework.
   fuchsia::auth::account::AccountManagerPtr account_manager_;
+  // Used to trigger device reboot.
+  fuchsia::device::manager::AdministratorPtr device_administrator_;
   fit::function<void()> on_shutdown_;
 
   // Holds the presentation service.
@@ -176,6 +186,9 @@ class BasemgrImpl : fuchsia::modular::BaseShellContext,
   fuchsia::modular::BaseShellPtr base_shell_;
 
   AsyncHolder<SessionProvider> session_provider_;
+
+  std::unique_ptr<NoopClipboardImpl> noop_clipboard_;
+  component::ServiceNamespace services_;
 
   enum class State {
     // normal mode of operation

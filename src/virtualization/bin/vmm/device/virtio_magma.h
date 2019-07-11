@@ -18,40 +18,54 @@
 
 #include "garnet/lib/magma/include/magma_abi/magma.h"
 #include "garnet/lib/magma/include/virtio/virtio_magma.h"
+#include "src/virtualization/bin/vmm/device/device_base.h"
+#include "src/virtualization/bin/vmm/device/virtio_magma_generic.h"
 #include "src/virtualization/bin/vmm/device/virtio_queue.h"
 
-class VirtioMagma {
+class VirtioMagma : public VirtioMagmaGeneric,
+                    public DeviceBase<VirtioMagma>,
+                    public fuchsia::virtualization::hardware::VirtioMagma {
  public:
-  VirtioMagma(zx::vmar* vmar, VirtioQueue* in_queue, VirtioQueue* out_queue)
-      : vmar_(vmar), in_queue_(in_queue), out_queue_(out_queue) {}
-  ~VirtioMagma();
-  zx_status_t Init(std::string device_path, std::string driver_path);
-  void HandleCommand(VirtioChain* chain);
+  VirtioMagma(component::StartupContext* context);
+  ~VirtioMagma() override = default;
 
-  void OnCommandAvailable();
-  void OnQueueReady();
+  // |fuchsia::virtualization::hardware::VirtioDevice|
+  void Ready(uint32_t negotiated_features, ReadyCallback callback) override;
+  void ConfigureQueue(uint16_t queue, uint16_t size, zx_gpaddr_t desc, zx_gpaddr_t avail,
+                      zx_gpaddr_t used, ConfigureQueueCallback callback) override;
+  void NotifyQueue(uint16_t queue) override;
+
+  // |fuchsia::virtualization::hardware::VirtioMagma|
+  void Start(fuchsia::virtualization::hardware::StartInfo start_info, zx::vmar vmar,
+             StartCallback callback) override;
 
  private:
-  void GetDriver(const virtio_magma_get_driver_t* request,
-                 virtio_magma_get_driver_resp_t* response);
-  void Query(const virtio_magma_query_t* request,
-             virtio_magma_query_resp_t* response);
-  void CreateConnection(const virtio_magma_create_connection_t* request,
-                        virtio_magma_create_connection_resp_t* response);
-  void ReleaseConnection(const virtio_magma_release_connection_t* request,
-                         virtio_magma_release_connection_resp_t* response);
+  virtual zx_status_t Handle_query(const virtio_magma_query_ctrl_t* request,
+                                   virtio_magma_query_resp_t* response) override;
+  virtual zx_status_t Handle_create_connection(
+      const virtio_magma_create_connection_ctrl_t* request,
+      virtio_magma_create_connection_resp_t* response) override;
+  virtual zx_status_t Handle_create_buffer(const virtio_magma_create_buffer_ctrl_t* request,
+                                           virtio_magma_create_buffer_resp_t* response) override;
+  virtual zx_status_t Handle_create_command_buffer(
+      const virtio_magma_create_command_buffer_ctrl_t* request,
+      virtio_magma_create_command_buffer_resp_t* response) override;
+  virtual zx_status_t Handle_map_aligned(const virtio_magma_map_aligned_ctrl_t* request,
+                                         virtio_magma_map_aligned_resp_t* response) override;
+  virtual zx_status_t Handle_map_specific(const virtio_magma_map_specific_ctrl_t* request,
+                                          virtio_magma_map_specific_resp_t* response) override;
+  virtual zx_status_t Handle_wait_semaphores(
+      const virtio_magma_wait_semaphores_ctrl_t* request,
+      virtio_magma_wait_semaphores_resp_t* response) override;
+  virtual zx_status_t Handle_read_notification_channel(
+      const virtio_magma_read_notification_channel_ctrl_t* request,
+      virtio_magma_read_notification_channel_resp_t* response) override;
+  virtual zx_status_t Handle_export(const virtio_magma_export_ctrl_t* request,
+                                    virtio_magma_export_resp_t* response) override;
 
-  std::string device_path_;
-  std::string driver_path_;
   fbl::unique_fd device_fd_;
-  fbl::unique_fd driver_fd_;
-  zx::vmo driver_vmo_;
-  zx::vmar* vmar_;
-  __UNUSED VirtioQueue* in_queue_;
-  VirtioQueue* out_queue_;
-  VirtioChain out_chain_;
-  std::unordered_map<uint64_t, magma_connection_t> connections_;
-  uint64_t next_connection_id_ = 1;
+  zx::vmar vmar_;
+  VirtioQueue out_queue_;
 
   FXL_DISALLOW_COPY_AND_ASSIGN(VirtioMagma);
 };

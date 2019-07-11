@@ -12,6 +12,7 @@
 #include "src/developer/debug/shared/buffered_fd.h"
 #include "src/developer/debug/shared/logging/logging.h"
 #include "src/developer/debug/shared/message_loop_poll.h"
+#include "src/developer/debug/zxdb/client/job.h"
 #include "src/developer/debug/zxdb/client/session.h"
 #include "src/developer/debug/zxdb/client/setting_schema_definition.h"
 #include "src/developer/debug/zxdb/common/string_util.h"
@@ -28,32 +29,28 @@ namespace zxdb {
 namespace {
 
 // Loads any actions specified on the command line into the vector.
-Err SetupActions(const CommandLineOptions& options,
-                 std::vector<Action>* actions) {
+Err SetupActions(const CommandLineOptions& options, std::vector<Action>* actions) {
   if (options.core) {
     if (options.connect || options.run) {
       return Err("--core can't be used with commands to connect or run.");
     }
 
     std::string cmd = VerbToString(Verb::kOpenDump) + " " + *options.core;
-    actions->push_back(Action("Open Dump", [cmd](const Action&, const Session&,
-                                                 Console* console) {
+    actions->push_back(Action("Open Dump", [cmd](const Action&, const Session&, Console* console) {
       console->ProcessInputLine(cmd.c_str(), ActionFlow::PostActionCallback);
     }));
   }
 
   if (options.connect) {
     std::string cmd = "connect " + *options.connect;
-    actions->push_back(Action("Connect", [cmd](const Action&, const Session&,
-                                               Console* console) {
+    actions->push_back(Action("Connect", [cmd](const Action&, const Session&, Console* console) {
       console->ProcessInputLine(cmd.c_str(), ActionFlow::PostActionCallback);
     }));
   }
 
   if (options.run) {
     std::string cmd = "run " + *options.run;
-    actions->push_back(Action("Run", [cmd](const Action&, const Session&,
-                                           Console* console) {
+    actions->push_back(Action("Run", [cmd](const Action&, const Session&, Console* console) {
       console->ProcessInputLine(cmd.c_str(), ActionFlow::PostActionCallback);
     }));
   }
@@ -64,7 +61,24 @@ Err SetupActions(const CommandLineOptions& options,
       return err;
   }
 
+  for (const auto& filter : options.filter) {
+    std::string cmd = "filter attach " + filter;
+    actions->push_back(Action("Filter", [cmd](const Action&, const Session&, Console* console) {
+      console->ProcessInputLine(cmd.c_str(), ActionFlow::PostActionCallback);
+    }));
+  }
+
   return Err();
+}
+
+void InitConsole(zxdb::Console& console) {
+  console.Init();
+
+  // Help text.
+  OutputBuffer help;
+  help.Append(Syntax::kWarning, "👉 ");
+  help.Append(Syntax::kComment, "To get started, try \"status\" or \"help\".");
+  console.Output(help);
 }
 
 void ScheduleActions(zxdb::Session& session, zxdb::Console& console,
@@ -79,7 +93,7 @@ void ScheduleActions(zxdb::Session& session, zxdb::Console& console,
       msg = fxl::StringPrintf("Error executing actions: %s", err.msg().c_str());
     }
     // Go into interactive mode.
-    console.Init();
+    InitConsole(console);
   };
 
   // This will add the actions to the MessageLoop and oversee that all the
@@ -87,6 +101,34 @@ void ScheduleActions(zxdb::Session& session, zxdb::Console& console,
   // Actions run on a singleton ActionFlow instance.
   zxdb::ActionFlow& flow = zxdb::ActionFlow::Singleton();
   flow.ScheduleActions(std::move(actions), &session, &console, callback);
+}
+
+void SetupCommandLineOptions(const CommandLineOptions& options, Session* session) {
+  // Symbol paths
+  std::vector<std::string> paths;
+  // At this moment, the build index has all the "default" paths.
+  BuildIDIndex& build_id_index = session->system().GetSymbols()->build_id_index();
+  for (const auto& build_id_file : build_id_index.build_id_files())
+    paths.push_back(build_id_file);
+  for (const auto& source : build_id_index.sources())
+    paths.push_back(source);
+
+  // We add the options paths given paths.
+  paths.insert(paths.end(), options.symbol_paths.begin(), options.symbol_paths.end());
+
+  if (options.symbol_cache_path) {
+    session->system().settings().SetString(ClientSettings::System::kSymbolCache,
+                                           *options.symbol_cache_path);
+  }
+
+  if (!options.symbol_servers.empty()) {
+    session->system().settings().SetList(ClientSettings::System::kSymbolServers,
+                                         options.symbol_servers);
+  }
+
+  // Adding it to the settings will trigger the loading of the symbols.
+  // Redundant adds are ignored.
+  session->system().settings().SetList(ClientSettings::System::kSymbolPaths, std::move(paths));
 }
 
 }  // namespace
@@ -117,70 +159,27 @@ int ConsoleMain(int argc, const char* argv[]) {
 
     // Route data from buffer -> session.
     Session session;
-    buffer.set_data_available_callback(
-        [&session]() { session.OnStreamReadable(); });
+    buffer.set_data_available_callback([&session]() { session.OnStreamReadable(); });
 
     // TODO(donosoc): Do correct category setup.
     debug_ipc::SetLogCategories({debug_ipc::LogCategory::kAll});
     if (options.debug_mode) {
       debug_ipc::SetDebugMode(true);
-      session.system().settings().SetBool(ClientSettings::System::kDebugMode,
-                                          true);
+      session.system().settings().SetBool(ClientSettings::System::kDebugMode, true);
     }
 
     ConsoleImpl console(&session);
     if (options.quit_agent_on_quit) {
-      session.system().settings().SetBool(
-          ClientSettings::System::kQuitAgentOnExit, true);
+      session.system().settings().SetBool(ClientSettings::System::kQuitAgentOnExit, true);
     }
 
-    // Save command-line switches ----------------------------------------------
-
-    // Symbol paths
-    std::vector<std::string> paths;
-    // At this moment, the build index has all the "default" paths.
-    BuildIDIndex& build_id_index =
-        session.system().GetSymbols()->build_id_index();
-    for (const auto& build_id_file : build_id_index.build_id_files())
-      paths.push_back(build_id_file);
-    for (const auto& source : build_id_index.sources())
-      paths.push_back(source);
-
-    // We add the options paths given paths.
-    paths.insert(paths.end(), options.symbol_paths.begin(),
-                 options.symbol_paths.end());
-
-    if (options.symbol_cache_path) {
-      session.system().settings().SetString(
-          ClientSettings::System::kSymbolCache, *options.symbol_cache_path);
-    }
-
-    if (!options.symbol_servers.empty()) {
-      session.system().settings().SetList(
-          ClientSettings::System::kSymbolServers, options.symbol_servers);
-    }
-
-    // Adding it to the settings will trigger the loading of the symbols.
-    // Redundant adds are ignored.
-    session.system().settings().SetList(ClientSettings::System::kSymbolPaths,
-                                        std::move(paths));
+    SetupCommandLineOptions(options, &session);
 
     if (!actions.empty()) {
       ScheduleActions(session, console, std::move(actions));
     } else {
       // Interactive mode is the default mode.
-      console.Init();
-
-      // Tip for connecting when run interactively.
-      OutputBuffer help;
-      help.Append(Syntax::kWarning, "👉 ");
-      help.Append(
-          Syntax::kComment,
-          "Please \"connect <ip>:<port>\" matching what you passed to\n   "
-          "run fuchsia-pkg://fuchsia.com/debug_agent#meta/debug_agent.cmx "
-          "--port=<port>\n"
-          "   on the target system. Or try \"help\".");
-      console.Output(help);
+      InitConsole(console);
     }
 
     loop.Run();

@@ -8,11 +8,11 @@ use {
     failure::{Error, ResultExt},
     fdio,
     fidl::endpoints::ServerEnd,
-    fidl_fuchsia_io::{DirectoryMarker, OPEN_RIGHT_READABLE},
+    fidl_fuchsia_io::{DirectoryMarker, OPEN_RIGHT_READABLE, OPEN_RIGHT_WRITABLE},
     fidl_fuchsia_pkg as fpkg, fuchsia_async as fasync,
     fuchsia_component::server::ServiceFs,
     fuchsia_syslog::{self, macros::*},
-    fuchsia_uri::pkg_uri::PkgUri,
+    fuchsia_url::pkg_url::PkgUrl,
     fuchsia_zircon::{HandleBased, Status},
     futures::{StreamExt, TryStreamExt},
     std::ffi::CString,
@@ -28,7 +28,7 @@ fn main() -> Result<(), Error> {
     fx_log_info!("starting mock resolver");
     let mut executor = fasync::Executor::new().context("error creating executor")?;
     let mut fs = ServiceFs::new_local();
-    fs.dir("public").add_fidl_service(move |stream| {
+    fs.dir("svc").add_fidl_service(move |stream| {
         let packages_to_mock = packages_to_mock.clone();
         fasync::spawn_local(async move {
             await!(run_resolver_service(stream, packages_to_mock))
@@ -46,8 +46,8 @@ async fn run_resolver_service(
 ) -> Result<(), Error> {
     fx_log_info!("running mock resolver service");
     while let Some(event) = await!(stream.try_next())? {
-        let fpkg::PackageResolverRequest::Resolve { package_uri, dir, responder, .. } = event;
-        let status = await!(resolve(package_uri, dir, packages_to_mock.clone()));
+        let fpkg::PackageResolverRequest::Resolve { package_url, dir, responder, .. } = event;
+        let status = await!(resolve(package_url, dir, packages_to_mock.clone()));
         responder.send(Status::from(status).into_raw())?;
         if let Err(s) = status {
             fx_log_err!("request failed: {}", s);
@@ -57,12 +57,12 @@ async fn run_resolver_service(
 }
 
 async fn resolve(
-    package_uri: String,
+    package_url: String,
     dir: ServerEnd<DirectoryMarker>,
     packages_to_mock: Vec<String>,
 ) -> Result<(), Status> {
-    let uri = PkgUri::parse(&package_uri).map_err(|_| Err(Status::INVALID_ARGS))?;
-    let name = uri.name().ok_or_else(|| Err(Status::INVALID_ARGS))?;
+    let url = PkgUrl::parse(&package_url).map_err(|_| Err(Status::INVALID_ARGS))?;
+    let name = url.name().ok_or_else(|| Err(Status::INVALID_ARGS))?;
     if !packages_to_mock.contains(&name.to_string()) {
         return Err(Status::NOT_FOUND);
     }
@@ -77,7 +77,7 @@ fn open_in_namespace(path: &str, dir: ServerEnd<DirectoryMarker>) -> Result<(), 
         fdio::fdio_sys::fdio_ns_connect(
             ns_ptr,
             cstr.as_ptr(),
-            OPEN_RIGHT_READABLE,
+            OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE,
             dir.into_channel().into_raw(),
         )
     })?;

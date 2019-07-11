@@ -40,7 +40,6 @@ group("all") {
     "//peridot/packages/tests:bup",
     "//peridot/packages/tests:ledger",
     "//peridot/packages/tests:leveldb",
-    "//peridot/packages/tests:maxwell_integration_tests",
     "//peridot/packages/tests:maxwell_unittests",
     "//peridot/packages/tests:modular_integration_tests",
     "//peridot/packages/tests:modular_unittests",
@@ -54,9 +53,8 @@ group("maxwell_unittests") {
   testonly = true
   public_deps = [
     "//peridot/bin/context_engine:context_engine_unittests",
-    "//peridot/bin/discovermgr:discovermgr_tests",
     "//peridot/bin/module_resolver:module_resolver_unittests",
-    "//peridot/bin/suggestion_engine:suggestion_engine_unittests",
+    "//src/stories/bin/discovermgr:discovermgr_tests",
   ]
 }
 
@@ -64,7 +62,7 @@ group("modular_test_harness") {
   testonly = true
   public_deps = [
     "//garnet/packages/testing:environment_delegating_runner",
-    "//peridot/bin/modular_test_harness",
+    "//peridot/bin/modular_test_harness:tests",
     "//peridot/public/lib/modular_test_harness/cpp:test_harness_fixture_test",
   ]
 }
@@ -76,41 +74,8 @@ group("modular_integration_tests") {
     "//garnet/packages/prod:test_runner",
     "//peridot/bin/basemgr:auto_login_base_shell_test",
     "//peridot/packages/prod:integration_testing",
-    "//peridot/tests:modular_tests",
-    "//peridot/tests/agent_services_tests:agent_services_tests",
-    "//peridot/tests/clipboard:clipboard_test_module",
-    "//peridot/tests/common:common_active_module",
-    "//peridot/tests/common:common_null_module",
-    "//peridot/tests/component_context:component_context_test_module",
-    "//peridot/tests/component_context:component_context_test_one_agent",
-    "//peridot/tests/component_context:component_context_test_two_agent",
-    "//peridot/tests/component_context:component_context_test_unstoppable_agent",
-    "//peridot/tests/embed_shell:embed_shell_test_child_module",
-    "//peridot/tests/embed_shell:embed_shell_test_parent_module",
-    "//peridot/tests/embed_shell:embed_shell_test_session_shell",
-    "//peridot/tests/embed_shell:embed_shell_test_story_shell",
-    "//peridot/tests/intents:intent_test_child_module",
-    "//peridot/tests/intents:intent_test_parent_module",
     "//peridot/tests/modular_config:test_config",
-    "//peridot/tests/modular_login_tests:modular_login_tests",
-    "//peridot/tests/module_context:module_context_test_entity_module",
-    "//peridot/tests/module_context:module_context_test_module",
-    "//peridot/tests/module_context:module_context_test_session_shell",
-    "//peridot/tests/parent_child:parent_child_test_child_module1",
-    "//peridot/tests/parent_child:parent_child_test_child_module2",
-    "//peridot/tests/parent_child:parent_child_test_parent_module",
-    "//peridot/tests/queue_persistence:queue_persistence_test_agent",
-    "//peridot/tests/queue_persistence:queue_persistence_test_module",
-    "//peridot/tests/session_shell:session_shell_test_session_shell",
     "//peridot/tests/sessionctl:sessionctl_integration_tests",
-    "//peridot/tests/story_shell:story_shell_test_session_shell",
-    "//peridot/tests/story_shell:story_shell_test_story_shell",
-    "//peridot/tests/story_shell_factory:story_shell_factory_test_session_shell",
-    "//peridot/tests/suggestion:suggestion_test_module",
-    "//peridot/tests/suggestion:suggestion_test_session_shell",
-    "//peridot/tests/trigger:trigger_test_agent",
-    "//peridot/tests/trigger:trigger_test_module",
-    "//peridot/tests/trigger:trigger_test_session_shell",
   ]
 }
 
@@ -134,6 +99,7 @@ group("modular_unittests") {
   public_deps = [
     "//peridot/bin/agents/clipboard:clipboard_unittests",
     "//peridot/bin/basemgr:basemgr_unittests",
+    "//peridot/bin/basemgr/intl_property_provider_impl:intl_property_provider_impl_tests",
     "//peridot/bin/module_resolver_rs:module_resolver_rs_tests",
     "//peridot/bin/sessionctl:sessionctl_unittests",
     "//peridot/bin/sessionmgr/agent_runner:agent_runner_unittests",
@@ -145,13 +111,6 @@ group("modular_unittests") {
     "//peridot/bin/sessionmgr/story_runner:story_runner_unittests",
     "//peridot/lib/sequential_futures:sequential_futures_tests",
     "//peridot/packages/prod:ledger",
-  ]
-}
-
-group("maxwell_integration_tests") {
-  testonly = true
-  public_deps = [
-    "//peridot/tests/maxwell_integration:maxwell_integration_tests",
   ]
 }
 

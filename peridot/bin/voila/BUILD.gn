@@ -12,8 +12,8 @@ rustc_binary("bin") {
   deps = [
     "//garnet/public/lib/fidl/rust/fidl",
     "//garnet/public/rust/carnelian",
-    "//garnet/public/rust/fuchsia-app",
     "//garnet/public/rust/fuchsia-async",
+    "//garnet/public/rust/fuchsia-component",
     "//garnet/public/rust/fuchsia-scenic",
     "//garnet/public/rust/fuchsia-syslog",
     "//garnet/public/rust/fuchsia-zircon",
@@ -35,9 +35,10 @@ rustc_binary("bin") {
     "//third_party/rust_crates:log",
     "//third_party/rust_crates:parking_lot",
     "//third_party/rust_crates:rand",
+    "//third_party/rust_crates:structopt",
     "//zircon/public/fidl/fuchsia-cobalt:fuchsia-cobalt-rustc",
     "//zircon/public/fidl/fuchsia-logger:fuchsia-logger-rustc",
-    "//zircon/public/fidl/fuchsia-tracelink:fuchsia-tracelink-rustc",
+    "//zircon/public/fidl/fuchsia-tracing-provider:fuchsia-tracing-provider-rustc",
   ]
   with_unit_tests = true
 }
@@ -63,7 +64,7 @@ package("voila") {
 
 test_package("voila_tests") {
   deps = [
-    ":bin",
+    ":bin_test",
     "//peridot/bin/voila/testing/session_shell",
   ]
   tests = [

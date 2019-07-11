@@ -14,17 +14,20 @@
 #include <fbl/unique_ptr.h>
 #include <fbl/vector.h>
 #include <fuchsia/sysmem/c/fidl.h>
+#include <lib/async/cpp/wait.h>
 #include <lib/zx/bti.h>
+#include <lib/zx/channel.h>
 #include <region-alloc/region-alloc.h>
-
-#include "protected_memory_allocator.h"
 
 #include <limits>
 #include <map>
 
+#include "memory_allocator.h"
+
 class Driver;
 class BufferCollectionToken;
-class Device {
+
+class Device final : public MemoryAllocator::Owner {
 public:
     Device(zx_device_t* parent_device, Driver* parent_driver);
 
@@ -35,10 +38,13 @@ public:
     //
 
     zx_status_t Connect(zx_handle_t allocator_request);
+    zx_status_t RegisterHeap(uint64_t heap, zx_handle_t heap_connection);
 
     zx_status_t GetProtectedMemoryInfo(fidl_txn* txn);
 
-    const zx::bti& bti();
+    // MemoryAllocator::Owner implementation.
+    const zx::bti& bti() override;
+    zx_status_t CreatePhysicalVmo(uint64_t base, uint64_t size, zx::vmo* vmo_out) override;
 
     uint32_t pdev_device_info_vid();
 
@@ -58,7 +64,10 @@ public:
     BufferCollectionToken* FindTokenByServerChannelKoid(
         zx_koid_t token_server_koid);
 
-    ProtectedMemoryAllocator* protected_allocator() { return protected_allocator_.get(); }
+    // Get allocator for |settings|. Returns NULL if allocator is not
+    // registered for settings.
+    MemoryAllocator* GetAllocator(
+        const fuchsia_sysmem_BufferMemorySettings* settings);
 
 private:
     zx_device_t* parent_device_ = nullptr;
@@ -81,7 +90,12 @@ private:
     // the server end of a BufferCollectionToken channel.
     std::map<zx_koid_t, BufferCollectionToken*> tokens_by_koid_;
 
-    fbl::unique_ptr<ProtectedMemoryAllocator> protected_allocator_;
+    // This map contains all registered memory allocators.
+    std::map<fuchsia_sysmem_HeapType, fbl::unique_ptr<MemoryAllocator>> allocators_;
+
+    fbl::unique_ptr<MemoryAllocator> contiguous_system_ram_allocator_;
+
+    MemoryAllocator* protected_allocator_ = nullptr;
 };
 
 #endif // ZIRCON_SYSTEM_DEV_SYSMEM_SYSMEM_DEVICE_H_

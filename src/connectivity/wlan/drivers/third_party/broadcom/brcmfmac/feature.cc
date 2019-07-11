@@ -17,6 +17,7 @@
 #include "feature.h"
 
 #include <string.h>
+#include <zircon/status.h>
 
 #include "brcm_hw_ids.h"
 #include "brcmu_wifi.h"
@@ -46,44 +47,6 @@ static const struct brcmf_feat_fwcap brcmf_fwcap_map[] = {
     {BRCMF_FEAT_P2P, "p2p"},
 };
 
-#ifdef DEBUG
-/*
- * expand quirk list to array of quirk strings.
- */
-#define BRCMF_QUIRK_DEF(_q) #_q,
-static const char* const brcmf_quirk_names[] = {BRCMF_QUIRK_LIST};
-#undef BRCMF_QUIRK_DEF
-
-/**
- * brcmf_feat_debugfs_read() - expose feature info to debugfs.
- *
- * @seq: sequence for debugfs entry.
- * @data: raw data pointer.
- */
-static zx_status_t brcmf_feat_debugfs_read(struct seq_file* seq, void* data) {
-    struct brcmf_bus* bus_if = dev_to_bus(static_cast<brcmf_device*>(seq->private_data));
-    uint32_t feats = bus_if->drvr->feat_flags;
-    uint32_t quirks = bus_if->drvr->chip_quirks;
-    int id;
-
-    seq_printf(seq, "Features: %08x\n", feats);
-    for (id = 0; id < BRCMF_FEAT_LAST; id++)
-        if (feats & BIT(id)) {
-            seq_printf(seq, "\t%s\n", brcmf_feat_names[id]);
-        }
-    seq_printf(seq, "\nQuirks:   %08x\n", quirks);
-    for (id = 0; id < BRCMF_FEAT_QUIRK_LAST; id++)
-        if (quirks & BIT(id)) {
-            seq_printf(seq, "\t%s\n", brcmf_quirk_names[id]);
-        }
-    return ZX_OK;
-}
-#else
-static zx_status_t brcmf_feat_debugfs_read(struct seq_file* seq, void* data) {
-    return ZX_OK;
-}
-#endif /* DEBUG */
-
 /**
  * brcmf_feat_iovar_int_get() - determine feature through iovar query.
  *
@@ -95,24 +58,25 @@ static void brcmf_feat_iovar_int_get(struct brcmf_if* ifp, enum brcmf_feat_id id
                                      const char* name) {
     uint32_t data;
     zx_status_t err;
+    int32_t fw_err = 0;
 
-    err = brcmf_fil_iovar_int_get(ifp, name, &data);
+    err = brcmf_fil_iovar_int_get(ifp, name, &data, &fw_err);
     if (err == ZX_OK) {
-        brcmf_dbg(INFO, "enabling feature: %s\n", brcmf_feat_names[id]);
+        BRCMF_DBG(INFO, "enabling feature: %s\n", brcmf_feat_names[id]);
         ifp->drvr->feat_flags |= BIT(id);
     } else {
-        brcmf_dbg(TRACE, "%s feature check failed: %d%s\n", brcmf_feat_names[id], err,
-            (err == ZX_ERR_NOT_SUPPORTED) ? " (FW: not supported)" : "");
+        BRCMF_DBG(TRACE, "%s feature check failed: %s, fw err %s\n", brcmf_feat_names[id],
+                  zx_status_get_string(err), brcmf_fil_get_errstr(fw_err));
     }
 }
 
 static void brcmf_feat_iovar_data_set(struct brcmf_if* ifp, enum brcmf_feat_id id, const char* name,
-                                      const void* data, size_t len) {
+                                      const void* data, size_t len, int32_t* fwerr_ptr) {
     zx_status_t err;
 
-    err = brcmf_fil_iovar_data_set(ifp, name, data, len);
+    err = brcmf_fil_iovar_data_set(ifp, name, data, len, fwerr_ptr);
     if (err == ZX_OK) {
-        brcmf_dbg(INFO, "enabling feature: %s\n", brcmf_feat_names[id]);
+        BRCMF_DBG(INFO, "enabling feature: %s\n", brcmf_feat_names[id]);
         ifp->drvr->feat_flags |= BIT(id);
     } else if (err == ZX_ERR_NOT_SUPPORTED) {
         // brcmf_fil_iovar_data_set() returns the result of brcmf_fil_cmd_data, which returned
@@ -120,10 +84,10 @@ static void brcmf_feat_iovar_data_set(struct brcmf_if* ifp, enum brcmf_feat_id i
         // original error check was "(err != -BRCMF_FW_UNSUPPORTED)" which meant that if the
         // firmware reported BRCMF_FW_UNSUPPORTED, this logic would see -EBADE and think all
         // was well.
-        brcmf_dbg(INFO, " * * NOT enabling feature %s, though the Linux driver would have",
+        BRCMF_DBG(INFO, " * * NOT enabling feature %s, though the Linux driver would have",
             brcmf_feat_names[id]);
     } else {
-        brcmf_dbg(TRACE, "%s feature check failed: %d\n", brcmf_feat_names[id], err);
+        BRCMF_DBG(TRACE, "%s feature check failed: %d\n", brcmf_feat_names[id], err);
     }
 }
 
@@ -133,20 +97,22 @@ static void brcmf_feat_firmware_capabilities(struct brcmf_if* ifp) {
     enum brcmf_feat_id id;
     int i;
     zx_status_t err;
+    int32_t fw_err = 0;
 
-    err = brcmf_fil_iovar_data_get(ifp, "cap", caps, sizeof(caps));
+    err = brcmf_fil_iovar_data_get(ifp, "cap", caps, sizeof(caps), &fw_err);
     if (err != ZX_OK) {
-        brcmf_err("could not get firmware cap (%d)\n", err);
+        BRCMF_ERR("could not get firmware cap: %s, fw err %s\n", zx_status_get_string(err),
+                  brcmf_fil_get_errstr(fw_err));
         return;
     }
 
     caps[sizeof(caps)-1] = 0;
-    brcmf_dbg(INFO, "[ %s]\n", caps);
+    BRCMF_DBG(INFO, "[ %s]\n", caps);
 
     for (i = 0; i < (int)countof(brcmf_fwcap_map); i++) {
         if (strstr(caps, brcmf_fwcap_map[i].fwcap_id)) {
             id = brcmf_fwcap_map[i].feature;
-            brcmf_dbg(INFO, "enabling feature: %s\n", brcmf_feat_names[id]);
+            BRCMF_DBG(INFO, "enabling feature: %s\n", brcmf_feat_names[id]);
             ifp->drvr->feat_flags |= BIT(id);
         }
     }
@@ -163,13 +129,13 @@ void brcmf_feat_attach(struct brcmf_pub* drvr) {
     memset(&gscan_cfg, 0, sizeof(gscan_cfg));
     if (drvr->bus_if->chip != BRCM_CC_43430_CHIP_ID && drvr->bus_if->chip != BRCM_CC_4345_CHIP_ID)
         brcmf_feat_iovar_data_set(ifp, BRCMF_FEAT_GSCAN, "pfn_gscan_cfg", &gscan_cfg,
-                                  sizeof(gscan_cfg));
+                                  sizeof(gscan_cfg), nullptr);
     brcmf_feat_iovar_int_get(ifp, BRCMF_FEAT_PNO, "pfn");
     if (drvr->bus_if->wowl_supported) {
         brcmf_feat_iovar_int_get(ifp, BRCMF_FEAT_WOWL, "wowl");
     }
     if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_WOWL)) {
-        err = brcmf_fil_iovar_int_get(ifp, "wowl_cap", &wowl_cap);
+        err = brcmf_fil_iovar_int_get(ifp, "wowl_cap", &wowl_cap, nullptr);
         if (err == ZX_OK) {
             ifp->drvr->feat_flags |= BIT(BRCMF_FEAT_WOWL_ARP_ND);
             if (wowl_cap & BRCMF_WOWL_PFN_FOUND) {
@@ -189,13 +155,13 @@ void brcmf_feat_attach(struct brcmf_pub* drvr) {
     brcmf_feat_iovar_int_get(ifp, BRCMF_FEAT_MFP, "mfp");
 
     pfn_mac.version = BRCMF_PFN_MACADDR_CFG_VER;
-    err = brcmf_fil_iovar_data_get(ifp, "pfn_macaddr", &pfn_mac, sizeof(pfn_mac));
+    err = brcmf_fil_iovar_data_get(ifp, "pfn_macaddr", &pfn_mac, sizeof(pfn_mac), nullptr);
     if (err == ZX_OK) {
         ifp->drvr->feat_flags |= BIT(BRCMF_FEAT_SCAN_RANDOM_MAC);
     }
 
     if (drvr->settings->feature_disable) {
-        brcmf_dbg(INFO, "Features: 0x%02x, disable: 0x%02x\n", ifp->drvr->feat_flags,
+        BRCMF_DBG(INFO, "Features: 0x%02x, disable: 0x%02x\n", ifp->drvr->feat_flags,
                   drvr->settings->feature_disable);
         ifp->drvr->feat_flags &= ~drvr->settings->feature_disable;
     }
@@ -216,8 +182,6 @@ void brcmf_feat_attach(struct brcmf_pub* drvr) {
         /* no quirks */
         break;
     }
-
-    brcmf_debugfs_add_entry(drvr, "features", brcmf_feat_debugfs_read);
 }
 
 bool brcmf_feat_is_enabled(struct brcmf_if* ifp, enum brcmf_feat_id id) {

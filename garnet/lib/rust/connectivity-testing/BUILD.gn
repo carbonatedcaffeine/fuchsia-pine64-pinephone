@@ -4,6 +4,7 @@
 
 import("//build/package.gni")
 import("//build/rust/rustc_library.gni")
+import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
 
 rustc_library("connectivity-testing") {
@@ -19,6 +20,7 @@ rustc_library("connectivity-testing") {
     "//garnet/public/rust/fuchsia-async",
     "//garnet/public/rust/fuchsia-syslog",
     "//garnet/public/rust/fuchsia-zircon",
+    "//sdk/fidl/fuchsia.net.oldhttp:fuchsia.net.oldhttp-rustc",
     "//sdk/fidl/fuchsia.wlan.common:fuchsia.wlan.common-rustc",
     "//third_party/rust_crates:failure",
     "//third_party/rust_crates:futures-preview",
@@ -26,10 +28,9 @@ rustc_library("connectivity-testing") {
   ]
 }
 
-package("connectivity-testing-tests") {
-  testonly = true
+unittest_package("connectivity-testing-tests") {
   deps = [
-    ":connectivity-testing",
+    ":connectivity-testing_test",
   ]
   tests = [
     {

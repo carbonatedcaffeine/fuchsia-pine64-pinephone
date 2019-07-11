@@ -5,13 +5,13 @@
 source_set("stack") {
   testonly = true
   sources = [
-    "stack-test.cpp",
+    "stack-test.cc",
   ]
   cflags = [ "-fstack-protector-all" ]
   deps = [
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/runtime:headers",
-    "$zx/system/ulib/unittest",
     "$zx/system/ulib/zircon",
+    "$zx/system/ulib/zxtest",
   ]
 }

@@ -4,7 +4,7 @@
 
 driver("msm8x53-clk") {
   sources = [
-    "msm8x53-clk.cpp",
+    "msm8x53-clk.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.clock",
@@ -13,6 +13,7 @@ driver("msm8x53-clk") {
     "$zx/system/banjo/ddk.protocol.i2c",
     "$zx/system/banjo/ddk.protocol.platform.bus",
     "$zx/system/banjo/ddk.protocol.platform.device",
+    "$zx/system/dev/lib/device-protocol-pdev",
     "$zx/system/dev/lib/mmio",
     "$zx/system/dev/lib/msm8x53",
     "$zx/system/fidl/fuchsia-hardware-clock:c",
@@ -31,8 +32,8 @@ test("msm8x53-clk-test") {
   testonly = true
   output_name = "msm8x53-clk-test"
   sources = [
-    "msm8x53-clk-test.cpp",
-    "msm8x53-clk.cpp",
+    "msm8x53-clk-test.cc",
+    "msm8x53-clk.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.clock",
@@ -41,6 +42,7 @@ test("msm8x53-clk-test") {
     "$zx/system/banjo/ddk.protocol.i2c",
     "$zx/system/banjo/ddk.protocol.platform.bus",
     "$zx/system/banjo/ddk.protocol.platform.device",
+    "$zx/system/dev/lib/device-protocol-pdev",
     "$zx/system/dev/lib/mock-mmio-reg",
     "$zx/system/dev/lib/msm8x53",
     "$zx/system/fidl/fuchsia-hardware-clock:c",

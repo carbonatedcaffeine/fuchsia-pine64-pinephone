@@ -11,15 +11,15 @@ use fidl_fuchsia_sys::{FlatNamespace, RunnerRequest, RunnerRequestStream};
 use fuchsia_async as fasync;
 use fuchsia_component::server::ServiceFs;
 use fuchsia_syslog::fx_log_info;
-use fuchsia_uri::pkg_uri::PkgUri;
+use fuchsia_url::pkg_url::PkgUrl;
 use fuchsia_zircon as zx;
 use futures::prelude::*;
 
 use std::mem;
 
 fn manifest_path_from_url(url: &str) -> Result<String, Error> {
-    match PkgUri::parse(url) {
-        Ok(uri) => match uri.resource() {
+    match PkgUrl::parse(url) {
+        Ok(url) => match url.resource() {
             Some(r) => Ok(r.to_string()),
             None => bail!("no resource"),
         },
@@ -136,7 +136,7 @@ async fn main() -> Result<(), Error> {
     fuchsia_syslog::init_with_tags(&["component_test_runner"])?;
 
     let mut fs = ServiceFs::new_local();
-    fs.dir("public").add_fidl_service(IncomingServices::Runner);
+    fs.dir("svc").add_fidl_service(IncomingServices::Runner);
 
     fs.take_and_serve_directory_handle()?;
 

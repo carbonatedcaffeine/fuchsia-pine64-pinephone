@@ -60,6 +60,7 @@ ZIRCON_DRIVER_BEGIN(demo_null_driver, demo_null_driver_ops, "zircon", "0.1", 1)
     BI_MATCH_IF(EQ, BIND_PROTOCOL, ZX_PROTOCOL_MISC_PARENT),
 ZIRCON_DRIVER_END(demo_null_driver)
 ```
+
 <!-- @@@ alainv sez these macros are being deprecated in favour of a Driver Binding Language -->
 
 The C preprocessor macros `ZIRCON_DRIVER_BEGIN` and `ZIRCON_DRIVER_END` delimit
@@ -159,9 +160,9 @@ parameter to **null_read()**.
 Similarly, when **null_read()** indicates the number of bytes that it read (0 in our case), this
 appears as the return value from the client's **read()** function.
 
-> **NOTE:
-> The handler is expected to always return immediately.
-> By convention, indicating zero bytes in `*actual` indicates EOF**
+
+Note: The handler is expected to always return immediately.
+By convention, indicating zero bytes in `*actual` indicates EOF
 
 There are, of course, cases when the device doesn't have data immediately available, *AND* it's
 not an EOF situation.
@@ -205,8 +206,7 @@ This tells the client that all of their data was written.
 Of course, since this is the `/dev/misc/demo-null` device, the data doesn't actually *go*
 anywhere.
 
-> **NOTE:
-> Just like in the** **null_read()** **case, the handler must not block.**
+Note: Just like in the **null_read()** case, the handler must not block.
 
 ## What about **open()** and **close()**?
 
@@ -456,7 +456,7 @@ side, and an appropriate **ioctl()** handler on the driver side.
 
 Under Fuchsia, this is done differently, by marshalling data through the Fuchsia Interface
 Definition Language
-([**FIDL**](https://fuchsia.googlesource.com/fuchsia/+/master/docs/development/languages/fidl/README.md)).
+([**FIDL**](/docs/development/languages/fidl/README.md)).
 
 For more details about FIDL itself, consult the reference above.
 For our purposes here, FIDL:
@@ -515,7 +515,7 @@ protocol Number {
 The first line, `library zircon.sample.number;` provides a name for the library that will
 be generated.
 
-Next, `[Layout="Simple"]` generates [simple C bindings](https://fuchsia.googlesource.com/fuchsia/+/master/docs/development/languages/fidl/languages/c.md#simple-bindings).
+Next, `[Layout="Simple"]` generates [simple C bindings](/docs/development/languages/fidl/languages/c.md#simple-bindings).
 
 Finally, the `protocol` section defines all of the methods that are available.
 Each method has a name, and specifies inputs and outputs.
@@ -779,7 +779,7 @@ specification's prototype of the result portion of the method definition.
 FIDL expressions can certainly be made more complex than what we've shown above.
 For example, nested structures can be used, rather than the simple `uint32`.
 Multiple parameters are allowed for both inputs and outputs. See the
-[FIDL reference](https://fuchsia.googlesource.com/fuchsia/+/master/docs/development/languages/fidl/README.md).
+[FIDL reference](/docs/development/languages/fidl/README.md).
 
 ## Registering multiple devices with `/dev/misc/demo-multi`
 

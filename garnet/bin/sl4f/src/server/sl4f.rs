@@ -28,12 +28,18 @@ use crate::audio::facade::AudioFacade;
 // Auth related includes
 use crate::auth::facade::AuthFacade;
 
+// Session related includes
+use crate::basemgr::facade::BaseManagerFacade;
+
 // Bluetooth related includes
 use crate::bluetooth::ble_advertise_facade::BleAdvertiseFacade;
 use crate::bluetooth::bt_control_facade::BluetoothControlFacade;
 use crate::bluetooth::facade::BluetoothFacade;
 use crate::bluetooth::gatt_client_facade::GattClientFacade;
 use crate::bluetooth::gatt_server_facade::GattServerFacade;
+
+// File related includes
+use crate::file::facade::FileFacade;
 
 // Logging related includes
 use crate::logging::facade::LoggingFacade;
@@ -50,10 +56,14 @@ use crate::setui::facade::SetUiFacade;
 // Traceutil related includes
 use crate::traceutil::facade::TraceutilFacade;
 
+// Webdriver related includes
+use crate::webdriver::facade::WebdriverFacade;
+
 // Wlan related includes
 use crate::wlan::facade::WlanFacade;
 
 pub mod macros {
+    pub use crate::fx_err_and_bail;
     pub use crate::with_line;
 }
 
@@ -62,6 +72,14 @@ macro_rules! with_line {
     ($tag:expr) => {
         format!("{}:{}", $tag, line!())
     };
+}
+
+#[macro_export]
+macro_rules! fx_err_and_bail {
+    ($tag:expr, $msg:expr) => {{
+        fx_log_err!(tag: $tag, "{}", $msg);
+        bail!($msg)
+    }};
 }
 
 /// Sl4f object. This stores all information about state for each connectivity stack.
@@ -76,6 +94,9 @@ pub struct Sl4f {
     // auth_facade: Thread safe object for injecting credentials for tests.
     auth_facade: Arc<AuthFacade>,
 
+    // basemgr_facade: Thread safe object for restarting sessions for tests.
+    basemgr_facade: Arc<BaseManagerFacade>,
+
     // bt_facade: Thread safe object for state for ble functions.
     ble_advertise_facade: Arc<BleAdvertiseFacade>,
 
@@ -84,6 +105,9 @@ pub struct Sl4f {
 
     // bt_control_facade: Thread safe object for state for  Bluetooth control tests
     bt_control_facade: Arc<BluetoothControlFacade>,
+
+    // file_facade: Thread safe object for state for  File control functions
+    file_facade: Arc<FileFacade>,
 
     // gatt_client_facade: Thread safe object for state for Gatt Client tests
     gatt_client_facade: Arc<GattClientFacade>,
@@ -106,6 +130,9 @@ pub struct Sl4f {
     // traceutil_facade: Thread safe object for state for Traceutil functions.
     traceutil_facade: Arc<TraceutilFacade>,
 
+    // webdriver_facade: thread safe object for state for webdriver functions.
+    webdriver_facade: Arc<WebdriverFacade>,
+
     // wlan_facade: Thread safe object for state for wlan connectivity tests
     wlan_facade: Arc<WlanFacade>,
 
@@ -119,8 +146,10 @@ impl Sl4f {
     pub fn new() -> Result<Arc<RwLock<Sl4f>>, Error> {
         let audio_facade = Arc::new(AudioFacade::new()?);
         let auth_facade = Arc::new(AuthFacade::new());
+        let basemgr_facade = Arc::new(BaseManagerFacade::new());
         let ble_advertise_facade = Arc::new(BleAdvertiseFacade::new());
         let bt_control_facade = Arc::new(BluetoothControlFacade::new());
+        let file_facade = Arc::new(FileFacade::new());
         let gatt_client_facade = Arc::new(GattClientFacade::new());
         let gatt_server_facade = Arc::new(GattServerFacade::new());
         let logging_facade = Arc::new(LoggingFacade::new());
@@ -128,13 +157,16 @@ impl Sl4f {
         let scenic_facade = Arc::new(ScenicFacade::new());
         let setui_facade = Arc::new(SetUiFacade::new()?);
         let traceutil_facade = Arc::new(TraceutilFacade::new());
+        let webdriver_facade = Arc::new(WebdriverFacade::new());
         let wlan_facade = Arc::new(WlanFacade::new()?);
         Ok(Arc::new(RwLock::new(Sl4f {
             audio_facade,
             auth_facade,
+            basemgr_facade,
             ble_advertise_facade,
             bt_facade: BluetoothFacade::new(),
             bt_control_facade,
+            file_facade,
             gatt_client_facade,
             gatt_server_facade,
             logging_facade,
@@ -142,6 +174,7 @@ impl Sl4f {
             scenic_facade,
             setui_facade,
             traceutil_facade,
+            webdriver_facade,
             wlan_facade,
             clients: Arc::new(Mutex::new(HashMap::new())),
         })))
@@ -159,12 +192,20 @@ impl Sl4f {
         self.auth_facade.clone()
     }
 
+    pub fn get_basemgr_facade(&self) -> Arc<BaseManagerFacade> {
+        self.basemgr_facade.clone()
+    }
+
     pub fn get_ble_advertise_facade(&self) -> Arc<BleAdvertiseFacade> {
         self.ble_advertise_facade.clone()
     }
 
     pub fn get_bt_control_facade(&self) -> Arc<BluetoothControlFacade> {
         self.bt_control_facade.clone()
+    }
+
+    pub fn get_file_facade(&self) -> Arc<FileFacade> {
+        self.file_facade.clone()
     }
 
     pub fn get_gatt_client_facade(&self) -> Arc<GattClientFacade> {
@@ -193,6 +234,10 @@ impl Sl4f {
 
     pub fn get_traceutil_facade(&self) -> Arc<TraceutilFacade> {
         self.traceutil_facade.clone()
+    }
+
+    pub fn get_webdriver_facade(&self) -> Arc<WebdriverFacade> {
+        self.webdriver_facade.clone()
     }
 
     pub fn get_wlan_facade(&self) -> Arc<WlanFacade> {

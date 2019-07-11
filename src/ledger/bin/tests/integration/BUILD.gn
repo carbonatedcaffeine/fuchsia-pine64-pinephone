@@ -30,9 +30,10 @@ executable("integration") {
     "//sdk/fidl/fuchsia.modular.auth",
     "//sdk/lib/fidl/cpp",
     "//sdk/lib/sys/cpp/testing:unit",
+    "//src/ledger/bin/app:constants",
     "//src/ledger/bin/app:lib",
     "//src/ledger/bin/fidl",
-    "//src/ledger/bin/fidl:error_notifier",
+    "//src/ledger/bin/fidl:syncable",
     "//src/ledger/bin/p2p_provider/impl",
     "//src/ledger/bin/p2p_provider/public",
     "//src/ledger/bin/p2p_sync/impl",
@@ -41,12 +42,12 @@ executable("integration") {
     "//src/ledger/bin/storage/public",
     "//src/ledger/bin/testing:ledger_instance_factory",
     "//src/ledger/bin/testing:lib",
-    "//src/ledger/bin/testing/netconnector",
+    "//src/ledger/bin/testing/overnet",
     "//src/ledger/bin/tests/integration/sync",
     "//src/ledger/cloud_provider_in_memory/lib",
     "//src/ledger/lib/firebase_auth/testing",
     "//src/lib/fxl",
-    "//third_party/googletest:gtest_main",
+    "//src/lib/fxl/test:gtest_main",
   ]
 
   configs += [ "//src/ledger:ledger_config" ]
@@ -77,8 +78,8 @@ source_set("integration_lib") {
     "//src/lib/fxl",
     "//third_party/googletest:gtest",
     "//zircon/public/lib/async-loop-cpp",
-    "//zircon/public/lib/async-testutils",
-    "//zircon/public/lib/trace-provider",
+    "//zircon/public/lib/async-testing",
+    "//zircon/public/lib/trace-provider-with-fdio",
   ]
 
   configs += [ "//src/ledger:ledger_config" ]

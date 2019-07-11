@@ -567,6 +567,9 @@ pub trait ParseBufferMut: ParseBuffer + AsMut<[u8]> {
     /// mutable references to the buffer. This can be useful if you want to
     /// modify parsed packets in-place.
     ///
+    /// Depending on the implementation of [`P::parse_mut`], the contents
+    /// of the buffer may be modified during parsing.
+    ///
     /// See the [`BufferViewMut`] and [`ParsablePacket`] documentation for more
     /// details.
     ///
@@ -655,11 +658,8 @@ pub trait Buffer: ParseBuffer {
     ///
     /// `reset` consumes the entire prefix and suffix, adding them to the body.
     fn reset(&mut self) {
-        // TODO(joshlf): Inline these calls once we have NLL.
-        let prefix = self.prefix_len();
-        let suffix = self.suffix_len();
-        self.grow_front(prefix);
-        self.grow_back(suffix);
+        self.grow_front(self.prefix_len());
+        self.grow_back(self.suffix_len());
     }
 
     /// Undo the effects of a previous parse in preparation for serialization.
@@ -677,6 +677,19 @@ pub trait Buffer: ParseBuffer {
     /// parsed packet, followed by the second most recently parsed packet, and
     /// so on. Otherwise, it may panic, and in any case, almost certainly won't
     /// produce the desired buffer contents.
+    ///
+    /// # Padding
+    ///
+    /// If, during parsing, a packet encountered post-packet padding that was
+    /// discarded (see the documentation on [`ParsablePacket::parse`]), calling
+    /// `undo_parse` on the `ParseMetadata` from that packet will not undo the
+    /// effects of consuming and discarding that padding. The reason for this is
+    /// that the padding is not considered part of the packet itself (the body
+    /// it was parsed from can be thought of comprising the packet and
+    /// post-packet padding back-to-back).
+    ///
+    /// Calling `undo_parse` on the next encapsulating packet (the one whose
+    /// body contained the padding) will undo those effects.
     ///
     /// # Panics
     ///
@@ -734,11 +747,8 @@ pub trait BufferMut: Buffer + ParseBufferMut {
     /// useful when serializing to ensure that the contents of packets
     /// previously stored in the buffer are not leaked.
     fn reset_zero(&mut self) {
-        // TODO(joshlf): Inline these calls once we have NLL.
-        let prefix = self.prefix_len();
-        let suffix = self.suffix_len();
-        self.grow_front_zero(prefix);
-        self.grow_back_zero(suffix);
+        self.grow_front_zero(self.prefix_len());
+        self.grow_back_zero(self.suffix_len());
     }
 
     /// Serializes a packet in the buffer.
@@ -853,7 +863,7 @@ pub trait BufferView<B: ByteSlice>: Sized + AsRef<[u8]> {
     /// `take_rest_front` consumes the rest of the bytes from the buffer's body.
     /// After a call to `take_rest_front`, the body is empty, and the bytes
     /// which were previously in the body are now in the prefix.
-    fn take_rest_front(mut self) -> B {
+    fn take_rest_front(&mut self) -> B {
         let len = self.len();
         self.take_front(len).unwrap()
     }
@@ -863,9 +873,27 @@ pub trait BufferView<B: ByteSlice>: Sized + AsRef<[u8]> {
     /// `take_rest_back` consumes the rest of the bytes from the buffer's body.
     /// After a call to `take_rest_back`, the body is empty, and the bytes which
     /// were previously in the body are now in the suffix.
-    fn take_rest_back(mut self) -> B {
+    fn take_rest_back(&mut self) -> B {
         let len = self.len();
         self.take_back(len).unwrap()
+    }
+
+    /// Takes a single byte of the buffer's body from the front.
+    ///
+    /// `take_byte_front` consumes a single byte from the from of the buffer's
+    /// body. It's equivalent to calling `take_front(1)` and copying out the
+    /// single byte on successful return.
+    fn take_byte_front(&mut self) -> Option<u8> {
+        self.take_front(1).map(|x| x[0])
+    }
+
+    /// Takes a single byte of the buffer's body from the back.
+    ///
+    /// `take_byte_back` consumes a single byte from the fron of the buffer's
+    /// body. It's equivalent to calling `take_back(1)` and copying out the
+    /// single byte on successful return.
+    fn take_byte_back(&mut self) -> Option<u8> {
+        self.take_back(1).map(|x| x[0])
     }
 
     /// Converts this view into a reference to the buffer's body.
@@ -1151,12 +1179,19 @@ pub trait ParsablePacket<B: ByteSlice, ParseArgs>: Sized {
     ///
     /// # Padding
     ///
-    /// There may be post-packet padding which was added in order to satisfy the
-    /// minimum body length requirement of a lower layer packet. If this packet
+    /// There may be post-packet padding (coming after the entire packet,
+    /// including any footer) which was added in order to satisfy the minimum
+    /// body length requirement of an encapsulating packet. If this packet
     /// describes its own length (and thus, it's possible to determine whether
-    /// there's any padding), `parse` is required to consume any padding. If
-    /// this invariant is not upheld, future calls to `Buffer::parse` or
-    /// `Buffer::undo_parse` may behave incorrectly.
+    /// there's any padding), `parse` is required to consume any post-packet
+    /// padding from the buffer's suffix. If this invariant is not upheld,
+    /// future calls to `Buffer::parse` or `Buffer::undo_parse` may behave
+    /// incorrectly.
+    ///
+    /// Pre-packet padding is not supported; if a protocol supports such
+    /// padding, it must be handled in a way that is transparent to this API. In
+    /// particular, that means that the `parse_metadata` method must treat that
+    /// padding as part of the packet.
     fn parse<BV: BufferView<B>>(buffer: BV, args: ParseArgs) -> Result<Self, Self::Error>;
 
     /// Parse a packet from a `BufferMut`.
@@ -1171,6 +1206,19 @@ pub trait ParsablePacket<B: ByteSlice, ParseArgs>: Sized {
     }
 
     /// Metadata about this packet required by [`Buffer::undo_parse`].
+    ///
+    /// The returned `ParseMetadata` records the number of header and footer
+    /// bytes consumed by this packet during parsing, and the number of bytes
+    /// left in the body (not consumed from the buffer). The header length must
+    /// be equal to the number of bytes consumed from the prefix, and the footer
+    /// length must be equal to the number of bytes consumed from the suffix.
+    ///
+    /// There is one exception: if any post-packet padding was consumed from the
+    /// suffix, this should not be included, as it is not considered part of the
+    /// packet. For example, consider a packet with 8 bytes of footer followed
+    /// by 8 bytes of post-packet padding. Parsing this packet would consume 16
+    /// bytes from the suffix, but calling `parse_metadata` on the resulting
+    /// object would return a `ParseMetadata` with only 8 bytes of footer.
     fn parse_metadata(&self) -> ParseMetadata;
 }
 
@@ -1306,7 +1354,7 @@ impl<'a> ParseBufferMut for &'a mut [u8] {
         &'b mut self,
         args: ParseArgs,
     ) -> Result<P, P::Error> {
-        P::parse(self, args)
+        P::parse_mut(self, args)
     }
     fn as_buf_mut(&mut self) -> Buf<&mut [u8]> {
         Buf::new(self, ..)
@@ -1488,6 +1536,8 @@ mod tests {
                 test_buffer::<Either<Buf<Vec<u8>>, Buf<Vec<u8>>>, _>(|len| {
                     Either::$variant(Buf::new(ascending(len), ..))
                 });
+                // Test call to `Buf::buffer_view` which returns a
+                // `BufferView`.
                 let mut buf: Either<Buf<Vec<u8>>, Buf<Vec<u8>>> =
                     Either::$variant(Buf::new(ascending(10), ..));
                 test_buffer_view(match &mut buf {
@@ -1495,6 +1545,15 @@ mod tests {
                     _ => unreachable!(),
                 });
                 test_buffer_view_post(&buf, true);
+                // Test call to `Buf::buffer_view_mut` which returns a
+                // `BufferViewMut`.
+                let mut buf: Either<Buf<Vec<u8>>, Buf<Vec<u8>>> =
+                    Either::$variant(Buf::new(ascending(10), ..));
+                test_buffer_view_mut(match &mut buf {
+                    Either::$variant(buf) => buf.buffer_view_mut(),
+                    _ => unreachable!(),
+                });
+                test_buffer_view_mut_post(&buf, true);
             };
         }
 
@@ -1646,12 +1705,50 @@ mod tests {
         assert_eq!(view.into_rest().as_ref(), &[3, 4, 5, 6][..]);
     }
 
+    // Test a BufferViewMut implementation. Call with a mutable view into a buffer
+    // with no extra capacity whose body contains [0, 1, ..., 9]. After the call
+    // returns, call test_buffer_view_post on the buffer.
+    fn test_buffer_view_mut<B: ByteSliceMut, BV: BufferViewMut<B>>(mut view: BV) {
+        assert_eq!(view.len(), 10);
+        assert_eq!(view.as_mut()[0], 0);
+        assert_eq!(view.take_front_zero(1).unwrap().as_ref(), &[0][..]);
+        assert_eq!(view.len(), 9);
+        assert_eq!(view.as_mut()[0], 1);
+        assert_eq!(view.take_front_zero(1).unwrap().as_ref(), &[0][..]);
+        assert_eq!(view.len(), 8);
+        assert_eq!(view.as_mut()[7], 9);
+        assert_eq!(view.take_back_zero(1).unwrap().as_ref(), &[0][..]);
+        assert_eq!(view.len(), 7);
+        assert_eq!(&view.as_mut()[0..2], &[2, 3][..]);
+        assert_eq!(view.take_obj_front_zero::<[u8; 2]>().unwrap().as_ref(), &[0, 0][..]);
+        assert_eq!(view.len(), 5);
+        assert_eq!(&view.as_mut()[3..5], &[7, 8][..]);
+        assert_eq!(view.take_obj_back_zero::<[u8; 2]>().unwrap().as_ref(), &[0, 0][..]);
+        assert_eq!(view.len(), 3);
+        assert!(view.take_front_zero(5).is_none());
+        assert_eq!(view.len(), 3);
+        assert!(view.take_back_zero(5).is_none());
+        assert_eq!(view.len(), 3);
+        assert_eq!(view.as_mut(), &[4, 5, 6][..]);
+        assert_eq!(view.into_rest_zero().as_ref(), &[0, 0, 0][..]);
+    }
+
     // Post-verification to test a BufferView implementation. Call after
     // test_buffer_view.
     fn test_buffer_view_post<B: Buffer>(buffer: &B, preserves_cap: bool) {
         assert_eq!(buffer.as_ref(), &[3, 4, 5, 6][..]);
         if preserves_cap {
             assert_eq!(buffer.prefix_len(), 3);
+            assert_eq!(buffer.suffix_len(), 3);
+        }
+    }
+
+    // Post-verification to test a BufferViewMut implementation. Call after
+    // test_buffer_view_mut.
+    fn test_buffer_view_mut_post<B: Buffer>(buffer: &B, preserves_cap: bool) {
+        assert_eq!(buffer.as_ref(), &[0, 0, 0][..]);
+        if preserves_cap {
+            assert_eq!(buffer.prefix_len(), 4);
             assert_eq!(buffer.suffix_len(), 3);
         }
     }
@@ -1666,7 +1763,9 @@ mod tests {
         // This ParsablePacket implementation takes the contents it expects as a
         // parse argument and validates the BufferView[Mut] against it. It consumes
         // one byte from the front and one byte from the back to ensure that that
-        // functionality works as well.
+        // functionality works as well. For a mutable buffer, the implementation also
+        // modifies the bytes that were consumed so tests can make sure that the
+        // `parse_mut` function was actually called and that the bytes are mutable.
         impl<B: ByteSlice> ParsablePacket<B, &[u8]> for () {
             type Error = ();
             fn parse<BV: BufferView<B>>(mut buffer: BV, args: &[u8]) -> Result<(), ()> {
@@ -1681,8 +1780,8 @@ mod tests {
                 B: ByteSliceMut,
             {
                 assert_eq!(buffer.as_ref(), args);
-                buffer.take_front(1);
-                buffer.take_back(1);
+                buffer.take_front(1).unwrap().as_mut()[0] += 1;
+                buffer.take_back(1).unwrap().as_mut()[0] += 2;
                 Ok(())
             }
 
@@ -1708,13 +1807,15 @@ mod tests {
 
         // mutable byte slices
 
-        let mut buf = &mut [0, 1, 2, 3, 4, 5, 6, 7][..];
+        let mut bytes = [0, 1, 2, 3, 4, 5, 6, 7];
+        let mut buf = &mut bytes[..];
         buf.parse_with::<_, ()>(&[0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         // test that, after parsing, the bytes consumed are consumed permanently
         buf.parse_with::<_, ()>(&[1, 2, 3, 4, 5, 6]).unwrap();
         // test that this also works with parse_with_mut
         buf.parse_with_mut::<_, ()>(&[2, 3, 4, 5]).unwrap();
         buf.parse_with_mut::<_, ()>(&[3, 4]).unwrap();
+        assert_eq!(bytes, [0, 1, 3, 4, 6, 7, 6, 7]);
 
         // test that different temporary values do not affect one another and
         // also that slicing works properly (in that the elements outside of the
@@ -1724,7 +1825,8 @@ mod tests {
         (&buf[1..7]).parse_with::<_, ()>(&[1, 2, 3, 4, 5, 6]).unwrap();
         (&buf[1..7]).parse_with::<_, ()>(&[1, 2, 3, 4, 5, 6]).unwrap();
         (&mut buf[1..7]).parse_with_mut::<_, ()>(&[1, 2, 3, 4, 5, 6]).unwrap();
-        (&mut buf[1..7]).parse_with_mut::<_, ()>(&[1, 2, 3, 4, 5, 6]).unwrap();
+        (&mut buf[1..7]).parse_with_mut::<_, ()>(&[2, 2, 3, 4, 5, 8]).unwrap();
+        assert_eq!(buf, &[0, 3, 2, 3, 4, 5, 10, 7][..]);
 
         // Buf with immutable byte slice
 
@@ -1741,7 +1843,8 @@ mod tests {
 
         // Buf with mutable byte slice
 
-        let buf = &mut [0, 1, 2, 3, 4, 5, 6, 7][..];
+        let mut bytes = [0, 1, 2, 3, 4, 5, 6, 7];
+        let buf = &mut bytes[..];
         let mut buf = Buf::new(&mut buf[..], ..);
         buf.parse_with::<_, ()>(&[0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         // test that, after parsing, the bytes consumed are consumed permanently
@@ -1749,18 +1852,22 @@ mod tests {
         // test that this also works with parse_with_mut
         buf.parse_with_mut::<_, ()>(&[2, 3, 4, 5]).unwrap();
         buf.parse_with_mut::<_, ()>(&[3, 4]).unwrap();
-
+        assert_eq!(bytes, [0, 1, 3, 4, 6, 7, 6, 7]);
         // the same test again, but this time with Buf's range set
-        let buf = &mut [0, 1, 2, 3, 4, 5, 6, 7][..];
+        let mut bytes = [0, 1, 2, 3, 4, 5, 6, 7];
+        let buf = &mut bytes[..];
         let mut buf = Buf::new(&mut buf[..], 1..7);
         buf.parse_with::<_, ()>(&[1, 2, 3, 4, 5, 6]).unwrap();
         // test that, after parsing, the bytes consumed are consumed permanently
         buf.parse_with::<_, ()>(&[2, 3, 4, 5]).unwrap();
+        assert_eq!(bytes, [0, 1, 2, 3, 4, 5, 6, 7]);
         // test that this also works with parse_with_mut
-        let buf = &mut [0, 1, 2, 3, 4, 5, 6, 7][..];
+        let mut bytes = [0, 1, 2, 3, 4, 5, 6, 7];
+        let buf = &mut bytes[..];
         let mut buf = Buf::new(&mut buf[..], 1..7);
         buf.parse_with_mut::<_, ()>(&[1, 2, 3, 4, 5, 6]).unwrap();
         buf.parse_with_mut::<_, ()>(&[2, 3, 4, 5]).unwrap();
+        assert_eq!(bytes, [0, 2, 3, 3, 4, 7, 8, 7]);
     }
 
     #[test]
@@ -1853,4 +1960,28 @@ mod tests {
         test_buf_grow_front_panics,
         test_buf_grow_back_panics,
     );
+
+    #[test]
+    fn take_rest_front_back() {
+        let buf = [1_u8, 2, 3];
+        let mut b = &mut &buf[..];
+        assert_eq!(b.take_rest_front(), &buf[..]);
+        assert_eq!(b.len(), 0);
+
+        let mut b = &mut &buf[..];
+        assert_eq!(b.take_rest_back(), &buf[..]);
+        assert_eq!(b.len(), 0);
+    }
+
+    #[test]
+    fn take_byte_front_back() {
+        let buf = [1_u8, 2, 3, 4];
+        let mut b = &mut &buf[..];
+        assert_eq!(b.take_byte_front().unwrap(), 1);
+        assert_eq!(b.take_byte_front().unwrap(), 2);
+        assert_eq!(b.take_byte_back().unwrap(), 4);
+        assert_eq!(b.take_byte_back().unwrap(), 3);
+        assert!(b.take_byte_front().is_none());
+        assert!(b.take_byte_back().is_none());
+    }
 }

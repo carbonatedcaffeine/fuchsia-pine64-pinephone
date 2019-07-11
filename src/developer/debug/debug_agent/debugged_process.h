@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_BIN_DEBUG_AGENT_DEBUGGED_PROCESS_H_
-#define GARNET_BIN_DEBUG_AGENT_DEBUGGED_PROCESS_H_
+#ifndef SRC_DEVELOPER_DEBUG_DEBUG_AGENT_DEBUGGED_PROCESS_H_
+#define SRC_DEVELOPER_DEBUG_DEBUG_AGENT_DEBUGGED_PROCESS_H_
 
 #include <lib/zx/process.h>
 #include <lib/zx/socket.h>
@@ -13,6 +13,7 @@
 #include <memory>
 #include <vector>
 
+#include "src/developer/debug/debug_agent/debugged_thread.h"
 #include "src/developer/debug/debug_agent/process_memory_accessor.h"
 #include "src/developer/debug/ipc/protocol.h"
 #include "src/developer/debug/ipc/records_utils.h"
@@ -26,7 +27,6 @@ namespace debug_agent {
 
 class Breakpoint;
 class DebugAgent;
-class DebuggedThread;
 class ProcessBreakpoint;
 class ProcessWatchpoint;
 class Watchpoint;
@@ -87,7 +87,7 @@ class DebuggedProcess : public debug_ipc::ZirconExceptionWatcher,
   // kernel and return immediatelly. It will block on all the suspend signals
   // otherwise.
   void SuspendAll(bool synchronous = false,
-                  std::vector<uint64_t>* suspended_koids = nullptr);
+                  std::vector<zx_koid_t>* suspended_koids = nullptr);
 
   // Returns the thread or null if there is no known thread for this koid.
   virtual DebuggedThread* GetThread(zx_koid_t thread_koid) const;
@@ -139,11 +139,13 @@ class DebuggedProcess : public debug_ipc::ZirconExceptionWatcher,
 
  private:
   // ZirconExceptionWatcher implementation.
+  void OnThreadStarting(zx::exception exception_token,
+                        zx_exception_info_t exception_info) override;
   void OnProcessTerminated(zx_koid_t process_koid) override;
-  void OnThreadStarting(zx_koid_t process_koid, zx_koid_t thread_koid) override;
-  void OnThreadExiting(zx_koid_t process_koid, zx_koid_t thread_koid) override;
-  void OnException(zx_koid_t process_koid, zx_koid_t thread_koid,
-                   uint32_t type) override;
+  void OnThreadExiting(zx::exception exception_token,
+                       zx_exception_info_t exception_info) override;
+  void OnException(zx::exception exception_token,
+                   zx_exception_info_t exception_info) override;
 
   void OnStdout(bool close);
   void OnStderr(bool close);
@@ -201,4 +203,4 @@ class DebuggedProcess : public debug_ipc::ZirconExceptionWatcher,
 
 }  // namespace debug_agent
 
-#endif  // GARNET_BIN_DEBUG_AGENT_DEBUGGED_PROCESS_H_
+#endif  // SRC_DEVELOPER_DEBUG_DEBUG_AGENT_DEBUGGED_PROCESS_H_

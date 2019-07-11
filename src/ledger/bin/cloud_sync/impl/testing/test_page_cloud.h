@@ -9,9 +9,9 @@
 #include <lib/fidl/cpp/binding.h>
 #include <lib/fit/function.h>
 
-#include "peridot/lib/commit_pack/commit_pack.h"
 #include "src/ledger/bin/encryption/fake/fake_encryption_service.h"
 #include "src/ledger/bin/fidl/include/types.h"
+#include "src/ledger/lib/commit_pack/commit_pack.h"
 #include "src/lib/fxl/macros.h"
 
 namespace cloud_sync {
@@ -22,8 +22,8 @@ struct ReceivedCommit {
 };
 
 cloud_provider::CommitPackEntry MakeTestCommit(
-    encryption::FakeEncryptionService* encryption_service,
-    const std::string& id, const std::string& data);
+    encryption::FakeEncryptionService* encryption_service, const std::string& id,
+    const std::string& data);
 
 std::unique_ptr<cloud_provider::CommitPack> MakeTestCommitPack(
     encryption::FakeEncryptionService* encryption_service,
@@ -31,8 +31,7 @@ std::unique_ptr<cloud_provider::CommitPack> MakeTestCommitPack(
 
 class TestPageCloud : public cloud_provider::PageCloud {
  public:
-  explicit TestPageCloud(
-      fidl::InterfaceRequest<cloud_provider::PageCloud> request);
+  explicit TestPageCloud(fidl::InterfaceRequest<cloud_provider::PageCloud> request);
   ~TestPageCloud() override;
 
   void RunPendingCallbacks();
@@ -49,7 +48,7 @@ class TestPageCloud : public cloud_provider::PageCloud {
   // GetCommits().
   unsigned int get_commits_calls = 0u;
   std::vector<cloud_provider::CommitPackEntry> commits_to_return;
-  std::unique_ptr<cloud_provider::Token> position_token_to_return;
+  std::unique_ptr<cloud_provider::PositionToken> position_token_to_return;
 
   // AddObject().
   unsigned int add_object_calls = 0u;
@@ -63,23 +62,20 @@ class TestPageCloud : public cloud_provider::PageCloud {
   std::map<std::string, std::string> objects_to_return;
 
   // SetWatcher().
-  std::vector<std::unique_ptr<cloud_provider::Token>>
-      set_watcher_position_tokens;
+  std::vector<std::unique_ptr<cloud_provider::PositionToken>> set_watcher_position_tokens;
   cloud_provider::PageCloudWatcherPtr set_watcher;
 
  private:
   // cloud_provider::PageCloud:
-  void AddCommits(cloud_provider::CommitPack commits,
-                  AddCommitsCallback callback) override;
-  void GetCommits(std::unique_ptr<cloud_provider::Token> min_position_token,
+  void AddCommits(cloud_provider::CommitPack commits, AddCommitsCallback callback) override;
+  void GetCommits(std::unique_ptr<cloud_provider::PositionToken> min_position_token,
                   GetCommitsCallback callback) override;
   void AddObject(std::vector<uint8_t> id, fuchsia::mem::Buffer data,
-                 AddObjectCallback callback) override;
+                 cloud_provider::ReferencePack references, AddObjectCallback callback) override;
   void GetObject(std::vector<uint8_t> id, GetObjectCallback callback) override;
-  void SetWatcher(
-      std::unique_ptr<cloud_provider::Token> min_position_token,
-      fidl::InterfaceHandle<cloud_provider::PageCloudWatcher> watcher,
-      SetWatcherCallback callback) override;
+  void SetWatcher(std::unique_ptr<cloud_provider::PositionToken> min_position_token,
+                  fidl::InterfaceHandle<cloud_provider::PageCloudWatcher> watcher,
+                  SetWatcherCallback callback) override;
 
   fidl::Binding<cloud_provider::PageCloud> binding_;
 

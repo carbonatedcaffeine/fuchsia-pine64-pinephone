@@ -19,7 +19,6 @@
 
 #include <zircon/compiler.h>
 
-#include "linuxisms.h"
 #include "netbuf.h"
 
 /*
@@ -27,13 +26,13 @@
  * Caller should explicitly test 'exp' when this completes
  * and take appropriate error action if 'exp' is still true.
  */
-#define SPINWAIT(exp, us)                    \
-    {                                        \
-        uint countdown = (us) + 9;           \
-        while ((exp) && (countdown >= 10)) { \
-            usleep(10);                      \
-            countdown -= 10;                 \
-        }                                    \
+#define SPINWAIT(exp, us)                                  \
+    {                                                      \
+        uint countdown = (us) + 9;                         \
+        while ((exp) && (countdown >= 10)) {               \
+            zx_nanosleep(zx_deadline_after(ZX_USEC(10)));  \
+            countdown -= 10;                               \
+        }                                                  \
     }
 
 /* osl multi-precedence packet queue */
@@ -196,12 +195,12 @@ static inline void* brcmu_alloc_and_copy(const void* buf, size_t size) {
 
 /* externs */
 /* format/print */
-#ifdef DEBUG
+#if !defined(NDEBUG)
 __PRINTFLIKE(3, 4) void brcmu_dbg_hex_dump(const void* data, size_t size, const char* fmt, ...);
-#else
+#else  // !defined(NDEBUG)
 __PRINTFLIKE(3, 4)
 static inline void brcmu_dbg_hex_dump(const void* data, size_t size, const char* fmt, ...) {}
-#endif
+#endif  // !defined(NDEBUG)
 
 #define BRCMU_BOARDREV_LEN 8
 #define BRCMU_DOTREV_LEN 16

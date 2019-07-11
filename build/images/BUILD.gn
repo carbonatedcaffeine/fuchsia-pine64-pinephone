@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/board.gni")
 import("//build/compiled_action.gni")
 import("//build/config.gni")
 import("//build/config/clang/clang.gni")
@@ -10,15 +11,15 @@ import("//build/config/fuchsia/zircon.gni")
 import("//build/images/boot.gni")
 import("//build/images/collect_blob_manifest.gni")
 import("//build/images/custom_signing.gni")
+import("//build/images/filesystem_limits.gni")
 import("//build/images/fvm.gni")
 import("//build/images/json.gni")
 import("//build/images/manifest.gni")
 import("//build/images/max_fvm_size.gni")
 import("//build/images/shell_commands.gni")
 import("//build/images/zxcrypt.gni")
+import("//build/info/info.gni")
 import("//build/package.gni")
-import("//build/sdk/sdk_atom.gni")
-import("//build/sdk/sdk_molecule.gni")
 import("//garnet/build/pkgfs.gni")
 import("//garnet/go/src/pm/pm.gni")
 
@@ -49,8 +50,13 @@ declare_args() {
   # Whether to include images necessary to run Fuchsia in QEMU in build
   # archives.
   add_qemu_to_build_archives = false
-}
 
+  # Additional bootserver args to add to pave.sh. New uses of this should be
+  # added with caution, and ideally discussion. The present use case is to
+  # enable throttling of netboot when specific network adapters are combined
+  # with specific boards, due to driver and hardware challenges.
+  additional_bootserver_arguments = ""
+}
 assert(
     meta_package_labels != [],
     "Missing meta_package_labels. Are you using a supported product configuration? " + "Check your args.gn file for an import of a product configuration, and consider " + "using one of the products in the `//products` or `//vendor/*/products` directories.")
@@ -105,7 +111,7 @@ group("meta_packages") {
   public_deps = meta_package_labels
 }
 
-group("monolith_packages") {
+group("base_packages") {
   testonly = true
   visibility = [ ":*" ]
   public_deps = [
@@ -113,7 +119,7 @@ group("monolith_packages") {
   ]
 }
 
-group("preinstall_packages") {
+group("cache_packages") {
   testonly = true
   visibility = [ ":*" ]
   public_deps = [
@@ -121,12 +127,12 @@ group("preinstall_packages") {
   ]
 }
 
-group("available_packages") {
+group("universe_packages") {
   testonly = true
   visibility = [ ":*" ]
   public_deps = [
-    ":monolith_packages",
-    ":preinstall_packages",
+    ":base_packages",
+    ":cache_packages",
     "//:additional_universe_packages",
   ]
 }
@@ -134,11 +140,11 @@ group("available_packages") {
 group("packages") {
   testonly = true
   public_deps = [
-    ":available_packages",
     ":meta_packages",
+    ":universe_packages",
   ]
 
-  if (enable_netboot) {
+  if (enable_netboot || bootfs_only) {
     data_deps = [
       ":netboot",
       ":netboot-script",
@@ -164,25 +170,25 @@ template("package_list") {
   }
 }
 
-package_list("monolith_packages.list") {
+package_list("base_packages.list") {
   visibility = [ ":*" ]
   deps = [
+    ":base_packages",
     ":meta_packages",
-    ":monolith_packages",
   ]
 }
 
-package_list("preinstall_packages.list") {
+package_list("cache_packages.list") {
   visibility = [ ":*" ]
   deps = [
-    ":preinstall_packages",
+    ":cache_packages",
   ]
 }
 
-package_list("available_packages.list") {
+package_list("universe_packages.list") {
   visibility = [ ":*" ]
   deps = [
-    ":available_packages",
+    ":universe_packages",
   ]
 }
 
@@ -191,10 +197,10 @@ group("package_lists") {
   visibility = [ ":*" ]
 
   deps = [
-    ":available_packages.list",
-    ":monolith_packages.list",
-    ":preinstall_packages.list",
     ":all_package_manifests.list",
+    ":base_packages.list",
+    ":cache_packages.list",
+    ":universe_packages.list",
   ]
 }
 
@@ -202,7 +208,7 @@ config_package("config-data") {
   testonly = true
   visibility = [ ":*" ]
   deps = [
-    ":available_packages",
+    ":universe_packages",
   ]
 }
 
@@ -210,7 +216,7 @@ shell_commands("shell-commands") {
   testonly = true
   visibility = [ ":*" ]
   deps = [
-    ":available_packages",
+    ":universe_packages",
   ]
 }
 
@@ -219,110 +225,88 @@ shell_commands("shell-commands") {
 ### package() targets enabled in the build.
 ###
 
-pm_binary_label = "//garnet/go/src/pm:pm_bin($host_toolchain)"
-pm_out_dir = get_label_info(pm_binary_label, "root_out_dir")
-pm_binary = "$pm_out_dir/pm"
+if (!bootfs_only) {
+  monolith_meta_far_merkle_index =
+      "$target_out_dir/monolith_meta_far_merkle_index"
+  package_metadata_list("monolith_meta_far_merkle_index") {
+    testonly = true
+    outputs = [
+      monolith_meta_far_merkle_index,
+    ]
+    data_keys = [ "meta_far_merkle_index_entries" ]
+    deps = [
+      ":base_packages",
+      ":meta_packages",
+    ]
+  }
 
-# This just runs `pm -k $system_package_key genkey` if the file doesn't exist.
-# Every package() target depends on this.
-action("system_package_key_check") {
-  visibility = [ "*" ]
-  deps = [
-    pm_binary_label,
-  ]
-  outputs = [
-    "$target_out_dir/system_package_key_check_ok.stamp",
-  ]
-  script = "//build/gn_run_binary.sh"
-  inputs = [
-    "system_package_key_check.py",
-    pm_binary,
-  ]
-  args =
-      [ clang_prefix ] + rebase_path(inputs + outputs + [ system_package_key ])
-}
+  # The pkgsvr index is a manifest mapping `package_name/package_version` to
+  # the merkleroot of the package's meta.far file.
+  pkgsvr_index = "$target_out_dir/pkgsvr_index"
 
-monolith_meta_far_merkle_index =
-    "$target_out_dir/monolith_meta_far_merkle_index"
-package_metadata_list("monolith_meta_far_merkle_index") {
-  testonly = true
-  outputs = [
-    monolith_meta_far_merkle_index,
-  ]
-  data_keys = [ "meta_far_merkle_index_entries" ]
-  deps = [
-    ":meta_packages",
-    ":monolith_packages",
-  ]
-}
+  action("pkgsvr_index") {
+    visibility = [
+      ":system_image.manifest",
+      ":update_packages.manifest",
+    ]
+    testonly = true
+    outputs = [
+      "$target_out_dir/$target_name",
+    ]
+    deps = [
+      ":monolith_meta_far_merkle_index",
+    ]
+    inputs = [
+      monolith_meta_far_merkle_index,
+    ]
 
-# The pkgsvr index is a manifest mapping `package_name/package_version` to
-# the merkleroot of the package's meta.far file.
-pkgsvr_index = "$target_out_dir/pkgsvr_index"
+    script = "//build/images/manifest_content_expand.sh"
+    args = [
+      rebase_path(monolith_meta_far_merkle_index, root_build_dir),
+      rebase_path(outputs[0], root_build_dir),
+    ]
+  }
 
-action("pkgsvr_index") {
-  visibility = [
-    ":system_image.manifest",
-    ":update_packages.manifest",
-  ]
-  testonly = true
-  outputs = [
-    "$target_out_dir/$target_name",
-  ]
-  deps = [
-    ":monolith_meta_far_merkle_index",
-  ]
-  inputs = [
-    monolith_meta_far_merkle_index,
-  ]
+  preinstall_meta_far_merkle_index =
+      "$target_out_dir/preinstall_meta_far_merkle_index"
+  package_metadata_list("preinstall_meta_far_merkle_index") {
+    testonly = true
+    outputs = [
+      preinstall_meta_far_merkle_index,
+    ]
+    data_keys = [ "meta_far_merkle_index_entries" ]
+    deps = [
+      ":cache_packages",
+      ":update.meta",
+    ]
+  }
 
-  script = "//build/images/manifest_content_expand.sh"
-  args = [
-    rebase_path(monolith_meta_far_merkle_index, root_build_dir),
-    rebase_path(outputs[0], root_build_dir),
-  ]
-}
+  # preinstall.manifest is a manifest of files that are a pkgfs "dynamic index"
+  # that maps {name}/{version} to {merkleroot} for each preinstalled package.
+  action("preinstall.manifest") {
+    visibility = [ ":data.blk" ]
+    testonly = true
 
-preinstall_meta_far_merkle_index =
-    "$target_out_dir/preinstall_meta_far_merkle_index"
-package_metadata_list("preinstall_meta_far_merkle_index") {
-  testonly = true
-  outputs = [
-    preinstall_meta_far_merkle_index,
-  ]
-  data_keys = [ "meta_far_merkle_index_entries" ]
-  deps = [
-    ":preinstall_packages",
-    ":update.meta",
-  ]
-}
+    deps = [
+      ":preinstall_meta_far_merkle_index",
+    ]
+    inputs = [
+      preinstall_meta_far_merkle_index,
+    ]
 
-# preinstall.manifest is a manifest of files that are a pkgfs "dynamic index"
-# populated inside /pkgfs/packages that are {name}/{version} containing the
-# merkleroot of the meta.far of that package.
-action("preinstall.manifest") {
-  visibility = [ ":data.blk" ]
-  testonly = true
-
-  deps = [
-    ":preinstall_meta_far_merkle_index",
-  ]
-  inputs = [
-    preinstall_meta_far_merkle_index,
-  ]
-
-  script = "manifest_add_dest_prefix.sh"
-  args = [ "pkgfs_index/packages/" ]
-  outputs = [
-    # The output is in the root build dir in order to avoid a complex rewrite
-    # of the source path. The minfs tool this is passed to interprets source
-    # locations relative to the manifest.
-    "$root_build_dir/$target_name",
-  ]
-  args += [
-    rebase_path(preinstall_meta_far_merkle_index, root_build_dir),
-    rebase_path(outputs[0], root_build_dir),
-  ]
+    script = "manifest_add_dest_prefix.sh"
+    args = [ "pkgfs_index/packages/" ]
+    outputs = [
+      # The output is in the root build dir in order to avoid a complex rewrite
+      # of the source path. The minfs tool this is passed to interprets source
+      # locations relative to the manifest.
+      "$root_build_dir/$target_name",
+    ]
+    args += [
+      rebase_path(preinstall_meta_far_merkle_index, root_build_dir),
+      rebase_path(outputs[0], root_build_dir),
+    ]
+  }
 }
 
 # The /boot and /system manifests have to be generated in concert.  Things
@@ -340,8 +324,8 @@ generated_file(system_image_manifest_args) {
   data_keys = [ "system_image_rsps" ]
   walk_keys = [ "package_barrier" ]
   deps = [
+    ":base_packages",
     ":meta_packages",
-    ":monolith_packages",
   ]
 }
 
@@ -350,14 +334,19 @@ generate_manifest("system_image.manifest") {
   visibility = [ ":*" ]
   testonly = true
 
-  # Create the /boot manifest that gets packed into BOOTFS in the ZBI.
-  # /system manifest files can assume that the /boot files are visible at
-  # runtime, so dependencies already in /boot won't be copied into /system.
-  bootfs_manifest = boot_manifest
-  bootfs_zircon_groups = "all"
+  if (bootfs_only) {
+    output_name = get_path_info(boot_manifest, "file")
+    zircon_groups = "all"
+  } else {
+    # Create the /boot manifest that gets packed into BOOTFS in the ZBI.
+    # /system manifest files can assume that the /boot files are visible at
+    # runtime, so dependencies already in /boot won't be copied into /system.
+    bootfs_manifest = boot_manifest
+    bootfs_zircon_groups = "all"
 
-  # Collect whatever we want from Zircon that didn't go into /boot.
-  zircon_groups = ""
+    # Collect whatever we want from Zircon that didn't go into /boot.
+    zircon_groups = ""
+  }
 
   # Now each package() target in the build contributes manifest entries.
   # For system_image packages, these contain binaries that need their
@@ -370,100 +359,109 @@ generate_manifest("system_image.manifest") {
   ]
   args = [ "@" + rebase_path(system_image_manifest_args_path, root_build_dir) ]
 
-  args += [ "--entry-manifest=" +
-            get_label_info(":$target_name", "label_no_toolchain") ]
+  if (!bootfs_only) {
+    args += [ "--entry-manifest=" +
+              get_label_info(":$target_name", "label_no_toolchain") ]
 
-  # Add the meta/package JSON file that makes this the "system_image" package.
-  json = "system_meta_package.json"
-  sources += [ json ]
-  args += [ "--entry=meta/package=" + rebase_path(json, root_build_dir) ]
+    # Add the meta/package JSON file that makes this the "system_image" package.
+    json = "system_meta_package.json"
+    sources += [ json ]
+    args += [ "--entry=meta/package=" + rebase_path(json, root_build_dir) ]
 
-  # Add the static packages (pkgsvr) index.
-  deps += [ ":pkgsvr_index" ]
-  sources += [ pkgsvr_index ]
-  args += [ "--entry=data/static_packages=" +
-            rebase_path(pkgsvr_index, root_build_dir) ]
+    # Add the static packages (pkgsvr) index.
+    deps += [ ":pkgsvr_index" ]
+    sources += [ pkgsvr_index ]
+    args += [ "--entry=data/static_packages=" +
+              rebase_path(pkgsvr_index, root_build_dir) ]
+  }
 }
 
 system_manifest_outputs = get_target_outputs(":system_image.manifest")
-assert(boot_manifest == system_manifest_outputs[2])
+if (bootfs_only) {
+  assert(boot_manifest == system_manifest_outputs[0])
+} else {
+  assert(boot_manifest == system_manifest_outputs[2])
+}
 system_build_id_map = system_manifest_outputs[1]
 
-# Generate, sign, and seal the system_image package file.
-pm_build_package("system_image.meta") {
-  package_name = "system_image"
-  visibility = [ ":*" ]
-  testonly = true
-  manifest = ":system_image.manifest"
-}
+if (!bootfs_only) {
+  # Generate, sign, and seal the system_image package file.
+  pm_build_package("system_image.meta") {
+    package_name = "system_image"
+    visibility = [ ":*" ]
+    testonly = true
+    manifest = ":system_image.manifest"
+  }
 
-# Now generate the blob manifest.  This lists all the source files
-# that need to go into the blobfs image.  That is everything from the
-# system_image manifest, everything from each package manifest, and
-# all the synthesized meta.far files.
-blob_manifest = "$root_build_dir/blob.manifest"
+  # Now generate the blob manifest.  This lists all the source files
+  # that need to go into the blobfs image.  That is everything from the
+  # system_image manifest, everything from each package manifest, and
+  # all the synthesized meta.far files.
+  blob_manifest = "$root_build_dir/blob.manifest"
 
-collect_blob_manifest("blob.manifest") {
-  testonly = true
-  visibility = [ ":*" ]
-  outputs = [
-    blob_manifest,
-  ]
-  deps = [
-    ":meta_packages",
-    ":monolith_packages",
-    ":preinstall_packages",
-    ":system_image.meta",
-    ":update.meta",
-    pkgfs_package_label,
-  ]
-}
-
-# Pack up all the blobs!
-zircon_tool_action("blob.blk") {
-  visibility = [ ":*" ]
-  testonly = true
-  deps = [
-    ":blob.manifest",
-  ]
-  blob_image_path = "$target_out_dir/$target_name"
-  blob_size_list = "$root_build_dir/blob.sizes"
-  outputs = [
-    blob_image_path,
-    # This should be an output too, but the generate_fvm template assumes that all
-    # outputs of these actions are inputs to the fvm tool.
-    # blob_size_list
-  ]
-  depfile = blob_image_path + ".d"
-  inputs = [
-    blob_manifest,
-  ]
-  tool = "blobfs"
-  args = [
-    "--depfile",
-    "--sizes",
-    rebase_path(blob_size_list, root_build_dir),
-    "--compress",
-    rebase_path(blob_image_path, root_build_dir),
-    "create",
-    "--manifest",
-    rebase_path(blob_manifest, root_build_dir),
-  ]
-}
-images += [
-  {
+  collect_blob_manifest("blob.manifest") {
+    testonly = true
+    visibility = [ ":*" ]
+    outputs = [
+      blob_manifest,
+    ]
     deps = [
-      ":blob.blk",
+      ":base_packages",
+      ":cache_packages",
+      ":meta_packages",
+      ":system_image.meta",
+      ":update.meta",
+      pkgfs_package_label,
     ]
-    public = [
-      "IMAGE_BLOB_RAW",
+  }
+
+  blob_image_path = "$target_out_dir/blob.blk"
+
+  # Pack up all the blobs!
+  zircon_tool_action("blob.blk") {
+    visibility = [ ":*" ]
+    testonly = true
+    deps = [
+      ":blob.manifest",
     ]
-    json = {
-      name = "blob"
-      type = "blk"
-    }
-  },
-]
+    blob_size_list = "$root_build_dir/blob.sizes"
+    outputs = [
+      blob_image_path,
+      # This should be an output too, but the generate_fvm template assumes that all
+      # outputs of these actions are inputs to the fvm tool.
+      # blob_size_list
+    ]
+    depfile = blob_image_path + ".d"
+    inputs = [
+      blob_manifest,
+    ]
+    tool = "blobfs"
+    args = [
+      "--depfile",
+      "--sizes",
+      rebase_path(blob_size_list, root_build_dir),
+      "--compress",
+      rebase_path(blob_image_path, root_build_dir),
+      "create",
+      "--manifest",
+      rebase_path(blob_manifest, root_build_dir),
+    ]
+  }
+  images += [
+    {
+      deps = [
+        ":blob.blk",
+      ]
+      public = [
+        "IMAGE_BLOB_RAW",
+      ]
+      json = {
+        name = "blob"
+        type = "blk"
+      }
+    },
+  ]
+}
 
 ###
 ### Zircon Boot Images
@@ -510,7 +508,6 @@ images += [
       type = "kernel"
       archive = add_qemu_to_build_archives
     }
-    sdk = "qemu-kernel.bin"
     deps = []
     foreach(image, zircon_images) {
       if (image.name == "qemu-kernel" && image.cpu == target_cpu) {
@@ -533,46 +530,59 @@ action("devmgr_config.txt") {
   outputs = [
     "$target_out_dir/$target_name",
   ]
-
-  pkgfs = "bin/" + pkgfs_binary_name
-  pkgfs_label = pkgfs_package_label
-  pkgfs_pkg_out_dir = get_label_info(pkgfs_label, "target_out_dir") + "/" +
-                      get_label_info(pkgfs_label, "name")
-  pkgfs_blob_manifest = "$pkgfs_pkg_out_dir/meta/contents"
-  system_image_merkleroot = "$target_out_dir/system_image.meta/meta.far.merkle"
-
+  args = [ "--output=" + rebase_path(outputs[0], root_build_dir) ]
+  sources = []
   deps = [
-    ":system_image.meta",
-    pkgfs_label,
-  ]
-  sources = [
-    pkgfs_blob_manifest,
-    system_image_merkleroot,
+    ":system_image.manifest",
   ]
 
-  args = [
-    "--output=" + rebase_path(outputs[0], root_build_dir),
+  if (!bootfs_only) {
+    pkgfs = "bin/" + pkgfs_binary_name
+    pkgfs_label = pkgfs_package_label
+    pkgfs_pkg_out_dir = get_label_info(pkgfs_label, "target_out_dir") + "/" +
+                        get_label_info(pkgfs_label, "name")
+    pkgfs_blob_manifest = "$pkgfs_pkg_out_dir/meta/contents"
+    system_image_merkleroot =
+        "$target_out_dir/system_image.meta/meta.far.merkle"
 
-    # Start with the fixed options.
-    "--entry=devmgr.require-system=true",
-  ]
+    deps += [
+      "//build/info:latest-commit-date",
+      ":system_image.meta",
+      pkgfs_label,
+    ]
+    sources += [
+      pkgfs_blob_manifest,
+      system_image_merkleroot,
+    ]
 
-  # Add the pkgfs command line, embedding the merkleroot of the system image.
-  args += [
-    "--contents",
-    "--rewrite=*=zircon.system.pkgfs.cmd={target}+{source}",
-    "--entry=${pkgfs}=" + rebase_path(system_image_merkleroot, root_build_dir),
-    "--no-contents",
-    "--reset-rewrite",
-  ]
+    args += [ "--entry=devmgr.require-system=true" ]
 
-  # Embed the pkgfs blob manifest with the "zircon.system.pkgfs.file."
-  # prefix on target file names.
-  args += [
-    "--rewrite=*=zircon.system.pkgfs.file.{target}={source}",
-    "--manifest=" + rebase_path(pkgfs_blob_manifest, root_build_dir),
-    "--reset-rewrite",
-  ]
+    # Add the pkgfs command line, embedding the merkleroot of the system image.
+    args += [
+      "--contents",
+      "--rewrite=*=zircon.system.pkgfs.cmd={target}+{source}",
+      "--entry=${pkgfs}=" +
+          rebase_path(system_image_merkleroot, root_build_dir),
+      "--no-contents",
+      "--reset-rewrite",
+    ]
+
+    # Embed the pkgfs blob manifest with the "zircon.system.pkgfs.file."
+    # prefix on target file names.
+    args += [
+      "--rewrite=*=zircon.system.pkgfs.file.{target}={source}",
+      "--manifest=" + rebase_path(pkgfs_blob_manifest, root_build_dir),
+      "--reset-rewrite",
+    ]
+
+    # Add the backstop UTC value from the integration repo latest commit
+    args += [
+      "--contents",
+      "--entry=devmgr.epoch=" + rebase_path(build_info_files.latest_unix_stamp, root_build_dir),
+      "--no-contents",
+      "--reset-rewrite",
+    ]
+  }
 
   foreach(entry, devmgr_config) {
     args += [ "--entry=$entry" ]
@@ -584,7 +594,6 @@ action("devmgr_config.txt") {
   # none in /boot.  If there were any non-ASan drivers in the build,
   # bin/devhost.asan will load them and needs to know to moderate the
   # checking for interacting with uninstrumented code.
-  deps += [ ":system_image.manifest" ]
   sources += [ boot_manifest ]
   args += [
     "--include=bin/devhost.asan",
@@ -609,6 +618,13 @@ component_manager_target_name = get_label_info(component_manager_label, "name")
 component_manager_manifest =
     component_manager_target_dir + "/" + component_manager_target_name
 
+root_manifests_label = "//src/sys/root:root_manifests.bootfs"
+root_manifests_target_dir =
+    get_label_info(root_manifests_label, "target_out_dir")
+root_manifests_target_name = get_label_info(root_manifests_label, "name")
+root_manifests_manifest =
+    root_manifests_target_dir + "/" + root_manifests_target_name
+
 # The main bootable image, which requires `blob.blk` to appear on some
 # attached storage device at runtime.
 zbi("fuchsia") {
@@ -617,12 +633,13 @@ zbi("fuchsia") {
   deps = [
     ":devmgr_config.txt",
     ":system_image.manifest",
-    ":zxcrypt_config.txt",
     component_manager_label,
+    root_manifests_label,
   ]
   inputs = [
-    component_manager_manifest,
     boot_manifest,
+    component_manager_manifest,
+    root_manifests_manifest,
     zircon_kernel_zbi,
   ]
   manifest = [
@@ -632,10 +649,21 @@ zbi("fuchsia") {
       ]
       sources = get_target_outputs(":devmgr_config.txt")
     },
-    "config/zxcrypt=" +
-        rebase_path("$target_out_dir/zxcrypt_config.txt", root_build_dir),
   ]
-  cmdline = kernel_cmdline_args
+  if (!bootfs_only) {
+    deps += [ ":zxcrypt_config.txt" ]
+    manifest += [
+      {
+        outputs = [
+          "config/zxcrypt",
+        ]
+        sources = [
+          "$target_out_dir/zxcrypt_config.txt",
+        ]
+      },
+    ]
+  }
+  cmdline = kernel_cmdline_args + board_kernel_cmdline_args
   cmdline_inputs = kernel_cmdline_files
   manifest += bootfs_extra
 }
@@ -644,22 +672,20 @@ images += [
     deps = [
       ":fuchsia",
     ]
-    sdk = "fuchsia.zbi"
     if (!use_vboot && custom_signing_script == "") {
       updater = "zbi"
-    }
-    if (!use_vboot) {
-      installer = "fuchsia.zbi"
     }
     json = {
       name = "zircon-a"
       type = "zbi"
 
-      # TODO(IN-892): Although we wish to minimize the usage of mexec (ZX-2069),
-      # the infrastructure currently requires it for vim2 lifecycle management.
-      # (`fastboot continue` does not continue back to fuchsia after paving and
-      # rebooting in the case we do not mexec a kernel.)
-      bootserver_pave = [ "--boot" ]
+      bootserver_pave = []
+
+      # TODO(ZX-2069): we want to reduce the usage of mexec, but currently we
+      # do not have sufficient boot control on x64.
+      if (target_cpu == "x64") {
+        bootserver_pave += [ "--boot" ]
+      }
 
       if (custom_signing_script == "" && !use_vboot) {
         bootserver_pave += [
@@ -697,7 +723,6 @@ if (custom_signing_script != "") {
       deps = [
         ":signed",
       ]
-      sdk = "fuchsia.zbi.signed"
       updater = "zbi.signed"
       json = {
         name = "zircon-a.signed"
@@ -743,9 +768,7 @@ if (custom_signing_script != "") {
       deps = [
         ":signed",
       ]
-      sdk = "zircon-a.signed"
       updater = "zbi.signed"
-      installer = "fuchsia.zbi"
       json = {
         name = "zircon-a.signed"
         type = "zbi.signed"
@@ -780,9 +803,8 @@ if (custom_signing_script != "") {
       sources = [
         "$root_out_dir/zedboot.vboot",
       ]
-      # TODO(ZX-2689): Re-enable after system_updater is fixed.
-      # updater = "zedboot.signed"
-      installer = "zedboot.zbi"
+
+      updater = "zedboot.signed"
     },
   ]
 } else {
@@ -795,7 +817,6 @@ if (custom_signing_script != "") {
         "$root_out_dir/zedboot.zbi",
       ]
       updater = "zedboot"
-      installer = "zedboot.zbi"
     },
   ]
 }
@@ -809,216 +830,291 @@ declare_args() {
   always_zedboot = false
 }
 
-# data.blk creates minfs data partition containing the preinstall package
-# index. The partition is included in fvm.blk and fvm.sparse.blk.
-# To increase the size of the data partition, increase the total size of the
-# fvm images using |fvm_image_size|.
-zircon_tool_action("data.blk") {
-  testonly = true
-  tool = "minfs"
-  data_image_path = "$target_out_dir/$target_name"
-  outputs = [
-    data_image_path,
-  ]
-  depfile = data_image_path + ".d"
-  deps = [
-    ":preinstall.manifest",
-  ]
-  preinstall_manifest = get_target_outputs(deps[0])
-  args = [
-    "--depfile",
-    rebase_path(data_image_path, root_build_dir),
-    "create",
-    "--manifest",
-    rebase_path(preinstall_manifest[0], root_build_dir),
-  ]
-  if (data_partition_manifest != "") {
-    args += [
+record_filesystem_sizes_deps = []
+
+if (!bootfs_only) {
+  data_image_path = "$target_out_dir/data.blk"
+
+  # data.blk creates minfs data partition containing the preinstall package
+  # index. The partition is included in fvm.blk and fvm.sparse.blk.
+  # To increase the size of the data partition, increase the total size of the
+  # fvm images using |fvm_image_size|.
+  zircon_tool_action("data.blk") {
+    testonly = true
+    tool = "minfs"
+    outputs = [
+      data_image_path,
+    ]
+    depfile = data_image_path + ".d"
+    deps = [
+      ":preinstall.manifest",
+    ]
+    preinstall_manifest = get_target_outputs(deps[0])
+    args = [
+      "--depfile",
+      rebase_path(data_image_path, root_build_dir),
+      "create",
       "--manifest",
-      rebase_path(data_partition_manifest),
+      rebase_path(preinstall_manifest[0], root_build_dir),
+    ]
+    if (data_partition_manifest != "") {
+      args += [
+        "--manifest",
+        rebase_path(data_partition_manifest),
+      ]
+    }
+  }
+  images += [
+    {
+      public = [
+        "IMAGE_DATA_RAW",
+      ]
+      json = {
+        name = "data"
+        type = "blk"
+      }
+      deps = [
+        ":data.blk",
+      ]
+    },
+  ]
+
+  # Record the maximum allowable FVM size in the build directory for later steps
+  # to check against.
+  max_fvm_size_file = "$root_build_dir/max_fvm_size.txt"
+  write_file(max_fvm_size_file, max_fvm_size)
+
+  # fvm.blk creates an FVM partition image containing the blob partition produced
+  # by blob.blk and the data partition produced by data.blk. fvm.blk is primarily
+  # invoked and used by the qemu run, via `fx run`.
+  generate_fvm("fvm.blk") {
+    testonly = true
+    output_name = "$target_out_dir/fvm.blk"
+    args = fvm_create_args
+    if (fvm_image_size != "") {
+      args += [
+        "--length",
+        fvm_image_size,
+      ]
+    }
+    partitions = [
+      {
+        type = "blob"
+        dep = ":blob.blk"
+        minimum_inodes = blobfs_minimum_inodes
+        minimum_data_bytes = blobfs_minimum_data_bytes
+        maximum_bytes = blobfs_maximum_bytes
+      },
+      {
+        type = "data"
+        dep = ":data.blk"
+        minimum_inodes = minfs_minimum_inodes
+        minimum_data_bytes = minfs_minimum_data_bytes
+        maximum_bytes = minfs_maximum_bytes
+      },
     ]
   }
-}
-images += [
-  {
-    public = [
-      "IMAGE_DATA_RAW",
-    ]
-    json = {
-      name = "data"
-      type = "blk"
-    }
+  images += [
+    {
+      deps = [
+        ":fvm.blk",
+      ]
+      json = {
+        name = "storage-full"
+        type = "blk"
+        archive = add_qemu_to_build_archives
+      }
+      public = [
+        "IMAGE_FVM_RAW",
+      ]
+    },
+  ]
+
+  fvm_sparse_blk_path = "$target_out_dir/fvm.sparse.blk"
+
+  # fvm.sparse.blk creates a sparse FVM partition image containing the blob
+  # partition produced by blob.blk and the data partition produced by data.blk.
+  # fvm.sparse.blk is primarily invoked and used by the paver boot, via `fx
+  # pave`.
+  generate_fvm("fvm.sparse.blk") {
+    testonly = true
+    output_name = fvm_sparse_blk_path
     deps = [
+      ":blob.blk",
       ":data.blk",
     ]
-  },
-]
-
-# Record the maximum allowable FVM size in the build directory for later steps
-# to check against.
-max_fvm_size_file = "$root_build_dir/max_fvm_size.txt"
-write_file(max_fvm_size_file, max_fvm_size)
-
-# fvm.blk creates an FVM partition image containing the blob partition produced
-# by blob.blk and the data partition produced by data.blk. fvm.blk is primarily
-# invoked and used by the qemu run, via `fx run`.
-generate_fvm("fvm.blk") {
-  testonly = true
-  output_name = "$target_out_dir/fvm.blk"
-  args = fvm_create_args
-  if (fvm_image_size != "") {
-    args += [
-      "--length",
-      fvm_image_size,
+    args = fvm_sparse_args
+    partitions = [
+      {
+        type = "blob"
+        dep = ":blob.blk"
+        minimum_inodes = blobfs_minimum_inodes
+        minimum_data_bytes = blobfs_minimum_data_bytes
+        maximum_bytes = blobfs_maximum_bytes
+      },
+      {
+        type = "data"
+        dep = ":data.blk"
+        minimum_inodes = minfs_minimum_inodes
+        minimum_data_bytes = minfs_minimum_data_bytes
+        maximum_bytes = minfs_maximum_bytes
+      },
     ]
   }
-  partitions = [
+  images += [
     {
-      type = "blob"
-      dep = ":blob.blk"
-      minimum_inodes = blobfs_minimum_inodes
-      minimum_data_bytes = blobfs_minimum_data_bytes
-      maximum_bytes = blobfs_maximum_bytes
-    },
-    {
-      type = "data"
-      dep = ":data.blk"
-      minimum_inodes = minfs_minimum_inodes
-      minimum_data_bytes = minfs_minimum_data_bytes
-      maximum_bytes = minfs_maximum_bytes
+      deps = [
+        ":fvm.sparse.blk",
+      ]
+      json = {
+        name = "storage-sparse"
+        type = "blk"
+        bootserver_pave = [ "--fvm" ]
+      }
+      public = [
+        "IMAGE_FVM_SPARSE",
+      ]
     },
   ]
-}
-images += [
-  {
-    deps = [
-      ":fvm.blk",
-    ]
-    json = {
-      name = "storage-full"
-      type = "blk"
-      archive = add_qemu_to_build_archives
-    }
-    sdk = "fvm.blk"
-    public = [
-      "IMAGE_FVM_RAW",
-    ]
-  },
-]
 
-# fvm.sparse.blk creates a sparse FVM partition image containing the blob
-# partition produced by blob.blk and the data partition produced by data.blk.
-# fvm.sparse.blk is primarily invoked and used by the paver boot, via `fx
-# pave`.
-generate_fvm("fvm.sparse.blk") {
-  testonly = true
-  output_name = "$target_out_dir/fvm.sparse.blk"
-  deps = [
-    ":blob.blk",
-    ":data.blk",
-  ]
-  args = fvm_sparse_args
-  partitions = [
-    {
-      type = "blob"
-      dep = ":blob.blk"
-      minimum_inodes = blobfs_minimum_inodes
-      minimum_data_bytes = blobfs_minimum_data_bytes
-      maximum_bytes = blobfs_maximum_bytes
-    },
-    {
-      type = "data"
-      dep = ":data.blk"
-      minimum_inodes = minfs_minimum_inodes
-      minimum_data_bytes = minfs_minimum_data_bytes
-      maximum_bytes = minfs_maximum_bytes
-    },
-  ]
-}
-images += [
-  {
+  action("filesystem_sizes.json") {
+    testonly = true
+    script = "format_filesystem_sizes.py"
     deps = [
+      ":blob.blk",
+      ":data.blk",
       ":fvm.sparse.blk",
     ]
-    json = {
-      name = "storage-sparse"
-      type = "blk"
-      bootserver_pave = [ "--fvm" ]
-    }
-    installer = "fvm.sparse.blk"
-    sdk = "fvm.sparse.blk"
-    public = [
-      "IMAGE_FVM_SPARSE",
+    output_name = "$root_build_dir/filesystem_sizes.json"
+    outputs = [
+      output_name,
     ]
-  },
-]
+    inputs = [
+      blob_image_path,
+      data_image_path,
+      fvm_sparse_blk_path,
+    ]
+    args = [
+      "--fvm-blk",
+      rebase_path(fvm_sparse_blk_path),
+      "--blob-blk",
+      rebase_path(blob_image_path),
+      "--data-blk",
+      rebase_path(data_image_path),
+      "--fvm-tool",
+      rebase_path("$zircon_tools_dir/fvm"),
+      "--blobfs-tool",
+      rebase_path("$zircon_tools_dir/blobfs"),
+      "--minfs-tool",
+      rebase_path("$zircon_tools_dir/minfs"),
+      "--max-fvm-contents-size",
+      max_fvm_size,
+      "--max-blob-contents-size",
+      max_blob_contents_size,
+      "--max-blob-image-size",
+      max_blob_image_size,
+      "--max-data-contents-size",
+      max_data_contents_size,
+      "--max-data-image-size",
+      max_data_image_size,
+      "--output",
+      rebase_path(output_name),
+    ]
+  }
+  record_filesystem_sizes_deps += [ ":filesystem_sizes.json" ]
 
-# fvm.blob.sparse.blk creates a sprase FVM partition image containing the blob
-# partition produced by blob.blk.
-generate_fvm("fvm.blob.sparse.blk") {
-  testonly = true
-  output_name = "$target_out_dir/$target_name"
-  deps = [
-    ":blob.blk",
-  ]
-  args = fvm_sparse_args
-  partitions = [
+  # fvm.blob.sparse.blk creates a sprase FVM partition image containing the blob
+  # partition produced by blob.blk.
+  generate_fvm("fvm.blob.sparse.blk") {
+    testonly = true
+    output_name = "$target_out_dir/$target_name"
+    deps = [
+      ":blob.blk",
+    ]
+    args = fvm_sparse_args
+    partitions = [
+      {
+        type = "blob"
+        dep = ":blob.blk"
+        minimum_inodes = blobfs_minimum_inodes
+        minimum_data_bytes = blobfs_minimum_data_bytes
+        maximum_bytes = blobfs_maximum_bytes
+      },
+    ]
+  }
+  images += [
     {
-      type = "blob"
-      dep = ":blob.blk"
-      minimum_inodes = blobfs_minimum_inodes
-      minimum_data_bytes = blobfs_minimum_data_bytes
-      maximum_bytes = blobfs_maximum_bytes
+      default = false
+      deps = [
+        ":fvm.blob.sparse.blk",
+      ]
+      public = [
+        "IMAGE_FVM_BLOB_SPARSE",
+      ]
+    },
+  ]
+
+  # This rolls the primary ZBI together with a compressed RAMDISK image of
+  # fvm.blk into a fat ZBI that boots the full system without using any real
+  # storage.  The system decompresses the fvm.blk image into memory and then
+  # sees that RAM disk just as if it were a real disk on the device.
+  zbi("netboot") {
+    testonly = true
+    deps = [
+      ":fuchsia",
+      ":fvm.blk",
+    ]
+    inputs = get_target_outputs(":fuchsia")
+    ramdisk_inputs = get_target_outputs(":fvm.blk")
+  }
+  images += [
+    {
+      default = false
+      json = {
+        bootserver_netboot = [ "--boot" ]
+        name = "netboot"
+        type = "zbi"
+      }
+      public = [
+        "IMAGE_NETBOOT_ZBI",
+
+        # TODO(mcgrathr): The complete ZBI can be used with a separate kernel
+        # too, the kernel image in it will just be ignored.  So just use the
+        # primary ZBI for this until all uses are converted to using the ZBI
+        # alone.  Then remove this as IMAGE_BOOT_RAM variable should no
+        # longer be in use.
+        "IMAGE_NETBOOT_RAM",
+      ]
+      deps = [
+        ":netboot",
+      ]
+    },
+  ]
+} else {
+  # The bootfs_only image is already a netboot'able image.
+  group("netboot") {
+    testonly = true
+    deps = [
+      ":fuchsia",
+    ]
+  }
+  images += [
+    {
+      json = {
+        bootserver_netboot = [ "--boot" ]
+        name = "fuchsia"
+        type = "zbi"
+      }
+      public = [
+        "IMAGE_NETBOOT_RAM",
+        "IMAGE_NETBOOT_ZBI",
+      ]
+      deps = [
+        ":fuchsia",
+      ]
     },
   ]
 }
-images += [
-  {
-    deps = [
-      ":fvm.blob.sparse.blk",
-    ]
-    public = [
-      "IMAGE_FVM_BLOB_SPARSE",
-    ]
-  },
-]
-
-# This rolls the primary ZBI together with a compressed RAMDISK image of
-# fvm.blk into a fat ZBI that boots the full system without using any real
-# storage.  The system decompresses the fvm.blk image into memory and then
-# sees that RAM disk just as if it were a real disk on the device.
-zbi("netboot") {
-  testonly = true
-  deps = [
-    ":fuchsia",
-    ":fvm.blk",
-  ]
-  inputs = get_target_outputs(":fuchsia")
-  ramdisk_inputs = get_target_outputs(":fvm.blk")
-}
-images += [
-  {
-    default = false
-    json = {
-      bootserver_netboot = [ "--boot" ]
-      name = "netboot"
-      type = "zbi"
-    }
-    public = [
-      "IMAGE_NETBOOT_ZBI",
-
-      # TODO(mcgrathr): The complete ZBI can be used with a separate kernel
-      # too, the kernel image in it will just be ignored.  So just use the
-      # primary ZBI for this until all uses are converted to using the ZBI
-      # alone.  Then remove this as IMAGE_BOOT_RAM variable should no
-      # longer be in use.
-      "IMAGE_NETBOOT_RAM",
-    ]
-    deps = [
-      ":netboot",
-    ]
-  },
-]
 
 if (target_cpu != "arm64" && !use_vboot) {
   # TODO(surajmalhotra): Remove this target once SDK no longer depends on it.
@@ -1038,7 +1134,6 @@ if (target_cpu != "arm64" && !use_vboot) {
       deps = [
         ":vboot",
       ]
-      sdk = "zircon.vboot"
     },
   ]
 
@@ -1062,8 +1157,6 @@ if (target_cpu != "arm64" && !use_vboot) {
         type = "blk"
         bootserver_pave = [ "--bootloader" ]
       }
-      installer = "fuchsia.esp.blk"
-      sdk = "local.esp.blk"
       if (!use_vboot && custom_signing_script == "") {
         updater = "bootloader"
       }
@@ -1082,82 +1175,12 @@ if (target_cpu != "arm64" && !use_vboot) {
   ]
 }
 
-installer_label = "//garnet/bin/installer:install-fuchsia"
-installer_out_dir = get_label_info(installer_label, "root_out_dir")
-installer_path = "$installer_out_dir/install-fuchsia"
-
-action("installer.manifest") {
-  script = "manifest.py"
-  outputs = [
-    "$target_out_dir/installer.manifest",
-  ]
-  args = [
-    "--output=" + rebase_path(outputs[0], root_build_dir),
-    "--output-cwd=" + rebase_path(target_out_dir, root_build_dir),
-    "--entry=install-fuchsia=" + rebase_path(installer_path, root_build_dir),
-  ]
-  foreach(image, images) {
-    if (defined(image.installer)) {
-      image_sources = []
-      if (defined(image.sources)) {
-        image_sources += image.sources
-      } else {
-        foreach(label, image.deps) {
-          image_sources += get_target_outputs(label)
-        }
-      }
-      assert(image_sources == [ image_sources[0] ])
-      args += [ "--entry=${image.installer}=" +
-                rebase_path(image_sources[0], root_build_dir) ]
-    }
-  }
-}
-
-# installer.blk is a minfs partition image that includes all of the
-# images required to install a Fuchsia build.
-zircon_tool_action("installer") {
+# Pseudo-target to record information about the sizes of filesystems assembled
+# during the build for later analysis.
+group("record_filesystem_sizes") {
   testonly = true
-  tool = "minfs"
-  deps = [
-    ":installer.manifest",
-    installer_label,
-  ]
-  outputs = [
-    "$target_out_dir/installer.blk",
-  ]
-  sources = []
-  foreach(image, images) {
-    if (defined(image.installer)) {
-      deps += image.deps
-      if (defined(image.sources)) {
-        sources += image.sources
-      } else {
-        foreach(label, image.deps) {
-          sources += get_target_outputs(label)
-        }
-      }
-    }
-  }
-  depfile = "$target_out_dir/installer.blk.d"
-  args = [
-    "--depfile",
-    rebase_path(outputs[0], root_build_dir),
-    "create",
-    "--manifest",
-  ]
-  args += rebase_path(get_target_outputs(deps[0]), root_build_dir)
+  deps = record_filesystem_sizes_deps
 }
-images += [
-  {
-    default = false
-    public = [
-      "IMAGE_INSTALLER_RAW",
-    ]
-    deps = [
-      ":installer",
-    ]
-  },
-]
 
 group("images") {
   testonly = true
@@ -1165,6 +1188,7 @@ group("images") {
     ":ids.txt",
     ":package_lists",
     ":paver-script",
+    ":record_filesystem_sizes",
     "zedboot",
   ]
 }
@@ -1206,17 +1230,6 @@ action("flash_script") {
 
 paver_targets = [
   {
-    name = "paver-script"
-    outputs = [
-      "$root_build_dir/pave.sh",
-    ]
-    switch = "--pave="
-    json = {
-      name = "pave"
-      type = "sh"
-    }
-  },
-  {
     name = "netboot-script"
     outputs = [
       "$root_build_dir/netboot.sh",
@@ -1227,7 +1240,23 @@ paver_targets = [
       type = "sh"
     }
   },
+  {
+    name = "paver-script"
+    outputs = [
+      "$root_build_dir/pave.sh",
+    ]
+    if (bootfs_only) {
+      switch = "--netboot="
+    } else {
+      switch = "--pave="
+    }
+    json = {
+      name = "pave"
+      type = "sh"
+    }
+  },
 ]
+
 foreach(format,
         [
           "tgz",
@@ -1291,6 +1320,13 @@ foreach(target, paver_targets) {
       target.switch + rebase_path(outputs[0], root_build_dir),
       "--board_name=${board_name}",
     ]
+
+    if (additional_bootserver_arguments != "") {
+      args += [
+        "--additional_bootserver_arguments=${additional_bootserver_arguments}",
+      ]
+    }
+
     args += rebase_path(sources, root_build_dir)
   }
 }
@@ -1310,10 +1346,12 @@ package_metadata_list("update_meta_far_merkle_index") {
   ]
   data_keys = [ "meta_far_merkle_index_entries" ]
   deps = [
+    ":base_packages",
     ":meta_packages",
-    ":monolith_packages",
-    ":system_image.meta",
   ]
+  if (!bootfs_only) {
+    deps += [ ":system_image.meta" ]
+  }
 }
 
 action("update_packages.manifest") {
@@ -1358,6 +1396,13 @@ action("update.manifest") {
         "update_package.json",
       ]
     },
+
+    {
+      target = "version"
+      sources = [
+        rebase_path(build_info_files.version, "", root_build_dir),
+      ]
+    },
   ]
 
   foreach(image, images) {
@@ -1392,7 +1437,13 @@ action("update.manifest") {
 
   args = [ "--output=" + rebase_path(outputs[0], root_build_dir) ]
   sources = []
-  deps = []
+
+  deps = [
+    # This dep ensures the version file included below is always generated,
+    # which is presently significant only really for bringup, as bringup still
+    # attempts to build this target.
+    "//build/info:build-info",
+  ]
 
   foreach(entry, update_manifest) {
     entry_source = ""
@@ -1461,12 +1512,14 @@ package_metadata_list("all_package_manifests.list") {
   rebase = root_build_dir
   deps = [
     ":packages",
-    ":system_image.meta",
     ":update.meta",
   ]
+  if (!bootfs_only) {
+    deps += [ ":system_image.meta" ]
+  }
 }
 
-# The component index is the index of components in all available packages.
+# The component index is the index of components in all universe packages.
 component_index_metadata = "$target_out_dir/component_index_metadata"
 component_index_metadata_list("component_index_metadata") {
   visibility = [ "//src/sys/component_index:*" ]
@@ -1478,13 +1531,13 @@ component_index_metadata_list("component_index_metadata") {
   ]
 
   deps = [
-    ":available_packages",
+    ":universe_packages",
   ]
 }
 
-# The system index is the index of all available packages, naming each blobs.json
-# file instead of its merkleroot, and including a tag of the package set the
-# package is a part of (monolith/preinstall/available). Additionally the
+# The system index is the index of all universe packages, naming each
+# blobs.json file instead of its merkleroot, and including a tag of the package
+# set the package is a part of (base/cache/universe). Additionally the
 # system_index has the system package itself, and the system update package.
 system_index = "$target_out_dir/system_index"
 
@@ -1492,22 +1545,24 @@ tagged_snapshot_manifests = [
   {
     tag = "monolith"
     deps = [
+      ":base_packages",
       ":meta_packages",
-      ":monolith_packages",
-      ":system_image.meta",
       ":update.meta",
     ]
+    if (!bootfs_only) {
+      deps += [ ":system_image.meta" ]
+    }
   },
   {
     tag = "preinstall"
     deps = [
-      ":preinstall_packages",
+      ":cache_packages",
     ]
   },
   {
     tag = "available"
     deps = [
-      ":available_packages",
+      ":universe_packages",
     ]
   },
 ]
@@ -1604,9 +1659,9 @@ pm_publish("publish") {
 group("updates") {
   testonly = true
   deps = [
-    ":publish",
     ":ids.txt",
     ":package_lists",
+    ":publish",
     ":system_snapshot",
   ]
 }
@@ -1629,7 +1684,7 @@ generated_file("package-build-id-files.list") {
   ]
 
   deps = [
-    ":available_packages",
+    ":universe_packages",
   ]
 }
 
@@ -1728,65 +1783,4 @@ write_images_manifest("images-manifest") {
     "$root_build_dir/images.json",
     "$root_build_dir/image_paths.sh",
   ]
-}
-
-###
-### SDK
-###
-
-sdk_images = []
-
-foreach(image, images) {
-  if (defined(image.sdk)) {
-    image_target_name = "${image.sdk}_sdk"
-    sdk_images += [ ":$image_target_name" ]
-    sdk_atom(image_target_name) {
-      id = "sdk://images/${image.sdk}"
-      category = "partner"
-      testonly = true
-
-      file_content = "target/$target_cpu/${image.sdk}"
-      meta = {
-        dest = "images/${image.sdk}-meta.json"
-        schema = "image"
-        value = {
-          type = "image"
-          name = "${image.sdk}"
-          file = {
-            if (target_cpu == "x64") {
-              x64 = file_content
-            } else if (target_cpu == "arm64") {
-              arm64 = file_content
-            } else {
-              assert(false, "Unsupported target architecture: $target_cpu")
-            }
-          }
-        }
-      }
-
-      image_sources = []
-      if (defined(image.sources)) {
-        image_sources += image.sources
-      } else {
-        foreach(label, image.deps) {
-          image_sources += get_target_outputs(label)
-        }
-      }
-
-      files = [
-        {
-          source = image_sources[0]
-          dest = "target/$target_cpu/${image.sdk}"
-        },
-      ]
-
-      non_sdk_deps = image.deps
-    }
-  }
-}
-
-sdk_molecule("images_sdk") {
-  testonly = true
-
-  deps = sdk_images
 }

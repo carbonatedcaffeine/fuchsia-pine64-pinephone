@@ -18,25 +18,21 @@
 #define BRCMF_DEVICE_H
 
 #include <assert.h>
+#include <pthread.h>
+#include <string.h>
+#include <threads.h>
+
+#include <atomic>
+
 #include <ddk/driver.h>
-#include <ddk/protocol/pci.h>
-#include <ddk/protocol/pci-lib.h>
-#include <ddk/protocol/usb.h>
 #include <lib/async-loop/loop.h> // to start the worker thread
 #include <lib/async/default.h>  // for async_get_default_dispatcher()
 #include <lib/async/task.h>     // for async_post_task()
 #include <lib/async/time.h>     // for async_now()
-#include <pthread.h>
-#include <string.h>
 #include <lib/sync/completion.h>
-#include <stdatomic.h>
-#include <threads.h>
 #include <wlan/protocol/if-impl.h>
 #include <zircon/listnode.h>
 #include <zircon/types.h>
-
-#include "debug.h"
-#include "usb.h"
 
 #define BACKPLANE_ID_HIGH_REVCODE_HIGH 0x7000
 #define BACKPLANE_ID_HIGH_REVCODE_HIGH_SHIFT 8
@@ -65,8 +61,6 @@
 #define BC_CORE_POWER_CONTROL_SHIFT 13
 
 #define BRCMF_ERR_FIRMWARE_UNSUPPORTED (-23)
-
-#define max(a, b) ((a)>(b)?(a):(b))
 
 extern async_dispatcher_t* default_dispatcher;
 
@@ -129,44 +123,6 @@ static inline struct brcmf_bus* dev_to_bus(struct brcmf_device* dev) {
     return dev->bus;
 }
 
-struct brcmf_usb_interface_descriptor {
-    int bInterfaceClass;
-    int bInterfaceSubClass;
-    int bInterfaceProtocol;
-    int bInterfaceNumber;
-    int bNumEndpoints;
-};
-
-struct brcmf_usb_device {
-    usb_speed_t speed;
-    struct brcmf_device dev;
-    struct {
-        int bNumConfigurations;
-        int bDeviceClass;
-    } descriptor;
-    size_t parent_req_size;
-};
-
-struct brcmf_endpoint_container {
-    usb_endpoint_descriptor_t desc;
-};
-
-struct brcmf_usb_altsetting {
-    struct brcmf_usb_interface_descriptor desc;
-    struct brcmf_endpoint_container* endpoint;
-};
-
-struct brcmf_usb_interface {
-    struct brcmf_usb_altsetting* altsetting;
-    struct brcmf_usb_device* usb_device;
-    void* intfdata;
-};
-
-struct brcmf_usb_device_id {
-    int idVendor;
-    int idProduct;
-};
-
 struct brcmf_firmware {
     size_t size;
     void* data;
@@ -179,6 +135,7 @@ struct net_device {
     struct wireless_dev* ieee80211_ptr;
     bool initialized_for_ap;
     bool scan_busy;
+    bool multicast_promisc;
     uint64_t scan_txn_id;
     wlanif_impl_ifc_t* if_callbacks;
     void* if_callback_cookie;
@@ -217,22 +174,18 @@ void brcmf_free_net_device(struct net_device* dev);
 
 void brcmf_enable_tx(struct net_device* dev);
 
-static inline struct brcmf_usb_device* intf_to_usbdev(const struct brcmf_usb_interface* intf) {
-    return intf->usb_device;
-}
-
 // TODO(cphoenix): Fix this hack
 #define ieee80211_frequency_to_channel(freq) (freq)
 
-bool brcmf_test_and_set_bit_in_array(size_t bit_number, atomic_ulong* addr);
+bool brcmf_test_and_set_bit_in_array(size_t bit_number, std::atomic<unsigned long>* addr);
 
-bool brcmf_test_and_clear_bit_in_array(size_t bit_number, atomic_ulong* addr);
+bool brcmf_test_and_clear_bit_in_array(size_t bit_number, std::atomic<unsigned long>* addr);
 
-bool brcmf_test_bit_in_array(size_t bit_number, atomic_ulong* addr);
+bool brcmf_test_bit_in_array(size_t bit_number, std::atomic<unsigned long>* addr);
 
-void brcmf_clear_bit_in_array(size_t bit_number, atomic_ulong* addr);
+void brcmf_clear_bit_in_array(size_t bit_number, std::atomic<unsigned long>* addr);
 
-void brcmf_set_bit_in_array(size_t bit_number, atomic_ulong* addr);
+void brcmf_set_bit_in_array(size_t bit_number, std::atomic<unsigned long>* addr);
 
 zx_status_t brcmf_debugfs_create_directory(const char *name, zx_handle_t parent,
                                            zx_handle_t* new_directory_out);

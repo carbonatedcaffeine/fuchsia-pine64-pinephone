@@ -194,12 +194,9 @@ func (f *installFile) open() error {
 	}
 
 	var err error
-	// TODO(raggi): propagate flags instead to allow for resumption and so on
-	f.blob, err = os.OpenFile(f.fs.blobfs.PathOf(f.name), os.O_WRONLY|os.O_CREATE, os.ModePerm)
 
-	if f.isPkg {
-		f.fs.index.Installing(f.name)
-	}
+	// TODO(raggi): propagate flags instead to allow for resumption and so on
+	f.blob, err = f.fs.blobfs.OpenFile(f.name, os.O_WRONLY|os.O_CREATE, 0777)
 
 	// permission errors from blobfs are returned when the blob already exists and
 	// is no longer writable
@@ -208,16 +205,29 @@ func (f *installFile) open() error {
 		f.fs.index.Fulfill(f.name)
 
 		if f.isPkg {
-			// A package is being written for which we already have a blob in blobfs. The
-			// error returned to the user is still ErrAlreadyExists if the package is
-			// complete, otherwise it may be nil if the package requires repair/futher
-			// blobs.
-			return f.importPackage()
+			// Importing a package file that is already present in blobfs could fail for
+			// a number of reasons, such as the package being invalid, and so on. We need
+			// to report such cases back to the caller. In the case where we import fine,
+			// we must fall through to passing ErrAlreadyExists back to the caller, so
+			// that they know that the package file itself is already complete. Getting
+			// `fs.ErrAlreadyExists` on a package meta.far write does not in and of
+			// itself indicate that the whole package is present, only that the package
+			// metadata blob is present.
+			if err := f.importPackage(); err != nil {
+				return err
+			}
 		}
-
 		return fs.ErrAlreadyExists
 	}
-	return goErrToFSErr(err)
+
+	if err != nil {
+		return goErrToFSErr(err)
+	}
+
+	if f.isPkg {
+		f.fs.index.Installing(f.name)
+	}
+	return nil
 }
 
 func (f *installFile) Write(p []byte, off int64, whence int) (int, error) {
@@ -244,7 +254,7 @@ func (f *installFile) Write(p []byte, off int64, whence int) (int, error) {
 
 		if f.isPkg {
 			// If a package installation fails, the error is returned here.
-			return n, f.importPackage()
+			return n, goErrToFSErr(f.importPackage())
 		}
 	}
 
@@ -295,6 +305,7 @@ func (f *installFile) importPackage() error {
 		log.Printf("error opening package blob after writing: %s: %s", f.name, err)
 		return fs.ErrFailedPrecondition
 	}
+	defer b.Close()
 
 	r, err := far.NewReader(b)
 	if err != nil {
@@ -348,16 +359,9 @@ func (f *installFile) importPackage() error {
 	// readable"
 	mayHaveBlob := func(root string) bool { return true }
 	if len(files) > 20 {
-		d, err := os.Open(f.fs.blobfs.Root)
+		dnames, err := f.fs.blobfs.Blobs()
 		if err != nil {
-			log.Printf("error open(%q): %s", f.fs.blobfs.Root, err)
-			// Note: translates to zx.ErrBadState
-			return fs.ErrFailedPrecondition
-		}
-		dnames, err := d.Readdirnames(-1)
-		d.Close()
-		if err != nil {
-			log.Printf("error readdir(%q): %s", f.fs.blobfs.Root, err)
+			log.Printf("error readdir blobfs: %s", err)
 			// Note: translates to zx.ErrBadState
 			return fs.ErrFailedPrecondition
 		}

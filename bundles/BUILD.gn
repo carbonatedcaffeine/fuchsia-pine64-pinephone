@@ -7,6 +7,10 @@ group("tools") {
   public_deps = [
     "//garnet/packages/products:devtools",
     "//garnet/packages/tools:all",
+    "//src/developer/bugreport",
+    "//src/developer/bugreport:host_tool",
+    "//src/developer/debug/zxdb:zxdb_host",
+    "//tools/fidlcat:fidlcat_host",
   ]
 }
 
@@ -17,6 +21,7 @@ group("tests") {
     "//garnet/packages/tests:all",
     "//peridot/packages/tests:all",
     "//src:tests",
+    "//tools:tests",
     "//topaz/packages/tests:all",
   ]
 }

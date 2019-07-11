@@ -2,18 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_SHARED_ZX_STATUS_DEFINITIONS_H_
+#define SRC_DEVELOPER_DEBUG_SHARED_ZX_STATUS_DEFINITIONS_H_
 
 #include <stdint.h>
 
 namespace debug_ipc {
 
 // This file tracks //zircon/system/public/zircon/errors.h
-// That file holds the zx_status_t definitions and it's not bound to change
-// much, so copying it should not provide much headaches.
+// That file holds the zx_status_t definitions and it's not bound to change much, so copying it
+// should not provide much headaches.
 //
-// The constant naming convention is an exception and is maintained to be
-// consistent with the naming used in zircon.
+// The constant naming convention is an exception and is maintained to be consistent with the naming
+// used in zircon.
 
 // As defined in zircon/types.h
 using zx_status_t = int32_t;
@@ -238,3 +239,5 @@ constexpr zx_status_t kZxErrConnectionReset = -75;
 constexpr zx_status_t kZxErrConnectionAborted = -76;
 
 }  // namespace debug_ipc
+
+#endif  // SRC_DEVELOPER_DEBUG_SHARED_ZX_STATUS_DEFINITIONS_H_

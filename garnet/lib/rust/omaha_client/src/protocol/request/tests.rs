@@ -7,7 +7,7 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 #[test]
-pub fn basic_serialization_test() {
+fn basic_serialization_test() {
     let expected = json!({
         "request": {
             "protocol": "3.0",
@@ -59,7 +59,7 @@ pub fn basic_serialization_test() {
 }
 
 #[test]
-pub fn basic_ping_serialization_test() {
+fn basic_ping_serialization_test() {
     let expected = json!({
         "request":{
             "protocol": "3.0",
@@ -114,7 +114,7 @@ pub fn basic_ping_serialization_test() {
 }
 
 #[test]
-pub fn basic_event_serialization_test() {
+fn basic_event_serialization_test() {
     let expected = json!({
         "request": {
             "protocol": "3.0",
@@ -161,7 +161,7 @@ pub fn basic_event_serialization_test() {
                 events: vec![Event {
                     event_type: EventType::InstallComplete,
                     event_result: EventResult::Success,
-                    errorcode: Some(0),
+                    errorcode: Some(EventErrorCode::ParseResponse),
                     ..Event::default()
                 }],
                 ..App::default()
@@ -175,7 +175,7 @@ pub fn basic_event_serialization_test() {
 }
 
 #[test]
-pub fn multiple_event_serialization_test() {
+fn multiple_event_serialization_test() {
     let expected = json!({
         "request": {
             "protocol": "3.0",
@@ -232,7 +232,7 @@ pub fn multiple_event_serialization_test() {
                     Event {
                         event_type: EventType::InstallComplete,
                         event_result: EventResult::Success,
-                        errorcode: Some(0),
+                        errorcode: Some(EventErrorCode::ParseResponse),
                         ..Event::default()
                     },
                     Event {
@@ -258,7 +258,7 @@ pub fn multiple_event_serialization_test() {
 }
 
 #[test]
-pub fn all_fields_serialization_test() {
+fn all_fields_serialization_test() {
     let expected = json!({
         "request": {
             "protocol": "3.0",
@@ -332,7 +332,7 @@ pub fn all_fields_serialization_test() {
                     Event {
                         event_type: EventType::InstallComplete,
                         event_result: EventResult::Success,
-                        errorcode: Some(0),
+                        errorcode: Some(EventErrorCode::ParseResponse),
                         ..Event::default()
                     },
                     Event {

@@ -4,7 +4,7 @@
 
 driver("goodix") {
   sources = [
-    "gt92xx.cpp",
+    "gt92xx.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.clock",
@@ -13,6 +13,7 @@ driver("goodix") {
     "$zx/system/banjo/ddk.protocol.hidbus",
     "$zx/system/banjo/ddk.protocol.i2c",
     "$zx/system/banjo/ddk.protocol.platform.device",
+    "$zx/system/dev/lib/device-protocol-i2c-channel",
     "$zx/system/dev/lib/mmio",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",
@@ -23,4 +24,7 @@ driver("goodix") {
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",
   ]
+
+  # TODO(ZX-2863): This driver violates the allowed shlib deps policy.
+  deprecated_inhibit_driver_shlib_allowlist = true
 }

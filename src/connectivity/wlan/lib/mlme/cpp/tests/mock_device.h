@@ -32,7 +32,7 @@ namespace {
 struct WlanPacket {
   fbl::unique_ptr<Packet> pkt;
   CBW cbw;
-  PHY phy;
+  wlan_info_phy_type_t phy;
   uint32_t flags;
 };
 
@@ -49,12 +49,13 @@ struct MockDevice : public DeviceInterface {
 
     auto info = &wlanmac_info.ifc_info;
     memcpy(info->mac_addr, addr.byte, 6);
-    info->mac_role = WLAN_MAC_ROLE_CLIENT;
-    info->supported_phys = WLAN_PHY_OFDM | WLAN_PHY_HT | WLAN_PHY_VHT;
+    info->mac_role = WLAN_INFO_MAC_ROLE_CLIENT;
+    info->supported_phys = WLAN_INFO_PHY_TYPE_OFDM | WLAN_INFO_PHY_TYPE_HT |
+                           WLAN_INFO_PHY_TYPE_VHT;
     info->driver_features = 0;
-    info->num_bands = 2;
-    info->bands[0] = test_utils::FakeBandInfo(WLAN_BAND_2GHZ);
-    info->bands[1] = test_utils::FakeBandInfo(WLAN_BAND_5GHZ);
+    info->bands_count = 2;
+    info->bands[0] = test_utils::FakeBandInfo(WLAN_INFO_BAND_2GHZ);
+    info->bands[1] = test_utils::FakeBandInfo(WLAN_INFO_BAND_5GHZ);
     state->set_channel(wlan_channel_t{.cbw = CBW20, .primary = 1});
   }
 
@@ -70,7 +71,8 @@ struct MockDevice : public DeviceInterface {
     return std::make_unique<TestTimer>(id, &clock_);
   }
 
-  zx_status_t DeliverEthernet(Span<const uint8_t> eth_frame) override final {
+  zx_status_t DeliverEthernet(
+      fbl::Span<const uint8_t> eth_frame) override final {
     eth_queue.push_back({eth_frame.cbegin(), eth_frame.cend()});
     return ZX_OK;
   }
@@ -84,7 +86,7 @@ struct MockDevice : public DeviceInterface {
     return ZX_OK;
   }
 
-  zx_status_t SendService(Span<const uint8_t> span) override final {
+  zx_status_t SendService(fbl::Span<const uint8_t> span) override final {
     std::vector<uint8_t> msg(span.cbegin(), span.cend());
     svc_queue.push_back(msg);
     return ZX_OK;
@@ -173,7 +175,7 @@ struct MockDevice : public DeviceInterface {
   // be of type T.
   template <typename T>
   std::vector<MlmeMsg<T>> GetServiceMsgs(
-      uint32_t ordinal = MlmeMsg<T>::kNoOrdinal) {
+      uint64_t ordinal = MlmeMsg<T>::kNoOrdinal) {
     std::vector<MlmeMsg<T>> ret;
     for (auto iter = svc_queue.begin(); iter != svc_queue.end(); ++iter) {
       auto msg = MlmeMsg<T>::Decode(*iter, ordinal);

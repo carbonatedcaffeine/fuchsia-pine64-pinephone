@@ -63,10 +63,25 @@ source_set("object_identifier_lib") {
   configs += [ "//src/ledger:ledger_config" ]
 }
 
+source_set("piece_tracker") {
+  sources = [
+    "piece_tracker.cc",
+    "piece_tracker.h",
+  ]
+
+  public_deps = [
+    "//src/ledger/bin/storage/public",
+  ]
+
+  configs += [ "//src/ledger:ledger_config" ]
+}
+
 source_set("lib") {
   sources = [
     "commit_impl.cc",
     "commit_impl.h",
+    "commit_pruner.cc",
+    "commit_pruner.h",
     "data_serialization.h",
     "db_serialization.cc",
     "db_serialization.h",
@@ -118,6 +133,7 @@ source_set("lib") {
 
   public_deps = [
     ":object_identifier_lib",
+    ":piece_tracker",
     "//peridot/lib/convert",
     "//src/ledger/lib/coroutine",
     "//src/ledger/third_party/bup",
@@ -159,6 +175,7 @@ source_set("unittests") {
 
   sources = [
     "commit_impl_unittest.cc",
+    "commit_pruner_unittest.cc",
     "commit_random_impl.cc",
     "commit_random_impl.h",
     "db_serialization_unittest.cc",
@@ -166,12 +183,14 @@ source_set("unittests") {
     "journal_unittest.cc",
     "ledger_storage_unittest.cc",
     "leveldb_factory_unittest.cc",
+    "live_commit_tracker_unittest.cc",
     "object_digest_unittest.cc",
     "object_impl_unittest.cc",
     "page_db_empty_impl.cc",
     "page_db_empty_impl.h",
     "page_db_unittest.cc",
     "page_storage_unittest.cc",
+    "piece_tracker_unittest.cc",
     "split_unittest.cc",
   ]
 

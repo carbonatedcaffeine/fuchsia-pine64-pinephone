@@ -589,7 +589,7 @@ extern "C" {
         out_buf: *mut raw::c_void,
         out_len: usize,
     ) -> isize;
-    pub fn fdio_pipe_half2(fd: *mut i32, handle: *mut zx_handle_t) -> zx_status_t;
+    pub fn fdio_pipe_half(fd: *mut i32, handle: *mut zx_handle_t) -> zx_status_t;
     pub fn fdio_get_vmo_copy(fd: raw::c_int, out_vmo: *mut zx_handle_t) -> zx_status_t;
     pub fn fdio_get_vmo_clone(fd: raw::c_int, out_vmo: *mut zx_handle_t) -> zx_status_t;
     pub fn fdio_get_exact_vmo(fd: raw::c_int, out_vmo: *mut zx_handle_t) -> zx_status_t;
@@ -605,9 +605,9 @@ extern "C" {
         path: *const raw::c_char,
         fd: raw::c_int,
     ) -> zx_status_t;
+    pub fn fdio_ns_unbind(ns: *mut fdio_ns_t, path: *const raw::c_char) -> zx_status_t;
     pub fn fdio_ns_opendir(ns: *mut fdio_ns_t) -> raw::c_int;
     pub fn fdio_ns_chdir(ns: *mut fdio_ns_t) -> zx_status_t;
-    pub fn fdio_ns_install(ns: *mut fdio_ns_t) -> zx_status_t;
     pub fn fdio_ns_get_installed(ns: *mut *mut fdio_ns_t) -> zx_status_t;
     pub fn fdio_ns_export(ns: *mut fdio_ns_t, out: *mut *mut fdio_flat_namespace_t) -> zx_status_t;
     pub fn fdio_ns_export_root(out: *mut *mut fdio_flat_namespace_t) -> zx_status_t;

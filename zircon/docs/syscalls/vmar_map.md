@@ -10,7 +10,7 @@ Add a memory mapping.
 
 <!-- Updated by update-docs-from-abigen, do not edit. -->
 
-```
+```c
 #include <zircon/syscalls.h>
 
 zx_status_t zx_vmar_map(zx_handle_t handle,
@@ -29,6 +29,7 @@ retains a reference to the underlying virtual memory object, which means
 closing the VMO handle does not remove the mapping added by this function.
 
 *options* is a bit vector of the following:
+
 - **ZX_VM_SPECIFIC**  Use the *vmar_offset* to place the mapping, invalid if
   *handle* does not have the **ZX_VM_CAN_MAP_SPECIFIC** permission.
   *vmar_offset* is an offset relative to the base address of the given VMAR.
@@ -54,8 +55,10 @@ closing the VMO handle does not remove the mapping added by this function.
 - **ZX_VM_MAP_RANGE**  Immediately page into the new mapping all backed
   regions of the VMO.  This cannot be specified if
   **ZX_VM_SPECIFIC_OVERWRITE** is used.
-- **ZX_VM_REQUIRE_NON_RESIZABLE** Maps the VMO only if the VMO is non-resizable,
-  that is, it was created with the **ZX_VMO_NON_RESIZABLE** option.
+- **ZX_VM_ALLOW_FAULTS** Required if it would be possible for the created
+  mapping to generate faults. In particular, it is required if *vmo* is resizable,
+  if *vmo* is non-resizable but the mapping extends past the end of *vmo*, or if
+  *vmo* was created from [`zx_pager_create_vmo()`].
 
 *vmar_offset* must be 0 if *options* does not have **ZX_VM_SPECIFIC** or
 **ZX_VM_SPECIFIC_OVERWRITE** set.  If neither of those are set, then
@@ -65,12 +68,16 @@ allocator determined by policy set on the target VMAR).
 *len* must be page-aligned.
 
 In addition one of the following power-of-two alignment flags can added:
+
 - **ZX_VM_ALIGN_1KB** aligns *child_addr* to a power-of-2 at least 1K bytes.
 - **ZX_VM_ALIGN_2KB** aligns *child_addr* to a power-of-2 at least 2K bytes.
 - **ZX_VM_ALIGN_4KB** aligns *child_addr* to a power-of-2 at least 4K bytes.
 - **ZX_VM_ALIGN_8KB** aligns *child_addr* to a power-of-2 at least 8K bytes.
 and continues up to
 - **ZX_VM_ALIGN_4GB** aligns *child_addr* to a power-of-2 at least 4G bytes.
+
+TODO(ZX-3978): Currently, alignment flags greater than 4KB cannot be used when
+mapping a VMO into a compact VMAR.
 
 Using **ZX_VM_ALIGN** flags with **ZX_VM_SPECIFIC** will fail if the vmar
 base address + *vmo_offset* are not aligned to the requested value.
@@ -108,8 +115,11 @@ non-zero when neither **ZX_VM_SPECIFIC** nor
 
 **ZX_ERR_ACCESS_DENIED**  Insufficient privileges to make the requested mapping.
 
-**ZX_ERR_NOT_SUPPORTED** The VMO is resizable and **ZX_VM_REQUIRE_NON_RESIZABLE** was
-requested.
+**ZX_ERR_NOT_SUPPORTED** If the vmo is resizable or backed by a pager but
+**ZX_VM_ALLOW_FAULTS** is not set.
+
+**ZX_ERR_BUFFER_TOO_SMALL** The VMO is not resizable and the mapping extends past the end
+of the VMO but **ZX_VM_ALLOW_FAULTS** is not set.
 
 **ZX_ERR_NO_MEMORY**  Failure due to lack of memory.
 There is no good way for userspace to handle this (unlikely) error.
@@ -132,6 +142,7 @@ the VMO.
 
 <!-- References updated by update-docs-from-abigen, do not edit. -->
 
+[`zx_pager_create_vmo()`]: pager_create_vmo.md
 [`zx_vmar_allocate()`]: vmar_allocate.md
 [`zx_vmar_destroy()`]: vmar_destroy.md
 [`zx_vmar_protect()`]: vmar_protect.md

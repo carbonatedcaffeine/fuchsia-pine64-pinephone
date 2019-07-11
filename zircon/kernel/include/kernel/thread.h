@@ -346,6 +346,9 @@ static inline bool thread_is_signaled(thread_t* t) {
     return t->signals != 0;
 }
 
+// Call the arch-specific signal handler.
+void arch_iframe_process_pending_signals(iframe_t* iframe);
+
 // process pending signals, may never return because of kill signal
 void thread_process_pending_signals(void);
 void dump_thread_locked(thread_t* t, bool full) TA_REQ(thread_lock);
@@ -471,7 +474,6 @@ static inline void thread_preempt_disable(void) {
 // thread_preempt_reenable() decrements the preempt_disable counter.  See
 // thread_preempt_disable().
 static inline void thread_preempt_reenable(void) {
-    DEBUG_ASSERT(!arch_blocking_disallowed());
     DEBUG_ASSERT(thread_preempt_disable_count() > 0);
 
     thread_t* current_thread = get_current_thread();
@@ -480,6 +482,7 @@ static inline void thread_preempt_reenable(void) {
     atomic_signal_fence();
 
     if (new_count == 0) {
+        DEBUG_ASSERT(!arch_blocking_disallowed());
         thread_check_preempt_pending();
     }
 }
@@ -521,7 +524,6 @@ static inline void thread_resched_disable(void) {
 // thread_resched_reenable() decrements the preempt_disable counter.  See
 // thread_resched_disable().
 static inline void thread_resched_reenable(void) {
-    DEBUG_ASSERT(!arch_blocking_disallowed());
     DEBUG_ASSERT(thread_resched_disable_count() > 0);
 
     thread_t* current_thread = get_current_thread();
@@ -531,6 +533,7 @@ static inline void thread_resched_reenable(void) {
     atomic_signal_fence();
 
     if (new_count == 0) {
+        DEBUG_ASSERT(!arch_blocking_disallowed());
         thread_check_preempt_pending();
     }
 }

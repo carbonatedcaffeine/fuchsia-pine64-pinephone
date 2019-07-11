@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef ZIRCON_SYSTEM_ULIB_ZXTEST_TEST_TEST_REGISTRY_H_
+#define ZIRCON_SYSTEM_ULIB_ZXTEST_TEST_TEST_REGISTRY_H_
 
 #include <zxtest/base/test-driver.h>
 #include <zxtest/base/test.h>
@@ -18,19 +19,27 @@ namespace test {
 
 // Stub used for testing;
 class TestDriverStub : public internal::TestDriver {
-public:
-    ~TestDriverStub() final {}
+ public:
+  ~TestDriverStub() final {
+  }
 
-    void Skip() final {}
+  void Skip() final {
+  }
 
-    bool Continue() const final { return should_continue_; }
+  bool Continue() const final {
+    return should_continue_;
+  }
 
-    void NotifyFail() { should_continue_ = false; }
+  void NotifyFail() {
+    should_continue_ = false;
+  }
 
-    internal::TestStatus Status() const final { return internal::TestStatus::kFailed; }
+  internal::TestStatus Status() const final {
+    return internal::TestStatus::kFailed;
+  }
 
-private:
-    bool should_continue_ = true;
+ private:
+  bool should_continue_ = true;
 };
 
 // Verify that without errors, |Test::TestBody| is called after |Test::SetUp| and
@@ -98,9 +107,14 @@ void EventBroadcasterOnEnvironmentTearDown();
 void EventBroadcasterOnIterationEnd();
 void EventBroadcasterOnProgramEnd();
 
+// Verify FileLogSink behavior since it is the default log sink.
+void FileLogSinkWrite();
+void FileLogSinkCallCloserOnDestruction();
+
 // Verify that Runner behaves appropiately with the defined options.
 void RunnerRegisterTest();
 void RunnerRegisterTestWithCustomFactory();
+void RunnerLifecycleObserversRegisteredAndNotified();
 void RunnerRunAllTests();
 void RunnerRunAllTestsUntilFailure();
 void RunnerRunAllTestsSameTestCase();
@@ -121,6 +135,10 @@ void RunnerOptionsParseFromCmdLineShort();
 void RunnerOptionsParseFromCmdLineLong();
 void RunnerOptionsParseFromCmdLineErrors();
 
+// Verify that swapping the reporter actually changes where things are outputted.
+void ReporterWritesToLogSink();
+void ReporterSetLogSink();
+
 // Verify that the current Filter implementation matches gTest expectations.
 void FilterOpFilterEmptyMatchesAll();
 void FilterOpFilterFullMatch();
@@ -137,13 +155,15 @@ void DeathStatementInternalError();
 #endif
 
 struct RegisteredTest {
-    const char* name = nullptr;
-    void (*test_fn)() = nullptr;
+  const char* name = nullptr;
+  void (*test_fn)() = nullptr;
 };
 
 // Just so we capture the function name.
 #define RUN_TEST(test_function)                                                                    \
-    RegisteredTest { .name = #test_function, .test_fn = &test_function }
+  RegisteredTest {                                                                                 \
+    .name = #test_function, .test_fn = &test_function                                              \
+  }
 
 // List of tests to run.
 static constexpr RegisteredTest kRegisteredTests[] = {
@@ -179,14 +199,19 @@ static constexpr RegisteredTest kRegisteredTests[] = {
     RUN_TEST(EventBroadcasterOnEnvironmentTearDown),
     RUN_TEST(EventBroadcasterOnIterationEnd),
     RUN_TEST(EventBroadcasterOnProgramEnd),
+    RUN_TEST(FileLogSinkWrite),
+    RUN_TEST(FileLogSinkCallCloserOnDestruction),
     RUN_TEST(RunnerRegisterTest),
     RUN_TEST(RunnerRegisterTestWithCustomFactory),
+    RUN_TEST(RunnerLifecycleObserversRegisteredAndNotified),
     RUN_TEST(RunnerRunAllTests),
     RUN_TEST(RunnerRunAllTestsUntilFailure),
     RUN_TEST(RunnerRunAllTestsSameTestCase),
     RUN_TEST(RunnerSetUpAndTearDownEnvironmentsTests),
     RUN_TEST(RunnerRunOnlyFilteredTests),
     RUN_TEST(RunnerListTests),
+    RUN_TEST(ReporterSetLogSink),
+    RUN_TEST(ReporterWritesToLogSink),
     RUN_TEST(TestDriverImplFatalFailureEndsTest),
     RUN_TEST(TestDriverImplNonFatalFailureDoesNotEndTest),
     RUN_TEST(TestDriverImplReset),
@@ -209,5 +234,7 @@ static constexpr RegisteredTest kRegisteredTests[] = {
 
 #undef RUN_TEST
 
-} // namespace test
-} // namespace zxtest
+}  // namespace test
+}  // namespace zxtest
+
+#endif  // ZIRCON_SYSTEM_ULIB_ZXTEST_TEST_TEST_REGISTRY_H_

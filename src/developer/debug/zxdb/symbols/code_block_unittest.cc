@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "src/developer/debug/zxdb/symbols/code_block.h"
+
 #include "gtest/gtest.h"
 #include "src/developer/debug/zxdb/symbols/symbol_context.h"
 
@@ -19,8 +20,7 @@ TEST(CodeBlock, ContainsAddress) {
 
   // Set some ranges.
   block->set_code_ranges(AddressRanges(
-      AddressRanges::kCanonical,
-      {AddressRange(0x1000, 0x2000), AddressRange(0x3000, 0x3001)}));
+      AddressRanges::kCanonical, {AddressRange(0x1000, 0x2000), AddressRange(0x3000, 0x3001)}));
 
   // Blocks should count the beginning but not the end as inside them.
   EXPECT_TRUE(block->ContainsAddress(context, 0x1000));
@@ -44,8 +44,7 @@ TEST(CodeBlock, GetMostSpecificChild) {
 
   // Outer has two ranges.
   outer->set_code_ranges(AddressRanges(
-      AddressRanges::kCanonical,
-      {AddressRange(0x1000, 0x2000), AddressRange(0x3000, 0x3001)}));
+      AddressRanges::kCanonical, {AddressRange(0x1000, 0x2000), AddressRange(0x3000, 0x3001)}));
 
   // There are two inner blocks, one covers partially the first range, the
   // other covers exactly the second range.

@@ -525,18 +525,25 @@ bool LowEnergyConnectionManager::Connect(PeerId peer_id,
 }
 
 bool LowEnergyConnectionManager::Disconnect(PeerId peer_id) {
+  // TODO(BT-873): When connection requests can be canceled, do so here.
+  if (pending_requests_.find(peer_id) != pending_requests_.end()) {
+    bt_log(WARN, "gap-le",
+           "Can't disconnect peer %s because it's being connected to",
+           bt_str(peer_id));
+    return false;
+  }
+
   auto iter = connections_.find(peer_id);
   if (iter == connections_.end()) {
     bt_log(WARN, "gap-le", "peer not connected (id: %s)", bt_str(peer_id));
-    return false;
+    return true;
   }
 
   // Remove the connection state from the internal map right away.
   auto conn = std::move(iter->second);
   connections_.erase(iter);
 
-  bt_log(INFO, "gap-le", "disconnecting link: %s",
-         conn->link()->ToString().c_str());
+  bt_log(INFO, "gap-le", "disconnecting link: %s", bt_str(*conn->link()));
   CleanUpConnection(std::move(conn));
   return true;
 }
@@ -841,8 +848,7 @@ void LowEnergyConnectionManager::OnConnectResult(PeerId peer_id,
 void LowEnergyConnectionManager::OnDisconnectionComplete(
     const hci::EventPacket& event) {
   ZX_DEBUG_ASSERT(event.event_code() == hci::kDisconnectionCompleteEventCode);
-  const auto& params =
-      event.view().payload<hci::DisconnectionCompleteEventParams>();
+  const auto& params = event.params<hci::DisconnectionCompleteEventParams>();
   hci::ConnectionHandle handle = le16toh(params.connection_handle);
 
   if (params.status != hci::StatusCode::kSuccess) {
@@ -882,9 +888,8 @@ void LowEnergyConnectionManager::OnDisconnectionComplete(
 void LowEnergyConnectionManager::OnLEConnectionUpdateComplete(
     const hci::EventPacket& event) {
   ZX_DEBUG_ASSERT(event.event_code() == hci::kLEMetaEventCode);
-  ZX_DEBUG_ASSERT(
-      event.view().payload<hci::LEMetaEventParams>().subevent_code ==
-      hci::kLEConnectionUpdateCompleteSubeventCode);
+  ZX_DEBUG_ASSERT(event.params<hci::LEMetaEventParams>().subevent_code ==
+                  hci::kLEConnectionUpdateCompleteSubeventCode);
 
   auto payload =
       event.le_event_params<hci::LEConnectionUpdateCompleteSubeventParams>();

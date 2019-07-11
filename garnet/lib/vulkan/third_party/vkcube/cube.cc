@@ -60,8 +60,6 @@
 #include <trace-provider/provider.h>
 #endif
 
-#include "src/lib/fxl/log_settings_command_line.h"
-
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
 
 //#define USE_YUV_TEXTURE 1
@@ -84,12 +82,17 @@
 #define UNUSED
 #endif
 
+#if defined(VK_USE_PLATFORM_FUCHSIA)
+#include <lib/syslog/global.h>
+#define ERR_EXIT(err_msg, err_class) FX_LOG(FATAL, err_class, err_msg)
+#else
+
 #define ERR_EXIT(err_msg, err_class) \
   do {                               \
-    printf(err_msg);                 \
-    fflush(stdout);                  \
+    printf(err_msg) fflush(stdout);  \
     exit(1);                         \
   } while (0)
+#endif
 
 #define GET_INSTANCE_PROC_ADDR(inst, entrypoint)                           \
   {                                                                        \
@@ -2262,6 +2265,9 @@ static void demo_init_vk(struct demo* demo) {
 #if VK_USE_PLATFORM_FUCHSIA
 #if CUBE_USE_IMAGE_PIPE
   const char* kMagmaLayer = "VK_LAYER_FUCHSIA_imagepipe_swapchain";
+#elif CUBE_SKIP_PRESENT
+  const char* kMagmaLayer =
+      "VK_LAYER_FUCHSIA_imagepipe_swapchain_fb_skip_present";
 #else
   const char* kMagmaLayer = "VK_LAYER_FUCHSIA_imagepipe_swapchain_fb";
 #endif
@@ -2857,7 +2863,9 @@ void demo_init_vk_swapchain(struct demo* demo) {
   GET_DEVICE_PROC_ADDR(demo->device, GetSwapchainImagesKHR);
   GET_DEVICE_PROC_ADDR(demo->device, AcquireNextImageKHR);
   GET_DEVICE_PROC_ADDR(demo->device, QueuePresentKHR);
+#if USE_YUV_TEXTURE
   GET_DEVICE_PROC_ADDR(demo->device, CreateSamplerYcbcrConversionKHR);
+#endif
   GET_DEVICE_PROC_ADDR(demo->device, GetDeviceQueue2);
   if (demo->protected_output) {
     VkDeviceQueueInfo2 queue_info2 = {
@@ -3069,29 +3077,41 @@ void demo_run_image_pipe(struct demo* demo, int argc, char** argv) {
   demo->fuchsia_state->t0 = std::chrono::high_resolution_clock::now();
 
 #ifdef MAGMA_ENABLE_TRACING
-  trace::TraceProvider trace_provider(demo->fuchsia_state->loop.dispatcher());
+  trace::TraceProviderWithFdio trace_provider(
+      demo->fuchsia_state->loop.dispatcher());
 #endif
 
-  demo->fuchsia_state->component =
-      std::make_unique<scenic::ViewProviderComponent>(
-          [demo](scenic::ViewContext view_context) {
-            auto resize_callback = [demo](float width, float height) {
-              demo->width = width;
-              demo->height = height;
-              if (demo->prepared) {
-                demo_resize(demo);
-              } else {
-                demo_prepare(demo);
-              }
-            };
-            auto view = std::make_unique<VkCubeView>(std::move(view_context),
-                                                     resize_callback);
-            demo->fuchsia_state->image_pipe_handle =
-                view->TakeImagePipeChannel().release();
-            demo_init_vk_swapchain(demo);
-            return view;
-          },
-          &demo->fuchsia_state->loop);
+  demo->fuchsia_state->context = sys::ComponentContext::Create();
+
+  ImagePipeViewProviderService::CreateViewCallback create_view_callback =
+      [demo](fuchsia::ui::views::ViewToken view_token) {
+        auto resize_callback = [demo](float width, float height) {
+          demo->width = width;
+          demo->height = height;
+          if (demo->prepared) {
+            demo_resize(demo);
+          } else {
+            demo_prepare(demo);
+          }
+        };
+
+        auto view =
+            ImagePipeView::Create(demo->fuchsia_state->context.get(),
+                                  std::move(view_token), resize_callback);
+        if (!view)
+          ERR_EXIT("Failed to created ImagePipeView",
+                   "CreateViewCallback failure");
+
+        demo->fuchsia_state->image_pipe_handle =
+            view->TakeImagePipeChannel().release();
+
+        demo_init_vk_swapchain(demo);
+        demo->fuchsia_state->view = std::move(view);
+      };
+
+  demo->fuchsia_state->view_provider_service =
+      std::make_unique<ImagePipeViewProviderService>(
+          demo->fuchsia_state->context.get(), std::move(create_view_callback));
 
   zx_status_t loop_status = ZX_OK;
   while (!demo->quit && loop_status == ZX_OK) {
@@ -3142,6 +3162,10 @@ static void demo_run_magma(struct demo* demo) {
 #endif  // VK_USE_PLATFORM_FUCHSIA
 
 int cube_main(int argc, char** argv) {
+#if defined(VK_USE_PLATFORM_FUCHSIA)
+  fx_log_init();
+#endif
+
   struct demo demo;
 
   demo_init(&demo, argc, argv);
@@ -3191,7 +3215,7 @@ int test_vk_cube(int argc, char** argv) {
 #if defined(MAGMA_ENABLE_TRACING)
   async::Loop loop(&kAsyncLoopConfigNoAttachToThread);
   loop.StartThread();
-  trace::TraceProvider trace_provider(loop.dispatcher());
+  trace::TraceProviderWithFdio trace_provider(loop.dispatcher());
 #endif
   return cube_main(argc, argv);
 }

@@ -4,8 +4,7 @@
 
 driver("ethertap") {
   sources = [
-    "binding.c",
-    "ethertap.cpp",
+    "ethertap.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.ethernet",

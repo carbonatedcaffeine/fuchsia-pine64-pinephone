@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Fuchsia Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@ library fuchsia.sys;
 // entries instead, just like files.
 // TODO(ZX-1358): Point to the FIDL interface for file I/O once RIO is migrated.
 protocol ServiceProvider {
-    // Asks the host to provide the service identified by |service_name| through
-    // the |channel| endpoint supplied by the caller. If the host is not willing
-    // or able to provide the requested service, it should close the |channel|.
+    // Asks the host to provide the service identified by `service_name` through
+    // the `channel` endpoint supplied by the caller. If the host is not willing
+    // or able to provide the requested service, it should close the `channel`.
     ConnectToService(string service_name, handle<channel> channel);
 };

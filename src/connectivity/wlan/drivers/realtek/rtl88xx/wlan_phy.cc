@@ -3,6 +3,7 @@
 #include <ddk/binding.h>
 #include <ddk/debug.h>
 #include <ddk/device.h>
+#include <wlan/common/phy.h>
 #include <zircon/assert.h>
 #include <zircon/errors.h>
 #include <zircon/status.h>
@@ -46,15 +47,19 @@ zx_status_t WlanPhy::Create(zx_device_t* bus_device) {
     };
 
     static wlanphy_impl_protocol_ops_t wlanphy_impl_ops = {
-        .query = [](void* ctx, wlanphy_info_t* info) -> zx_status_t {
+        .query = [](void* ctx, wlanphy_impl_info_t* info) -> zx_status_t {
             return reinterpret_cast<WlanPhy*>(ctx)->Query(info);
         },
-        .create_iface = [](void* ctx, wlanphy_create_iface_req_t req, uint16_t* out_iface_id)
+        .create_iface = [](void* ctx, const wlanphy_impl_create_iface_req_t* req,
+                           uint16_t* out_iface_id)
                 -> zx_status_t {
             return reinterpret_cast<WlanPhy*>(ctx)->CreateIface(req, out_iface_id);
         },
         .destroy_iface = [](void* ctx, uint16_t id) -> zx_status_t {
             return reinterpret_cast<WlanPhy*>(ctx)->DestroyIface(id);
+        },
+        .set_country = [](void* ctx, const wlanphy_country_t* country) -> zx_status_t {
+            return reinterpret_cast<WlanPhy*>(ctx)->SetCountry(country);
         },
     };
 
@@ -90,12 +95,13 @@ void WlanPhy::Release() {
     delete this;
 }
 
-zx_status_t WlanPhy::Query(wlanphy_info_t* info) {
+zx_status_t WlanPhy::Query(wlanphy_impl_info_t* info) {
     if (wlan_mac_ == nullptr) { return ZX_ERR_NOT_FOUND; }
     return wlan_mac_->Query(info);
 }
 
-zx_status_t WlanPhy::CreateIface(wlanphy_create_iface_req_t req, uint16_t* out_iface_id) {
+zx_status_t WlanPhy::CreateIface(const wlanphy_impl_create_iface_req_t* req,
+                                 uint16_t* out_iface_id) {
     if (wlan_mac_ != nullptr) { return ZX_ERR_ALREADY_BOUND; }
     WlanMac* wlan_mac = nullptr;
     const zx_status_t status = device_->CreateWlanMac(zx_device_, &wlan_mac);
@@ -117,6 +123,15 @@ zx_status_t WlanPhy::DestroyIface(uint16_t id) {
     return ZX_OK;
 }
 
+zx_status_t WlanPhy::SetCountry(const wlanphy_country_t* country) {
+    if (country == nullptr) {
+        return ZX_ERR_INVALID_ARGS;
+    }
+    zxlogf(ERROR, "rtl88xx: SetCountry to [%s] not implemented\n",
+           wlan::common::Alpha2ToStr(country->alpha2).c_str());
+    return ZX_ERR_NOT_SUPPORTED;
+}
+
 }  // namespace rtl88xx
 }  // namespace wlan
 
@@ -125,8 +140,8 @@ zx_status_t rtl88xx_bind_wlan_phy(void* ctx, zx_device_t* device) {
     return ::wlan::rtl88xx::WlanPhy::Create(device);
 }
 
-static zx_driver_ops_t rtl88xx_driver_ops = []() {
-    zx_driver_ops_t ops;
+static constexpr zx_driver_ops_t rtl88xx_driver_ops = []() {
+    zx_driver_ops_t ops = {};
     ops.version = DRIVER_OPS_VERSION;
     ops.bind = &rtl88xx_bind_wlan_phy;
     return ops;

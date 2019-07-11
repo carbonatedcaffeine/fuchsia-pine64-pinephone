@@ -129,7 +129,7 @@ int CodecAdapterFfmpegDecoder::GetBuffer(
     std::lock_guard<std::mutex> lock(lock_);
     need_new_buffers = !decoded_output_info_;
     if (!decoded_output_info_ ||
-        (*decoded_output_info_).format != decoded_output_info.format) {
+        !fidl::Equals((*decoded_output_info_).format, decoded_output_info.format)) {
       output_increased_in_size =
           decoded_output_info_.has_value() &&
           decoded_output_info.buffer_bytes_needed >
@@ -169,7 +169,7 @@ int CodecAdapterFfmpegDecoder::GetBuffer(
   }
 
   AVBufferRef* buffer_ref = av_buffer_create(
-      (*buffer)->buffer_base(), static_cast<int>((*buffer)->buffer_size()),
+      buffer->buffer_base(), static_cast<int>(buffer->buffer_size()),
       FfmpegFreeBufferCallback, this, flags);
 
   int fill_arrays_status = av_image_fill_arrays(
@@ -317,7 +317,6 @@ CodecAdapterFfmpegDecoder::CoreCodecGetBufferCollectionConstraints(
   // These are all false because SW decode.
   result.buffer_memory_constraints.physically_contiguous_required = false;
   result.buffer_memory_constraints.secure_required = false;
-  result.buffer_memory_constraints.secure_permitted = false;
 
   if (port == kOutputPort) {
     ZX_ASSERT(decoded_output_info_.has_value());

@@ -20,7 +20,7 @@ e.g. `"$zx/system/ulib/zircon"`.
 ## `executable()` and `test()`
 
 The primary target type in producing a binary is `executable()`.  This produces
-an exectuable binary from the listed sources.  The Zircon build also provides a
+an executable binary from the listed sources.  The Zircon build also provides a
 means to indicate the location in the image wherein that binary should be
 installed via the `install_path` variable in the target scope.
 `install_path` can be:
@@ -61,7 +61,7 @@ a library can be used either in the kernel or in userland, then you must set
 `static = true` explicitly alongside `kernel = true` (unless you set `shared =
 true` and want to prohibit static linking of that library in userland).
 
-**Note:** For kernel modules that do not provide an `include/` subdirectory,
+Note: For kernel modules that do not provide an `include/` subdirectory,
 use [`source_set()`](#source_set) instead of `library()`.
 
 Here’s an exemplar showing all the essential options.  Most actual targets

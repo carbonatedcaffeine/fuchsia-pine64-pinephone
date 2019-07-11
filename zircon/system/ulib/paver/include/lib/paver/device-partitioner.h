@@ -42,14 +42,18 @@ const char* PartitionName(Partition type);
 // API should return true if device passed in should be filtered out.
 extern bool (*TestBlockFilter)(const fbl::unique_fd&);
 
+enum class Arch {
+    kX64,
+    kArm64,
+};
+
 // Abstract device partitioner definition.
 // This class defines common APIs for interacting with a device partitioner.
 class DevicePartitioner {
 public:
     // Factory method which automatically returns the correct DevicePartitioner
     // implementation. Returns nullptr on failure.
-    static fbl::unique_ptr<DevicePartitioner> Create(fbl::unique_fd devfs_root,
-                                                     zx::channel sysinfo);
+    static fbl::unique_ptr<DevicePartitioner> Create(fbl::unique_fd devfs_root, Arch arch);
 
     virtual ~DevicePartitioner() = default;
 
@@ -83,7 +87,7 @@ public:
     using FilterCallback = fbl::Function<bool(const gpt_partition_t&)>;
 
     // Find and initialize a GPT based device.
-    static zx_status_t InitializeGpt(fbl::unique_fd devfs_root, const zx::channel& sysinfo,
+    static zx_status_t InitializeGpt(fbl::unique_fd devfs_root, Arch arch,
                                      fbl::unique_ptr<GptDevicePartitioner>* gpt_out);
 
     // Returns block info for a specified block device.
@@ -118,9 +122,6 @@ public:
     zx_status_t WipeFvm() const;
 
 private:
-    // Validates that the board type can have a valid GPT.
-    static bool CheckValidBoard(const zx::channel& sysinfo);
-
     // Find and return the topological path of the GPT which we will pave.
     static bool FindTargetGptPath(const fbl::unique_fd& devfs_root, fbl::String* out);
 
@@ -142,7 +143,7 @@ private:
 // DevicePartitioner implementation for EFI based devices.
 class EfiDevicePartitioner : public DevicePartitioner {
 public:
-    static zx_status_t Initialize(fbl::unique_fd devfs_root, const zx::channel& sysinfo,
+    static zx_status_t Initialize(fbl::unique_fd devfs_root, Arch arch,
                                   fbl::unique_ptr<DevicePartitioner>* partitioner);
 
     bool UseSkipBlockInterface() const override { return false; }
@@ -167,7 +168,7 @@ private:
 // DevicePartitioner implementation for ChromeOS devices.
 class CrosDevicePartitioner : public DevicePartitioner {
 public:
-    static zx_status_t Initialize(fbl::unique_fd devfs_root, const zx::channel& sysinfo,
+    static zx_status_t Initialize(fbl::unique_fd devfs_root, Arch arch,
                                   fbl::unique_ptr<DevicePartitioner>* partitioner);
 
     bool UseSkipBlockInterface() const override { return false; }
@@ -240,10 +241,9 @@ public:
     zx_status_t GetBlockSize(const fbl::unique_fd& device_fd, uint32_t* block_size) const override;
 
 private:
-    SkipBlockDevicePartitioner(fbl::unique_fd devfs_root, fbl::unique_fd block_devfs_root)
-        : devfs_root_(std::move(devfs_root)), block_devfs_root_(std::move(block_devfs_root)) {}
+    SkipBlockDevicePartitioner(fbl::unique_fd devfs_root)
+        : devfs_root_(std::move(devfs_root)) {}
 
     fbl::unique_fd devfs_root_;
-    fbl::unique_fd block_devfs_root_;
 };
 } // namespace paver

@@ -3,10 +3,21 @@
 // found in the LICENSE file.
 
 use {
+    crate::amber_connector::AmberConnect,
     failure::Fail,
+    fidl_fuchsia_amber::{
+        self, ControlProxy as AmberProxy, FetchResultEvent, FetchResultMarker,
+        OpenedRepositoryMarker, OpenedRepositoryProxy,
+    },
+    fidl_fuchsia_pkg_ext::BlobId,
     fidl_fuchsia_pkg_ext::{RepositoryConfig, RepositoryConfigs},
-    fuchsia_syslog::fx_log_err,
-    fuchsia_uri::pkg_uri::RepoUri,
+    fuchsia_async as fasync,
+    fuchsia_syslog::{fx_log_err, fx_log_info},
+    fuchsia_url::pkg_url::{PkgUrl, RepoUrl},
+    fuchsia_zircon::Status,
+    futures::stream::StreamExt,
+    futures::Future,
+    parking_lot::RwLock,
     std::collections::btree_set,
     std::collections::hash_map::Entry,
     std::collections::{BTreeSet, HashMap},
@@ -14,20 +25,23 @@ use {
     std::fs,
     std::io,
     std::path::{Path, PathBuf},
+    std::sync::Arc,
 };
 
 /// [RepositoryManager] controls access to all the repository configs used by the package resolver.
-#[derive(Debug, PartialEq, Eq)]
-pub struct RepositoryManager {
+#[derive(Debug)]
+pub struct RepositoryManager<A: AmberConnect> {
     dynamic_configs_path: PathBuf,
-    static_configs: HashMap<RepoUri, RepositoryConfig>,
-    dynamic_configs: HashMap<RepoUri, RepositoryConfig>,
+    static_configs: HashMap<RepoUrl, RepositoryConfig>,
+    dynamic_configs: HashMap<RepoUrl, RepositoryConfig>,
+    amber: A,
+    conns: Arc<RwLock<HashMap<RepoUrl, OpenedRepositoryProxy>>>,
 }
 
-impl RepositoryManager {
+impl<A: AmberConnect> RepositoryManager<A> {
     /// Returns a reference to the [RepositoryConfig] config identified by the config `repo_url`,
     /// or `None` if it does not exist.
-    pub fn get(&self, repo_url: &RepoUri) -> Option<&RepositoryConfig> {
+    pub fn get(&self, repo_url: &RepoUrl) -> Option<&RepositoryConfig> {
         self.dynamic_configs.get(repo_url).or_else(|| self.static_configs.get(repo_url))
     }
 
@@ -40,6 +54,11 @@ impl RepositoryManager {
     /// and the old [RepositoryConfig] is returned. If this repository is a static config, the
     /// static config is shadowed by the dynamic config until it is removed.
     pub fn insert(&mut self, config: RepositoryConfig) -> Option<RepositoryConfig> {
+        // Clear any connections so we aren't talking to stale repositories.
+        if self.conns.write().remove(config.repo_url()).is_some() {
+            fx_log_info!("closing connection to {} repo because config changed", config.repo_url());
+        }
+
         let result = self.dynamic_configs.insert(config.repo_url().clone(), config);
         self.save();
         result
@@ -48,9 +67,17 @@ impl RepositoryManager {
     /// Removes a [RepositoryConfig] identified by the config `repo_url`.
     pub fn remove(
         &mut self,
-        repo_url: &RepoUri,
+        repo_url: &RepoUrl,
     ) -> Result<Option<RepositoryConfig>, CannotRemoveStaticRepositories> {
         if let Some(config) = self.dynamic_configs.remove(repo_url) {
+            // Clear any connections so we aren't talking to stale repositories.
+            if self.conns.write().remove(repo_url).is_some() {
+                fx_log_info!(
+                    "closing connection to {} repo because config removed",
+                    config.repo_url()
+                );
+            }
+
             self.save();
             return Ok(Some(config));
         }
@@ -63,7 +90,7 @@ impl RepositoryManager {
     }
 
     /// Returns an iterator over all the managed [RepositoryConfig]s.
-    pub fn list(&self) -> List {
+    pub fn list(&self) -> List<A> {
         let keys = self
             .dynamic_configs
             .iter()
@@ -97,25 +124,150 @@ impl RepositoryManager {
             }
         }
     }
+
+    /// Connect to the amber service.
+    pub fn connect_to_amber(&self) -> Result<AmberProxy, Status> {
+        self.amber.connect()
+    }
+
+    pub fn get_package<'a>(
+        &self,
+        url: &'a PkgUrl,
+    ) -> impl Future<Output = Result<BlobId, Status>> + 'a {
+        let repo = self.connect_to_repo(url.repo());
+        get_package(repo, url)
+    }
+
+    fn connect_to_repo(&self, url: &RepoUrl) -> Result<OpenedRepositoryProxy, Status> {
+        // Exit early if we've already connected to this repository.
+        if let Some(conn) = self.conns.read().get(url) {
+            if !conn.is_closed() {
+                return Ok(conn.clone());
+            }
+        }
+
+        // Next, check if we actually have a repository defined for this URI. If not, exit early
+        // with NOT_FOUND.
+        let config = if let Some(config) = self.get(url) {
+            config.clone()
+        } else {
+            return Err(Status::NOT_FOUND);
+        };
+
+        // Create the proxy to Amber. In order to minimize our time with the lock held, we'll
+        // create the proxy first, even if it proves to be redundant because we lost the race with
+        // another thread.
+        let (repo, repo_server_end) = fidl::endpoints::create_proxy::<OpenedRepositoryMarker>()
+            .map_err(|err| {
+                fx_log_err!("failed to create proxy: {}", err);
+                Status::INTERNAL
+            })?;
+
+        // The repo is defined, so we might actually need to connect to the device.
+        {
+            let mut conns = self.conns.write();
+
+            // It's still possible we raced with some other connection attempt, so exit early if
+            // they created a valid connection.
+            if let Some(conn) = conns.get(url) {
+                if !conn.is_closed() {
+                    return Ok(conn.clone());
+                }
+            }
+
+            conns.insert(url.clone(), repo.clone());
+        };
+
+        let amber = self.connect_to_amber()?;
+
+        // We'll actually do the connection in a separate async context. It will log any errors it
+        // finds.
+        fasync::spawn(async move {
+            let status = match await!(amber.open_repository(config.into(), repo_server_end)) {
+                Ok(status) => status,
+                Err(err) => {
+                    fx_log_err!("failed to open repository: {}", err);
+                    return;
+                }
+            };
+
+            if let Err(err) = Status::ok(status) {
+                fx_log_err!("failed to open repository: {}", err);
+            }
+        });
+
+        return Ok(repo);
+    }
+}
+
+async fn get_package(
+    repo: Result<OpenedRepositoryProxy, Status>,
+    url: &PkgUrl,
+) -> Result<BlobId, Status> {
+    let repo = repo?;
+
+    // While the fuchsia-pkg:// spec doesn't require a package name, we do.
+    let name = url.name().ok_or_else(|| {
+        fx_log_err!("package url is missing a package name: {}", url);
+        Err(Status::INVALID_ARGS)
+    })?;
+
+    let (result, result_server_end) = fidl::endpoints::create_proxy::<FetchResultMarker>()
+        .map_err(|err| {
+            fx_log_err!("failed to create proxy: {}", err);
+            Status::INTERNAL
+        })?;
+
+    // Ask amber to cache the package.
+    repo.get_update_complete(&name, url.variant(), url.package_hash(), result_server_end).map_err(
+        |err| {
+            fx_log_err!("error communicating with amber: {:?}", err);
+            Status::INTERNAL
+        },
+    )?;
+
+    match await!(result.take_event_stream().into_future()) {
+        (Some(Ok(FetchResultEvent::OnSuccess { merkle })), _) => match merkle.parse() {
+            Ok(merkle) => Ok(merkle),
+            Err(err) => {
+                fx_log_err!("{:?} is not a valid merkleroot: {:?}", merkle, err);
+                return Err(Status::INTERNAL);
+            }
+        },
+        (Some(Ok(FetchResultEvent::OnError { result, message })), _) => {
+            let status = Status::from_raw(result);
+            fx_log_err!("error fetching package: {}: {}", status, message);
+            return Err(status);
+        }
+        (Some(Err(err)), _) => {
+            fx_log_err!("error communicating with amber: {}", err);
+            return Err(Status::INTERNAL);
+        }
+        (None, _) => {
+            fx_log_err!("amber unexpectedly closed fetch result channel");
+            return Err(Status::INTERNAL);
+        }
+    }
 }
 
 /// [RepositoryManagerBuilder] constructs a [RepositoryManager], optionally initializing it
 /// with [RepositoryConfig]s passed in directly or loaded out of the filesystem.
 #[derive(Clone, Debug)]
-pub struct RepositoryManagerBuilder {
+pub struct RepositoryManagerBuilder<A: AmberConnect> {
     dynamic_configs_path: PathBuf,
-    static_configs: HashMap<RepoUri, RepositoryConfig>,
-    dynamic_configs: HashMap<RepoUri, RepositoryConfig>,
+    static_configs: HashMap<RepoUrl, RepositoryConfig>,
+    dynamic_configs: HashMap<RepoUrl, RepositoryConfig>,
+    amber: A,
 }
 
-impl RepositoryManagerBuilder {
+impl<A: AmberConnect> RepositoryManagerBuilder<A> {
     /// Create a new builder and initialize it with the dynamic
     /// [RepositoryConfigs](RepositoryConfig) from this path if it exists, and add it to the
     /// [RepositoryManager], or error out if we encounter errors during the load. The
     /// [RepositoryManagerBuilder] is also returned on error in case the errors should be ignored.
-    pub fn new<T>(dynamic_configs_path: T) -> Result<Self, (Self, LoadError)>
+    pub fn new<P>(dynamic_configs_path: P, amber: A) -> Result<Self, (Self, LoadError)>
     where
-        T: Into<PathBuf>,
+        P: Into<PathBuf>,
     {
         let dynamic_configs_path = dynamic_configs_path.into();
 
@@ -135,6 +287,7 @@ impl RepositoryManagerBuilder {
                 .into_iter()
                 .map(|config| (config.repo_url().clone(), config))
                 .collect(),
+            amber: amber,
         };
 
         if let Some(err) = err {
@@ -146,9 +299,9 @@ impl RepositoryManagerBuilder {
 
     /// Adds these static [RepoConfigs](RepoConfig) to the [RepositoryManager].
     #[cfg(test)]
-    pub fn static_configs<T>(mut self, iter: T) -> Self
+    pub fn static_configs<I>(mut self, iter: I) -> Self
     where
-        T: IntoIterator<Item = RepositoryConfig>,
+        I: IntoIterator<Item = RepositoryConfig>,
     {
         for config in iter.into_iter() {
             self.static_configs.insert(config.repo_url().clone(), config);
@@ -160,12 +313,12 @@ impl RepositoryManagerBuilder {
     /// Load a directory of [RepositoryConfigs](RepositoryConfig) files into the
     /// [RepositoryManager], or error out if we encounter errors during the load. The
     /// [RepositoryManagerBuilder] is also returned on error in case the errors should be ignored.
-    pub fn load_static_configs_dir<T>(
+    pub fn load_static_configs_dir<P>(
         mut self,
-        static_configs_dir: T,
+        static_configs_dir: P,
     ) -> Result<Self, (Self, Vec<LoadError>)>
     where
-        T: AsRef<Path>,
+        P: AsRef<Path>,
     {
         let static_configs_dir = static_configs_dir.as_ref();
 
@@ -179,11 +332,13 @@ impl RepositoryManagerBuilder {
     }
 
     /// Build the [RepositoryManager].
-    pub fn build(self) -> RepositoryManager {
+    pub fn build(self) -> RepositoryManager<A> {
         RepositoryManager {
             dynamic_configs_path: self.dynamic_configs_path,
             static_configs: self.static_configs,
             dynamic_configs: self.dynamic_configs,
+            amber: self.amber,
+            conns: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -193,7 +348,7 @@ impl RepositoryManagerBuilder {
 /// individual [LoadError] errors encountered during the load.
 fn load_configs_dir<T: AsRef<Path>>(
     dir: T,
-) -> (HashMap<RepoUri, RepositoryConfig>, Vec<LoadError>) {
+) -> (HashMap<RepoUrl, RepositoryConfig>, Vec<LoadError>) {
     let dir = dir.as_ref();
 
     let mut entries = match dir.read_dir() {
@@ -234,10 +389,10 @@ fn load_configs_dir<T: AsRef<Path>>(
             }
         }
 
-        let expected_uri = path
+        let expected_url = path
             .file_stem()
             .and_then(|name| name.to_str())
-            .and_then(|name| RepoUri::new(name.to_string()).ok());
+            .and_then(|name| RepoUrl::new(name.to_string()).ok());
 
         let configs = match load_configs_file(&path) {
             Ok(configs) => configs,
@@ -254,7 +409,7 @@ fn load_configs_dir<T: AsRef<Path>>(
         for config in configs {
             match map.entry(config.repo_url().clone()) {
                 Entry::Occupied(mut entry) => {
-                    let replaced_config = if Some(entry.key()) == expected_uri.as_ref() {
+                    let replaced_config = if Some(entry.key()) == expected_url.as_ref() {
                         entry.insert(config)
                     } else {
                         config
@@ -323,12 +478,12 @@ impl fmt::Display for LoadError {
 /// `List` is an iterator over all the [RepoConfig].
 ///
 /// See its documentation for more.
-pub struct List<'a> {
-    keys: btree_set::IntoIter<&'a RepoUri>,
-    repo_mgr: &'a RepositoryManager,
+pub struct List<'a, A: AmberConnect> {
+    keys: btree_set::IntoIter<&'a RepoUrl>,
+    repo_mgr: &'a RepositoryManager<A>,
 }
 
-impl<'a> Iterator for List<'a> {
+impl<'a, A: AmberConnect> Iterator for List<'a, A> {
     type Item = &'a RepositoryConfig;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -348,9 +503,9 @@ pub struct CannotRemoveStaticRepositories;
 mod tests {
     use super::*;
 
-    use crate::test_util::create_dir;
+    use crate::test_util::{create_dir, ClosedAmberConnector};
     use fidl_fuchsia_pkg_ext::{RepositoryConfigBuilder, RepositoryKey};
-    use fuchsia_uri::pkg_uri::RepoUri;
+    use fuchsia_url::pkg_url::RepoUrl;
     use maplit::hashmap;
     use std::fs::File;
     use std::io::Write;
@@ -393,73 +548,50 @@ mod tests {
     fn test_insert_get_remove() {
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
-        let mut repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path).unwrap().build();
+        let mut repomgr =
+            RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+                .unwrap()
+                .build();
+        assert_eq!(dynamic_configs_path, dynamic_configs_path.clone());
+        assert_eq!(repomgr.static_configs, HashMap::new());
+        assert_eq!(repomgr.dynamic_configs, HashMap::new());
 
-        assert_eq!(
-            repomgr,
-            RepositoryManager {
-                dynamic_configs_path: dynamic_configs_path.clone(),
-                static_configs: HashMap::new(),
-                dynamic_configs: HashMap::new(),
-            }
-        );
+        let fuchsia_url = RepoUrl::parse("fuchsia-pkg://fuchsia.com").unwrap();
+        assert_eq!(repomgr.get(&fuchsia_url), None);
 
-        let fuchsia_uri = RepoUri::parse("fuchsia-pkg://fuchsia.com").unwrap();
-        assert_eq!(repomgr.get(&fuchsia_uri), None);
-
-        let config1 = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let config1 = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![0]))
             .build();
-        let config2 = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let config2 = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![1]))
             .build();
 
         assert_eq!(repomgr.insert(config1.clone()), None);
-        assert_eq!(
-            repomgr,
-            RepositoryManager {
-                dynamic_configs_path: dynamic_configs_path.clone(),
-                static_configs: HashMap::new(),
-                dynamic_configs: hashmap! {
-                    fuchsia_uri.clone() => config1.clone(),
-                },
-            }
-        );
+        assert_eq!(dynamic_configs_path, dynamic_configs_path.clone());
+        assert_eq!(repomgr.static_configs, HashMap::new());
+        assert_eq!(repomgr.dynamic_configs, hashmap! { fuchsia_url.clone() => config1.clone() });
 
         assert_eq!(repomgr.insert(config2.clone()), Some(config1.clone()));
-        assert_eq!(
-            repomgr,
-            RepositoryManager {
-                dynamic_configs_path: dynamic_configs_path.clone(),
-                static_configs: HashMap::new(),
-                dynamic_configs: hashmap! {
-                    fuchsia_uri.clone() => config2.clone(),
-                },
-            }
-        );
+        assert_eq!(dynamic_configs_path, dynamic_configs_path.clone());
+        assert_eq!(repomgr.static_configs, HashMap::new());
+        assert_eq!(repomgr.dynamic_configs, hashmap! { fuchsia_url.clone() => config2.clone() });
 
-        assert_eq!(repomgr.get(&fuchsia_uri), Some(&config2));
-        assert_eq!(repomgr.remove(&fuchsia_uri), Ok(Some(config2.clone())));
-        assert_eq!(
-            repomgr,
-            RepositoryManager {
-                dynamic_configs_path: dynamic_configs_path.clone(),
-                static_configs: HashMap::new(),
-                dynamic_configs: HashMap::new()
-            }
-        );
-        assert_eq!(repomgr.remove(&fuchsia_uri), Ok(None));
+        assert_eq!(repomgr.get(&fuchsia_url), Some(&config2));
+        assert_eq!(repomgr.remove(&fuchsia_url), Ok(Some(config2.clone())));
+        assert_eq!(repomgr.static_configs, HashMap::new());
+        assert_eq!(repomgr.dynamic_configs, HashMap::new());
+        assert_eq!(repomgr.remove(&fuchsia_url), Ok(None));
     }
 
     #[test]
     fn shadowing_static_config() {
-        let fuchsia_uri = RepoUri::parse("fuchsia-pkg://fuchsia.com").unwrap();
+        let fuchsia_url = RepoUrl::parse("fuchsia-pkg://fuchsia.com").unwrap();
 
-        let fuchsia_config1 = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let fuchsia_config1 = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![1]))
             .build();
 
-        let fuchsia_config2 = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let fuchsia_config2 = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![2]))
             .build();
 
@@ -469,24 +601,25 @@ mod tests {
         )]);
 
         let dynamic_dir = tempfile::tempdir().unwrap();
-        let mut repomgr = RepositoryManagerBuilder::new(dynamic_dir.path().join("config"))
-            .unwrap()
-            .load_static_configs_dir(static_dir.path())
-            .unwrap()
-            .build();
+        let mut repomgr =
+            RepositoryManagerBuilder::new(dynamic_dir.path().join("config"), ClosedAmberConnector)
+                .unwrap()
+                .load_static_configs_dir(static_dir.path())
+                .unwrap()
+                .build();
 
-        assert_eq!(repomgr.get(&fuchsia_uri), Some(&fuchsia_config1));
+        assert_eq!(repomgr.get(&fuchsia_url), Some(&fuchsia_config1));
         assert_eq!(repomgr.insert(fuchsia_config2.clone()), None);
-        assert_eq!(repomgr.get(&fuchsia_uri), Some(&fuchsia_config2));
-        assert_eq!(repomgr.remove(&fuchsia_uri), Ok(Some(fuchsia_config2)));
-        assert_eq!(repomgr.get(&fuchsia_uri), Some(&fuchsia_config1));
+        assert_eq!(repomgr.get(&fuchsia_url), Some(&fuchsia_config2));
+        assert_eq!(repomgr.remove(&fuchsia_url), Ok(Some(fuchsia_config2)));
+        assert_eq!(repomgr.get(&fuchsia_url), Some(&fuchsia_config1));
     }
 
     #[test]
     fn cannot_remove_static_config() {
-        let fuchsia_uri = RepoUri::parse("fuchsia-pkg://fuchsia.com").unwrap();
+        let fuchsia_url = RepoUrl::parse("fuchsia-pkg://fuchsia.com").unwrap();
 
-        let fuchsia_config1 = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let fuchsia_config1 = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![1]))
             .build();
 
@@ -498,15 +631,16 @@ mod tests {
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
 
-        let mut repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path)
-            .unwrap()
-            .load_static_configs_dir(static_dir.path())
-            .unwrap()
-            .build();
+        let mut repomgr =
+            RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+                .unwrap()
+                .load_static_configs_dir(static_dir.path())
+                .unwrap()
+                .build();
 
-        assert_eq!(repomgr.get(&fuchsia_uri), Some(&fuchsia_config1));
-        assert_eq!(repomgr.remove(&fuchsia_uri), Err(CannotRemoveStaticRepositories));
-        assert_eq!(repomgr.get(&fuchsia_uri), Some(&fuchsia_config1));
+        assert_eq!(repomgr.get(&fuchsia_url), Some(&fuchsia_config1));
+        assert_eq!(repomgr.remove(&fuchsia_url), Err(CannotRemoveStaticRepositories));
+        assert_eq!(repomgr.get(&fuchsia_url), Some(&fuchsia_config1));
     }
 
     #[test]
@@ -517,10 +651,11 @@ mod tests {
         let static_dir = tempfile::tempdir().unwrap();
         let does_not_exist_dir = static_dir.path().join("not-exists");
 
-        let (_, errors) = RepositoryManagerBuilder::new(&dynamic_configs_path)
-            .unwrap()
-            .load_static_configs_dir(&does_not_exist_dir)
-            .unwrap_err();
+        let (_, errors) =
+            RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+                .unwrap()
+                .load_static_configs_dir(&does_not_exist_dir)
+                .unwrap_err();
         assert_eq!(errors.len(), 1, "{:?}", errors);
         assert_does_not_exist_error(&errors[0], &does_not_exist_dir);
     }
@@ -530,13 +665,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let invalid_path = dir.path().join("invalid");
 
-        let example_uri = RepoUri::parse("fuchsia-pkg://example.com").unwrap();
-        let example_config = RepositoryConfigBuilder::new(example_uri.clone())
+        let example_url = RepoUrl::parse("fuchsia-pkg://example.com").unwrap();
+        let example_config = RepositoryConfigBuilder::new(example_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![0]))
             .build();
 
-        let fuchsia_uri = RepoUri::parse("fuchsia-pkg://fuchsia.com").unwrap();
-        let fuchsia_config = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let fuchsia_url = RepoUrl::parse("fuchsia-pkg://fuchsia.com").unwrap();
+        let fuchsia_config = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![1]))
             .build();
 
@@ -556,34 +691,33 @@ mod tests {
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
 
-        let (builder, errors) = RepositoryManagerBuilder::new(&dynamic_configs_path)
-            .unwrap()
-            .load_static_configs_dir(dir.path())
-            .unwrap_err();
+        let (builder, errors) =
+            RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+                .unwrap()
+                .load_static_configs_dir(dir.path())
+                .unwrap_err();
         assert_eq!(errors.len(), 1, "{:?}", errors);
         assert_parse_error(&errors[0], &invalid_path);
         let repomgr = builder.build();
 
+        assert_eq!(repomgr.dynamic_configs_path, dynamic_configs_path);
         assert_eq!(
-            repomgr,
-            RepositoryManager {
-                dynamic_configs_path: dynamic_configs_path,
-                static_configs: hashmap! {
-                    example_uri => example_config,
-                    fuchsia_uri => fuchsia_config,
-                },
-                dynamic_configs: HashMap::new(),
+            repomgr.static_configs,
+            hashmap! {
+                example_url => example_config,
+                fuchsia_url => fuchsia_config,
             }
         );
+        assert_eq!(repomgr.dynamic_configs, HashMap::new());
     }
 
     #[test]
     fn test_builder_static_configs_dir() {
-        let fuchsia_uri = RepoUri::parse("fuchsia-pkg://fuchsia.com").unwrap();
-        let fuchsia_config = RepositoryConfigBuilder::new(fuchsia_uri.clone()).build();
+        let fuchsia_url = RepoUrl::parse("fuchsia-pkg://fuchsia.com").unwrap();
+        let fuchsia_config = RepositoryConfigBuilder::new(fuchsia_url.clone()).build();
 
-        let example_uri = RepoUri::parse("fuchsia-pkg://example.com").unwrap();
-        let example_config = RepositoryConfigBuilder::new(example_uri.clone()).build();
+        let example_url = RepoUrl::parse("fuchsia-pkg://example.com").unwrap();
+        let example_config = RepositoryConfigBuilder::new(example_url.clone()).build();
 
         let dir = create_dir(vec![
             ("example.com.json", RepositoryConfigs::Version1(vec![example_config.clone()])),
@@ -593,46 +727,44 @@ mod tests {
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
 
-        let repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path)
+        let repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
             .unwrap()
             .load_static_configs_dir(dir.path())
             .unwrap()
             .build();
 
+        assert_eq!(repomgr.dynamic_configs_path, dynamic_configs_path);
         assert_eq!(
-            repomgr,
-            RepositoryManager {
-                dynamic_configs_path: dynamic_configs_path,
-                static_configs: hashmap! {
-                    example_uri => example_config,
-                    fuchsia_uri => fuchsia_config,
-                },
-                dynamic_configs: HashMap::new(),
+            repomgr.static_configs,
+            hashmap! {
+                example_url => example_config,
+                fuchsia_url => fuchsia_config,
             }
         );
+        assert_eq!(repomgr.dynamic_configs, HashMap::new());
     }
 
     #[test]
     fn test_builder_static_configs_dir_overlapping_filename_wins() {
-        let fuchsia_uri = RepoUri::parse("fuchsia-pkg://fuchsia.com").unwrap();
+        let fuchsia_url = RepoUrl::parse("fuchsia-pkg://fuchsia.com").unwrap();
 
-        let fuchsia_config = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let fuchsia_config = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![0]))
             .build();
 
-        let fuchsia_com_config = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let fuchsia_com_config = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![1]))
             .build();
 
-        let fuchsia_com_json_config = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let fuchsia_com_json_config = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![2]))
             .build();
 
-        let example_config = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let example_config = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![3]))
             .build();
 
-        let oem_config = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let oem_config = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![4]))
             .build();
 
@@ -653,10 +785,11 @@ mod tests {
 
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
-        let (builder, errors) = RepositoryManagerBuilder::new(&dynamic_configs_path)
-            .unwrap()
-            .load_static_configs_dir(dir.path())
-            .unwrap_err();
+        let (builder, errors) =
+            RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+                .unwrap()
+                .load_static_configs_dir(dir.path())
+                .unwrap_err();
 
         assert_eq!(errors.len(), 4);
         assert_overridden_error(&errors[0], &fuchsia_config);
@@ -666,27 +799,20 @@ mod tests {
 
         let repomgr = builder.build();
 
-        assert_eq!(
-            repomgr,
-            RepositoryManager {
-                dynamic_configs_path: dynamic_configs_path,
-                static_configs: hashmap! {
-                    fuchsia_uri => fuchsia_com_json_config,
-                },
-                dynamic_configs: HashMap::new(),
-            }
-        );
+        assert_eq!(repomgr.dynamic_configs_path, dynamic_configs_path);
+        assert_eq!(repomgr.static_configs, hashmap! { fuchsia_url => fuchsia_com_json_config });
+        assert_eq!(repomgr.dynamic_configs, HashMap::new());
     }
 
     #[test]
     fn test_builder_static_configs_dir_overlapping_first_wins() {
-        let fuchsia_uri = RepoUri::parse("fuchsia-pkg://fuchsia.com").unwrap();
+        let fuchsia_url = RepoUrl::parse("fuchsia-pkg://fuchsia.com").unwrap();
 
-        let fuchsia_config1 = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let fuchsia_config1 = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![0]))
             .build();
 
-        let fuchsia_config2 = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let fuchsia_config2 = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![1]))
             .build();
 
@@ -699,42 +825,33 @@ mod tests {
 
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
-        let (builder, errors) = RepositoryManagerBuilder::new(&dynamic_configs_path)
-            .unwrap()
-            .load_static_configs_dir(dir.path())
-            .unwrap_err();
+        let (builder, errors) =
+            RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+                .unwrap()
+                .load_static_configs_dir(dir.path())
+                .unwrap_err();
 
         assert_eq!(errors.len(), 1);
         assert_overridden_error(&errors[0], &fuchsia_config2);
 
         let repomgr = builder.build();
 
-        assert_eq!(
-            repomgr,
-            RepositoryManager {
-                dynamic_configs_path: dynamic_configs_path,
-                static_configs: hashmap! {
-                    fuchsia_uri => fuchsia_config1,
-                },
-                dynamic_configs: HashMap::new(),
-            }
-        );
+        assert_eq!(repomgr.dynamic_configs_path, dynamic_configs_path);
+        assert_eq!(repomgr.static_configs, hashmap! { fuchsia_url => fuchsia_config1 });
+        assert_eq!(repomgr.dynamic_configs, HashMap::new());
     }
 
     #[test]
     fn test_builder_dynamic_configs_path_ignores_if_not_exists() {
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
-        let repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path).unwrap().build();
+        let repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+            .unwrap()
+            .build();
 
-        assert_eq!(
-            repomgr,
-            RepositoryManager {
-                dynamic_configs_path: dynamic_configs_path,
-                static_configs: HashMap::new(),
-                dynamic_configs: HashMap::new(),
-            }
-        );
+        assert_eq!(repomgr.dynamic_configs_path, dynamic_configs_path);
+        assert_eq!(repomgr.static_configs, HashMap::new());
+        assert_eq!(repomgr.dynamic_configs, HashMap::new());
     }
 
     #[test]
@@ -747,25 +864,21 @@ mod tests {
             f.write(b"hello world").unwrap();
         }
 
-        let (builder, err) = RepositoryManagerBuilder::new(&invalid_path).unwrap_err();
+        let (builder, err) =
+            RepositoryManagerBuilder::new(&invalid_path, ClosedAmberConnector).unwrap_err();
         assert_parse_error(&err, &invalid_path);
         let repomgr = builder.build();
 
-        assert_eq!(
-            repomgr,
-            RepositoryManager {
-                dynamic_configs_path: invalid_path,
-                static_configs: HashMap::new(),
-                dynamic_configs: HashMap::new(),
-            }
-        );
+        assert_eq!(repomgr.dynamic_configs_path, invalid_path);
+        assert_eq!(repomgr.static_configs, HashMap::new());
+        assert_eq!(repomgr.dynamic_configs, HashMap::new());
     }
 
     #[test]
     fn test_builder_dynamic_configs_path() {
-        let fuchsia_uri = RepoUri::parse("fuchsia-pkg://fuchsia.com").unwrap();
+        let fuchsia_url = RepoUrl::parse("fuchsia-pkg://fuchsia.com").unwrap();
 
-        let config = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let config = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![0]))
             .build();
 
@@ -773,49 +886,45 @@ mod tests {
             create_dir(vec![("config", RepositoryConfigs::Version1(vec![config.clone()]))]);
         let dynamic_configs_path = dynamic_dir.path().join("config");
 
-        let repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path).unwrap().build();
+        let repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+            .unwrap()
+            .build();
 
-        assert_eq!(
-            repomgr,
-            RepositoryManager {
-                dynamic_configs_path,
-                static_configs: HashMap::new(),
-                dynamic_configs: hashmap! {
-                    fuchsia_uri => config,
-                },
-            }
-        );
+        assert_eq!(repomgr.dynamic_configs_path, dynamic_configs_path);
+        assert_eq!(repomgr.static_configs, HashMap::new());
+        assert_eq!(repomgr.dynamic_configs, hashmap! { fuchsia_url => config });
     }
 
     #[test]
     fn test_persistence() {
-        let fuchsia_uri = RepoUri::parse("fuchsia-pkg://fuchsia.com").unwrap();
+        let fuchsia_url = RepoUrl::parse("fuchsia-pkg://fuchsia.com").unwrap();
 
-        let static_config = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let static_config = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![1]))
             .build();
         let static_configs = RepositoryConfigs::Version1(vec![static_config.clone()]);
         let static_dir = create_dir(vec![("config", static_configs.clone())]);
 
-        let old_dynamic_config = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let old_dynamic_config = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![2]))
             .build();
         let old_dynamic_configs = RepositoryConfigs::Version1(vec![old_dynamic_config.clone()]);
         let dynamic_dir = create_dir(vec![("config", old_dynamic_configs.clone())]);
         let dynamic_configs_path = dynamic_dir.path().join("config");
 
-        let mut repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path)
-            .unwrap()
-            .load_static_configs_dir(&static_dir)
-            .unwrap()
-            .build();
+        let mut repomgr =
+            RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+                .unwrap()
+                .load_static_configs_dir(&static_dir)
+                .unwrap()
+                .build();
 
         // make sure the dynamic config file didn't change just from opening it.
         let f = File::open(&dynamic_configs_path).unwrap();
         let actual: RepositoryConfigs = serde_json::from_reader(f).unwrap();
         assert_eq!(actual, old_dynamic_configs);
 
-        let new_dynamic_config = RepositoryConfigBuilder::new(fuchsia_uri.clone())
+        let new_dynamic_config = RepositoryConfigBuilder::new(fuchsia_url.clone())
             .add_root_key(RepositoryKey::Ed25519(vec![3]))
             .build();
         let new_dynamic_configs = RepositoryConfigs::Version1(vec![new_dynamic_config.clone()]);
@@ -827,14 +936,14 @@ mod tests {
         assert_eq!(actual, new_dynamic_configs);
 
         // Removing the repo should empty out the file.
-        assert_eq!(repomgr.remove(&fuchsia_uri), Ok(Some(new_dynamic_config)));
+        assert_eq!(repomgr.remove(&fuchsia_url), Ok(Some(new_dynamic_config)));
         let f = File::open(&dynamic_configs_path).unwrap();
         let actual: RepositoryConfigs = serde_json::from_reader(f).unwrap();
         assert_eq!(actual, RepositoryConfigs::Version1(vec![]));
 
         // We should now be back to the static config.
-        assert_eq!(repomgr.get(&fuchsia_uri), Some(&static_config));
-        assert_eq!(repomgr.remove(&fuchsia_uri), Err(CannotRemoveStaticRepositories));
+        assert_eq!(repomgr.get(&fuchsia_url), Some(&static_config));
+        assert_eq!(repomgr.remove(&fuchsia_url), Err(CannotRemoveStaticRepositories));
     }
 
     #[test]
@@ -842,17 +951,19 @@ mod tests {
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
 
-        let repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path).unwrap().build();
+        let repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+            .unwrap()
+            .build();
         assert_eq!(repomgr.list().collect::<Vec<_>>(), Vec::<&RepositoryConfig>::new());
     }
 
     #[test]
     fn test_list() {
-        let example_uri = RepoUri::parse("fuchsia-pkg://example.com").unwrap();
-        let example_config = RepositoryConfigBuilder::new(example_uri).build();
+        let example_url = RepoUrl::parse("fuchsia-pkg://example.com").unwrap();
+        let example_config = RepositoryConfigBuilder::new(example_url).build();
 
-        let fuchsia_uri = RepoUri::parse("fuchsia-pkg://fuchsia.com").unwrap();
-        let fuchsia_config = RepositoryConfigBuilder::new(fuchsia_uri).build();
+        let fuchsia_url = RepoUrl::parse("fuchsia-pkg://fuchsia.com").unwrap();
+        let fuchsia_config = RepositoryConfigBuilder::new(fuchsia_url).build();
 
         let static_dir = create_dir(vec![
             ("example.com", RepositoryConfigs::Version1(vec![example_config.clone()])),
@@ -862,7 +973,7 @@ mod tests {
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
 
-        let repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path)
+        let repomgr = RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
             .unwrap()
             .load_static_configs_dir(static_dir.path())
             .unwrap()

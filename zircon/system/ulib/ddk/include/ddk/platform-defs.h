@@ -9,6 +9,7 @@
 
 __BEGIN_CDECLS
 
+// clang-format off
 // Vendor, Product and Device IDs for generic platform drivers
 #define PDEV_VID_GENERIC            0
 #define PDEV_PID_GENERIC            0
@@ -42,6 +43,8 @@ __BEGIN_CDECLS
 #define PDEV_DID_GPIO_LIGHT         28  // Driver for controlling lights via GPIOs
 #define PDEV_DID_CPU_TRACE          29  // CPU tracing driver
 #define PDEV_DID_DW_DSI             30  // Designware DSI
+#define PDEV_DID_USB_XHCI_COMPOSITE 31  // XHCI USB Controller, as a composite device
+#define PDEV_DID_SSD1306            32  // Oled Display
 
 // QEMU emulator
 #define PDEV_VID_QEMU               1
@@ -67,6 +70,7 @@ __BEGIN_CDECLS
 #define PDEV_PID_SHERLOCK           5
 #define PDEV_PID_CLEO               6
 #define PDEV_PID_EAGLE              7
+#define PDEV_PID_VISALIA            8
 
 #define PDEV_DID_GAUSS_AUDIO_IN     1
 #define PDEV_DID_GAUSS_AUDIO_OUT    2
@@ -111,6 +115,8 @@ __BEGIN_CDECLS
 #define PDEV_DID_AMLOGIC_MIPI_CSI   21
 #define PDEV_DID_SHERLOCK_PDM       22
 #define PDEV_DID_AMLOGIC_MALI_INIT  23
+#define PDEV_DID_AML_USB_PHY_V2     24
+#define PDEV_DID_AMLOGIC_SPI        25
 
 // Broadcom
 #define PDEV_VID_BROADCOM           6
@@ -178,6 +184,9 @@ __BEGIN_CDECLS
 #define PDEV_VID_TI                 16
 #define PDEV_PID_TI_LP8556          1
 #define PDEV_DID_TI_BACKLIGHT       1
+#define PDEV_DID_TI_TAS5805         2
+#define PDEV_DID_TI_TAS5782         3
+#define PDEV_DID_TI_TAS2770         4
 
 // Test
 #define PDEV_VID_TEST               17
@@ -187,6 +196,10 @@ __BEGIN_CDECLS
 #define PDEV_PID_HIDCTL_TEST        4
 #define PDEV_PID_VCAMERA_TEST       5
 #define PDEV_PID_LIBDRIVER_TEST     6
+#define PDEV_PID_METADATA_TEST      7
+#define PDEV_PID_PCI_TEST           8
+#define PDEV_PID_DDKFIDL_TEST       9
+#define PDEV_PID_COMPATIBILITY_TEST 10
 
 #define PDEV_DID_TEST_PARENT        1
 #define PDEV_DID_TEST_CHILD_1       2
@@ -199,11 +212,16 @@ __BEGIN_CDECLS
 #define PDEV_DID_TEST_POWER         9
 #define PDEV_DID_TEST_CHILD_4       10
 #define PDEV_DID_TEST_VCAMERA       11
+#define PDEV_DID_TEST_AUDIO_CODEC   12
+#define PDEV_DID_TEST_DDKFIDL       13
+#define PDEV_DID_TEST_VCAM_FACTORY  14
 
 // ARM
 #define PDEV_VID_ARM                18
 #define PDEV_PID_ISP                1
+#define PDEV_PID_GDC                2
 #define PDEV_DID_ARM_MALI_IV009     1
+#define PDEV_DID_ARM_MALI_IV010     2
 
 // Qualcomm
 #define PDEV_VID_QUALCOMM           19
@@ -217,7 +235,22 @@ __BEGIN_CDECLS
 // Synaptics
 #define PDEV_VID_SYNAPTICS          20
 #define PDEV_PID_SYNAPTICS_AS370     1
-#define PDEV_DID_SYNAPTICS_GPIO      2
+#define PDEV_DID_SYNAPTICS_GPIO      1
+#define PDEV_DID_AS370_USB_PHY       2
+#define PDEV_DID_AS370_AUDIO_OUT     3
+#define PDEV_DID_AS370_AUDIO_IN      4
+#define PDEV_DID_AS370_CLOCK         5
+
+// Maxim
+#define PDEV_VID_MAXIM              21
+#define PDEV_DID_MAXIM_MAX98373      1
+// clang-format on
+
+// Nordic
+#define PDEV_VID_NORDIC             21
+#define PDEV_PID_NORDIC_NRF52840     1
+#define PDEV_DID_NORDIC_THREAD       1
+
 
 __END_CDECLS
 

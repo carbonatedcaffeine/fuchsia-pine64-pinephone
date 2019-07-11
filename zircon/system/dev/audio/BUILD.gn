@@ -4,8 +4,10 @@
 
 group("audio") {
   deps = [
+    "as370-tdm-output",
     "astro-pdm-input",
     "astro-tdm-output",
+    "codecs",
     "gauss-pdm-input",
     "gauss-tdm",
     "intel-hda",

@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_LINE_TABLE_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_LINE_TABLE_H_
 
 #include <optional>
 #include <string>
@@ -31,14 +32,14 @@ class LineTable {
   // Returns the absolute file name for the given file index. This is the value
   // from DWARFDebugLine::Row::File (1-based). It will return an empty optional
   // on failure.
-  virtual std::optional<std::string> GetFileNameByIndex(
-      uint64_t file_id) const = 0;
+  virtual std::optional<std::string> GetFileNameByIndex(uint64_t file_id) const = 0;
 
   // Returns the DIE associated with the subroutine for the given row. This may
   // be an invalid DIE if there is no subroutine for this code (could be
   // compiler-generated).
-  virtual llvm::DWARFDie GetSubroutineForRow(
-      const llvm::DWARFDebugLine::Row& row) const = 0;
+  virtual llvm::DWARFDie GetSubroutineForRow(const llvm::DWARFDebugLine::Row& row) const = 0;
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_LINE_TABLE_H_

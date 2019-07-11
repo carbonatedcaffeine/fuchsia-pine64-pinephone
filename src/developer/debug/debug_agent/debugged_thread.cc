@@ -5,6 +5,7 @@
 #include "src/developer/debug/debug_agent/debugged_thread.h"
 
 #include <inttypes.h>
+#include <zircon/status.h>
 #include <zircon/syscalls/debug.h>
 #include <zircon/syscalls/exception.h>
 
@@ -15,8 +16,8 @@
 #include "src/developer/debug/debug_agent/debugged_process.h"
 #include "src/developer/debug/debug_agent/object_util.h"
 #include "src/developer/debug/debug_agent/process_breakpoint.h"
-#include "src/developer/debug/debug_agent/process_watchpoint.h"
 #include "src/developer/debug/debug_agent/process_info.h"
+#include "src/developer/debug/debug_agent/process_watchpoint.h"
 #include "src/developer/debug/debug_agent/unwind.h"
 #include "src/developer/debug/ipc/agent_protocol.h"
 #include "src/developer/debug/ipc/message_reader.h"
@@ -31,6 +32,13 @@
 namespace debug_agent {
 
 namespace {
+
+bool IsBlockedOnException(const zx::thread& thread) {
+  zx_info_thread info;
+  return thread.get_info(ZX_INFO_THREAD, &info, sizeof(info), nullptr,
+                         nullptr) == ZX_OK &&
+         info.state == ZX_THREAD_STATE_BLOCKED_EXCEPTION;
+}
 
 // Used to have better context upon reading the debug logs.
 std::string ThreadPreamble(const DebuggedThread* thread) {
@@ -64,35 +72,37 @@ const char* ExceptionTypeToString(uint32_t type) {
 }  // namespace
 
 DebuggedThread::DebuggedThread(DebuggedProcess* process, zx::thread thread,
-                               zx_koid_t koid, ThreadCreationOption option)
+                               zx_koid_t koid, zx::exception exception,
+                               ThreadCreationOption option)
     : debug_agent_(process->debug_agent()),
       process_(process),
       thread_(std::move(thread)),
-      koid_(koid) {
+      koid_(koid),
+      exception_token_(std::move(exception)) {
   switch (option) {
     case ThreadCreationOption::kRunningKeepRunning:
       // do nothing
       break;
     case ThreadCreationOption::kSuspendedKeepSuspended:
-      suspend_reason_ = SuspendReason::kException;
       break;
     case ThreadCreationOption::kSuspendedShouldRun:
-      debug_ipc::MessageLoopTarget::Current()->ResumeFromException(koid,
-                                                                   thread_, 0);
+      ResumeException();
       break;
   }
 }
 
 DebuggedThread::~DebuggedThread() = default;
 
-void DebuggedThread::OnException(uint32_t type) {
-  suspend_reason_ = SuspendReason::kException;
+void DebuggedThread::OnException(zx::exception exception_token,
+                                 zx_exception_info_t exception_info) {
+  exception_token_ = std::move(exception_token);
 
   debug_ipc::NotifyException exception;
-  exception.type = arch::ArchProvider::Get().DecodeExceptionType(*this, type);
+  exception.type =
+      arch::ArchProvider::Get().DecodeExceptionType(*this, exception_info.type);
 
-  DEBUG_LOG(Thread) << ThreadPreamble(this) << "Received exception "
-                    << ExceptionTypeToString(type) << ", interpreted as "
+  DEBUG_LOG(Thread) << ThreadPreamble(this) << "Exception: "
+                    << ExceptionTypeToString(exception_info.type) << " -> "
                     << debug_ipc::NotifyException::TypeToString(exception.type);
 
   zx_thread_state_general_regs regs;
@@ -118,34 +128,35 @@ void DebuggedThread::OnException(uint32_t type) {
 
   FXL_NOTREACHED() << "Invalid exception notification type: "
                    << static_cast<uint32_t>(exception.type);
+
+  // The exception was unhandled, so we close it so that the system can run its
+  // course. The destructor would've done it anyway, but being explicit helps
+  // readability.
+  exception_token_.reset();
 }
 
 void DebuggedThread::HandleSingleStep(debug_ipc::NotifyException* exception,
                                       zx_thread_state_general_regs* regs) {
   if (current_breakpoint_) {
-    // The current breakpoint is set only when stopped at a breakpoint or when
-    // single-stepping over one. We're not going to get an exception for a
-    // thread when stopped, so hitting this exception means the breakpoint is
-    // done being stepped over. The breakpoint will tell us if the exception
-    // was from a normal completion of the breakpoint step, or whether
-    // something else went wrong while stepping.
-    bool completes_bp_step =
-        current_breakpoint_->BreakpointStepHasException(koid_, exception->type);
+    DEBUG_LOG(Thread) << ThreadPreamble(this) << "Single step over 0x" << std::hex
+                      << current_breakpoint_->address();
+    // Getting here means that the thread is done stepping over a breakpoint.
+    // Depending on whether others threads are stepping over the breakpoints, this thread might be
+    // suspended (waiting for other threads to step over).
+    // This means that we cannot resume from suspension here, as the breakpoint is owning the
+    // thread "run-lifetime".
+    //
+    // We can, though, resume from the exception, as effectivelly we already handled the single-step
+    // exception, so there is no more need to keep the thread in an excepted state. The suspend
+    // handle will take care of keeping the thread stopped.
+    //
+    // NOTE: It's important to resume the exception *before* telling the breakpoint we are done
+    //       going over it, as it may call ResumeForRunMode, which could then again attempt to step
+    //       over it.
+    ResumeException();
+    current_breakpoint_->EndStepOver(koid_);
     current_breakpoint_ = nullptr;
-    if (completes_bp_step &&
-        run_mode_ == debug_ipc::ResumeRequest::How::kContinue) {
-      // This step was an internal thing to step over the breakpoint in
-      // service of continuing from a breakpoint. Transparently resume the
-      // thread since the client didn't request the step. The step
-      // (non-continue) cases will be handled below in the normal flow since
-      // we just finished a step.
-      ResumeForRunMode();
-      return;
-    }
-    // Something else went wrong while stepping (the instruction with the
-    // breakpoint could have crashed). Fall through to dispatching the
-    // exception to the client.
-    current_breakpoint_ = nullptr;
+    return;
   }
 
   if (run_mode_ == debug_ipc::ResumeRequest::How::kContinue) {
@@ -177,7 +188,6 @@ void DebuggedThread::HandleGeneralException(
 
 void DebuggedThread::HandleSoftwareBreakpoint(
     debug_ipc::NotifyException* exception, zx_thread_state_general_regs* regs) {
-  DEBUG_LOG(Thread) << ThreadPreamble(this) << "Hit SW breakpoint";
 
   auto on_stop = UpdateForSoftwareBreakpoint(regs, &exception->hit_breakpoints);
   switch (on_stop) {
@@ -231,6 +241,7 @@ void DebuggedThread::SendExceptionNotification(
 
 void DebuggedThread::Resume(const debug_ipc::ResumeRequest& request) {
   DEBUG_LOG(Thread) << ThreadPreamble(this) << "Resuming.";
+
   run_mode_ = request.how;
   step_in_range_begin_ = request.range_begin;
   step_in_range_end_ = request.range_end;
@@ -238,47 +249,86 @@ void DebuggedThread::Resume(const debug_ipc::ResumeRequest& request) {
   ResumeForRunMode();
 }
 
-DebuggedThread::SuspendResult DebuggedThread::Suspend(bool synchronous) {
+void DebuggedThread::ResumeException() {
+  // We need to mark that this token is correctly handled before closing it.
+  if (exception_token_.is_valid()) {
+    uint32_t state = ZX_EXCEPTION_STATE_HANDLED;
+    zx_status_t status = exception_token_.set_property(ZX_PROP_EXCEPTION_STATE,
+                                                       &state, sizeof(state));
+    FXL_DCHECK(status == ZX_OK) << "Got: " << zx_status_get_string(status);
+  }
+  exception_token_.reset();
+}
+
+void DebuggedThread::ResumeSuspension() {
+  suspend_token_.reset();
+}
+
+bool DebuggedThread::Suspend(bool synchronous) {
   // Subsequent suspend calls should return immediatelly. Note that this does
   // not mean that the thread is in that state, but rather that that operation
   // was sent to the kernel.
-  if (suspend_reason_ == SuspendReason::kException)
-    return SuspendResult::kOnException;
-
-  if (suspend_reason_ == SuspendReason::kOther)
-    return SuspendResult::kSuspended;
+  if (IsSuspended() || IsInException())
+    return false;
 
   DEBUG_LOG(Thread) << ThreadPreamble(this) << "Suspending thread.";
 
   zx_status_t status;
   status = thread_.suspend(&suspend_token_);
-  if (status != ZX_OK)
-    return SuspendResult::kError;
-
-  suspend_reason_ = SuspendReason::kOther;
+  if (status != ZX_OK) {
+    FXL_LOG(WARNING) << ThreadPreamble(this)
+                     << "Could not suspend: " << zx_status_get_string(status);
+    return false;
+  }
 
   if (synchronous)
     return WaitForSuspension(DefaultSuspendDeadline());
-  return SuspendResult::kWasRunning;
+  return true;
 }
 
 zx::time DebuggedThread::DefaultSuspendDeadline() {
-  return zx::deadline_after(zx::msec(100));
+  // Various events and environments can cause suspensions to take a long time,
+  // so this needs to be a relatively long time. We don't generally expect
+  // error cases that take infinitely long so there isn't much downside of a
+  // long timeout.
+  return zx::deadline_after(zx::sec(1));
 }
 
-DebuggedThread::SuspendResult DebuggedThread::WaitForSuspension(
-    zx::time deadline) {
-  // Only exception will return immediatelly.
-  if (suspend_reason_ == SuspendReason::kException)
-    return SuspendResult::kOnException;
+bool DebuggedThread::WaitForSuspension(zx::time deadline) {
+  // This function is complex because a thread in an exception state can't be
+  // suspended (ZX-3772). Delivery of exceptions are queued on the
+  // exception port so our cached state may be stale, and exceptions can also
+  // race with our suspend call.
+  //
+  // To manually stress-test this code, write a one-line infinite loop:
+  //   volatile bool done = false;
+  //   while (!done) {}
+  // and step over it with "next". This will cause an infinite flood of
+  // single-step exceptions as fast as the debugger can process them. Pausing
+  // after doing the "next" will trigger a suspension and is more likely to
+  // race with an exception.
 
-  zx_signals_t observed;
-  zx_status_t status =
-      thread_.wait_one(ZX_THREAD_SUSPENDED, deadline, &observed);
-  FXL_DCHECK(observed & ZX_THREAD_SUSPENDED);
-  if (status != ZX_OK)
-    return SuspendResult::kError;
-  return SuspendResult::kSuspended;
+  // If an exception happens before the suspend does, we'll never get the
+  // suspend signal and will end up waiting for the entire timeout just to be
+  // able to tell the difference between suspended and exception. To avoid
+  // waiting for a long timeout to tell the difference, wait for short timeouts
+  // multiple times.
+  auto poll_time = zx::msec(10);
+  zx_status_t status = ZX_OK;
+  do {
+    // Always check the thread state from the kernel because of queue desribed
+    // above.
+    if (IsBlockedOnException(thread_))
+      return true;
+
+    zx_signals_t observed;
+    status = thread_.wait_one(ZX_THREAD_SUSPENDED,
+                              zx::deadline_after(poll_time), &observed);
+    if (status == ZX_OK && (observed & ZX_THREAD_SUSPENDED))
+      return true;
+
+  } while (status == ZX_ERR_TIMED_OUT && zx::clock::get_monotonic() < deadline);
+  return false;
 }
 
 void DebuggedThread::FillThreadRecord(
@@ -427,6 +477,9 @@ DebuggedThread::OnStop DebuggedThread::UpdateForSoftwareBreakpoint(
           .BreakpointInstructionForSoftwareExceptionAddress(
               *arch::ArchProvider::Get().IPInRegs(regs));
 
+  DEBUG_LOG(Thread) << ThreadPreamble(this) << "Hit SW breakpoint on 0x" << std::hex
+                    << breakpoint_address;
+
   ProcessBreakpoint* found_bp =
       process_->FindProcessBreakpointForAddr(breakpoint_address);
   if (found_bp) {
@@ -469,6 +522,8 @@ DebuggedThread::OnStop DebuggedThread::UpdateForSoftwareBreakpoint(
       }
 
       if (!process_->dl_debug_addr() && process_->RegisterDebugState()) {
+        DEBUG_LOG(Thread) << ThreadPreamble(this)
+                          << "Found ld.so breakpoint. Sending modules.";
         // This breakpoint was the explicit breakpoint ld.so executes to
         // notify us that the loader is ready. Send the current module list
         // and silently keep this thread stopped. The client will explicitly
@@ -524,8 +579,8 @@ DebuggedThread::OnStop DebuggedThread::UpdateForHardwareBreakpoint(
 }
 
 DebuggedThread::OnStop DebuggedThread::UpdateForWatchpoint(
-      zx_thread_state_general_regs* regs,
-      std::vector<debug_ipc::BreakpointStats>* hit_breakpoints) {
+    zx_thread_state_general_regs* regs,
+    std::vector<debug_ipc::BreakpointStats>* hit_breakpoints) {
   auto& arch = arch::ArchProvider::Get();
   uint64_t address = arch.InstructionForWatchpointHit(*this);
 
@@ -606,41 +661,30 @@ void DebuggedThread::UpdateForWatchpointHit(
 }
 
 void DebuggedThread::ResumeForRunMode() {
-  // If we jumped, once we resume we reset the status.
-  if (suspend_reason_ == SuspendReason::kException) {
-    // Note: we could have a valid suspend token here in addition to the
-    // exception if the suspension races with the delivery of the exception.
-    if (current_breakpoint_) {
-      // Going over a breakpoint always requires a single-step first. Then we
-      // continue according to run_mode_.
-      DEBUG_LOG(Thread) << ThreadPreamble(this) << "Stepping over thread.";
-      SetSingleStep(true);
-      current_breakpoint_->BeginStepOver(koid_);
-    } else {
-      // All non-continue resumptions require single stepping.
-      SetSingleStep(run_mode_ != debug_ipc::ResumeRequest::How::kContinue);
-    }
-    suspend_reason_ = SuspendReason::kNone;
+  // We check if we're set to currently step over a breakpoint. If so we need to do some special
+  // handling, as going over a breakpoint is always a single-step opearation.
+  // After that we can continue according to the set run-mode.
+  if (IsInException() && current_breakpoint_) {
+    DEBUG_LOG(Thread) << ThreadPreamble(this) << "Stepping over breakpoint: 0x" << std::hex
+                      << current_breakpoint_->address();
+    SetSingleStep(true);
+    current_breakpoint_->BeginStepOver(koid_);
 
-    zx_status_t status =
-        debug_ipc::MessageLoopTarget::Current()->ResumeFromException(
-            koid_, thread_, 0);
-    FXL_DCHECK(status == ZX_OK)
-        << "Expected ZX_OK, got " << debug_ipc::ZxStatusToString(status);
-  } else if (suspend_reason_ == SuspendReason::kOther) {
-    // A breakpoint should only be current when it was hit which will be
-    // caused by an exception.
-    FXL_DCHECK(!current_breakpoint_);
-
-    // All non-continue resumptions require single stepping.
-    SetSingleStep(run_mode_ != debug_ipc::ResumeRequest::How::kContinue);
-
-    // The suspend token is holding the thread suspended, releasing it will
-    // resume (if nobody else has the thread suspended).
-    suspend_reason_ = SuspendReason::kNone;
-    FXL_DCHECK(suspend_token_.is_valid());
-    suspend_token_.reset();
+    // In this case, the breakpoint takes control of the thread lifetime and has already set the
+    // thread to resume.
+    return;
   }
+
+  // We're not handling the special "step over a breakpoint case". This is the normal resume case.
+  // This could've been triggered by an internal resume (eg. triggered by a breakpoint), so we need
+  // to check if the client actually wants this thread to resume.
+  if (client_state_ == ClientState::kPaused)
+    return;
+
+  // All non-continue resumptions require single stepping.
+  SetSingleStep(run_mode_ != debug_ipc::ResumeRequest::How::kContinue);
+  ResumeException();
+  ResumeSuspension();
 }
 
 void DebuggedThread::SetSingleStep(bool single_step) {
@@ -650,17 +694,16 @@ void DebuggedThread::SetSingleStep(bool single_step) {
   thread_.write_state(ZX_THREAD_STATE_SINGLE_STEP, &value, sizeof(value));
 }
 
-const char* DebuggedThread::SuspendReasonToString(SuspendReason reason) {
-  switch (reason) {
-    case SuspendReason::kNone:
-      return "None";
-    case SuspendReason::kException:
-      return "Exception";
-    case SuspendReason::kOther:
-      return "Other";
+const char* DebuggedThread::ClientStateToString(ClientState client_state) {
+  switch (client_state) {
+    case ClientState::kRunning:
+      return "Running";
+    case ClientState::kPaused:
+      return "Paused";
   }
+
   FXL_NOTREACHED();
-  return "";
+  return "<unknown>";
 }
 
 }  // namespace debug_agent

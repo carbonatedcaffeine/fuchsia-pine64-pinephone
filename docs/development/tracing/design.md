@@ -75,7 +75,7 @@ together with userspace trace data.
 The `trace` program offers command-line access to tracing functionality
 for developers.  It also supports converting Fuchsia trace archives into
 other formats, such as Catapult JSON records which can be visualized
-using Catapult (aka. chrome:://tracing).
+using Catapult (aka. Chrome Trace-Viewer, available at chrome://tracing).
 
 Trace information can also be collected programmatically by using the
 `Controller` FIDL protocol directly.
@@ -167,7 +167,7 @@ int main(int argc, char** argv) {
   if (status != ZX_OK) exit(1);
 
   // Create the trace provider.
-  trace::TraceProvider trace_provider(loop.dispatcher());
+  trace::TraceProviderWithFdio trace_provider(loop.dispatcher());
 
   // Do something...
 
@@ -247,6 +247,7 @@ Fuchsia trace format (but it may be nonsensical if trace providers
 deliberately emit garbage data).
 
 These are some important invariants of the transport protocol:
+
 - There are no synchronization points between the trace manager and trace
   providers other than starting or stopping collection.
 - Trace providers (components being traced) only ever write to trace buffers;

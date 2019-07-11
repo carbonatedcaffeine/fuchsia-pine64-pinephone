@@ -7,6 +7,7 @@
 #include <iostream>
 #include <map>
 #include <random>
+
 #include "src/connectivity/overnet/lib/environment/trace_cout.h"
 #include "src/connectivity/overnet/lib/packet_protocol/packet_protocol.h"
 #include "src/connectivity/overnet/lib/testing/test_timer.h"
@@ -30,8 +31,9 @@ class PacketProtocolFuzzer {
 
   // Step time forward.
   // Return true if the fuzzer should continue.
-  bool StepTime(uint64_t microseconds) {
-    return timer_.Step(microseconds) &&
+  bool StepTime(int64_t microseconds) {
+    return timer_.Step(
+               std::min(microseconds, TimeDelta::FromSeconds(10).as_us())) &&
            timer_.Now().after_epoch() != TimeDelta::PositiveInf();
   }
 
@@ -41,6 +43,7 @@ class PacketProtocolFuzzer {
   class Sender final : public PacketProtocol::PacketSender {
    public:
     void SendPacket(SeqNum seq, LazySlice data) override;
+    void NoConnectivity() override{};
 
     struct PendingSend {
       SeqNum seq;
@@ -76,9 +79,11 @@ class PacketProtocolFuzzer {
   std::mt19937 rng_{12345};
   const PacketProtocol::Codec* const codec_;
   ClosedPtr<PacketProtocol> pp1_ = MakeClosedPtr<PacketProtocol>(
-      &timer_, [this] { return rng_(); }, &sender1_, codec_, kMaxSegmentSize);
+      &timer_, [this] { return rng_(); }, &sender1_, codec_, kMaxSegmentSize,
+      true);
   ClosedPtr<PacketProtocol> pp2_ = MakeClosedPtr<PacketProtocol>(
-      &timer_, [this] { return rng_(); }, &sender2_, codec_, kMaxSegmentSize);
+      &timer_, [this] { return rng_(); }, &sender2_, codec_, kMaxSegmentSize,
+      true);
 };
 
 }  // namespace overnet

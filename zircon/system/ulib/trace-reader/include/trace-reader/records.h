@@ -18,7 +18,7 @@
 #include <fbl/macros.h>
 #include <fbl/string.h>
 #include <fbl/vector.h>
-#include <trace-engine/types.h>
+#include <lib/trace-engine/types.h>
 
 namespace trace {
 
@@ -744,4 +744,4 @@ private:
 
 } // namespace trace
 
-#endif  // TRACE_READER_RECORDS_H_
+#endif // TRACE_READER_RECORDS_H_

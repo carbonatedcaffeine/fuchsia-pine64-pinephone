@@ -8,10 +8,10 @@
 #include <fuchsia/ledger/cloud/cpp/fidl.h>
 #include <lib/fit/function.h>
 
-#include "peridot/lib/commit_pack/commit_pack.h"
 #include "src/ledger/bin/encryption/public/encryption_service.h"
 #include "src/ledger/bin/fidl/include/types.h"
 #include "src/ledger/bin/storage/public/page_storage.h"
+#include "src/ledger/lib/commit_pack/commit_pack.h"
 #include "src/lib/fxl/memory/weak_ptr.h"
 
 namespace cloud_sync {
@@ -26,11 +26,10 @@ namespace cloud_sync {
 // not recoverable.
 class BatchDownload {
  public:
-  BatchDownload(storage::PageStorage* storage,
-                encryption::EncryptionService* encryption_service,
+  BatchDownload(storage::PageStorage* storage, encryption::EncryptionService* encryption_service,
                 std::vector<cloud_provider::CommitPackEntry> entries,
-                std::unique_ptr<cloud_provider::Token> position_token,
-                fit::closure on_done, fit::closure on_error);
+                std::unique_ptr<cloud_provider::PositionToken> position_token, fit::closure on_done,
+                fit::closure on_error);
   ~BatchDownload();
 
   // Can be called only once.
@@ -42,7 +41,7 @@ class BatchDownload {
   storage::PageStorage* const storage_;
   encryption::EncryptionService* const encryption_service_;
   std::vector<cloud_provider::CommitPackEntry> entries_;
-  std::unique_ptr<cloud_provider::Token> position_token_;
+  std::unique_ptr<cloud_provider::PositionToken> position_token_;
   fit::closure on_done_;
   fit::closure on_error_;
   bool started_ = false;

@@ -2,14 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <gtest/gtest.h>
 #include <lib/zx/job.h>
 #include <lib/zx/process.h>
-#include <src/lib/fxl/command_line.h>
-#include <src/lib/fxl/log_settings_command_line.h>
 #include <src/lib/fxl/logging.h>
 
 #include "garnet/bin/trace/tests/run_test.h"
-#include "gtest/gtest.h"
 
 const char kTracePath[] = "/bin/trace";
 const char kChildPath[] = "/pkg/bin/run_awhile";
@@ -83,15 +81,4 @@ TEST(DetachTest, DISABLED_SpawnedAppDetached) {
             ZX_OK);
   ASSERT_TRUE(test_helper);
   EXPECT_EQ(test_helper.kill(), ZX_OK);
-}
-
-// Provide our own main so that --verbose,etc. are recognized.
-int main(int argc, char** argv) {
-  fxl::CommandLine cl = fxl::CommandLineFromArgcArgv(argc, argv);
-  if (!fxl::SetLogSettingsFromCommandLine(cl))
-    return EXIT_FAILURE;
-
-  testing::InitGoogleTest(&argc, argv);
-
-  return RUN_ALL_TESTS();
 }

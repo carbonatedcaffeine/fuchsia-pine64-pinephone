@@ -46,6 +46,12 @@ const uint32 DEVICE_COMPONENT_PARTS_MAX = 16;
 /// Maximum instructions in a match program
 const uint32 DEVICE_COMPONENT_PART_INSTRUCTIONS_MAX = 32;
 
+/// Bit flags for device add configuration
+bits AddDeviceConfig : uint32 {
+    ///  Device can be a component in multiple composite devices
+    ALLOW_MULTI_COMPOSITE = 0x00000001;
+};
+
 /// A part of a description of a DeviceComponent
 struct DeviceComponentPart {
     // This is an awful hack around the LLCPP bindings not being ready yet.
@@ -64,59 +70,82 @@ struct DeviceComponent {
     array<DeviceComponentPart>:DEVICE_COMPONENT_PARTS_MAX parts;
 };
 
+/// A enum of CompatibilityTestStatus
+enum CompatibilityTestStatus : uint32 {
+    OK = 1;
+    ERR_BIND_NO_DDKADD = 2;
+    ERR_BIND_TIMEOUT = 3;
+    ERR_UNBIND_NO_DDKREMOVE = 4;
+    ERR_UNBIND_TIMEOUT = 5;
+    ERR_SUSPEND_DDKREMOVE = 6;
+    ERR_INTERNAL = 7;
+};
+
 /// Protocol for controlling devices in a devhost process from the devcoordinator
-[Layout = "Simple"]
 protocol DeviceController {
-    /// Bind the requested driver to this device.  |driver_path| is informational,
-    /// but all calls to BindDriver/CreateDevice should use the same |driver_path|
-    /// each time they use a |driver| VMO with the same contents.
+    /// Bind the requested driver to this device.  `driver_path` is informational,
+    /// but all calls to BindDriver/CreateDevice should use the same `driver_path`
+    /// each time they use a `driver` VMO with the same contents. Returns a `status`
+    /// and optionally a channel to the driver's test output. `test_output` will be
+    /// not present unless the driver is configured to run its run_unit_tests hook, in
+    /// which case the other end of the channel will have been passed to the driver.
     BindDriver(string:DEVICE_PATH_MAX driver_path, handle<vmo> driver)
-        -> (zx.status status);
+        -> (zx.status status, handle<channel>? test_output);
 
     /// Give this device a channel to its shadow in another process.
     ConnectProxy(handle<channel> shadow);
+
+    /// Ask devhost to unbind this device. On success, the remote end of this
+    /// interface channel will close instead of returning a result.
+    Unbind();
 
     /// Ask the devhost to remove this device.  On success, the remote end of
     /// this interface channel will close instead of returning a result.
     RemoveDevice();
 
-    /// Ask devhost to suspend this device, using the target state indicated by |flags|.
+    /// Ask devhost to suspend this device, using the target state indicated by `flags`.
     Suspend(uint32 flags) -> (zx.status status);
+
+    /// Inform devhost about the compatibility test status when compatibility tests
+    /// fail or complete successfully.
+    // TODO(ravoorir) : This should be an asynchronous call from devhost to
+    // devcoordinator as a reply to RunCompatibilityTests, when llcpp can support
+    // making an asynchronous fidl call.
+    CompleteCompatibilityTests(CompatibilityTestStatus status);
 };
 
 /// Protocol for controlling a devhost process from the devcoordinator
-[Layout = "Simple"]
 protocol DevhostController {
     /// Create a device in the devhost that only implements the device protocol
-    /// and claims to support the given |protocol_id|.  This device will communicate
-    /// with the devcoordinator via |rpc|.
+    /// and claims to support the given `protocol_id`.  This device will communicate
+    /// with the devcoordinator via `rpc`.
     CreateDeviceStub(handle<channel> rpc, uint32 protocol_id, LocalDeviceId local_device_id);
 
     /// Create a device in the devhost representing the shadowed half of device
     /// in another devhost.  This new device will communicate with the devcoordinator
-    /// via |rpc|, and with its other half via |parent_proxy|.
+    /// via `rpc`, and with its other half via `parent_proxy`.
     ///
     /// The new device will have the given driver responsible for running its half
     /// of the driver's cross-process protocol.  It's create() method will be invoked,
-    /// giving it access to |parent_proxy| and |proxy_args|.
+    /// giving it access to `parent_proxy` and `proxy_args`.
     ///
     /// parent_proxy, if present, will usually be a channel to the upper half of
     /// a shadowed device.  The one exception is when this method is used
     /// to create the Platform Bus, in which case it will be a channel to a
     /// fuchsia.boot.Items protocol.
     ///
-    /// |local_device_id| will be a unique value within the device's devhost
+    /// `local_device_id` will be a unique value within the device's devhost
     CreateDevice(handle<channel> rpc, string:DEVICE_PATH_MAX driver_path,
                  handle<vmo> driver, handle? parent_proxy,
                  string:DEVICE_ARGS_MAX? proxy_args, LocalDeviceId local_device_id);
 
     /// Introduce a composite device that has the given name and properties.
-    /// |components| will be a list of all of the composite's components,
+    /// `components` will be a list of all of the composite's components,
     /// described using devhost local device ids.  The order of the components
     /// will match the original composite creation request.  The new device will
-    /// communicate with devcoordinator via |rpc|.
+    /// communicate with devcoordinator via `rpc`.
     ///
-    /// |local_device_id| will be a unique value within the device's devhost, identifying
+    /// `local_device_id` will be a unique value within the device's devhost, identifying
     /// the resulting composite device.
     CreateCompositeDevice(handle<channel> rpc,
                           vector<LocalDeviceId>:COMPONENTS_MAX components,
@@ -127,17 +156,18 @@ protocol DevhostController {
 /// Interface for the devices in devhosts to coordinate with the devcoordinator.
 [Layout = "Simple"]
 protocol Coordinator {
-    /// Record the addition of a new device that can be communicated with via |rpc|.
-    /// For binding purposes, it is has properties |props|. |name| and |driver_path|
-    /// are informational and used for debugging.  The device will have |protocol_id|
-    /// as its primary protocol id.  |args| should only be used for shadowed devices,
-    /// and will be forwarded to the shadow device. |client_remote|, if present,
+    /// Record the addition of a new device that can be communicated with via `rpc`.
+    /// For binding purposes, it is has properties `props`. `name` and `driver_path`
+    /// are informational and used for debugging.  The device will have `protocol_id`
+    /// as its primary protocol id.  `args` should only be used for shadowed devices,
+    /// and will be forwarded to the shadow device. `client_remote`, if present,
     /// will be passed to the device as an open connection for the client.
-    /// On success, the returned |local_device_id| is the identifier assigned by devmgr.
+    /// On success, the returned `local_device_id` is the identifier assigned by devmgr.
     AddDevice(handle<channel> rpc,
               vector<DeviceProperty>:PROPERTIES_MAX props,
               string:DEVICE_NAME_MAX name, uint32 protocol_id,
               string:DEVICE_PATH_MAX? driver_path, string:DEVICE_ARGS_MAX? args,
+              AddDeviceConfig device_add_config,
               handle<channel>? client_remote)
         -> (zx.status status, LocalDeviceId local_device_id);
 
@@ -157,7 +187,7 @@ protocol Coordinator {
     /// Mark this device as visible.
     MakeVisible() -> (zx.status status);
 
-    /// Attempt to bind a driver against this device.  If |driver_path| is null,
+    /// Attempt to bind a driver against this device.  If `driver_path` is null,
     /// this will initiate the driver matching algorithm.
     /// TODO(teisenbe): Specify the behavior of invoking this multiple times.  I believe
     /// the current behavior is a bug.
@@ -186,8 +216,8 @@ protocol Coordinator {
         -> (zx.status status);
 
     /// Behaves like AddMetadata, but instead of associating it with the
-    /// requesting device, associates it with the device at |device_path|.  If
-    /// the device at |device_path| is not a child of the requesting device AND
+    /// requesting device, associates it with the device at `device_path`.  If
+    /// the device at `device_path` is not a child of the requesting device AND
     /// the requesting device is not running in the sys devhost, then this will
     /// fail.
     PublishMetadata(string:DEVICE_PATH_MAX device_path, uint32 key,
@@ -196,24 +226,23 @@ protocol Coordinator {
     /// Adds the given composite device.  This causes the devcoordinator to try to match the
     /// components against the existing device tree, and to monitor all new device additions
     /// in order to find the components as they are created.
-    // The treatment of |components| is an awful hack around the LLCPP bindings not being ready
+    // The treatment of `components` is an awful hack around the LLCPP bindings not being ready
     // yet.  Since we're using the C ones for now, we can only embed these structures as arrays
     // instead of vectors.
     AddCompositeDevice(string:DEVICE_NAME_MAX name, vector<DeviceProperty>:PROPERTIES_MAX props,
                        array<DeviceComponent>:COMPONENTS_MAX components, uint32 components_count,
                        uint32 coresident_device_index) -> (zx.status status);
 
-    // Special commands for implementing the dmctl device.
-    // TODO(teisenbe): We should revisit how these are carried over.
-
-
-    /// Perform an mexec with the given kernel and bootdata.
-    /// See ZX-2069 for the thoughts on deprecating mexec.
-    DmMexec(handle<vmo> kernel, handle<vmo> bootdata);
-
     /// Watches a directory, receiving events of added messages on the
     /// watcher request channel.
     /// See fuchsia.io.Directory for more information.
     DirectoryWatch(uint32 mask, uint32 options, handle<channel> watcher)
         -> (zx.status s);
+
+    /// Run Compatibility tests for the driver that binds to this device.
+    /// The hook_wait_time is the time that the driver expects to take for
+    /// each device hook in nanoseconds.
+    /// Returns whether the compatibility tests started, and does not convey
+    /// anything about the status of the test.
+    RunCompatibilityTests(int64 hook_wait_time) -> (zx.status status);
 };

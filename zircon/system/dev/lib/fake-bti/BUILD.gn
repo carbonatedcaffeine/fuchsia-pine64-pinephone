@@ -8,11 +8,11 @@ library("fake-bti") {
   testonly = true
   shared = true
   sources = [
-    "fake-bti.cpp",
+    "fake-bti.cc",
   ]
   deps = [
     "$zx/system/ulib/fbl",
-    "$zx/system/ulib/unittest",
+    "$zx/system/ulib/fdio",
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",
   ]

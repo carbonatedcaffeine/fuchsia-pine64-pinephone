@@ -17,6 +17,7 @@ rustc_binary("bin") {
     "//garnet/lib/rust/ethernet",
     "//garnet/lib/rust/fidl_fuchsia_hardware_ethernet_ext",
     "//garnet/lib/rust/fidl_fuchsia_net_ext",
+    "//garnet/lib/rust/never",
     "//garnet/public/lib/fidl/rust/fidl",
     "//garnet/public/rust/fuchsia-async",
     "//garnet/public/rust/fuchsia-component",
@@ -30,6 +31,12 @@ rustc_binary("bin") {
     "//zircon/public/fidl/fuchsia-hardware-ethernet:fuchsia-hardware-ethernet-rustc",
     "//zircon/public/fidl/fuchsia-net:fuchsia-net-rustc",
     "//zircon/public/fidl/fuchsia-net-stack:fuchsia-net-stack-rustc",
+  ]
+
+  test_deps = [
+    "//src/connectivity/network/testing/netemul/lib/fidl:sandbox-rustc",
+    "//src/connectivity/network/testing/netemul/lib/fidl:network-rustc",
+    "//third_party/rust_crates:pin-utils",
   ]
 }
 
@@ -54,17 +61,22 @@ package("netstack3") {
 
 test_package("netstack3_tests") {
   deps = [
-    ":bin",
-    "core:netstack3-core",
+    ":bin_test",
+    "core:netstack3-core_test",
+    "core/specialize-ip-macro/test:lib_test",
   ]
   tests = [
     {
       name = "netstack3_bin_test"
-      environments = basic_envs
+      environments = [ qemu_env ]
     },
     {
       name = "netstack3_core_lib_test"
-      environments = basic_envs
+      environments = [ qemu_env ]
+    },
+    {
+      name = "specialize_ip_macro_test_lib_test"
+      environments = [ qemu_env ]
     },
   ]
 }

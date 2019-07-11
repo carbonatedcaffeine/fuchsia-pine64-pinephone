@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GARNET_BIN_ZXDB_CLIENT_JOB_CONTEXT_H_
-#define GARNET_BIN_ZXDB_CLIENT_JOB_CONTEXT_H_
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_JOB_CONTEXT_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_JOB_CONTEXT_H_
 
 #include <functional>
 #include <string>
@@ -31,8 +31,7 @@ class JobContext : public ClientObject {
  public:
   // Note that the callback will be issued in all cases which may be after the
   // job_context is destroyed. In this case the weak pointer will be null.
-  using Callback =
-      std::function<void(fxl::WeakPtr<JobContext> job_context, const Err&)>;
+  using Callback = std::function<void(fxl::WeakPtr<JobContext> job_context, const Err&)>;
 
   enum class State {
     // There is no job currently running. From here, it can only transition
@@ -90,4 +89,4 @@ class JobContext : public ClientObject {
 
 }  // namespace zxdb
 
-#endif  // GARNET_BIN_ZXDB_CLIENT_JOB_CONTEXT_H_
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_JOB_CONTEXT_H_

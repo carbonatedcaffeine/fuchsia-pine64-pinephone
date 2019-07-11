@@ -3,23 +3,22 @@
 #include <fidl_llcpp_basictypes.h>
 #include <memory>
 
+namespace llcpp {
+
 namespace fidl {
 namespace test {
 namespace llcpp {
 namespace basictypes {
 
-::fidl::test::llcpp::basictypes::SimpleUnion::SimpleUnion() {
+::llcpp::fidl::test::llcpp::basictypes::SimpleUnion::SimpleUnion() {
   tag_ = Tag::Invalid;
-  memset(reinterpret_cast<uint8_t*>(&tag_) + sizeof(tag_),
-         0,
-         offsetof(SimpleUnion, field_a_) - sizeof(tag_));
 }
 
-::fidl::test::llcpp::basictypes::SimpleUnion::~SimpleUnion() {
+::llcpp::fidl::test::llcpp::basictypes::SimpleUnion::~SimpleUnion() {
   Destroy();
 }
 
-void ::fidl::test::llcpp::basictypes::SimpleUnion::Destroy() {
+void ::llcpp::fidl::test::llcpp::basictypes::SimpleUnion::Destroy() {
   switch (which()) {
   default:
     break;
@@ -27,7 +26,7 @@ void ::fidl::test::llcpp::basictypes::SimpleUnion::Destroy() {
   tag_ = Tag::Invalid;
 }
 
-void ::fidl::test::llcpp::basictypes::SimpleUnion::MoveImpl_(SimpleUnion&& other) {
+void ::llcpp::fidl::test::llcpp::basictypes::SimpleUnion::MoveImpl_(SimpleUnion&& other) {
   switch (other.which()) {
   case Tag::kFieldA:
     mutable_field_a() = std::move(other.mutable_field_a());
@@ -41,32 +40,26 @@ void ::fidl::test::llcpp::basictypes::SimpleUnion::MoveImpl_(SimpleUnion&& other
   other.Destroy();
 }
 
-void ::fidl::test::llcpp::basictypes::SimpleUnion::SizeAndOffsetAssertionHelper() {
-  static_assert(offsetof(::fidl::test::llcpp::basictypes::SimpleUnion, field_a_) == 4);
-  static_assert(offsetof(::fidl::test::llcpp::basictypes::SimpleUnion, field_b_) == 4);
-  static_assert(sizeof(::fidl::test::llcpp::basictypes::SimpleUnion) == ::fidl::test::llcpp::basictypes::SimpleUnion::PrimarySize);
+void ::llcpp::fidl::test::llcpp::basictypes::SimpleUnion::SizeAndOffsetAssertionHelper() {
+  static_assert(offsetof(::llcpp::fidl::test::llcpp::basictypes::SimpleUnion, field_a_) == 4);
+  static_assert(offsetof(::llcpp::fidl::test::llcpp::basictypes::SimpleUnion, field_b_) == 4);
+  static_assert(sizeof(::llcpp::fidl::test::llcpp::basictypes::SimpleUnion) == ::llcpp::fidl::test::llcpp::basictypes::SimpleUnion::PrimarySize);
 }
 
 
-int32_t& ::fidl::test::llcpp::basictypes::SimpleUnion::mutable_field_a() {
+int32_t& ::llcpp::fidl::test::llcpp::basictypes::SimpleUnion::mutable_field_a() {
   if (which() != Tag::kFieldA) {
     Destroy();
     new (&field_a_) int32_t;
-    memset(reinterpret_cast<uint8_t*>(&field_a_) + sizeof(int32_t),
-           0,
-           sizeof(SimpleUnion) - offsetof(SimpleUnion, field_a_) - sizeof(int32_t));
   }
   tag_ = Tag::kFieldA;
   return field_a_;
 }
 
-int32_t& ::fidl::test::llcpp::basictypes::SimpleUnion::mutable_field_b() {
+int32_t& ::llcpp::fidl::test::llcpp::basictypes::SimpleUnion::mutable_field_b() {
   if (which() != Tag::kFieldB) {
     Destroy();
     new (&field_b_) int32_t;
-    memset(reinterpret_cast<uint8_t*>(&field_b_) + sizeof(int32_t),
-           0,
-           sizeof(SimpleUnion) - offsetof(SimpleUnion, field_b_) - sizeof(int32_t));
   }
   tag_ = Tag::kFieldB;
   return field_b_;
@@ -76,10 +69,10 @@ int32_t& ::fidl::test::llcpp::basictypes::SimpleUnion::mutable_field_b() {
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kTestInterface_ConsumeSimpleStruct_Ordinal = 728053387u;
+constexpr uint64_t kTestInterface_ConsumeSimpleStruct_Ordinal = 728053387lu << 32;
 extern "C" const fidl_type_t fidl_test_llcpp_basictypes_TestInterfaceConsumeSimpleStructRequestTable;
 [[maybe_unused]]
-constexpr uint32_t kTestInterface_ConsumeSimpleUnion_Ordinal = 776403313u;
+constexpr uint64_t kTestInterface_ConsumeSimpleUnion_Ordinal = 776403313lu << 32;
 
 }  // namespace
 
@@ -379,3 +372,4 @@ void TestInterface::Interface::ConsumeSimpleUnionCompleterBase::Reply(::fidl::De
 }  // namespace llcpp
 }  // namespace test
 }  // namespace fidl
+}  // namespace llcpp

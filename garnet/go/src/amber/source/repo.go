@@ -19,7 +19,7 @@ type Repository struct {
 	installer *packageInstaller
 }
 
-func OpenRepository(config *pkg.RepositoryConfig, pkgInstallDir string, blobInstallDir string, pkgNeedsDir string) (Repository, error) {
+func OpenRepository(config *pkg.RepositoryConfig, pkgfs PkgfsDir) (Repository, error) {
 	result := Repository{source: nil}
 	if len(config.Mirrors) == 0 {
 		return result, errors.New("There must be at least one mirror")
@@ -68,10 +68,8 @@ func OpenRepository(config *pkg.RepositoryConfig, pkgInstallDir string, blobInst
 		return result, err
 	}
 	result.installer = &packageInstaller{
-		pkgInstallDir:  pkgInstallDir,
-		pkgNeedsDir:    pkgNeedsDir,
-		blobInstallDir: blobInstallDir,
-		fetcher:        &result,
+		pkgfs:   pkgfs,
+		fetcher: &result,
 	}
 	return result, nil
 }
@@ -121,24 +119,35 @@ type blobFetcher interface {
 }
 
 type packageInstaller struct {
-	pkgInstallDir  string
-	pkgNeedsDir    string
-	blobInstallDir string
-	fetcher        blobFetcher
+	pkgfs   PkgfsDir
+	fetcher blobFetcher
 }
 
 func (i packageInstaller) GetPkg(merkle string, length int64) error {
-	err := i.fetcher.fetchInto(merkle, length, i.pkgInstallDir)
+	err := i.fetcher.fetchInto(merkle, length, i.pkgfs.PkgInstallDir())
 	if os.IsExist(err) {
 		return nil
 	}
 
 	if err != nil {
+		// If the package already existed but was missing the meta FAR (or the
+		// meta FAR wasn't indexed), it may now be valid and readable.
+		if _, e := os.Stat(filepath.Join("/pkgfs/versions", merkle)); e == nil {
+			return nil
+		}
+
+		// If the needs dir now exists, ignore a failure to write the meta FAR
+		// and move on to processing the package's needs.
+		if _, e := os.Stat(filepath.Join(i.pkgfs.PkgNeedsDir(), merkle)); e == nil {
+			err = nil
+		}
+	}
+	if err != nil {
 		log.Printf("error fetching pkg %q: %s", merkle, err)
 		return err
 	}
 
-	needsDir, err := os.Open(filepath.Join(i.pkgNeedsDir, merkle))
+	needsDir, err := os.Open(filepath.Join(i.pkgfs.PkgNeedsDir(), merkle))
 	if os.IsNotExist(err) {
 		// Package is fully installed already
 		return nil
@@ -152,7 +161,7 @@ func (i packageInstaller) GetPkg(merkle string, length int64) error {
 	for len(neededBlobs) > 0 {
 		for _, blob := range neededBlobs {
 			// TODO(raggi): switch to using the needs paths for install
-			err := i.fetcher.fetchInto(blob, -1, i.blobInstallDir)
+			err := i.fetcher.fetchInto(blob, -1, i.pkgfs.BlobInstallDir())
 			if err != nil {
 				return err
 			}
@@ -162,6 +171,17 @@ func (i packageInstaller) GetPkg(merkle string, length int64) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	// If the package is now readable, we fulfilled all needs, and life is good
+	if _, e := os.Stat(filepath.Join(i.pkgfs.VersionsDir(), merkle)); e == nil {
+		return nil
+	}
+
+	// XXX(raggi): further triage as to the cause of, and recovery from this condition required:
+	log.Printf("error fetching pkg %q: %v - package was incomplete after all needs fulfilled", merkle, err)
+	if err == nil {
+		err = fmt.Errorf("package install incomplete")
 	}
 	return err
 }

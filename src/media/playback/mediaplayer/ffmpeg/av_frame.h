@@ -5,6 +5,8 @@
 #ifndef SRC_MEDIA_PLAYBACK_MEDIAPLAYER_FFMPEG_AV_FRAME_H_
 #define SRC_MEDIA_PLAYBACK_MEDIAPLAYER_FFMPEG_AV_FRAME_H_
 
+#include <memory>
+
 extern "C" {
 #include "libavutil/frame.h"
 }
@@ -16,7 +18,7 @@ struct AVFrameDeleter {
   inline void operator()(AVFrame* ptr) const { av_frame_free(&ptr); }
 };
 
-using AvFramePtr = std::unique_ptr<AVFrame, AVFrameDeleter>;
+using AvFramePtr = ::std::unique_ptr<AVFrame, AVFrameDeleter>;
 
 struct AvFrame {
   static AvFramePtr Create() { return AvFramePtr(av_frame_alloc()); }

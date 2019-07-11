@@ -77,8 +77,7 @@ zx_status_t HardwareBreakpoint::Update(
   return ZX_OK;
 }
 
-zx_status_t HardwareBreakpoint::Install(
-    zx_koid_t thread_koid) {
+zx_status_t HardwareBreakpoint::Install(zx_koid_t thread_koid) {
   uint64_t address = process_bp_->address();
   // We need to install this new thread.
   DebuggedThread* thread = process_bp_->process()->GetThread(thread_koid);
@@ -92,11 +91,7 @@ zx_status_t HardwareBreakpoint::Install(
 
   // Thread needs to be suspended or on an exception (ZX-3772).
   // We make a synchronous (blocking) call.
-  auto result = thread->Suspend(true);
-  if (result == DebuggedThread::SuspendResult::kError) {
-    Warn(WarningType::kInstall, thread_koid, address, ZX_ERR_BAD_STATE);
-    return ZX_ERR_BAD_STATE;
-  }
+  bool was_running = thread->Suspend(true);
 
   // Do the actual installation.
   auto& arch = arch::ArchProvider::Get();
@@ -108,7 +103,7 @@ zx_status_t HardwareBreakpoint::Install(
   }
 
   // If the thread was running, we need to resume it.
-  if (result == DebuggedThread::SuspendResult::kWasRunning) {
+  if (was_running) {
     debug_ipc::ResumeRequest resume;
     resume.how = debug_ipc::ResumeRequest::How::kContinue;
     thread->Resume(resume);
@@ -127,8 +122,7 @@ zx_status_t HardwareBreakpoint::Uninstall() {
   return ZX_OK;
 }
 
-zx_status_t HardwareBreakpoint::Uninstall(
-    zx_koid_t thread_koid) {
+zx_status_t HardwareBreakpoint::Uninstall(zx_koid_t thread_koid) {
   uint64_t address = process_bp_->address();
   DebuggedThread* thread = process_bp_->process()->GetThread(thread_koid);
   if (!thread) {
@@ -141,11 +135,7 @@ zx_status_t HardwareBreakpoint::Uninstall(
 
   // Thread needs to be suspended or on an exception (ZX-3772).
   // We make a synchronous (blocking) call.
-  auto result = thread->Suspend(true);
-  if (result == DebuggedThread::SuspendResult::kError) {
-    Warn(WarningType::kInstall, thread_koid, address, ZX_ERR_BAD_STATE);
-    return ZX_ERR_BAD_STATE;
-  }
+  bool was_running = thread->Suspend(true);
 
   auto& arch = arch::ArchProvider::Get();
   zx_status_t status = arch.UninstallHWBreakpoint(&thread->thread(), address);
@@ -155,7 +145,7 @@ zx_status_t HardwareBreakpoint::Uninstall(
   }
 
   // If the thread was running, we need to resume it.
-  if (result == DebuggedThread::SuspendResult::kWasRunning) {
+  if (was_running) {
     debug_ipc::ResumeRequest resume;
     resume.how = debug_ipc::ResumeRequest::How::kContinue;
     thread->Resume(resume);

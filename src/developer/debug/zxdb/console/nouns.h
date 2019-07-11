@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_NOUNS_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_NOUNS_H_
 
 #include <map>
 #include <vector>
@@ -28,6 +29,7 @@ enum class Noun {
   kGlobal,
   kSymServer,
   kThread,
+  kFilter,
 
   // Adding a new one? Add to GetNouns().
   kLast  // Not a real noun, keep last.
@@ -35,8 +37,8 @@ enum class Noun {
 
 struct NounRecord {
   NounRecord();
-  NounRecord(std::initializer_list<std::string> aliases, const char* short_help,
-             const char* help, CommandGroup command_group);
+  NounRecord(std::initializer_list<std::string> aliases, const char* short_help, const char* help,
+             CommandGroup command_group);
   ~NounRecord();
 
   // These are the user-typed strings that will name this noun. The [0]th one
@@ -83,3 +85,5 @@ void AppendNouns(std::map<Noun, NounRecord>* nouns);
 const std::vector<SwitchRecord>& GetNounSwitches();
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_NOUNS_H_

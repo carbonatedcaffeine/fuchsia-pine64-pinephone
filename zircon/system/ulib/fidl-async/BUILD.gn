@@ -4,6 +4,7 @@
 
 library("fidl-async") {
   sdk = "source"
+  sdk_publishable = true
   sdk_headers = [ "lib/fidl-async/bind.h" ]
   sources = [
     "bind.c",
@@ -22,8 +23,8 @@ library("fidl-async-cpp") {
     "lib/fidl-async/cpp/channel_transaction.h",
   ]
   sources = [
-    "llcpp_bind.cpp",
-    "llcpp_channel_transaction.cpp",
+    "llcpp_bind.cc",
+    "llcpp_channel_transaction.cc",
   ]
   deps = [
     "$zx/system/ulib/async",

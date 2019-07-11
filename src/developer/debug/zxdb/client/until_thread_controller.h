@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_UNTIL_THREAD_CONTROLLER_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_UNTIL_THREAD_CONTROLLER_H_
 
 #include <stdint.h>
 
@@ -10,10 +11,8 @@
 
 #include "src/developer/debug/zxdb/client/frame_fingerprint.h"
 #include "src/developer/debug/zxdb/client/thread_controller.h"
-#include "src/lib/fxl/memory/weak_ptr.h"
-#include "src/developer/debug/zxdb/client/frame_fingerprint.h"
-#include "src/developer/debug/zxdb/client/thread_controller.h"
 #include "src/developer/debug/zxdb/symbols/input_location.h"
+#include "src/lib/fxl/memory/weak_ptr.h"
 
 namespace zxdb {
 
@@ -45,18 +44,15 @@ class UntilThreadController : public ThreadController {
   // Runs to the given location until the current frame compares to the given
   // frame according to the given comparator. This allows stepping backward in
   // the call stack.
-  UntilThreadController(InputLocation location, FrameFingerprint newest_frame,
-                        FrameComparison cmp);
+  UntilThreadController(InputLocation location, FrameFingerprint newest_frame, FrameComparison cmp);
 
   ~UntilThreadController() override;
 
   // ThreadController implementation:
-  void InitWithThread(Thread* thread,
-                      std::function<void(const Err&)> cb) override;
+  void InitWithThread(Thread* thread, std::function<void(const Err&)> cb) override;
   ContinueOp GetContinueOp() override;
-  StopOp OnThreadStop(
-      debug_ipc::NotifyException::Type stop_type,
-      const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) override;
+  StopOp OnThreadStop(debug_ipc::NotifyException::Type stop_type,
+                      const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) override;
   const char* GetName() const override { return "Until"; }
 
  private:
@@ -84,3 +80,5 @@ class UntilThreadController : public ThreadController {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_UNTIL_THREAD_CONTROLLER_H_

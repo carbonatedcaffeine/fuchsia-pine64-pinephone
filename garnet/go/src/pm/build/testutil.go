@@ -5,18 +5,19 @@
 package build
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
-
-	"golang.org/x/crypto/ed25519"
+	"strings"
 )
 
 // TestFiles is the list of files created by the default factories in this package.
-var TestFiles = []string{"a", "b", "dir/c", "meta/test/t"}
+var TestFiles = []string{"a", "b", "dir/c", "rand1", "rand2", "meta/test/t"}
 
 // TestPackage initializes a set of files into a package directory next to the
 // config manifest
@@ -39,14 +40,6 @@ func TestPackage(cfg *Config) {
 		panic(err)
 	}
 
-	_, pkey, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		panic(err)
-	}
-	if err := ioutil.WriteFile(cfg.KeyPath, []byte(pkey), os.ModePerm); err != nil {
-		panic(err)
-	}
-
 	mfst, err := os.Create(cfg.ManifestPath)
 	if err != nil {
 		panic(err)
@@ -66,7 +59,12 @@ func TestPackage(cfg *Config) {
 		if err != nil {
 			panic(err)
 		}
-		if _, err := fmt.Fprintf(f, "%s\n", name); err != nil {
+		if strings.HasPrefix(name, "rand") {
+			_, err = io.Copy(f, io.LimitReader(rand.Reader, 100))
+		} else {
+			_, err = fmt.Fprintf(f, "%s\n", name)
+		}
+		if err != nil {
 			panic(err)
 		}
 		err = f.Close()
@@ -87,9 +85,6 @@ func BuildTestPackage(cfg *Config) {
 	TestPackage(cfg)
 
 	if err := Update(cfg); err != nil {
-		panic(err)
-	}
-	if err := Sign(cfg); err != nil {
 		panic(err)
 	}
 	if _, err := Seal(cfg); err != nil {

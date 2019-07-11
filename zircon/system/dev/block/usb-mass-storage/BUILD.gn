@@ -4,17 +4,20 @@
 
 driver("usb-mass-storage") {
   sources = [
-    "usb-mass-storage.cpp",
+    "usb-mass-storage.cc",
   ]
   deps = [
     ":block",
   ]
+
+  # TODO(ZX-2863): This driver violates the allowed shlib deps policy.
+  deprecated_inhibit_driver_shlib_allowlist = true
 }
 
 source_set("block") {
   visibility = [ ":*" ]
   sources = [
-    "block.cpp",
+    "block.cc",
   ]
   public_deps = [
     "$zx/system/banjo/ddk.protocol.block",
@@ -22,7 +25,6 @@ source_set("block") {
     "$zx/system/banjo/ddk.protocol.usb.composite",
     "$zx/system/banjo/ddk.protocol.usb.request",
     "$zx/system/dev/lib/usb",
-    "$zx/system/fidl/fuchsia-hardware-usb-virtual-bus:c",
     "$zx/system/ulib/async-loop",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",
@@ -46,7 +48,7 @@ group("tests") {
 
 test("ums-block") {
   sources = [
-    "tests/block.cpp",
+    "tests/block.cc",
   ]
   deps = [
     ":block",
@@ -61,8 +63,8 @@ test("ums-block") {
 
 test("ums") {
   sources = [
-    "tests/usb-mass-storage.cpp",
-    "usb-mass-storage.cpp",
+    "tests/usb-mass-storage.cc",
+    "usb-mass-storage.cc",
   ]
   defines = [ "UNITTEST" ]
   deps = [

@@ -2,18 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef ZIRCON_SYSTEM_ULIB_TRACE_PROVIDER_PROVIDER_IMPL_H_
+#define ZIRCON_SYSTEM_ULIB_TRACE_PROVIDER_PROVIDER_IMPL_H_
 
-#include <fbl/macros.h>
-#include <fbl/string.h>
-#include <fbl/vector.h>
+#include <string>
+#include <vector>
+
 #include <lib/async/cpp/wait.h>
+#include <lib/trace-engine/handler.h>
+#include <lib/trace-engine/types.h>
+#include <lib/trace-provider/provider.h>
 #include <lib/zx/channel.h>
 #include <lib/zx/fifo.h>
 #include <lib/zx/time.h>
 #include <lib/zx/vmo.h>
-#include <trace-engine/types.h>
-#include <trace-provider/provider.h>
 
 // Provide a definition for the opaque type declared in provider.h.
 struct trace_provider {};
@@ -48,16 +50,28 @@ private:
         async::WaitMethod<Connection, &Connection::Handle> wait_;
     };
 
-    void Start(trace_buffering_mode_t buffering_mode, zx::vmo buffer,
-               zx::fifo fifo, fbl::Vector<fbl::String> enabled_categories);
+    void Initialize(trace_buffering_mode_t buffering_mode, zx::vmo buffer,
+                    zx::fifo fifo, std::vector<std::string> categories);
+    void Start(trace_start_mode_t start_mode,
+               std::vector<std::string> additional_categories);
+
     void Stop();
+    void Terminate();
+
+    void OnStopped();
+    void OnTerminated();
     void OnClose();
 
     async_dispatcher_t* const dispatcher_;
     Connection connection_;
 
-    DISALLOW_COPY_ASSIGN_AND_MOVE(TraceProviderImpl);
+    TraceProviderImpl(const TraceProviderImpl&) = delete;
+    TraceProviderImpl(TraceProviderImpl&&) = delete;
+    TraceProviderImpl& operator=(const TraceProviderImpl&) = delete;
+    TraceProviderImpl& operator=(TraceProviderImpl&&) = delete;
 };
 
 } // namespace internal
 } // namespace trace
+
+#endif  // ZIRCON_SYSTEM_ULIB_TRACE_PROVIDER_PROVIDER_IMPL_H_

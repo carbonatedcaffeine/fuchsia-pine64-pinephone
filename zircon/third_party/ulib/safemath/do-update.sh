@@ -28,9 +28,8 @@ sed -i -e 's/BASE_/SAFEMATH_/g' *.h
 # Update include paths.
 sed -i -e 's/#include "base\/numerics\/\(.*\)"/#include <safemath\/\1>/g' *.h
 
-# TODO(TC-383): This is some hackery because cmath isn't includable with the
-# current Fuchsia toolchain, so make the library usable with musl's math.h
-# instead.
+# This is some hackery because cmath isn't includable in kernel mode, so make
+# the library usable with math.h instead.
 sed -i -e 's/#include <cmath>/#include <math.h>/g' *.h
 sed -i -e 's/std::isfinite(/isfinite(/g' *.h
 
@@ -47,6 +46,12 @@ cat <<END
 # Copyright 2019 The Fuchsia Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+config("safemath_public.config") {
+  if (is_fuchsia && is_kernel) {
+    defines = [ "SAFEMATH_DISABLE_OSTREAM_OPERATORS=1" ]
+  }
+}
 
 library("safemath") {
   sdk = "source"
@@ -67,8 +72,30 @@ library("safemath") {
   ]
   sources = []
   host = true
-  kernel = false
+  kernel = true
   static = true
+
+  # For now, when using safemath in the kernel, limit its usage to indirect
+  # usage via libaffine.
+  #
+  # It is possible for safemath to panic on some code paths.  Making these code
+  # paths impossible to access in the kernel (at compile time) is a bit
+  # complicated.  Right now, we know that libaffine will never access these
+  # paths, and nothing else in the kernel currently uses safemath.  So, for now,
+  # when building safemath for the kernel, restrict its visibility to just
+  # libaffine.  If/when other usage starts to show up in the kernel, we can
+  # revisit this.
+  #
+  # See ZX-4598
+  #
+  if (is_kernel) {
+    visibility = [
+      "$zx/system/ulib/affine/*",
+      ":*",
+    ]
+  }
+
+  public_configs = [ ":safemath_public.config" ]
 }
 END
 ) >BUILD.gn

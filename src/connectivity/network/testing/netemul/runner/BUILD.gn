@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/package.gni")
+import("//src/lib/isolated_devmgr/devmgr_manifest.gni")
 
 group("runner") {
   testonly = true
@@ -25,6 +26,10 @@ source_set("src") {
     "format.h",
     "log_listener.cc",
     "log_listener.h",
+    "log_listener_log_sink.cc",
+    "log_listener_log_sink.h",
+    "log_listener_ostream.cc",
+    "log_listener_ostream.h",
     "managed_environment.cc",
     "managed_environment.h",
     "managed_launcher.cc",
@@ -33,6 +38,7 @@ source_set("src") {
     "managed_logger.h",
     "sandbox.cc",
     "sandbox.h",
+    "sandbox_env.cc",
     "sandbox_env.h",
     "sandbox_service.cc",
     "sandbox_service.h",
@@ -53,6 +59,7 @@ source_set("src") {
     "//sdk/fidl/fuchsia.sys",
     "//sdk/lib/sys/cpp",
     "//sdk/lib/sys/cpp/testing:enclosing_environment",
+    "//src/connectivity/network/testing/netemul/lib/fidl:devmgr",
     "//src/connectivity/network/testing/netemul/lib/fidl:environment",
     "//src/connectivity/network/testing/netemul/lib/fidl:network",
     "//src/connectivity/network/testing/netemul/lib/fidl:sandbox",
@@ -99,7 +106,11 @@ executable("bin") {
 executable("sandbox_unittest") {
   testonly = true
   sources = [
+    "log_listener_ostream_unittest.cc",
+    "log_listener_test_helpers.cc",
+    "log_listener_test_helpers.h",
     "logger_unittest.cc",
+    "managed_logger_unittest.cc",
     "sandbox_unittest.cc",
   ]
 
@@ -160,6 +171,35 @@ package("netemul_sandbox") {
     {
       path = rebase_path("helpers/meta/helper_netstack_intermediary.cmx")
       dest = "helper_netstack_intermediary.cmx"
+    },
+  ]
+}
+
+devmgr_manifest("devmgr_manifest") {
+}
+
+package("netemul_devmgr") {
+  deprecated_shell = "//build"
+
+  testonly = true
+
+  deps = [
+    ":devmgr_manifest",
+    "//src/lib/isolated_devmgr",
+  ]
+
+  extra = [ "$target_gen_dir/devmgr.manifest" ]
+
+  binaries = [
+    {
+      name = "isolated_devmgr"
+    },
+  ]
+
+  meta = [
+    {
+      path = rebase_path("meta/netemul_devmgr.cmx")
+      dest = "netemul_devmgr.cmx"
     },
   ]
 }

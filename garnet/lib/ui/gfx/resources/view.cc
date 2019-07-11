@@ -8,6 +8,7 @@
 #include "garnet/lib/ui/gfx/engine/object_linker.h"
 #include "garnet/lib/ui/gfx/engine/session.h"
 #include "garnet/lib/ui/gfx/resources/nodes/node.h"
+#include "garnet/lib/ui/gfx/util/validate_eventpair.h"
 #include "src/lib/fxl/logging.h"
 
 namespace scenic_impl {
@@ -15,13 +16,18 @@ namespace gfx {
 
 const ResourceTypeInfo View::kTypeInfo = {ResourceType::kView, "View"};
 
-View::View(Session* session, ResourceId id, ViewLinker::ImportLink link)
-    :Resource(session, id, View::kTypeInfo), link_(std::move(link)),
-    weak_factory_(this) {
+View::View(Session* session, ResourceId id, ViewLinker::ImportLink link,
+           fuchsia::ui::views::ViewRefControl control_ref, fuchsia::ui::views::ViewRef view_ref)
+    : Resource(session, id, View::kTypeInfo),
+      link_(std::move(link)),
+      control_ref_(std::move(control_ref)),
+      view_ref_(std::move(view_ref)),
+      weak_factory_(this) {
   node_ = fxl::AdoptRef<ViewNode>(new ViewNode(session, id));
 
   FXL_DCHECK(link_.valid());
   FXL_DCHECK(!link_.initialized());
+  FXL_DCHECK(validate_viewref(control_ref_, view_ref_));
 }
 
 View::~View() {
@@ -43,8 +49,7 @@ void View::SignalRender() {
   if (zx_object_get_info(render_handle_, ZX_INFO_HANDLE_VALID, /*buffer=*/NULL,
                          /*buffer_size=*/0, /*actual=*/NULL,
                          /*avail=*/NULL) == ZX_OK) {
-    zx_status_t status =
-        zx_object_signal(render_handle_, /*clear_mask=*/0u, ZX_EVENT_SIGNALED);
+    zx_status_t status = zx_object_signal(render_handle_, /*clear_mask=*/0u, ZX_EVENT_SIGNALED);
     ZX_ASSERT(status == ZX_OK);
   }
 }

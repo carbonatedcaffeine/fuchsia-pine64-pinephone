@@ -3,6 +3,8 @@
         "binary": "bin/tiles_ctl"
     },
     "sandbox": {
-        "services": [ "fuchsia.tracelink.Registry" ]
+        "services": [
+            "fuchsia.tracing.provider.Registry"
+        ]
     }
 }

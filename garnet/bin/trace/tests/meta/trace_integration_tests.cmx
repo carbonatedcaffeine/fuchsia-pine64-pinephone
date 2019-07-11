@@ -2,7 +2,7 @@
     "facets": {
         "fuchsia.test": {
             "injected-services": {
-                "fuchsia.tracelink.Registry": [
+                "fuchsia.tracing.provider.Registry": [
                     "fuchsia-pkg://fuchsia.com/trace_manager#meta/trace_manager.cmx",
                     "--verbose=2"
                 ],
@@ -19,14 +19,14 @@
     "sandbox": {
         "features": [
             "isolated-persistent-storage",
-            "shell",
+            "deprecated-shell",
             "system-temp"
         ],
         "services": [
             "fuchsia.process.Launcher",
             "fuchsia.process.Resolver",
             "fuchsia.sys.Launcher",
-            "fuchsia.tracelink.Registry",
+            "fuchsia.tracing.provider.Registry",
             "fuchsia.tracing.controller.Controller"
         ]
     }

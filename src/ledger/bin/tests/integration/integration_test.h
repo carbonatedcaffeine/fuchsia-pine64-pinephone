@@ -26,8 +26,7 @@ namespace ledger {
 // separate thread.
 class BaseIntegrationTest : public ::testing::Test, public LoopController {
  public:
-  explicit BaseIntegrationTest(
-      const LedgerAppInstanceFactoryBuilder* factory_builder);
+  explicit BaseIntegrationTest(const LedgerAppInstanceFactoryBuilder* factory_builder);
   ~BaseIntegrationTest() override;
 
   BaseIntegrationTest(const BaseIntegrationTest&) = delete;
@@ -51,8 +50,7 @@ class BaseIntegrationTest : public ::testing::Test, public LoopController {
 
   zx::socket StreamDataToSocket(std::string data);
 
-  std::unique_ptr<LedgerAppInstanceFactory::LedgerAppInstance>
-  NewLedgerAppInstance();
+  std::unique_ptr<LedgerAppInstanceFactory::LedgerAppInstance> NewLedgerAppInstance();
 
   LedgerAppInstanceFactory* GetAppFactory();
 
@@ -65,12 +63,12 @@ class BaseIntegrationTest : public ::testing::Test, public LoopController {
   std::unique_ptr<LedgerAppInstanceFactory> factory_;
   // Loop used to run network service and token provider tasks.
   std::unique_ptr<SubLoop> services_loop_;
-  std::unique_ptr<trace::TraceProvider> trace_provider_;
+  std::unique_ptr<trace::TraceProviderWithFdio> trace_provider_;
 };
 
-class IntegrationTest : public BaseIntegrationTest,
-                        public ::testing::WithParamInterface<
-                            const LedgerAppInstanceFactoryBuilder*> {
+class IntegrationTest
+    : public BaseIntegrationTest,
+      public ::testing::WithParamInterface<const LedgerAppInstanceFactoryBuilder*> {
  public:
   IntegrationTest();
   ~IntegrationTest() override;

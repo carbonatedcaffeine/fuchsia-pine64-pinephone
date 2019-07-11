@@ -16,8 +16,7 @@
 
 namespace ledger {
 
-class FakeDiskCleanupManager : public DiskCleanupManager,
-                               public PageUsageListener {
+class FakeDiskCleanupManager : public DiskCleanupManager, public PageUsageListener {
  public:
   FakeDiskCleanupManager() = default;
   ~FakeDiskCleanupManager() override = default;
@@ -30,22 +29,19 @@ class FakeDiskCleanupManager : public DiskCleanupManager,
 
   bool IsEmpty() override { return true; }
 
-  void TryCleanUp(fit::function<void(storage::Status)> callback) override {
+  void TryCleanUp(fit::function<void(Status)> callback) override {
     // Do not call the callback directly.
     cleanup_callback = std::move(callback);
   }
-  void OnPageOpened(fxl::StringView /*ledger_name*/,
-                    storage::PageIdView /*page_id*/) override {
+  void OnPageOpened(fxl::StringView /*ledger_name*/, storage::PageIdView /*page_id*/) override {
     ++page_opened_count;
   }
 
-  void OnPageClosed(fxl::StringView /*ledger_name*/,
-                    storage::PageIdView /*page_id*/) override {
+  void OnPageClosed(fxl::StringView /*ledger_name*/, storage::PageIdView /*page_id*/) override {
     ++page_closed_count;
   }
 
-  void OnPageUnused(fxl::StringView /*ledger_name*/,
-                    storage::PageIdView /*page_id*/) override {
+  void OnPageUnused(fxl::StringView /*ledger_name*/, storage::PageIdView /*page_id*/) override {
     ++page_unused_count;
     if (on_OnPageUnused_callback_) {
       on_OnPageUnused_callback_();
@@ -56,7 +52,7 @@ class FakeDiskCleanupManager : public DiskCleanupManager,
   int page_closed_count = 0;
   int page_unused_count = 0;
   fit::closure on_OnPageUnused_callback_;
-  fit::function<void(storage::Status)> cleanup_callback;
+  fit::function<void(Status)> cleanup_callback;
 
  private:
   FXL_DISALLOW_COPY_AND_ASSIGN(FakeDiskCleanupManager);

@@ -1,6 +1,5 @@
 // Copyright 2018 The Fuchsia Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 #include "src/developer/crashpad_agent/report_attachments.h"
 
@@ -19,8 +18,7 @@ namespace crash {
 
 namespace {
 
-// The crash server expects a specific filename for the attached stack trace in
-// Dart crash reports.
+// The crash server expects a specific filename for the attached stack trace in Dart crash reports.
 const char kAttachmentDartStackTraceFilename[] = "DartError";
 
 bool WriteVMO(crashpad::FileWriter* writer, const fuchsia::mem::Buffer& vmo) {
@@ -58,10 +56,9 @@ void AddFeedbackAttachments(crashpad::CrashReportDatabase::NewReport* report,
 
 }  // namespace
 
-void AddManagedRuntimeExceptionAttachments(
-    crashpad::CrashReportDatabase::NewReport* report,
-    const fuchsia::feedback::Data& feedback_data,
-    ManagedRuntimeException* exception) {
+void AddManagedRuntimeExceptionAttachments(crashpad::CrashReportDatabase::NewReport* report,
+                                           const fuchsia::feedback::Data& feedback_data,
+                                           ManagedRuntimeException* exception) {
   AddFeedbackAttachments(report, feedback_data);
 
   // Language-specific attachments.
@@ -73,8 +70,7 @@ void AddManagedRuntimeExceptionAttachments(
       AddAttachment(report, "data", exception->unknown_().data);
       break;
     case ManagedRuntimeException::Tag::kDart:
-      AddAttachment(report, kAttachmentDartStackTraceFilename,
-                    exception->dart().stack_trace);
+      AddAttachment(report, kAttachmentDartStackTraceFilename, exception->dart().stack_trace);
       break;
   }
 }

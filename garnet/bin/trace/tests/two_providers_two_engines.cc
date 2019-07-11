@@ -14,15 +14,15 @@
 #include <trace-provider/provider.h>
 #include <trace/event.h>
 
-#include "integration_test_utils.h"
-#include "self_contained_provider.h"
+#include "garnet/bin/trace/tests/integration_test_utils.h"
+#include "garnet/bin/trace/tests/self_contained_provider.h"
 
 #define TEST_NAME "two-providers-two-engines"
 
 static bool RunTwoProvidersTwoEnginesTest(const tracing::Spec& spec) {
   async::Loop loop(&kAsyncLoopConfigNoAttachToThread);
 
-  fbl::unique_ptr<trace::TraceProvider> provider1;
+  fbl::unique_ptr<trace::TraceProviderWithFdio> provider1;
   if (!CreateProviderSynchronously(loop, "provider1", &provider1)) {
     return false;
   }

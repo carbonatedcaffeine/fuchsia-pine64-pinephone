@@ -9,10 +9,10 @@
 #include <ddk/io-buffer.h>
 #include <ddk/mmio-buffer.h>
 #include <ddk/platform-defs.h>
-#include <ddk/protocol/platform-device-lib.h>
+#include <lib/device-protocol/platform-device.h>
 #include <ddk/protocol/platform/device.h>
 #include <ddktl/device.h>
-#include <ddktl/pdev.h>
+#include <lib/device-protocol/pdev.h>
 #include <ddktl/protocol/rawnand.h>
 #include <fbl/unique_ptr.h>
 #include <hw/reg.h>

@@ -12,6 +12,8 @@ export FUCHSIA_DIR="$(dirname $(dirname $(dirname "${devshell_lib_dir}")))"
 export FUCHSIA_OUT_DIR="${FUCHSIA_OUT_DIR:-${FUCHSIA_DIR}/out}"
 unset devshell_lib_dir
 
+source "${FUCHSIA_DIR}/buildtools/vars.sh"
+
 if [[ "${FUCHSIA_DEVSHELL_VERBOSITY}" -eq 1 ]]; then
   set -x
 fi
@@ -38,16 +40,22 @@ function fx-symbolize {
   if [[ -z "$FUCHSIA_BUILD_DIR" ]]; then
     fx-config-read
   fi
-  if [[ -z "$BUILDTOOLS_CLANG_DIR" ]]; then
-    source "${FUCHSIA_DIR}/buildtools/vars.sh"
-  fi
-  local idstxt="${FUCHSIA_BUILD_DIR}/ids.txt"
+  local idstxt=()
   if [[ $# -gt 0 ]]; then
-    idstxt="$1"
+    idstxt=(-ids-rel -ids "$1")
   fi
-  local prebuilt_dir="${FUCHSIA_DIR}/zircon/prebuilt/downloads"
-  local llvm_symbolizer="${BUILDTOOLS_CLANG_DIR}/bin/llvm-symbolizer"
-  "${prebuilt_dir}/symbolize" -ids-rel -ids "$idstxt" -llvm-symbolizer "$llvm_symbolizer"
+  local symbolize="${FUCHSIA_DIR}/prebuilt/tools/symbolize/${BUILDTOOLS_PLATFORM}/symbolize"
+  local clang_dir="${FUCHSIA_DIR}/prebuilt/third_party/clang/${BUILDTOOLS_PLATFORM}"
+  local llvm_symbolizer="${clang_dir}/bin/llvm-symbolizer"
+  local toolchain_dir="${clang_dir}/lib/debug/.build-id"
+  local download_dir="${FUCHSIA_DIR}/prebuilt_build_ids"
+  local out_dir="${FUCHSIA_BUILD_DIR}/.build-id"
+  local zircon_dir="${ZIRCON_BUILDROOT}/.build-id"
+  set -x
+  "$symbolize" -llvm-symbolizer "$llvm_symbolizer" \
+    "${idstxt[@]}" \
+    -build-id-dir "$download_dir" -build-id-dir "$toolchain_dir" \
+    -build-id-dir "$out_dir" -build-id-dir "$zircon_dir"
 }
 
 function fx-gen {
@@ -135,9 +143,8 @@ function fx-config-read {
     exit 1
   fi
 
-  if ! fx-build-config-load; then
-    exit $?
-  fi
+  fx-build-config-load || exit $?
+
   _FX_LOCK_FILE="${FUCHSIA_BUILD_DIR}.build_lock"
 }
 
@@ -199,11 +206,29 @@ function get-device-addr {
   echo "${device}"
 }
 
+function fx-find-command {
+  local -r cmd=$1
+
+  local command_path="${FUCHSIA_DIR}/tools/devshell/${cmd}"
+  if [[ -x "${command_path}" ]]; then
+    echo "${command_path}"
+    return 0
+  fi
+
+  local command_path="${FUCHSIA_DIR}/tools/devshell/contrib/${cmd}"
+  if [[ -x "${command_path}" ]]; then
+    echo "${command_path}"
+    return 0
+  fi
+
+  return 1
+}
+
 function fx-command-run {
   local -r command_name="$1"
-  local -r command_path="${FUCHSIA_DIR}/tools/devshell/${command_name}"
+  local -r command_path="$(fx-find-command ${command_name})"
 
-  if [[ ! -f "${command_path}" ]]; then
+  if [[ ${command_path} == "" ]]; then
     fx-error "Unknown command ${command_name}"
     exit 1
   fi
@@ -402,12 +427,18 @@ function fx-run-ninja {
 
   # TERM is passed for the pretty ninja UI
   # PATH is passed as some tools are referenced via $PATH due to platform differences.
-  # TMPDIR is passed for Goma on macOS. TMPDIR must be set, or unset, not
-  # empty. Some Dart build tools have been observed writing into source paths
+  # TMPDIR is passed for Goma on macOS.
+  # NINJA_STATUS is passed to control Ninja progress status.
+  # GOMA_DISABLED is passed to forcefully disabling Goma.
+  #
+  # GOMA_DISABLED and TMPDIR must be set, or unset, not empty. Some Dart
+  # build tools have been observed writing into source paths
   # when TMPDIR="" - it is deliberately unquoted and using the ${+} expansion
-  # expression).
+  # expression). GOMA_DISABLED will forcefully disable Goma even if it's set to
+  # empty.
   fx-try-locked env -i TERM="${TERM}" PATH="${PATH}" \
     ${NINJA_STATUS+"NINJA_STATUS=${NINJA_STATUS}"} \
+    ${GOMA_DISABLED+"GOMA_DISABLED=$GOMA_DISABLED"} \
     ${TMPDIR+"TMPDIR=$TMPDIR"} \
     "$cmd" "${args[@]}"
 }

@@ -17,23 +17,18 @@ namespace zxdb {
 
 MockSymbolDataProvider::MockSymbolDataProvider() : weak_factory_(this) {}
 
-void MockSymbolDataProvider::AddRegisterValue(debug_ipc::RegisterID id,
-                                              bool synchronous,
+void MockSymbolDataProvider::AddRegisterValue(debug_ipc::RegisterID id, bool synchronous,
                                               uint64_t value) {
   regs_[id] = RegData(synchronous, value);
 }
 
-void MockSymbolDataProvider::AddMemory(uint64_t address,
-                                       std::vector<uint8_t> data) {
-  mem_[address] = std::move(data);
+void MockSymbolDataProvider::AddMemory(uint64_t address, std::vector<uint8_t> data) {
+  memory_.AddMemory(address, std::move(data));
 }
 
-debug_ipc::Arch MockSymbolDataProvider::GetArch() {
-  return debug_ipc::Arch::kArm64;
-}
+debug_ipc::Arch MockSymbolDataProvider::GetArch() { return debug_ipc::Arch::kArm64; }
 
-bool MockSymbolDataProvider::GetRegister(debug_ipc::RegisterID id,
-                                         std::optional<uint64_t>* value) {
+bool MockSymbolDataProvider::GetRegister(debug_ipc::RegisterID id, std::optional<uint64_t>* value) {
   *value = std::nullopt;
 
   if (GetSpecialRegisterType(id) == debug_ipc::SpecialRegisterType::kIP) {
@@ -81,55 +76,21 @@ void MockSymbolDataProvider::GetFrameBaseAsync(GetRegisterCallback callback) {
       });
 }
 
+uint64_t MockSymbolDataProvider::GetCanonicalFrameAddress() const { return cfa_; }
+
 void MockSymbolDataProvider::GetMemoryAsync(uint64_t address, uint32_t size,
                                             GetMemoryCallback callback) {
-  auto found = FindBlockForAddress(address);
-  if (found == mem_.end()) {
-    debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE, [callback]() {
-      // The API states that invalid memory is not an error, it just does a
-      // short read.
-      callback(Err(), std::vector<uint8_t>());
-    });
-  } else {
-    size_t offset = address - found->first;
-
-    uint32_t size_to_return =
-        std::min(size, static_cast<uint32_t>(found->second.size() - offset));
-
-    std::vector<uint8_t> subset;
-    subset.resize(size_to_return);
-    memcpy(&subset[0], &found->second[offset], size_to_return);
-    debug_ipc::MessageLoop::Current()->PostTask(
-        FROM_HERE, [callback, subset]() { callback(Err(), subset); });
-  }
+  std::vector<uint8_t> result = memory_.ReadMemory(address, size);
+  debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE,
+                                              [callback, result]() { callback(Err(), result); });
 }
 
-void MockSymbolDataProvider::WriteMemory(uint64_t address,
-                                         std::vector<uint8_t> data,
+void MockSymbolDataProvider::WriteMemory(uint64_t address, std::vector<uint8_t> data,
                                          std::function<void(const Err&)> cb) {
   memory_writes_.emplace_back(address, std::move(data));
 
   // Declare success.
   debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE, [cb]() { cb(Err()); });
-}
-
-MockSymbolDataProvider::RegisteredMemory::const_iterator
-MockSymbolDataProvider::FindBlockForAddress(uint64_t address) const {
-  // Finds the first block >= address.
-  auto found = mem_.lower_bound(address);
-
-  // We need the first block <= address.
-  if (found != mem_.end() && found->first == address)
-    return found;  // Got exact match.
-
-  // Now find the first block < address.
-  if (found == mem_.begin())
-    return mem_.end();  // Nothing before the address.
-
-  --found;
-  if (address >= found->first + found->second.size())
-    return mem_.end();  // Address is after this range.
-  return found;
 }
 
 }  // namespace zxdb

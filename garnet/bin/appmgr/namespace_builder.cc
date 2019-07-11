@@ -8,6 +8,7 @@
 #include <lib/fdio/fd.h>
 #include <lib/fdio/fdio.h>
 #include <lib/fdio/limits.h>
+#include <src/lib/fxl/strings/concatenate.h>
 #include <zircon/processargs.h>
 
 #include <fcntl.h>
@@ -21,6 +22,8 @@
 
 namespace component {
 
+constexpr char kDeprecatedDataName[] = "deprecated-data";
+
 NamespaceBuilder::NamespaceBuilder() = default;
 
 NamespaceBuilder::~NamespaceBuilder() = default;
@@ -28,8 +31,7 @@ NamespaceBuilder::~NamespaceBuilder() = default;
 void NamespaceBuilder::AddFlatNamespace(fuchsia::sys::FlatNamespacePtr ns) {
   if (ns && ns->paths.size() == ns->directories.size()) {
     for (size_t i = 0; i < ns->paths.size(); ++i) {
-      AddDirectoryIfNotPresent(ns->paths.at(i),
-                               std::move(ns->directories.at(i)));
+      AddDirectoryIfNotPresent(ns->paths.at(i), std::move(ns->directories.at(i)));
     }
   }
 }
@@ -41,15 +43,12 @@ void NamespaceBuilder::AddPackage(zx::channel package) {
 void NamespaceBuilder::AddConfigData(const SandboxMetadata& sandbox, const std::string& pkg_name) {
   for (const auto& feature : sandbox.features()) {
     if (feature == "config-data") {
-      FXL_LOG(INFO) << "config-data for " << pkg_name;
-      PushDirectoryFromPathAs("/pkgfs/packages/config-data/0/data/" + pkg_name,
-                              "/config/data");
+      PushDirectoryFromPathAs("/pkgfs/packages/config-data/0/data/" + pkg_name, "/config/data");
     }
   }
 }
 
-void NamespaceBuilder::AddDirectoryIfNotPresent(const std::string& path,
-                                                zx::channel directory) {
+void NamespaceBuilder::AddDirectoryIfNotPresent(const std::string& path, zx::channel directory) {
   if (std::find(paths_.begin(), paths_.end(), path) != paths_.end())
     return;
   PushDirectoryFromChannel(path, std::move(directory));
@@ -59,23 +58,24 @@ void NamespaceBuilder::AddServices(zx::channel services) {
   PushDirectoryFromChannel("/svc", std::move(services));
 }
 
-void NamespaceBuilder::AddSandbox(
-    const SandboxMetadata& sandbox,
-    const HubDirectoryFactory& hub_directory_factory) {
-  AddSandbox(sandbox, hub_directory_factory, [] {
-    FXL_NOTREACHED() << "IsolatedDataPathFactory unexpectedly used";
-    return "";
-  }, [] {
-    FXL_NOTREACHED() << "IsolatedCachePathFactory unexpectedly used";
-    return "";
-  });
+void NamespaceBuilder::AddSandbox(const SandboxMetadata& sandbox,
+                                  const HubDirectoryFactory& hub_directory_factory) {
+  AddSandbox(
+      sandbox, hub_directory_factory,
+      [] {
+        FXL_NOTREACHED() << "IsolatedDataPathFactory unexpectedly used";
+        return "";
+      },
+      [] {
+        FXL_NOTREACHED() << "IsolatedCachePathFactory unexpectedly used";
+        return "";
+      });
 }
 
-void NamespaceBuilder::AddSandbox(
-    const SandboxMetadata& sandbox,
-    const HubDirectoryFactory& hub_directory_factory,
-    const IsolatedDataPathFactory& isolated_data_path_factory,
-    const IsolatedCachePathFactory& isolated_cache_path_factory) {
+void NamespaceBuilder::AddSandbox(const SandboxMetadata& sandbox,
+                                  const HubDirectoryFactory& hub_directory_factory,
+                                  const IsolatedDataPathFactory& isolated_data_path_factory,
+                                  const IsolatedCachePathFactory& isolated_cache_path_factory) {
   for (const auto& path : sandbox.dev()) {
     if (path == "class") {
       FXL_LOG(WARNING) << "Ignoring request for all device classes";
@@ -84,8 +84,16 @@ void NamespaceBuilder::AddSandbox(
     PushDirectoryFromPath("/dev/" + path);
   }
 
-  for (const auto& path : sandbox.system())
-    PushDirectoryFromPath("/system/" + path);
+  for (const auto& path : sandbox.system()) {
+    // 'deprecated-data' is the value used to access /system/data
+    // to request a directory inside /system/data 'deprecated-data/some/path' is supplied
+    if (path == kDeprecatedDataName || path.find(fxl::Concatenate({kDeprecatedDataName, "/"})) == 0) {
+      PushDirectoryFromPath("/system/data" +
+                            path.substr(strlen(kDeprecatedDataName), std::string::npos));
+    } else {
+      PushDirectoryFromPath("/system/" + path);
+    }
+  }
 
   for (const auto& path : sandbox.pkgfs())
     PushDirectoryFromPath("/pkgfs/" + path);
@@ -111,14 +119,12 @@ void NamespaceBuilder::AddSandbox(
 
   for (const auto& feature : sandbox.features()) {
     if (feature == "build-info") {
-      PushDirectoryFromPathAs("/pkgfs/packages/build-info/0/data",
-                              "/config/build-info");
-    } else if (feature == "root-ssl-certificates" || feature == "shell") {
-      // "shell" implies "root-ssl-certificates"
-      PushDirectoryFromPathAs("/pkgfs/packages/root_ssl_certificates/0/data",
-                              "/config/ssl");
+      PushDirectoryFromPathAs("/pkgfs/packages/build-info/0/data", "/config/build-info");
+    } else if (feature == "root-ssl-certificates" || feature == "deprecated-shell") {
+      // "deprecated-shell" implies "root-ssl-certificates"
+      PushDirectoryFromPathAs("/pkgfs/packages/root_ssl_certificates/0/data", "/config/ssl");
 
-      if (feature == "shell") {
+      if (feature == "deprecated-shell") {
         // TODO(abarth): These permissions should depend on the envionment
         // in some way so that a shell running at a user-level scope doesn't
         // have access to all the device drivers and such.
@@ -142,10 +148,12 @@ void NamespaceBuilder::AddSandbox(
     } else if (feature == "system-temp") {
       PushDirectoryFromPath("/tmp");
     } else if (feature == "vulkan") {
+      PushDirectoryFromPath("/dev/class/goldfish-address-space");
+      PushDirectoryFromPath("/dev/class/goldfish-control");
+      PushDirectoryFromPath("/dev/class/goldfish-pipe");
       PushDirectoryFromPath("/dev/class/gpu");
-      PushDirectoryFromPathAs(
-        "/pkgfs/packages/config-data/0/data/vulkan-icd/icd.d",
-        "/config/vulkan/icd.d");
+      PushDirectoryFromPathAs("/pkgfs/packages/config-data/0/data/vulkan-icd/icd.d",
+                              "/config/vulkan/icd.d");
     }
   }
 
@@ -157,8 +165,7 @@ void NamespaceBuilder::PushDirectoryFromPath(std::string path) {
   PushDirectoryFromPathAs(path, path);
 }
 
-void NamespaceBuilder::PushDirectoryFromPathAs(std::string src_path,
-                                               std::string dst_path) {
+void NamespaceBuilder::PushDirectoryFromPathAs(std::string src_path, std::string dst_path) {
   if (std::find(paths_.begin(), paths_.end(), dst_path) != paths_.end())
     return;
   fxl::UniqueFD dir(open(src_path.c_str(), O_DIRECTORY | O_RDONLY));
@@ -172,8 +179,7 @@ void NamespaceBuilder::PushDirectoryFromPathAs(std::string src_path,
   PushDirectoryFromChannel(std::move(dst_path), std::move(handle));
 }
 
-void NamespaceBuilder::PushDirectoryFromChannel(std::string path,
-                                                zx::channel channel) {
+void NamespaceBuilder::PushDirectoryFromChannel(std::string path, zx::channel channel) {
   FXL_DCHECK(std::find(paths_.begin(), paths_.end(), path) == paths_.end());
   types_.push_back(PA_HND(PA_NS_DIR, types_.size()));
   handles_.push_back(channel.get());

@@ -15,13 +15,15 @@
     },
     "sandbox": {
         "features": [
-            "shell",
+            "deprecated-shell",
             "vulkan"
         ],
         "services": [
             "fuchsia.feedback.DataProvider",
             "fuchsia.logger.Log",
-            "fuchsia.tracelink.Registry",
+            "fuchsia.sys.Environment",
+            "fuchsia.sys.Loader",
+            "fuchsia.tracing.provider.Registry",
             "fuchsia.vulkan.loader.Loader"
         ]
     }

@@ -17,13 +17,16 @@ use std::thread;
 
 mod audio;
 mod auth;
+mod basemgr;
 mod bluetooth;
+mod file;
 mod logging;
 mod netstack;
 mod scenic;
 mod server;
 mod setui;
 mod traceutil;
+mod webdriver;
 mod wlan;
 
 use fuchsia_syslog::macros::*;

@@ -16,20 +16,28 @@ using namespace overnet;
 
 class Fuzzer;
 
-class Nub final : public PacketNub<int, 256> {
+class NubStuff {
+ public:
+  NubStuff(Fuzzer* fuzzer, uint8_t index);
+
+  Router* router() { return &router_; }
+
+ private:
+  Router router_;
+};
+
+class Nub final : public NubStuff, public PacketNub<int, 256> {
  public:
   Nub(Fuzzer* fuzzer, uint8_t index);
 
   void SendTo(int dest, Slice slice) override;
-  Router* GetRouter() override;
   void Publish(LinkPtr<> link) override {
-    router_.RegisterLink(std::move(link));
+    router()->RegisterLink(std::move(link));
   }
 
  private:
   Fuzzer* const fuzzer_;
   const uint8_t index_;
-  Router router_;
 };
 
 class Fuzzer {
@@ -38,8 +46,8 @@ class Fuzzer {
 
   Timer* timer() { return &timer_; }
   bool IsDone() {
-    return nub1_.GetRouter()->HasRouteTo(NodeId(2)) &&
-           nub2_.GetRouter()->HasRouteTo(NodeId(1));
+    return nub1_.router()->HasRouteTo(NodeId(2)) &&
+           nub2_.router()->HasRouteTo(NodeId(1));
   }
   bool StepTime() { return timer_.StepUntilNextEvent(); }
   bool StepTime(uint64_t us) { return timer_.Step(us); }
@@ -49,6 +57,7 @@ class Fuzzer {
   void DropPacket(uint64_t packet);
   void Initiate1();
   void Initiate2();
+  void Close();
 
  private:
   TestTimer timer_;
@@ -71,17 +80,19 @@ class Fuzzer {
   std::vector<Packet> packets_;
 };
 
+NubStuff::NubStuff(Fuzzer* fuzzer, uint8_t index)
+    : router_(fuzzer->timer(), NodeId(index), false) {}
+
 Nub::Nub(Fuzzer* fuzzer, uint8_t index)
-    : PacketNub(fuzzer->timer(), NodeId(index)),
+    : NubStuff(fuzzer, index),
+      PacketNub(router()),
       fuzzer_(fuzzer),
-      index_(index),
-      router_(fuzzer->timer(), NodeId(index), false) {}
+      index_(index) {}
 
 void Nub::SendTo(int dest, Slice slice) {
+  assert(dest != 0);
   fuzzer_->QueueSend(index_, dest, std::move(slice));
 }
-
-Router* Nub::GetRouter() { return &router_; }
 
 Fuzzer::Fuzzer() = default;
 
@@ -133,6 +144,15 @@ void Fuzzer::DropPacket(uint64_t packet) {
   p.state = PacketState::DROPPED;
 }
 
+void Fuzzer::Close() {
+  int nubs_closed = 0;
+  nub1_.router()->Close([&nubs_closed] { nubs_closed++; });
+  nub2_.router()->Close([&nubs_closed] { nubs_closed++; });
+  while (nubs_closed != 2) {
+    StepTime();
+  }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Input
 
@@ -170,17 +190,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   const uint8_t end_behavior = input.NextByte();
   while (!fuzzer.IsDone()) {
     switch (input.NextByte()) {
-      case 0:
+      default:
         OVERNET_TRACE(INFO) << "Fuzzer: Flush";
         do {
-          if (input.IsEof()) {
-            if (end_behavior & 1) {
-              OVERNET_TRACE(INFO) << "Fuzzer: Initiate from 1 -> 2";
-              fuzzer.Initiate1();
-            } else {
-              OVERNET_TRACE(INFO) << "Fuzzer: Initiate from 2 -> 1";
-              fuzzer.Initiate2();
-            }
+          if (end_behavior & 1) {
+            OVERNET_TRACE(INFO) << "Fuzzer: Initiate from 1 -> 2";
+            fuzzer.Initiate1();
+          } else {
+            OVERNET_TRACE(INFO) << "Fuzzer: Initiate from 2 -> 1";
+            fuzzer.Initiate2();
           }
         } while (fuzzer.FlushPackets() || fuzzer.StepTime());
         if (input.IsEof() && !fuzzer.IsDone()) {
@@ -213,10 +231,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         OVERNET_TRACE(INFO) << "Fuzzer: Initiate from 2 -> 1";
         fuzzer.Initiate2();
       } break;
-      default: {
-        return 0;
-      }
     }
   }
+  fuzzer.Close();
   return 0;
 }

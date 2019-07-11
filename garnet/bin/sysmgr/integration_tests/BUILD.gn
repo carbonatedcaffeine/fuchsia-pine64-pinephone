@@ -4,6 +4,7 @@
 
 import("//build/fidl/fidl.gni")
 import("//build/package.gni")
+import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
 
 fidl("interface") {
@@ -58,6 +59,7 @@ executable("service_startup_test") {
   deps = [
     ":interface",
     "//garnet/bin/appmgr:appmgr_for_test",
+    "//garnet/examples/fidl/services:echo",
     "//garnet/public/lib/gtest",
     "//sdk/lib/sys/cpp",
     "//src/lib/fxl",
@@ -85,8 +87,7 @@ executable("package_updating_loader_test") {
   ]
 }
 
-package("integration_tests") {
-  testonly = true
+test_package("integration_tests") {
   package_name = "sysmgr_integration_tests"
 
   deps = [
@@ -125,13 +126,8 @@ package("integration_tests") {
       path = rebase_path("meta/mock_resolver.cmx")
       dest = "mock_resolver.cmx"
     },
-    {
-      path = rebase_path("meta/service_startup_test.cmx")
-      dest = "service_startup_test.cmx"
-    },
-    {
-      path = rebase_path("meta/package_updating_loader_test.cmx")
-      dest = "package_updating_loader_test.cmx"
-    },
   ]
+
+  components =
+      [ "//garnet/examples/fidl/echo_server_rust:echo_server_rust_component" ]
 }

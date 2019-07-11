@@ -4,7 +4,7 @@
 
 use {
     failure::{err_msg, Error, Fail, ResultExt},
-    fuchsia_async::TimeoutExt,
+    fuchsia_async::{DurationExt, TimeoutExt},
     fuchsia_bluetooth::{error::Error as BTError, expectation::asynchronous::ExpectableStateExt},
     fuchsia_zircon::{Duration, DurationNum},
     futures::TryFutureExt,
@@ -15,7 +15,7 @@ use crate::harness::low_energy_central::CentralHarness;
 mod central_expectation {
     use crate::harness::low_energy_central::{CentralState, ScanStateChange};
     use fuchsia_bluetooth::expectation::Predicate;
-    use fuchsia_bluetooth::le::RemoteDevice;
+    use fuchsia_bluetooth::types::le::RemoteDevice;
 
     pub fn scan_enabled() -> Predicate<CentralState> {
         Predicate::new(

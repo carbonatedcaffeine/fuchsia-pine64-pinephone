@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("../../gn/build_rules.gni")
+
 if (current_toolchain == host_toolchain) {
   executable("hotsort_gen") {
     sources = [
@@ -17,9 +19,8 @@ if (current_toolchain == host_toolchain) {
       "transpose.c",
       "transpose.h",
     ]
-    include_dirs = [ "//src/graphics/lib/compute" ]
     deps = [
-      "//src/graphics/lib/compute/common",
+      "${graphics_compute_dir}/common",
     ]
   }
 }

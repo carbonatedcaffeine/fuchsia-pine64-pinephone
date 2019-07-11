@@ -34,9 +34,7 @@ class HostDevice final {
   // Protocol trampolines.
   static void DdkUnbind(void* ctx) { static_cast<HostDevice*>(ctx)->Unbind(); }
 
-  static void DdkRelease(void* ctx) {
-    static_cast<HostDevice*>(ctx)->Release();
-  }
+  static void DdkRelease(void* ctx) { static_cast<HostDevice*>(ctx)->Release(); }
 
   // Route ddk fidl messages to the dispatcher function
   static zx_status_t DdkMessage(void* ctx, fidl_msg_t* msg, fidl_txn_t* txn) {
@@ -77,10 +75,17 @@ class HostDevice final {
   // Guards access to members below.
   std::mutex mtx_;
 
-  // Map of child DDK gatt devices
-  std::unordered_map<GattRemoteServiceDevice*,
-                     std::unique_ptr<GattRemoteServiceDevice>>
-      gatt_devices_;
+  // Contains the context objects for the bt-gatt-svc devices that are published for remote GATT
+  // services. These are maintained as weak/raw references and managed as part of the DDK lifecycle
+  // events. The following invariants are assumed:
+  //
+  //    1. This HostDevice strictly outlives all members that are referenced from |gatt_devices_|.
+  //    2. Each member is created and added to this list when a remote GATT service is detected AND
+  //       GattRemoteServiceDevice::Bind() returns success.
+  //    3. A member is explicitly unbound and removed from this list when the associated GATT
+  //       service is removed or when this HostDevice gets unbound.
+  //    4. The actual object destruction is expected to be performed via DDK events.
+  std::unordered_set<GattRemoteServiceDevice*> gatt_devices_ __TA_GUARDED(mtx_);
 
   // Host processes all its messages on |loop_|. |loop_| is initialized to run
   // in its own thread.

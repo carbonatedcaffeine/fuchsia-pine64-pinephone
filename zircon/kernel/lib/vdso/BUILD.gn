@@ -10,7 +10,7 @@ library("vdso") {
   kernel = true
   sources = [
     "vdso-image.S",
-    "vdso.cpp",
+    "vdso.cc",
   ]
 
   # vdso-image.S includes the vDSO (aka libzircon.so) contents and so must
@@ -45,7 +45,7 @@ library("vdso") {
 
 source_set("rodso") {
   sources = [
-    "rodso.cpp",
+    "rodso.cc",
   ]
   deps = [
     ":headers",

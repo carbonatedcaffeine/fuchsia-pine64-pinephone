@@ -5,16 +5,16 @@
 test("devfs") {
   test_group = "fs"
   sources = [
-    "fdio-tests.cpp",
-    "fidl-tests.cpp",
+    "fdio-tests.cc",
+    "fidl-tests.cc",
   ]
   deps = [
     "$zx/system/fidl/fuchsia-io:c",
     "$zx/system/ulib/fbl",
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/fs",
-    "$zx/system/ulib/unittest",
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",
+    "$zx/system/ulib/zxtest",
   ]
 }

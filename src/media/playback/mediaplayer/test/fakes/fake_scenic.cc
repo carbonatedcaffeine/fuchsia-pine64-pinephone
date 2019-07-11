@@ -17,23 +17,18 @@ FakeScenic::FakeScenic() : dispatcher_(async_get_default_dispatcher()) {}
 FakeScenic::~FakeScenic() {}
 
 void FakeScenic::CreateSession(
-    ::fidl::InterfaceRequest<fuchsia::ui::scenic::Session> session,
-    ::fidl::InterfaceHandle<fuchsia::ui::scenic::SessionListener> listener) {
+    fidl::InterfaceRequest<fuchsia::ui::scenic::Session> session,
+    fidl::InterfaceHandle<fuchsia::ui::scenic::SessionListener> listener) {
   fake_session_.Bind(std::move(session), listener.Bind());
 }
 
-void FakeScenic::GetDisplayInfo(GetDisplayInfoCallback callback) {
+void FakeScenic::GetDisplayInfo(GetDisplayInfoCallback callback) { FXL_NOTIMPLEMENTED(); }
+
+void FakeScenic::GetDisplayOwnershipEvent(GetDisplayOwnershipEventCallback callback) {
   FXL_NOTIMPLEMENTED();
 }
 
-void FakeScenic::GetDisplayOwnershipEvent(
-    GetDisplayOwnershipEventCallback callback) {
-  FXL_NOTIMPLEMENTED();
-}
-
-void FakeScenic::TakeScreenshot(TakeScreenshotCallback callback) {
-  FXL_NOTIMPLEMENTED();
-}
+void FakeScenic::TakeScreenshot(TakeScreenshotCallback callback) { FXL_NOTIMPLEMENTED(); }
 
 }  // namespace test
 }  // namespace media_player

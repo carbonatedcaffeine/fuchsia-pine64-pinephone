@@ -28,8 +28,7 @@ int main(int argc, const char** argv) {
 #if !defined(NDEBUG)
     instance_params.layer_names.insert("VK_LAYER_LUNARG_standard_validation");
 #endif
-    auto vulkan_instance =
-        escher::VulkanInstance::New(std::move(instance_params));
+    auto vulkan_instance = escher::VulkanInstance::New(std::move(instance_params));
 
     auto vulkan_device = escher::VulkanDeviceQueues::New(
         vulkan_instance, {{
@@ -37,13 +36,15 @@ int main(int argc, const char** argv) {
                               VK_FUCHSIA_EXTERNAL_MEMORY_EXTENSION_NAME,
                               VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
                               VK_FUCHSIA_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
+                              VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
                           },
+                          {},
                           vk::SurfaceKHR()});
 
     escher::Escher escher(vulkan_device);
 
     async::Loop loop(&kAsyncLoopConfigAttachToThread);
-    trace::TraceProvider trace_provider(loop.dispatcher());
+    trace::TraceProviderWithFdio trace_provider(loop.dispatcher());
 
     std::unique_ptr<component::StartupContext> app_context(
         component::StartupContext::CreateFromStartupInfo());

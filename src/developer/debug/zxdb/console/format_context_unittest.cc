@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "src/developer/debug/zxdb/console/format_context.h"
+
 #include "gtest/gtest.h"
 #include "src/developer/debug/zxdb/client/arch_info.h"
 #include "src/developer/debug/zxdb/client/memory_dump.h"
@@ -28,8 +29,7 @@ TEST(FormatContext, FormatSourceContext) {
   opts.highlight_column = 11;
 
   OutputBuffer out;
-  ASSERT_FALSE(
-      FormatSourceContext("file", kSimpleProgram, opts, &out).has_error());
+  ASSERT_FALSE(FormatSourceContext("file", kSimpleProgram, opts, &out).has_error());
   EXPECT_EQ(
       "   2 \n   3 int main(int argc, char** argv) {\n"
       " ▶ 4   printf(\"Hello, world\");\n"
@@ -49,8 +49,7 @@ TEST(FormatContext, FormatSourceContext_OffBeginning) {
   OutputBuffer out;
   // This column is off the end of line two, and the context has one less line
   // at the beginning because it hit the top of the file.
-  ASSERT_FALSE(
-      FormatSourceContext("file", kSimpleProgram, opts, &out).has_error());
+  ASSERT_FALSE(FormatSourceContext("file", kSimpleProgram, opts, &out).has_error());
   EXPECT_EQ(
       "   1 #include \"foo.h\"\n"
       " ▶ 2 \n"
@@ -70,8 +69,7 @@ TEST(FormatContext, FormatSourceContext_OffEnd) {
   OutputBuffer out;
   // This column is off the end of line two, and the context has one less line
   // at the beginning because it hit the top of the file.
-  ASSERT_FALSE(
-      FormatSourceContext("file", kSimpleProgram, opts, &out).has_error());
+  ASSERT_FALSE(FormatSourceContext("file", kSimpleProgram, opts, &out).has_error());
   EXPECT_EQ(
       "   4   printf(\"Hello, world\");\n"
       "   5   return 1;\n"

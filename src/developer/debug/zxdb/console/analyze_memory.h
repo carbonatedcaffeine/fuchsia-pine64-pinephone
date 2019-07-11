@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_ANALYZE_MEMORY_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_ANALYZE_MEMORY_H_
 
 #include <functional>
 #include <map>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include "src/developer/debug/ipc/records.h"
+#include "src/developer/debug/ipc/register_desc.h"
 #include "src/developer/debug/zxdb/client/memory_dump.h"
 #include "src/lib/fxl/memory/ref_counted.h"
 #include "src/lib/fxl/memory/weak_ptr.h"
@@ -22,7 +24,7 @@ class OutputBuffer;
 class Process;
 class Stack;
 class Thread;
-class RegisterSet;
+class Register;
 
 struct AnalyzeMemoryOptions {
   // Required.
@@ -47,10 +49,9 @@ struct AnalyzeMemoryOptions {
 //
 // On error, the Err will be set, the output buffer will be empty, and
 // next_addr will be 0.
-void AnalyzeMemory(const AnalyzeMemoryOptions& opts,
-                   std::function<void(const Err& err, OutputBuffer analysis,
-                                      uint64_t next_addr)>
-                       cb);
+void AnalyzeMemory(
+    const AnalyzeMemoryOptions& opts,
+    std::function<void(const Err& err, OutputBuffer analysis, uint64_t next_addr)> cb);
 
 namespace internal {
 
@@ -61,8 +62,7 @@ namespace internal {
 // asynchronous callbacks to issue the final complete callback.
 class MemoryAnalysis : public fxl::RefCountedThreadSafe<MemoryAnalysis> {
  public:
-  using Callback = std::function<void(const Err& err, OutputBuffer analysis,
-                                      uint64_t next_addr)>;
+  using Callback = std::function<void(const Err& err, OutputBuffer analysis, uint64_t next_addr)>;
 
   MemoryAnalysis(const AnalyzeMemoryOptions& opts, Callback cb);
   ~MemoryAnalysis() = default;
@@ -73,17 +73,16 @@ class MemoryAnalysis : public fxl::RefCountedThreadSafe<MemoryAnalysis> {
 
   // Tests can call these functions to manually provide the data that would
   // normally be provided via IPC call. To use, call before "Schedule".
+  // Note: Frame 0's registers should be set first.
   void SetAspace(std::vector<debug_ipc::AddressRegion> aspace);
   void SetStack(const Stack& stack);
   void SetMemory(MemoryDump dump);
-  void SetRegisters(const RegisterSet&);
 
  private:
   void DoAnalysis();
 
   // Request callbacks.
   void OnAspace(const Err& err, std::vector<debug_ipc::AddressRegion> aspace);
-  void OnRegisters(const Err&, const RegisterSet&);
   void OnMemory(const Err& err, MemoryDump dump);
   void OnFrames(fxl::WeakPtr<Thread> thread);
 
@@ -93,6 +92,9 @@ class MemoryAnalysis : public fxl::RefCountedThreadSafe<MemoryAnalysis> {
   // Call when something goes wrong to issue the callback with the given
   // error printed to it.
   void IssueError(const Err& err);
+
+  // Saves the registers for the given frame index.
+  void AddRegisters(int frame_no, const std::vector<Register>& regs);
 
   // Adds to the annotations map the given description for the given address.
   // If there is already an annotation at that address, adds to the end.
@@ -104,8 +106,7 @@ class MemoryAnalysis : public fxl::RefCountedThreadSafe<MemoryAnalysis> {
 
   // Returns a formatted string representing all annotations in the range (end
   // non-inclusive).
-  std::string GetAnnotationsBetween(uint64_t address_begin,
-                                    uint64_t address_end) const;
+  std::string GetAnnotationsBetween(uint64_t address_begin, uint64_t address_end) const;
 
   // Returns a formatted string representing with the given data value
   // points to (if possible). Returns an empty string otherwise.
@@ -133,11 +134,15 @@ class MemoryAnalysis : public fxl::RefCountedThreadSafe<MemoryAnalysis> {
   bool aborted_ = false;
 
   // The things that need to be queried asynchronously before dumping.
-  bool have_registers_ = false;
   bool have_memory_ = false;
   bool have_frames_ = false;
   bool have_aspace_ = false;
+
+  // The register values from frame 0. See AddRegisters().
+  std::map<debug_ipc::RegisterID, uint64_t> frame_0_regs_;
 };
 
 }  // namespace internal
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_ANALYZE_MEMORY_H_

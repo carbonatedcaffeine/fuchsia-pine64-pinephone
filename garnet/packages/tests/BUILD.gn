@@ -71,6 +71,7 @@ group("tracing") {
     "//garnet/bin/trace/tests:trace_tests",
     "//garnet/bin/trace2json:trace2json_tests($host_toolchain)",
     "//garnet/bin/trace_stress",
+    "//garnet/lib/trace_converters:trace_converter_tests",
     "//garnet/packages/prod:tracing",
   ]
 }
@@ -106,7 +107,6 @@ group("acts_tests") {
 group("scenic") {
   testonly = true
   public_deps = [
-    "//garnet/bin/ui:ime_service_tests",
     "//garnet/bin/ui:scenic_tests",
     "//garnet/bin/ui/benchmarks/image_grid_cpp",
     "//garnet/bin/ui/benchmarks/transparency_benchmark",
@@ -121,13 +121,15 @@ group("scenic") {
     "//garnet/lib/ui/gfx/tests/rotated_square_test",
     "//garnet/packages/examples:scenic",
     "//garnet/packages/prod:scenic",
+    "//src/ui/bin/ime:tests",
+    "//src/ui/bin/shortcut:tests",
   ]
 }
 
 group("cmc") {
   testonly = true
   public_deps = [
-    "//garnet/bin/cmc:cmc($host_toolchain)",
+    "//src/sys/cmc:cmc_test($host_toolchain)",
   ]
 }
 
@@ -185,6 +187,13 @@ group("odu_tests") {
   ]
 }
 
+group("odu_host_tests") {
+  testonly = true
+  public_deps = [
+    "//garnet/bin/odu:odu_tests($host_toolchain)",
+  ]
+}
+
 group("fostr") {
   testonly = true
   public_deps = [
@@ -220,6 +229,13 @@ group("component_cpp") {
   testonly = true
   public_deps = [
     "//sdk/lib/sys/cpp/tests:component_cpp_tests",
+  ]
+}
+
+group("fuzzing") {
+  testonly = true
+  public_deps = [
+    "//sdk/lib/fuzzing/cpp:fuzz_input_unittests($host_toolchain)",
   ]
 }
 
@@ -264,7 +280,7 @@ group("zxdb") {
 group("debugserver") {
   testonly = true
   public_deps = [
-    "//garnet/bin/debugserver:debugserver_tests",
+    "//garnet/bin/debugserver:tests",
     "//garnet/lib/debugger_utils:debugger_utils_tests",
     "//garnet/lib/inferior_control:inferior_control_tests",
     "//garnet/packages/prod:debugserver",
@@ -275,6 +291,8 @@ group("examples") {
   testonly = true
   public_deps = [
     ":intl_examples",
+    "//garnet/examples/rust/inspect-rs:inspect_example_rs_tests",
+    "//sdk/lib/sys/cpp/testing/examples:component_context_provider_example_test",
     "//sdk/lib/sys/cpp/testing/examples:component_context_provider_example_test",
     "//sdk/lib/sys/cpp/testing/examples/test_with_environment:test_with_environment_example_test",
   ]
@@ -283,7 +301,8 @@ group("examples") {
 group("intl_examples") {
   testonly = true
   public_deps = [
-    "//garnet/examples/intl/manager:intl_property_manager_tests",
+    "//examples/intl/tz_version_parrot/test:tz_version_parrot_test",
+    "//garnet/examples/intl/manager:tests",
     "//garnet/examples/intl/wisdom/test:intl_wisdom_test",
   ]
 }
@@ -306,6 +325,7 @@ group("go_far_tests") {
 group("all") {
   testonly = true
   public_deps = [
+    ":a11y",
     ":acts_tests",
     ":amber",
     ":archivist_tests",
@@ -316,6 +336,7 @@ group("all") {
     ":bluetooth",
     ":boringssl",
     ":camera_client",
+    ":camera_driver",
     ":carnelian",
     ":catapult_converter",
     ":chrealm",
@@ -346,12 +367,12 @@ group("all") {
     ":fidl_compatibility_test_server_rust",
     ":fidl_llcpp_conformance_test",
     ":fidl_llcpp_types_test",
-    ":fidlcat",
     ":fidlext_tests",
     ":fonts",
     ":fostr",
     ":fsl",
     ":fuchsia_component_test",
+    ":fuzzing",
     ":fxl",
     ":gfxlatency",
     ":go_benchmarking_tests",
@@ -363,6 +384,7 @@ group("all") {
     ":guest",
     ":httpdate_hyper",
     ":image_pipe_swapchain",
+    ":inspect_health_unittests",
     ":inspect_query_unittests",
     ":inspect_unittests",
     ":iquery_golden_test",
@@ -376,9 +398,8 @@ group("all") {
     ":log_listener",
     ":logger",
     ":magma",
-    ":mdns",
     ":media",
-    ":memory_monitor",
+    ":memory_metrics",
     ":netcfg_tests",
     ":netemul",
     ":netfilter",
@@ -386,6 +407,7 @@ group("all") {
     ":netstack3",
     ":network",
     ":network_time",
+    ":odu_host_tests",
     ":odu_tests",
     ":omaha_client",
     ":overnet",
@@ -394,7 +416,6 @@ group("all") {
     ":pkg_resolver",
     ":pkg_url",
     ":pmd",
-    ":power_manager",
     ":process",
     ":profiler",
     ":rapidjson_utils",
@@ -418,6 +439,7 @@ group("all") {
     ":system_monitor_fuchsia",
     ":system_monitor_host",
     ":system_ota_tests",
+    ":system_update_checker",
     ":telephony",
     ":terminal",
     ":tiles",
@@ -437,8 +459,10 @@ group("all") {
     ":whereiscl",
     ":zircon",
     ":zxdb",
+    "//garnet/bin/sshd-host:sshd-host-tests",
     "//garnet/go/src/pm:host_tests",
-    "//src/connectivity/dhcp:dhcp_tests",
+    "//src/connectivity/network/dhcp:dhcp_tests",
+    "//src/connectivity/network/mdns/bundles:tests",
     "//src/sys/component_index:component_index_tests",
     "//src/sys/dash:dash_test",
     "//src/sys/locate:locate_integration_test",
@@ -463,14 +487,6 @@ group("fidl_llcpp_types_test") {
   testonly = true
   public_deps = [
     "//garnet/public/lib/fidl/llcpp:fidl_llcpp_types_test",
-  ]
-}
-
-group("fidlcat") {
-  testonly = true
-  public_deps = [
-    "//tools/fidlcat:fidlcat_host_tests($host_toolchain)",
-    "//tools/fidlcat:fidlcat_tests",
   ]
 }
 
@@ -499,28 +515,36 @@ group("libc") {
 group("inspect_unittests") {
   testonly = true
   public_deps = [
-    "//garnet/public/lib/inspect/tests:inspect_unittests",
+    "//garnet/public/lib/inspect_deprecated/tests:inspect_unittests",
+  ]
+}
+
+group("inspect_health_unittests") {
+  testonly = true
+  public_deps = [
+    "//garnet/public/lib/inspect_deprecated/health/tests:inspect_health_unittests",
   ]
 }
 
 group("inspect_query_unittests") {
   testonly = true
   public_deps = [
-    "//garnet/public/lib/inspect/query/tests:inspect_query_unittests",
+    "//garnet/public/lib/inspect_deprecated/query/tests:inspect_query_unittests",
   ]
 }
 
-group("memory_monitor") {
+group("memory_metrics") {
   testonly = true
   public_deps = [
-    "//garnet/bin/memory_monitor/test:memory_monitor_tests",
+    "//src/developer/memory/metrics/tests:memory_metrics_tests",
+    "//src/developer/memory/monitor/tests:memory_monitor_tests",
   ]
 }
 
 group("netstack_integration_tests") {
   testonly = true
   public_deps = [
-    "//src/connectivity/dhcp:dhcpd",
+    "//src/connectivity/network/dhcp:dhcpd",
     "//src/connectivity/network/testing/netemul",
     "//src/connectivity/network/tests:netstack_integration_tests",
   ]
@@ -533,7 +557,6 @@ group("netstack") {
     "//garnet/packages/prod:netstack",
     "//src/connectivity/network/netstack:netstack_gotests",
     "//src/connectivity/network/netstack/dhcp:netstack_dhcp_gotests",
-    "//src/connectivity/network/netstack/dhcp:netstack_dhcp_test($host_toolchain)",
     "//src/connectivity/network/netstack/dns:netstack_dns_gotests",
     "//src/connectivity/network/netstack/link/bridge:netstack_link_bridge_test($host_toolchain)",
     "//src/connectivity/network/netstack/routes:netstack_routes_gotests",
@@ -541,6 +564,7 @@ group("netstack") {
     "//src/connectivity/network/netstack/util:netstack_util_test($host_toolchain)",
     "//src/connectivity/network/tests:netstack_bsdsocket_c_api_test($host_toolchain)",
     "//src/connectivity/network/tests:netstack_c_api_tests",
+    "//src/connectivity/network/tests:netstack_external_network_test_client($host_toolchain)",
   ]
 }
 
@@ -565,9 +589,11 @@ group("fidl") {
     "//garnet/go/src/fidl:fidlgen_rust_test($host_toolchain)",
     "//garnet/go/src/fidl:fidlgen_syzkaller_ir_test($host_toolchain)",
     "//garnet/go/src/fidl:fidlgen_syzkaller_test($host_toolchain)",
+    "//garnet/go/src/fidl:fidlgen_types_test($host_toolchain)",
     "//garnet/public/lib/fidl/rust/fidl:rust_fidl_tests",
     "//garnet/tests/fidl-changes",
     "//garnet/tests/fidl-dangerous-identifiers",
+    "//sdk/lib/fidl/cpp:fidl_cpp_host_conformance_test($host_toolchain)",
     "//sdk/lib/fidl/cpp:fidl_cpp_host_unittests($host_toolchain)",
     "//sdk/lib/fidl/cpp:fidl_tests",
     "//tools/fidl/gidl:gidl_parser_test($host_toolchain)",
@@ -577,7 +603,7 @@ group("fidl") {
 group("difl") {
   testonly = true
   public_deps = [
-    "//garnet/public/lib/fidl/tools/difl_test_fidl",
+    "//tools/fidl/difl/tests",
   ]
 }
 
@@ -596,6 +622,7 @@ group("overnet") {
     "//src/connectivity/overnet/lib:overnet_fuzzers",
     "//src/connectivity/overnet/lib:overnet_tests",
     "//src/connectivity/overnet/lib:overnet_unittests($host_toolchain)",
+    "//src/connectivity/overnet/lib/endpoint/integration_tests:router_endpoint_integration_fuzzer_replay($host_toolchain)",
     "//src/connectivity/overnet/overnetstack:overnetstack_tests",
   ]
 }
@@ -611,7 +638,7 @@ group("syslog") {
 group("fsl") {
   testonly = true
   public_deps = [
-    "//garnet/public/lib/fsl:package",
+    "//garnet/public/lib/fsl:fsl_tests",
   ]
 }
 
@@ -655,12 +682,15 @@ group("guest") {
   testonly = true
   public_deps = [
     "//garnet/bin/vsock_service:vsock_service-tests",
-    "//garnet/packages/experimental:debian_guest",
-    "//garnet/packages/experimental:zircon_guest",
-    "//garnet/public/lib/guest:guest_lib_tests",
+    "//sdk/lib/virtualization:virtualization_lib_tests",
     "//src/virtualization/bin/guest_manager:guest_manager_tests",
     "//src/virtualization/bin/vmm:vmm_tests",
+    "//src/virtualization/bin/vmm/device:virtio_magma_mock_system",
+    "//src/virtualization/lib/grpc:grpc_vsock_tests",
+    "//src/virtualization/lib/guest_interaction:guest_interaction_tests",
+    "//src/virtualization/lib/vsh:vsh_tests",
     "//src/virtualization/tests:guest_integration_tests",
+    "//src/virtualization/tests:guest_unit_tests",
   ]
 }
 
@@ -731,15 +761,6 @@ group("fidl_compatibility_test_server_rust") {
   ]
 }
 
-group("mdns") {
-  testonly = true
-  public_deps = [
-    "//garnet/packages/prod:run",
-    "//src/connectivity/network/mdns/service:mdns_fuzzers",
-    "//src/connectivity/network/mdns/service:mdns_tests",
-  ]
-}
-
 group("go_stdlib_tests") {
   testonly = true
   public_deps = [
@@ -783,10 +804,9 @@ group("media") {
   public_deps = [
     ":virtual_audio",
     "//garnet/bin/media/codecs:tests",
-    "//garnet/public/lib/media/timeline:media_lib_timeline_tests",
-    "//src/media/audio:tests",
+    "//sdk/lib/media/cpp:media_lib_timeline_tests",
+    "//src/media:tests",
     "//src/media/playback/mediaplayer:tests",
-    "//src/media/sessions:tests",
   ]
 }
 
@@ -820,15 +840,6 @@ group("pkg_cache") {
   ]
 }
 
-group("power_manager") {
-  testonly = true
-  public_deps = [
-    "//garnet/bin/power_manager:power_manager_tests",
-    "//garnet/go/src/power_manager:power_manager_gotests",
-    "//garnet/packages/prod:power_manager",
-  ]
-}
-
 group("fidl_compatibility_test") {
   testonly = true
   public_deps = [
@@ -843,8 +854,16 @@ group("fidl_compatibility_test") {
 group("camera_client") {
   testonly = true
   public_deps = [
-    "//garnet/examples/camera/camera_client:example_camera_client",
-    "//garnet/lib/media/camera/simple_camera_lib:camera_tests",
+    "//src/camera/simple_camera/simple_camera_lib:camera_tests",
+    "//src/camera/test/camera_client_test",
+  ]
+}
+
+group("camera_driver") {
+  testonly = true
+  public_deps = [
+    "//src/camera:camera_full_on_device_test",
+    "//src/camera:camera_full_test",
   ]
 }
 
@@ -931,7 +950,7 @@ group("vulkan") {
   testonly = true
   public_deps = [
     "//garnet/packages/prod:vulkan",
-    "//third_party/vulkan_loader_and_validation_layers/layers:vulkan_loader_and_layers_tests",
+    "//src/graphics/lib/vulkan:loader_and_validation_tests",
   ]
 }
 
@@ -989,6 +1008,13 @@ group("pkg_resolver") {
   ]
 }
 
+group("system_update_checker") {
+  testonly = true
+  public_deps = [
+    "//garnet/bin/system-update-checker:system-update-checker-tests",
+  ]
+}
+
 group("chrealm") {
   testonly = true
   public_deps = [
@@ -1021,7 +1047,7 @@ group("go_tuf") {
 group("libinspect_integration_tests") {
   testonly = true
   public_deps = [
-    "//garnet/public/lib/inspect/integration:libinspect_integration_tests",
+    "//garnet/public/lib/inspect_deprecated/integration:libinspect_integration_tests",
   ]
 }
 
@@ -1036,14 +1062,14 @@ group("zircon") {
 group("runtime") {
   testonly = true
   public_deps = [
-    "//garnet/bin/appmgr:appmgr_unittests",
+    "//garnet/bin/appmgr:unittests",
     "//garnet/bin/appmgr/integration_tests:appmgr_integration_tests",
     "//garnet/bin/appmgr/integration_tests/inspect:inspect_integration_tests",
     "//garnet/bin/appmgr/integration_tests/inspect:inspect_vmo_integration_tests",
     "//garnet/bin/appmgr/integration_tests/mock_runner:appmgr_mock_runner",
     "//garnet/bin/appmgr/integration_tests/mock_runner:fake_component_for_runner",
     "//garnet/bin/appmgr/integration_tests/sandbox/features/build-info:build_info_tests",
-    "//garnet/bin/appmgr/integration_tests/sandbox/features/shell:has_shell",
+    "//garnet/bin/appmgr/integration_tests/sandbox/features/shell:has_deprecated_shell",
     "//garnet/bin/appmgr/integration_tests/sandbox/features/shell:no_shell",
     "//garnet/bin/appmgr/integration_tests/sandbox/features/storage",
     "//garnet/bin/appmgr/integration_tests/sandbox/features/system-temp:has_system_temp",
@@ -1057,6 +1083,7 @@ group("runtime") {
     "//garnet/packages/prod:runtime",
     "//src/sys/component_manager:component_manager_tests",
     "//src/sys/component_manager/tests:elf_runner_test",
+    "//src/sys/component_manager/tests:hub_integration_test",
     "//src/sys/component_manager/tests:no_pkg_resolver_test",
     "//src/sys/component_manager/tests:routing_integration_test",
   ]
@@ -1095,7 +1122,7 @@ group("device_settings") {
 group("terminal") {
   testonly = true
   public_deps = [
-    "//garnet/bin/terminal:terminal_tests",
+    "//garnet/bin/terminal:tests",
   ]
 }
 
@@ -1128,20 +1155,22 @@ group("bluetooth") {
     "//garnet/packages/prod:bluetooth_core",
     "//src/connectivity/bluetooth/core/bt-gap:tests",
     "//src/connectivity/bluetooth/core/bt-host:bluetooth_fuzzers",
-    "//src/connectivity/bluetooth/hci/fake",
+    "//src/connectivity/bluetooth/hci/emulator",
     "//src/connectivity/bluetooth/lib/bt-avctp:tests",
     "//src/connectivity/bluetooth/lib/bt-avdtp:tests",
     "//src/connectivity/bluetooth/lib/fuchsia-bluetooth:tests",
     "//src/connectivity/bluetooth/profiles/bt-a2dp-sink:tests",
     "//src/connectivity/bluetooth/tests",
+    "//src/connectivity/bluetooth/tools/bt-avrcp-controller:tests",
+    "//src/connectivity/bluetooth/tools/bt-cli:tests",
     "//src/connectivity/bluetooth/tools/bt-snoop:tests",
+    "//src/connectivity/bluetooth/tools/tests/bt-tool-cli-tests",
   ]
 }
 
 group("rust_crates") {
   testonly = true
   public_deps = [
-    "//garnet/bin/cmc:cmc_integration_test",
     "//garnet/bin/rolldice:rolldice-tests",
     "//garnet/lib/rust/cm_fidl_translator:cm_fidl_translator_tests",
     "//garnet/lib/rust/cm_fidl_validator:cm_fidl_validator_tests",
@@ -1150,15 +1179,21 @@ group("rust_crates") {
     "//garnet/lib/rust/connectivity-testing:connectivity-testing-tests",
     "//garnet/lib/rust/escaped-cstring:escaped-cstring-tests",
     "//garnet/lib/rust/ethernet:ethernet-tests",
+    "//garnet/lib/rust/fidl_fuchsia_amber_ext:fidl_fuchsia_amber_ext_tests",
     "//garnet/lib/rust/fidl_fuchsia_pkg_ext:fidl_fuchsia_pkg_ext_tests",
     "//garnet/lib/rust/fuchsia_pkg:fuchsia_pkg_tests",
-    "//garnet/lib/rust/fuchsia_uri:fuchsia_uri_tests",
-    "//garnet/lib/rust/fuchsia_uri_rewrite:fuchsia_uri_rewrite_tests",
+    "//garnet/lib/rust/fuchsia_pkg_testing:tests",
     "//garnet/lib/rust/io_util:io_util_tests",
     "//garnet/public/rust:rust-crates-tests",
+    "//garnet/public/rust/fdio:tests",
     "//garnet/public/rust/fuchsia-async:fuchsia-async-tests",
     "//garnet/public/rust/fuchsia-hyper:fuchsia-hyper-tests",
     "//garnet/public/rust/fuchsia-syslog:fuchsia-syslog-tests",
+    "//garnet/public/rust/fuchsia-vfs:fuchsia-vfs-tests",
+    "//garnet/public/rust/fuchsia-zircon:fuchsia-zircon-tests",
+    "//src/sys/cmc:cmc_integration_test",
+    "//src/sys/lib/fuchsia_url:fuchsia_url_tests",
+    "//src/sys/lib/fuchsia_url_rewrite:fuchsia_url_rewrite_tests",
   ]
 }
 
@@ -1205,6 +1240,7 @@ group("e2e_input_tests") {
   testonly = true
   public_deps = [
     "//garnet/tests/e2e_input_tests:e2e_input_tests",
+    "//src/ui/tests/e2e_input_tests",
   ]
 }
 
@@ -1249,6 +1285,7 @@ group("httpdate_hyper") {
 group("setui_client") {
   testonly = true
   public_deps = [
+    "//garnet/bin/setui_client:setui_client_interface_test",
     "//garnet/bin/setui_client:setui_client_tests",
     "//garnet/packages/prod:setui_client",
   ]
@@ -1278,7 +1315,7 @@ group("linux_runner") {
 group("catapult_converter") {
   testonly = true
   public_deps = [
-    "//garnet/bin/catapult_converter:host_catapult_converter_test($host_toolchain)",
+    "//garnet/bin/catapult_converter:catapult_converter_tests($host_toolchain)",
   ]
 }
 
@@ -1293,5 +1330,12 @@ group("whereiscl") {
   testonly = true
   public_deps = [
     "//tools/whereiscl:whereiscl_test($host_toolchain)",
+  ]
+}
+
+group("a11y") {
+  testonly = true
+  public_deps = [
+    "//src/ui/a11y/tests:tests",
   ]
 }

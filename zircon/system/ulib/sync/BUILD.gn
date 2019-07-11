@@ -4,15 +4,17 @@
 
 library("sync") {
   sdk = "static"
+  sdk_publishable = true
   sdk_headers = [
     "lib/sync/internal/condition-template.h",
+    "lib/sync/internal/mutex-internal.h",
     "lib/sync/completion.h",
     "lib/sync/condition.h",
     "lib/sync/mutex.h",
   ]
   sources = [
     "completion.c",
-    "condition.cpp",
+    "condition.cc",
     "mutex.c",
   ]
   configs += [ "$zx/public/gn/config:visibility_hidden" ]

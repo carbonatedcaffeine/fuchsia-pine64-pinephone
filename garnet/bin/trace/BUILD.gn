@@ -64,11 +64,11 @@ source_set("spec") {
 
   public_deps = [
     "//garnet/lib/measure",
-    "//garnet/public/lib/rapidjson_utils",
     "//src/lib/fxl",
   ]
 
   deps = [
+    "//garnet/public/lib/rapidjson_utils",
     "//third_party/rapidjson",
   ]
 }
@@ -89,6 +89,8 @@ source_set("unittests") {
 }
 
 package("trace") {
+  deprecated_shell = "//build"
+
   deps = [
     ":bin",
   ]

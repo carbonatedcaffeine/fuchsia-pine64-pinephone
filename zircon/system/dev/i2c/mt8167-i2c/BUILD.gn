@@ -4,13 +4,16 @@
 
 driver("mt8167-i2c") {
   sources = [
-    "mt8167-i2c.cpp",
+    "mt8167-i2c.cc",
   ]
   deps = [
+    "$zx/system/banjo/ddk.protocol.composite",
     "$zx/system/banjo/ddk.protocol.gpio",
     "$zx/system/banjo/ddk.protocol.i2c",
     "$zx/system/banjo/ddk.protocol.i2cimpl",
     "$zx/system/banjo/ddk.protocol.platform.device",
+    "$zx/system/dev/lib/device-protocol-pdev",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
     "$zx/system/dev/lib/mt8167",
     "$zx/system/ulib/ddk",
@@ -26,17 +29,19 @@ driver("mt8167-i2c") {
 test("mt8167-i2c-test") {
   output_name = "mt8167-i2c-test"
   sources = [
-    "mt8167-i2c-test.cpp",
-    "mt8167-i2c.cpp",
+    "mt8167-i2c-test.cc",
+    "mt8167-i2c.cc",
   ]
   deps = [
+    "$zx/system/banjo/ddk.protocol.composite",
     "$zx/system/banjo/ddk.protocol.gpio",
     "$zx/system/banjo/ddk.protocol.i2c",
     "$zx/system/banjo/ddk.protocol.i2cimpl",
     "$zx/system/banjo/ddk.protocol.platform.bus",
     "$zx/system/banjo/ddk.protocol.platform.device",
+    "$zx/system/dev/lib/device-protocol-pdev",
+    "$zx/system/dev/lib/device-protocol-platform-device",
     "$zx/system/dev/lib/mmio",
-    "$zx/system/dev/lib/mock-gpio",
     "$zx/system/dev/lib/mt8167",
     "$zx/system/ulib/ddk",
     "$zx/system/ulib/ddktl",

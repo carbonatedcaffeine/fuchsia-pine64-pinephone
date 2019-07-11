@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/clang/clang.gni")
-import("//build/config/fuchsia/zircon.gni")
+import("//build/config/fuchsia/zircon_images.gni")
 
 declare_args() {
   # Manifest files describing target libraries from toolchains.
@@ -22,10 +22,12 @@ declare_args() {
   extra_manifest_args = []
 }
 
+zircon_boot_manifests = []
 foreach(image, zircon_images) {
   if (image.type == "manifest") {
-    if (image.name == "legacy-image-$target_cpu") {
-      zircon_boot_manifests = [ "$zircon_root_build_dir/${image.path}" ]
+    if (image.name == "legacy-image-$target_cpu" ||
+        (image.cpu == target_cpu && image.name == "bootsvc")) {
+      zircon_boot_manifests += [ "$zircon_root_build_dir/${image.path}" ]
     } else if (image.name == "legacy-aux-$target_cpu") {
       zircon_aux_manifests = [ "$zircon_root_build_dir/${image.path}" ]
     }
@@ -113,6 +115,9 @@ template("generate_response_file") {
 #     [string] Comma-separated list of Zircon manifest groups to include
 #     in `bootfs_manifest`.
 #
+#   output_name (optional, default: target_name)
+#     [string] Root name of the output manifest file.
+#
 #   zircon_groups (optional, default: "")
 #     [string] Comma-separated list of Zircon manifest groups to include.
 #     If this is "", then the Zircon manifest only provides binaries
@@ -143,7 +148,11 @@ template("generate_manifest") {
     if (!defined(zircon_groups)) {
       zircon_groups = ""
     }
-    manifest_file = "$target_out_dir/$target_name"
+    if (defined(invoker.output_name)) {
+      manifest_file = "$target_out_dir/${invoker.output_name}"
+    } else {
+      manifest_file = "$target_out_dir/$target_name"
+    }
     depfile = "${manifest_file}.d"
     build_id_file = "${manifest_file}.ids.txt"
     stripped_dir = "${manifest_file}.stripped"

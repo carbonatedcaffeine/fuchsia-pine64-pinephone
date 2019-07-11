@@ -9,7 +9,6 @@
 #include <fbl/ref_counted.h>
 #include <fbl/ref_ptr.h>
 #include <fuchsia/media/cpp/fidl.h>
-#include <stdint.h>
 
 #include <memory>
 
@@ -17,10 +16,9 @@ namespace media::audio {
 
 class AudioCoreImpl;
 
-class PendingFlushToken
-    : public fbl::RefCounted<PendingFlushToken>,
-      public fbl::Recyclable<PendingFlushToken>,
-      public fbl::DoublyLinkedListable<std::unique_ptr<PendingFlushToken>> {
+class PendingFlushToken : public fbl::RefCounted<PendingFlushToken>,
+                          public fbl::Recyclable<PendingFlushToken>,
+                          public fbl::DoublyLinkedListable<std::unique_ptr<PendingFlushToken>> {
  public:
   static fbl::RefPtr<PendingFlushToken> Create(
       AudioCoreImpl* const service,
@@ -35,9 +33,8 @@ class PendingFlushToken
   friend class fbl::Recyclable<PendingFlushToken>;
   friend class std::default_delete<PendingFlushToken>;
 
-  PendingFlushToken(
-      AudioCoreImpl* const service,
-      fuchsia::media::AudioRenderer::DiscardAllPacketsCallback callback)
+  PendingFlushToken(AudioCoreImpl* const service,
+                    fuchsia::media::AudioRenderer::DiscardAllPacketsCallback callback)
       : service_(service), callback_(std::move(callback)) {}
 
   ~PendingFlushToken();

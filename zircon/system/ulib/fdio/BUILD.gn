@@ -4,6 +4,7 @@
 
 library("fdio") {
   sdk = "shared"
+  sdk_publishable = true
   sdk_headers = [
     "lib/fdio/directory.h",
     "lib/fdio/fd.h",
@@ -19,32 +20,32 @@ library("fdio") {
   ]
   shared = true
   sources = [
-    "bsdsocket.cpp",
-    "fd.cpp",
-    "fdio.c",
-    "get-vmo.cpp",
-    "namespace/local-connection.cpp",
-    "namespace/local-filesystem.cpp",
-    "namespace/local-vnode.cpp",
-    "namespace/namespace.cpp",
-    "null.cpp",
-    "remoteio.cpp",
-    "socket.cpp",
-    "spawn.cpp",
-    "stubs.cpp",
-    "uname.c",
-    "unistd.c",
-    "waitable.cpp",
-    "watcher.cpp",
-    "zxio.cpp",
+    "bsdsocket.cc",
+    "fd.cc",
+    "fdio.cc",
+    "get-vmo.cc",
+    "namespace/local-connection.cc",
+    "namespace/local-filesystem.cc",
+    "namespace/local-vnode.cc",
+    "namespace/namespace.cc",
+    "null.cc",
+    "remoteio.cc",
+    "socket.cc",
+    "spawn.cc",
+    "stubs.cc",
+    "uname.cc",
+    "unistd.cc",
+    "waitable.cc",
+    "watcher.cc",
+    "zxio.cc",
   ]
   configs += [ "$zx/public/gn/config:visibility_hidden" ]
   deps = [
     "$zx/system/fidl/fuchsia-device:c",
-    "$zx/system/fidl/fuchsia-io:c",
     "$zx/system/fidl/fuchsia-io:llcpp",
     "$zx/system/fidl/fuchsia-ldsvc:c",
     "$zx/system/fidl/fuchsia-net:c",
+    "$zx/system/fidl/fuchsia-net:llcpp",
     "$zx/system/fidl/fuchsia-process:c",
     "$zx/system/ulib/fbl",
     "$zx/system/ulib/fidl",

@@ -11,6 +11,7 @@
 
 #include "guest_test.h"
 #include "logger.h"
+#include "src/lib/fxl/test/test_settings.h"
 
 using ::testing::HasSubstr;
 
@@ -18,12 +19,8 @@ static constexpr char kVirtioRngUtil[] = "virtio_rng_test_util";
 static constexpr size_t kVirtioConsoleMessageCount = 100;
 static constexpr size_t kVirtioBalloonPageCount = 256;
 
-template <class T>
-T* GuestTest<T>::enclosed_guest_ = nullptr;
-
 class SingleCpuZirconEnclosedGuest : public ZirconEnclosedGuest {
-  zx_status_t LaunchInfo(
-      fuchsia::virtualization::LaunchInfo* launch_info) override {
+  zx_status_t LaunchInfo(fuchsia::virtualization::LaunchInfo* launch_info) override {
     launch_info->url = kZirconGuestUrl;
     launch_info->args.push_back("--virtio-gpu=false");
     launch_info->args.push_back("--cpus=1");
@@ -33,8 +30,7 @@ class SingleCpuZirconEnclosedGuest : public ZirconEnclosedGuest {
 };
 
 class SingleCpuDebianEnclosedGuest : public DebianEnclosedGuest {
-  zx_status_t LaunchInfo(
-      fuchsia::virtualization::LaunchInfo* launch_info) override {
+  zx_status_t LaunchInfo(fuchsia::virtualization::LaunchInfo* launch_info) override {
     launch_info->url = kDebianGuestUrl;
     launch_info->args.push_back("--virtio-gpu=false");
     launch_info->args.push_back("--cpus=1");
@@ -42,20 +38,19 @@ class SingleCpuDebianEnclosedGuest : public DebianEnclosedGuest {
   }
 };
 
-using GuestTypes =
-    ::testing::Types<ZirconEnclosedGuest, SingleCpuZirconEnclosedGuest,
-                     DebianEnclosedGuest, SingleCpuDebianEnclosedGuest>;
+using GuestTypes = ::testing::Types<ZirconEnclosedGuest, SingleCpuZirconEnclosedGuest,
+                                    DebianEnclosedGuest, SingleCpuDebianEnclosedGuest>;
 TYPED_TEST_SUITE(GuestTest, GuestTypes);
 
 TYPED_TEST(GuestTest, LaunchGuest) {
   std::string result;
-  EXPECT_EQ(this->Execute("echo \"test\"", &result), ZX_OK);
+  EXPECT_EQ(this->Execute({"echo", "test"}, &result), ZX_OK);
   EXPECT_EQ(result, "test\n");
 }
 
 TYPED_TEST(GuestTest, VirtioRng) {
   std::string result;
-  EXPECT_EQ(this->RunUtil(kVirtioRngUtil, "", &result), ZX_OK);
+  EXPECT_EQ(this->RunUtil(kVirtioRngUtil, {}, &result), ZX_OK);
   EXPECT_THAT(result, HasSubstr("PASS"));
 }
 
@@ -63,7 +58,7 @@ TYPED_TEST(GuestTest, VirtioConsole) {
   // Test many small packets.
   std::string result;
   for (size_t i = 0; i != kVirtioConsoleMessageCount; ++i) {
-    EXPECT_EQ(this->Execute("echo \"test\"", &result), ZX_OK);
+    EXPECT_EQ(this->Execute({"echo", "test"}, &result), ZX_OK);
     EXPECT_EQ(result, "test\n");
   }
 
@@ -71,11 +66,9 @@ TYPED_TEST(GuestTest, VirtioConsole) {
   // which is the maximum line length for dash.
   std::string test_data = "";
   for (size_t i = 0; i != kVirtioConsoleMessageCount; ++i) {
-    test_data.append("Lorem ipsum dolor sit amet consectetur ");
+    test_data.append("Lorem ipsum dolor sit amet consectetur");
   }
-  std::string cmd = fxl::StringPrintf("echo \"%s\"", test_data.c_str());
-
-  EXPECT_EQ(this->Execute(cmd, &result), ZX_OK);
+  EXPECT_EQ(this->Execute({"echo", test_data.c_str()}, &result), ZX_OK);
   test_data.append("\n");
   EXPECT_EQ(result, test_data);
 }
@@ -84,7 +77,7 @@ using VirtioBalloonGuestTest = GuestTest<DebianEnclosedGuest>;
 
 TEST_F(VirtioBalloonGuestTest, VirtioBalloon) {
   std::string result;
-  EXPECT_EQ(this->Execute("echo \"test\"", &result), ZX_OK);
+  EXPECT_EQ(this->Execute({"echo", "test"}, &result), ZX_OK);
   EXPECT_EQ(result, "test\n");
 
   fuchsia::virtualization::BalloonControllerSyncPtr balloon_controller;
@@ -95,8 +88,7 @@ TEST_F(VirtioBalloonGuestTest, VirtioBalloon) {
   ASSERT_EQ(status, ZX_OK);
 
   // Request an increase to the number of pages in the balloon.
-  status = balloon_controller->RequestNumPages(initial_num_pages +
-                                               kVirtioBalloonPageCount);
+  status = balloon_controller->RequestNumPages(initial_num_pages + kVirtioBalloonPageCount);
   ASSERT_EQ(status, ZX_OK);
 
   // Verify that the number of pages eventually equals the requested number. The
@@ -139,6 +131,18 @@ class LoggerOutputListener : public ::testing::EmptyTestEventListener {
 };
 
 int main(int argc, char** argv) {
+  if (!fxl::SetTestSettings(argc, argv)) {
+    return EXIT_FAILURE;
+  }
+
+  // Switch to line buffering of stdout/stderr, so that we don't lose
+  // log lines if a test hangs.
+  //
+  // TODO(IN-1446): Solve this globally for everyone, not just for this
+  // test suite.
+  std::setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
+  std::setvbuf(stderr, nullptr, _IOLBF, BUFSIZ);
+
   LoggerOutputListener listener;
 
   testing::InitGoogleTest(&argc, argv);

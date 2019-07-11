@@ -48,21 +48,12 @@ def main():
     parser.add_argument("--crate-root",
                         help="Path to source directory",
                         required=True)
-    parser.add_argument("--cargo-toml-dir",
-                        help="Path to directory in which a Cargo.toml for this target may be generated",
-                        required=True)
     parser.add_argument("--crate-type",
                         help="Type of crate to build",
                         required=True,
                         choices=["bin", "rlib", "staticlib", "proc-macro"])
-    parser.add_argument("--package-name",
-                        help="Name of package to build",
-                        required=True)
     parser.add_argument("--crate-name",
                         help="Name of crate to build",
-                        required=True)
-    parser.add_argument("--version",
-                        help="Semver version of the crate being built",
                         required=True)
     parser.add_argument("--edition",
                         help="Edition of rust to use when compiling the crate",
@@ -82,16 +73,13 @@ def main():
     parser.add_argument("--depfile",
                         help="Path at which the output depfile should be stored",
                         required=True)
+    parser.add_argument("--test",
+                        action="store_true",
+                        help="Whether to build the target in test configuration",
+                        default=False)
     parser.add_argument("--root-out-dir",
                         help="Root output dir on which depfile paths should be rebased",
                         required=True)
-    parser.add_argument("--test-output-file",
-                        help="Path at which the unit test output file should be stored if --with-unit-tests is supplied",
-                        required=False)
-    parser.add_argument("--with-unit-tests",
-                        help="Whether or not to build unit tests",
-                        action="store_true",
-                        required=False)
     parser.add_argument("--target",
                         help="Target for which this crate is being compiled",
                         required=True)
@@ -115,11 +103,8 @@ def main():
     parser.add_argument("--first-party-crate-root",
                         help="Path to directory containing the libs for first-party dependencies",
                         required=True)
-    parser.add_argument("--third-party-deps-data",
-                        help="Path to output of third_party_crates.py",
-                        required=True)
-    parser.add_argument("--out-info",
-                        help="Path metadata output",
+    parser.add_argument("--third-party-crate-root",
+                        help="Path to directory containing the libs for third-party dependencies",
                         required=True)
     parser.add_argument("--dep-data",
                         action="append",
@@ -146,6 +131,16 @@ def main():
                         action="append",
                         dest="features",
                         required=False)
+    parser.add_argument("--remap-path-prefix",
+                        help="Remap source names in output",
+                        action="append",
+                        required=False)
+    parser.add_argument("--mac-host",
+                        help="Whether or not the host is a Mac",
+                        default=False,
+                        action="store_true",
+                        required=False)
+
 
     parser.add_argument
     args = parser.parse_args()
@@ -184,19 +179,26 @@ def main():
         "-Zallow-features=%s" % ",".join(args.unstable_rust_features or [])
     ]
     call_args += ["-Lnative=%s" % dir for dir in args.lib_dir]
+    if args.test:
+        call_args += ["--test"]
     if args.features:
         for feature in args.features:
             call_args += ["--cfg", "feature=\"%s\"" % feature]
+    if args.remap_path_prefix:
+        for path_prefix in args.remap_path_prefix:
+            call_args += ["--remap-path-prefix", path_prefix]
 
     if args.target.endswith("fuchsia"):
         call_args += [
             "-L", os.path.join(args.sysroot, "lib"),
+            "-Clinker=%s" % os.path.join(args.clang_prefix, "lld"),
             "-Clink-arg=--pack-dyn-relocs=relr",
             "-Clink-arg=--sysroot=%s" % args.sysroot,
             "-Clink-arg=-L%s" % os.path.join(args.sysroot, "lib"),
             "-Clink-arg=-L%s" % os.path.join(args.clang_resource_dir, args.target, "lib"),
             "-Clink-arg=--threads",
             "-Clink-arg=-dynamic-linker=ld.so.1",
+            "-Clink-arg=--icf=all",
         ]
         if args.target.startswith("aarch64"):
             call_args += ["-Clink-arg=--fix-cortex-a53-843419"]
@@ -209,7 +211,7 @@ def main():
         if args.target.endswith("linux-gnu"):
             call_args += ["-Clink-arg=-Wl,--build-id"]
         if not args.target.endswith("darwin"):
-            call_args += ["-Clink-arg=-Wl,--threads"]
+            call_args += ["-Clink-arg=-Wl,--threads", "-Clink-arg=-Wl,--icf=all"]
 
     if args.mmacosx_version_min:
         call_args += [
@@ -219,8 +221,27 @@ def main():
     if args.lto:
         call_args += ["-Clto=%s" % args.lto]
 
-    third_party_json = json.load(open(args.third_party_deps_data))
-    search_paths = third_party_json["deps_folders"] + [ args.first_party_crate_root ]
+    # calculate all the search paths we should look for for deps in cargo's output
+    search_path_suffixes = [
+        os.path.join("debug", "deps"),
+        os.path.join("release", "deps"),
+    ]
+    targets = [
+        "x86_64-fuchsia",
+        "aarch64-fuchsia",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+    ]
+    # add in e.g. x86_64-unknown-linux/release/deps
+    for target in targets:
+        search_path_suffixes += [os.path.join(target, suffix) for suffix in search_path_suffixes]
+
+    search_paths = [
+        args.first_party_crate_root,
+        args.third_party_crate_root,
+    ]
+    search_paths += [os.path.join(args.third_party_crate_root, suffix) for suffix in search_path_suffixes]
+
     for path in search_paths:
         call_args += ["-L", "dependency=%s" % path]
 
@@ -238,18 +259,28 @@ def main():
             dep_data = json.load(open(data_path))
             if dep_data["third_party"]:
                 package_name = dep_data["package_name"]
-                if package_name not in third_party_json["crates"]:
-                    print(TERM_COLOR_RED)
-                    print("Missing Rust target dependency: " + data_path)
-                    print("Package is present in the third_party/ but is absent"
-                          " from dependency data: " + args.third_party_deps_data)
-                    print("Maybe this package is conditionally disabled for the"
-                          " current configuration of '%s'?" % args.crate_name)
-                    print(TERM_COLOR_END)
+                crate = dep_data["crate_name"]
+                crate_type = dep_data["crate_type"]
+                if crate_type == "lib":
+                    ext = ".rlib"
+                elif crate_type == "staticlib":
+                    ext = ".a"
+                elif crate_type == "proc-macro":
+                    if args.mac_host:
+                        ext = ".dylib"
+                    else:
+                        ext = ".so"
+                else:
+                    print "Unrecognized crate type: " + crate_type
                     return -1
-                crate_data = third_party_json["crates"][package_name]
-                crate = crate_data["crate_name"]
-                lib_path = crate_data["lib_path"]
+                filename = "lib" + crate + "-" + package_name + ext
+                lib_path = os.path.join(args.third_party_crate_root, filename)
+                if not os.path.exists(lib_path):
+                    print TERM_COLOR_RED
+                    print "lib not found at path: " + lib_path
+                    print "This is a bug. Please report this to the Fuchsia Toolchain team."
+                    print TERM_COLOR_END
+                    return -1
             else:
                 crate = dep_data["crate_name"]
                 lib_path = dep_data["lib_path"]
@@ -265,36 +296,13 @@ def main():
         "-o%s" % args.depfile,
         "--emit=dep-info",
     ]
-    if args.with_unit_tests:
-        depfile_args += ["--test"]
     depfile_job = start_command(depfile_args, env)
 
     # Build the desired output
     build_args = call_args + ["-o%s" % args.output_file]
     build_job = start_command(build_args, env)
 
-    # Build the test harness
-    if args.with_unit_tests:
-        build_test_args = call_args + [
-            "-o%s" % args.test_output_file,
-            "--test",
-        ]
-        test_job = start_command(build_test_args, env)
-
-    # Write output dependency info
-    create_base_directory(args.out_info)
-    with open(args.out_info, "w") as file:
-        file.write(json.dumps({
-            "crate_name": args.crate_name,
-            "package_name": args.package_name,
-            "third_party": False,
-            "cargo_toml_dir": args.cargo_toml_dir,
-            "lib_path": args.output_file,
-            "version": args.version,
-        }, sort_keys=True, indent=4, separators=(",", ": ")))
-
     # Wait for build jobs to complete
-
     stdout, stderr = depfile_job.communicate()
     if depfile_job.returncode != 0:
         print(stdout + stderr)
@@ -305,12 +313,6 @@ def main():
     if build_job.returncode != 0:
         print(stdout + stderr)
         return build_job.returncode
-
-    if args.with_unit_tests:
-        stdout, stderr = test_job.communicate()
-        if test_job.returncode != 0:
-            print(stdout + stderr)
-            return test_job.returncode
 
 if __name__ == '__main__':
     sys.exit(main())

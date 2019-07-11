@@ -14,6 +14,7 @@ group("mixer") {
 
 source_set("audio_mixer_lib") {
   sources = [
+    "//sdk/lib/media/audio_dfx/cpp/audio_device_fx.h",
     "constants.h",
     "fx_loader.cc",
     "fx_loader.h",
@@ -32,7 +33,6 @@ source_set("audio_mixer_lib") {
     "output_producer.h",
     "point_sampler.cc",
     "point_sampler.h",
-    "//sdk/lib/media/audio_dfx/cpp/audio_device_fx.h",
   ]
 
   public_deps = [
@@ -40,7 +40,7 @@ source_set("audio_mixer_lib") {
   ]
 
   deps = [
-    "//garnet/public/lib/media/timeline:no_converters",
+    "//sdk/lib/media/cpp:no_converters",
     "//src/lib/fxl",
     "//zircon/public/lib/fbl",
   ]
@@ -73,8 +73,9 @@ executable("test") {
 
   deps = [
     "//src/lib/fxl",
+    "//src/lib/fxl/test:test_settings",
     "//src/media/audio/audio_core/mixer:audio_mixer_lib",
-    "//third_party/googletest:gtest_main",
+    "//third_party/googletest:gtest",
     "//zircon/public/lib/fbl",
   ]
 }

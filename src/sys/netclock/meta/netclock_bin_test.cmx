@@ -1,0 +1,20 @@
+{
+    "program": {
+        "binary": "test/netclock_bin_test",
+        "env_vars": [
+            "RUST_BACKTRACE=full"
+        ]
+    },
+    "sandbox": {
+        "features": [
+            "build-info"
+        ],
+        "services": [
+            "fuchsia.logger.LogSink",
+            "fuchsia.net.Connectivity",
+            "fuchsia.net.NameLookup",
+            "fuchsia.posix.socket.Provider",
+            "fuchsia.net.SocketProvider"
+        ]
+    }
+}

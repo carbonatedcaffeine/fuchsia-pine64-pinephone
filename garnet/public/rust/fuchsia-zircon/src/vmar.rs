@@ -4,10 +4,10 @@
 
 //! Type-safe bindings for Zircon vmar objects.
 
-use bitflags::bitflags;
 use crate::ok;
-use crate::{AsHandleRef, Handle, HandleBased, HandleRef, Status, Vmo};
 use crate::{object_get_info, ObjectQuery, Topic};
+use crate::{AsHandleRef, Handle, HandleBased, HandleRef, Status, Vmo};
+use bitflags::bitflags;
 use fuchsia_zircon_sys as sys;
 
 /// An object representing a Zircon
@@ -19,9 +19,26 @@ use fuchsia_zircon_sys as sys;
 pub struct Vmar(Handle);
 impl_handle_based!(Vmar);
 
+sys::zx_info_vmar_t!(VmarInfo);
+
+impl From<sys::zx_info_vmar_t> for VmarInfo {
+    fn from(sys::zx_info_vmar_t { base, len }: sys::zx_info_vmar_t) -> VmarInfo {
+        VmarInfo { base, len }
+    }
+}
+
+// VmarInfo is able to be safely replaced with a byte representation and is a PoD type.
+unsafe impl ObjectQuery for VmarInfo {
+    const TOPIC: Topic = Topic::VMAR;
+    type InfoTy = VmarInfo;
+}
+
 impl Vmar {
     pub fn allocate(
-        &self, offset: usize, size: usize, flags: VmarFlags,
+        &self,
+        offset: usize,
+        size: usize,
+        flags: VmarFlags,
     ) -> Result<(Vmar, usize), Status> {
         let mut mapped = 0;
         let mut handle = 0;
@@ -40,12 +57,15 @@ impl Vmar {
     }
 
     pub fn map(
-        &self, vmar_offset: usize, vmo: &Vmo, vmo_offset: u64, len: usize, flags: VmarFlags,
+        &self,
+        vmar_offset: usize,
+        vmo: &Vmo,
+        vmo_offset: u64,
+        len: usize,
+        flags: VmarFlags,
     ) -> Result<usize, Status> {
         let flags = VmarFlagsExtended::from_bits_truncate(flags.bits());
-        unsafe {
-            self.map_unsafe(vmar_offset, vmo, vmo_offset, len, flags)
-        }
+        unsafe { self.map_unsafe(vmar_offset, vmo, vmo_offset, len, flags) }
     }
 
     /// Directly call zx_vmar_map.
@@ -55,7 +75,11 @@ impl Vmar {
     /// This function is unsafe because certain flags to `zx_vmar_map` may
     /// replace an existing mapping which is referenced elsewhere.
     pub unsafe fn map_unsafe(
-        &self, vmar_offset: usize, vmo: &Vmo, vmo_offset: u64, len: usize,
+        &self,
+        vmar_offset: usize,
+        vmo: &Vmo,
+        vmo_offset: u64,
+        len: usize,
         flags: VmarFlagsExtended,
     ) -> Result<usize, Status> {
         let mut mapped = 0;
@@ -91,18 +115,6 @@ impl Vmar {
         object_get_info::<VmarInfo>(self.as_handle_ref(), std::slice::from_mut(&mut info))
             .map(|_| info)
     }
-}
-
-#[repr(C)]
-#[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
-pub struct VmarInfo {
-    pub base: usize,
-    pub len: usize,
-}
-
-unsafe impl ObjectQuery for VmarInfo {
-    const TOPIC: Topic = Topic::VMAR;
-    type InfoTy = VmarInfo;
 }
 
 // TODO(smklein): Ideally we would have two separate sets of bitflags,
@@ -158,26 +170,14 @@ vmar_flags! {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::Unowned;
-    use fuchsia_zircon_sys as sys;
-
-    extern "C" {
-        pub fn zx_vmar_root_self() -> sys::zx_handle_t;
-    }
-
-    // Can't depend on fuchsia-runtime here so its vmar_root_self function is duplicated.
-    fn vmar_root_self() -> Unowned<'static, Vmar> {
-        unsafe {
-            let handle = zx_vmar_root_self();
-            Unowned::from_raw_handle(handle)
-        }
-    }
+    // The unit tests are built with a different crate name, but fuchsia_runtime returns a "real"
+    // fuchsia_zircon::Vmar that we need to use.
+    use fuchsia_zircon::{Status, VmarFlags};
 
     #[test]
     fn allocate_and_info() -> Result<(), Status> {
         let size = usize::pow(2, 20); // 1MiB
-        let root_vmar = vmar_root_self();
+        let root_vmar = fuchsia_runtime::vmar_root_self();
         let (vmar, base) = root_vmar.allocate(0, size, VmarFlags::empty())?;
 
         let info = vmar.info()?;
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn root_vmar_info() -> Result<(), Status> {
-        let root_vmar = vmar_root_self();
+        let root_vmar = fuchsia_runtime::vmar_root_self();
         let info = root_vmar.info()?;
         assert!(info.base > 0);
         assert!(info.len > 0);

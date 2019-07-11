@@ -36,8 +36,7 @@ class MessageQueueManager;
 
 // This class provides a way for components to connect to agents and
 // manages the life time of a running agent.
-class AgentRunner : fuchsia::modular::AgentProvider,
-                    AgentRunnerStorage::NotificationDelegate {
+class AgentRunner : AgentRunnerStorage::NotificationDelegate {
  public:
   AgentRunner(
       fuchsia::sys::Launcher* launcher,
@@ -49,8 +48,6 @@ class AgentRunner : fuchsia::modular::AgentProvider,
       EntityProviderRunner* entity_provider_runner,
       std::unique_ptr<AgentServiceIndex> agent_service_index = nullptr);
   ~AgentRunner() override;
-
-  void Connect(fidl::InterfaceRequest<fuchsia::modular::AgentProvider> request);
 
   // |callback| is called after - (1) all agents have been shutdown and (2)
   // no new tasks are scheduled to run.
@@ -90,8 +87,9 @@ class AgentRunner : fuchsia::modular::AgentProvider,
   // specified in |task_info| is satisfied. The trigger condition is also
   // replicated to the ledger and the task my get scheduled on other user
   // devices too.
-  void ScheduleTask(const std::string& agent_url,
-                    fuchsia::modular::TaskInfo task_info);
+  void ScheduleTask(
+      const std::string& agent_url, fuchsia::modular::TaskInfo task_info,
+      fit::function<void(bool)> done = [](bool) {});
 
   // Deletes a task for |agent_url| that is identified by agent provided
   // |task_id|. The trigger condition is removed from the ledger.
@@ -170,13 +168,6 @@ class AgentRunner : fuchsia::modular::AgentProvider,
   // A set of all agents that are either running or scheduled to be run.
   std::vector<std::string> GetAllAgents();
 
-  // |UpdateWatchers| will not notify watchers if we are tearing down.
-  void UpdateWatchers();
-
-  // |fuchsia::modular::AgentProvider|
-  void Watch(fidl::InterfaceHandle<fuchsia::modular::AgentProviderWatcher>
-                 watcher) override;
-
   // |AgentRunnerStorage::Delegate|
   void AddedTask(const std::string& key,
                  AgentRunnerStorage::TriggerInfo data) override;
@@ -243,10 +234,6 @@ class AgentRunner : fuchsia::modular::AgentProvider,
   fuchsia::auth::TokenManager* const token_manager_;
   fuchsia::modular::UserIntelligenceProvider* const user_intelligence_provider_;
   EntityProviderRunner* const entity_provider_runner_;
-
-  fidl::BindingSet<fuchsia::modular::AgentProvider> agent_provider_bindings_;
-  fidl::InterfacePtrSet<fuchsia::modular::AgentProviderWatcher>
-      agent_provider_watchers_;
 
   // When this is marked true, no new new tasks will be scheduled.
   std::shared_ptr<bool> terminating_;

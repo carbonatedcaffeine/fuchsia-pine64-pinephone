@@ -2,20 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <memory>
-
 #include <fuchsia/ui/input/cpp/fidl.h>
 #include <lib/async/cpp/time.h>
 #include <lib/zx/eventpair.h>
 
+#include <memory>
+
 #include "garnet/lib/ui/input/tests/util.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "src/lib/fxl/logging.h"
 #include "lib/gtest/test_loop_fixture.h"
 #include "lib/ui/input/cpp/formatting.h"
 #include "lib/ui/scenic/cpp/resources.h"
 #include "lib/ui/scenic/cpp/session.h"
+#include "src/lib/fxl/logging.h"
 
 // This test exercises the focus avoidance property of a View.  A pointer DOWN
 // event typically triggers a pair of focus/unfocus events (each sent to a
@@ -49,9 +49,9 @@
 // The first hit test occurs at 'x' to ensure View 1 gains focus. The
 // coordinates are:
 //
-// Event  Finger  Mark  Device  View-1  View-2
-// ADD    1       y     (0,0)   (0,0)   n/a
-// DOWN   1       y     (0,0)   (0,0)   n/a
+// Event  Finger  Mark  Device  View-1     View-2
+// ADD    1       y     (0,0)   (0.5,0.5)  n/a
+// DOWN   1       y     (0,0)   (0.5,0.5)  n/a
 //
 // The second hit test occurs at the overlap, at 'y'.  Typically, View 2 would
 // receive a focus event, and View 1 would receive an unfocus event.  Since View
@@ -59,9 +59,9 @@
 // events, but each View should *not* receive a focus or unfocus event.  The
 // coordinates are:
 //
-// Event  Finger  Mark  Device  View-1  View-2
-// ADD    2       y     (4,4)   (4,4)   (0, 0)
-// DOWN   2       y     (4,4)   (4,4)   (0, 0)
+// Event  Finger  Mark  Device  View-1     View-2
+// ADD    2       y     (4,4)   (4.5,4.5)  (0.5, 0.5)
+// DOWN   2       y     (4,4)   (4.5,4.5)  (0.5, 0.5)
 //
 // We use a different finger ID to trigger the second hit test. Each finger's
 // state sequence is thus consistent, albeit incomplete for test brevity.
@@ -91,106 +91,119 @@ TEST_F(FocusAvoidanceTest, ViewHierarchyByScenic) {
   // "Presenter" sets up a scene with room for two Views.
   uint32_t compositor_id = 0;
   SessionWrapper presenter(scenic());
-  presenter.RunNow(
-      [this, &compositor_id, vh_1 = std::move(vh_1), vh_2 = std::move(vh_2)](
-          scenic::Session* session, scenic::EntityNode* root_node) mutable {
-        // Minimal scene.
-        scenic::Compositor compositor(session);
-        compositor_id = compositor.id();
+  presenter.RunNow([this, &compositor_id, vh_1 = std::move(vh_1), vh_2 = std::move(vh_2)](
+                       scenic::Session* session, scenic::EntityNode* root_node) mutable {
+    // Minimal scene.
+    scenic::Compositor compositor(session);
+    compositor_id = compositor.id();
 
-        scenic::Scene scene(session);
-        scenic::Camera camera(scene);
-        scenic::Renderer renderer(session);
-        renderer.SetCamera(camera);
+    scenic::Scene scene(session);
+    scenic::Camera camera(scene);
+    scenic::Renderer renderer(session);
+    renderer.SetCamera(camera);
 
-        scenic::Layer layer(session);
-        layer.SetSize(test_display_width_px(), test_display_height_px());
-        layer.SetRenderer(renderer);
+    scenic::Layer layer(session);
+    layer.SetSize(test_display_width_px(), test_display_height_px());
+    layer.SetRenderer(renderer);
 
-        scenic::LayerStack layer_stack(session);
-        layer_stack.AddLayer(layer);
-        compositor.SetLayerStack(layer_stack);
+    scenic::LayerStack layer_stack(session);
+    layer_stack.AddLayer(layer);
+    compositor.SetLayerStack(layer_stack);
 
-        // Add local root node to the scene. Add per-view translation for each
-        // View, hang the ViewHolders.
-        scene.AddChild(*root_node);
-        scenic::EntityNode translate_1(session), translate_2(session);
-        scenic::ViewHolder holder_1(session, std::move(vh_1), "view holder 1"),
-            holder_2(session, std::move(vh_2), "view holder 2");
+    // Add local root node to the scene. Add per-view translation for each
+    // View, hang the ViewHolders.
+    scene.AddChild(*root_node);
+    scenic::EntityNode translate_1(session), translate_2(session);
+    scenic::ViewHolder holder_1(session, std::move(vh_1), "view holder 1"),
+        holder_2(session, std::move(vh_2), "view holder 2");
 
-        root_node->AddChild(translate_1);
-        translate_1.SetTranslation(0, 0, -1);
-        translate_1.Attach(holder_1);
+    const fuchsia::ui::gfx::vec3 zero{.x = 0, .y = 0, .z = 0};
+    // View 1's properties
+    {
+      fuchsia::ui::gfx::ViewProperties properties;
+      properties.bounding_box.min = zero;
+      properties.bounding_box.max = fuchsia::ui::gfx::vec3{.x = 5, .y = 5, .z = 1};
 
-        root_node->AddChild(translate_2);
-        translate_2.SetTranslation(4, 4, -2);
-        translate_2.Attach(holder_2);
+      // Set insets to 0.
+      properties.inset_from_min = zero;
+      properties.inset_from_max = zero;
+      holder_1.SetViewProperties(std::move(properties));
+    }
 
-        // View 2's parent (Presenter) sets "no-focus" property for view 2.
-        {
-          fuchsia::ui::gfx::ViewProperties properties;
-          properties.focus_change = false;
-          holder_2.SetViewProperties(std::move(properties));
-        }
+    // View 2's parent (Presenter) sets "no-focus" property for view 2.
+    {
+      fuchsia::ui::gfx::ViewProperties properties;
+      properties.focus_change = false;
+      properties.bounding_box.min = zero;
+      properties.bounding_box.max = fuchsia::ui::gfx::vec3{.x = 5, .y = 5, .z = 1};
 
-        RequestToPresent(session);
-      });
+      // Set insets to 0.
+      properties.inset_from_min = zero;
+      properties.inset_from_max = zero;
+      holder_2.SetViewProperties(std::move(properties));
+    }
+
+    root_node->AddChild(translate_1);
+    translate_1.SetTranslation(0, 0, -1);
+    translate_1.Attach(holder_1);
+
+    root_node->AddChild(translate_2);
+    translate_2.SetTranslation(4, 4, -2);
+    translate_2.Attach(holder_2);
+
+    RequestToPresent(session);
+  });
 
   // Client 1 vends a View to the global scene.
   SessionWrapper client_1(scenic());
-  client_1.RunNow(
-      [this, v_1 = std::move(v_1)](scenic::Session* session,
-                                   scenic::EntityNode* root_node) mutable {
-        scenic::View view(session, std::move(v_1), "view 1");
-        view.AddChild(*root_node);
+  client_1.RunNow([this, v_1 = std::move(v_1)](scenic::Session* session,
+                                               scenic::EntityNode* root_node) mutable {
+    scenic::View view(session, std::move(v_1), "view 1");
+    view.AddChild(*root_node);
 
-        scenic::ShapeNode shape(session);
-        shape.SetTranslation(2, 2, 0);  // Center the shape within the View.
-        root_node->AddPart(shape);
+    scenic::ShapeNode shape(session);
+    shape.SetTranslation(2, 2, 0);  // Center the shape within the View.
+    root_node->AddPart(shape);
 
-        scenic::Rectangle rec(session, 5, 5);  // Simple; no real GPU work.
-        shape.SetShape(rec);
+    scenic::Rectangle rec(session, 5, 5);  // Simple; no real GPU work.
+    shape.SetShape(rec);
 
-        scenic::Material material(session);
-        shape.SetMaterial(material);
+    scenic::Material material(session);
+    shape.SetMaterial(material);
 
-        RequestToPresent(session);
-      });
+    RequestToPresent(session);
+  });
 
   // Client 2 vends a View to the global scene.
   SessionWrapper client_2(scenic());
-  client_2.RunNow(
-      [this, v_2 = std::move(v_2)](scenic::Session* session,
-                                   scenic::EntityNode* root_node) mutable {
-        scenic::View view(session, std::move(v_2), "view 2");
-        view.AddChild(*root_node);
+  client_2.RunNow([this, v_2 = std::move(v_2)](scenic::Session* session,
+                                               scenic::EntityNode* root_node) mutable {
+    scenic::View view(session, std::move(v_2), "view 2");
+    view.AddChild(*root_node);
 
-        scenic::ShapeNode shape(session);
-        shape.SetTranslation(2, 2, 0);  // Center the shape within the View.
-        root_node->AddPart(shape);
+    scenic::ShapeNode shape(session);
+    shape.SetTranslation(2, 2, 0);  // Center the shape within the View.
+    root_node->AddPart(shape);
 
-        scenic::Rectangle rec(session, 5, 5);  // Simple; no real GPU work.
-        shape.SetShape(rec);
+    scenic::Rectangle rec(session, 5, 5);  // Simple; no real GPU work.
+    shape.SetShape(rec);
 
-        scenic::Material material(session);
-        shape.SetMaterial(material);
+    scenic::Material material(session);
+    shape.SetMaterial(material);
 
-        RequestToPresent(session);
-      });
+    RequestToPresent(session);
+  });
 
   // Multi-agent scene is now set up, send in the input.
-  presenter.RunNow([this, compositor_id](scenic::Session* session,
-                                         scenic::EntityNode* root_node) {
+  presenter.RunNow([this, compositor_id](scenic::Session* session, scenic::EntityNode* root_node) {
     PointerCommandGenerator pointer_1(compositor_id, /*device id*/ 1,
-                                      /*pointer id*/ 1,
-                                      PointerEventType::TOUCH);
+                                      /*pointer id*/ 1, PointerEventType::TOUCH);
     // A touch sequence that starts in the upper left corner of the display.
     session->Enqueue(pointer_1.Add(0, 0));
     session->Enqueue(pointer_1.Down(0, 0));
 
     PointerCommandGenerator pointer_2(compositor_id, /*device id*/ 1,
-                                      /*pointer id*/ 2,
-                                      PointerEventType::TOUCH);
+                                      /*pointer id*/ 2, PointerEventType::TOUCH);
     // A touch sequence that starts in the middle of the display.
     session->Enqueue(pointer_2.Add(4, 4));
     session->Enqueue(pointer_2.Down(4, 4));
@@ -207,8 +220,7 @@ TEST_F(FocusAvoidanceTest, ViewHierarchyByScenic) {
 
     // ADD
     EXPECT_TRUE(events[0].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[0].pointer(), 1u, PointerEventPhase::ADD, 0, 0));
+    EXPECT_TRUE(PointerMatches(events[0].pointer(), 1u, PointerEventPhase::ADD, 0.5, 0.5));
 
     // FOCUS
     EXPECT_TRUE(events[1].is_focus());
@@ -216,20 +228,17 @@ TEST_F(FocusAvoidanceTest, ViewHierarchyByScenic) {
 
     // DOWN
     EXPECT_TRUE(events[2].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[2].pointer(), 1u, PointerEventPhase::DOWN, 0, 0));
+    EXPECT_TRUE(PointerMatches(events[2].pointer(), 1u, PointerEventPhase::DOWN, 0.5, 0.5));
 
     // ADD
     EXPECT_TRUE(events[3].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[3].pointer(), 2u, PointerEventPhase::ADD, 4, 4));
+    EXPECT_TRUE(PointerMatches(events[3].pointer(), 2u, PointerEventPhase::ADD, 4.5, 4.5));
 
     // No unfocus event here!
 
     // DOWN
     EXPECT_TRUE(events[4].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[4].pointer(), 2u, PointerEventPhase::DOWN, 4, 4));
+    EXPECT_TRUE(PointerMatches(events[4].pointer(), 2u, PointerEventPhase::DOWN, 4.5, 4.5));
   });
 
   client_2.ExamineEvents([](const std::vector<InputEvent>& events) {
@@ -237,15 +246,13 @@ TEST_F(FocusAvoidanceTest, ViewHierarchyByScenic) {
 
     // ADD
     EXPECT_TRUE(events[0].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[0].pointer(), 2u, PointerEventPhase::ADD, 0, 0));
+    EXPECT_TRUE(PointerMatches(events[0].pointer(), 2u, PointerEventPhase::ADD, 0.5, 0.5));
 
     // No focus event here!
 
     // DOWN
     EXPECT_TRUE(events[1].is_pointer());
-    EXPECT_TRUE(
-        PointerMatches(events[1].pointer(), 2u, PointerEventPhase::DOWN, 0, 0));
+    EXPECT_TRUE(PointerMatches(events[1].pointer(), 2u, PointerEventPhase::DOWN, 0.5, 0.5));
 
 #if 0
     for (const auto& event : events)

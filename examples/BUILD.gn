@@ -7,8 +7,11 @@ group("examples") {
   deps = [
     ":tests",
     "cowsay",
+    "criterion_bench",
+    "dotmatrix_display",
     "fortune",
     "hello_world",
+    "isolated_cache",
     "media",
     "speech",
     "//examples/components/basic:components_basic_example",
@@ -20,6 +23,8 @@ group("tests") {
   testonly = true
   data_deps = [
     "hello_world:tests",
+    "media:tests",
     "rust_static_linking:static_linking_tests",
+    "isolated_cache:tests",
   ]
 }

@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_PROCESS_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_PROCESS_H_
 
 #include <stdint.h>
 
@@ -68,16 +69,14 @@ class Process : public ClientObject {
 
   // Queries the process for the currently-loaded modules (this always
   // recomputes the list).
-  virtual void GetModules(
-      std::function<void(const Err&, std::vector<debug_ipc::Module>)>) = 0;
+  virtual void GetModules(std::function<void(const Err&, std::vector<debug_ipc::Module>)>) = 0;
 
   // Queries the process for its address map if |address| is zero the entire
   // map is requested. If |address| is non-zero only the containing region
   // if exists will be retrieved.
   virtual void GetAspace(
       uint64_t address,
-      std::function<void(const Err&, std::vector<debug_ipc::AddressRegion>)>)
-      const = 0;
+      std::function<void(const Err&, std::vector<debug_ipc::AddressRegion>)>) const = 0;
 
   // Returns all threads in the process. This is as of the last update from
   // the system. If the program is currently running, the actual threads may be
@@ -124,8 +123,7 @@ class Process : public ClientObject {
   // The callback does NOT mean the step has completed, but rather the setup
   // for the function was successful. Symbols and breakpoint setup can cause
   // asynchronous failures.
-  virtual void ContinueUntil(const InputLocation& location,
-                             std::function<void(const Err&)> cb) = 0;
+  virtual void ContinueUntil(const InputLocation& location, std::function<void(const Err&)> cb) = 0;
 
   // Returns the SymbolDataProvider that can be used to evaluate symbols
   // in the context of this process. This will not have any frame information
@@ -136,9 +134,8 @@ class Process : public ClientObject {
   virtual fxl::RefPtr<SymbolDataProvider> GetSymbolDataProvider() const = 0;
 
   // Reads memory from the debugged process.
-  virtual void ReadMemory(
-      uint64_t address, uint32_t size,
-      std::function<void(const Err&, MemoryDump)> callback) = 0;
+  virtual void ReadMemory(uint64_t address, uint32_t size,
+                          std::function<void(const Err&, MemoryDump)> callback) = 0;
 
   // Write memory to the debugged process.
   virtual void WriteMemory(uint64_t address, std::vector<uint8_t> data,
@@ -147,13 +144,9 @@ class Process : public ClientObject {
   StartType start_type() const { return start_type_; }
 
   static constexpr size_t kMaxIOBufferSize = 1 * 1024 * 1024;  // In bytes.
-  const containers::circular_deque<uint8_t>& get_stdout() const {
-    return stdout_;
-  }
+  const containers::circular_deque<uint8_t>& get_stdout() const { return stdout_; }
 
-  const containers::circular_deque<uint8_t>& get_stderr() const {
-    return stderr_;
-  }
+  const containers::circular_deque<uint8_t>& get_stderr() const { return stderr_; }
 
  protected:
   fxl::ObserverList<ProcessObserver>& observers() { return observers_; }
@@ -171,3 +164,5 @@ class Process : public ClientObject {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_PROCESS_H_

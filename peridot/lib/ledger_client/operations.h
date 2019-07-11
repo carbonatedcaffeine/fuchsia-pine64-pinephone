@@ -10,6 +10,7 @@
 #include <fuchsia/ledger/cpp/fidl.h>
 #include <lib/async/cpp/operation.h>
 #include <lib/fsl/vmo/strings.h>
+#include <zircon/status.h>
 
 #include <string>
 
@@ -28,13 +29,6 @@ namespace modular {
 // PagePtr is held by LedgerClient and handed out as Page* to PageClient, which
 // passes it on to the respective Operations.
 //
-// As a result, callbacks for methods invoked on the Page* are not cancelled
-// when the Operation instance is deleted, as they would be if the FIDL pointer
-// were owned by the Operation instance. Therefore, such callbacks must be
-// explicitly guarded using a weak pointer to the Operation instance against
-// execution after their Operation instance was destroyed.
-//
-// This base class provides the method Protect() for the purpose.
 //
 // In derived class that are themselves template classes, the method must be
 // invoked by explicit qualification with this-> (or alternatively with the base
@@ -56,17 +50,6 @@ class PageOperation : public Operation<Args...> {
 
  protected:
   fuchsia::ledger::Page* page() const { return page_; }
-
-  using PageCallback = fit::function<void(fuchsia::ledger::Status)>;
-
-  PageCallback Protect(PageCallback callback) {
-    return [weak_this = this->GetWeakPtr(),
-            callback = std::move(callback)](fuchsia::ledger::Status status) {
-      if (weak_this) {
-        callback(status);
-      }
-    };
-  }
 
  private:
   fuchsia::ledger::Page* const page_;
@@ -93,17 +76,6 @@ class LedgerOperation : public Operation<Args...> {
  protected:
   fuchsia::ledger::Ledger* ledger() const { return ledger_; }
   fuchsia::ledger::Page* page() const { return page_; }
-
-  using LedgerCallback = fit::function<void(fuchsia::ledger::Status)>;
-
-  LedgerCallback Protect(LedgerCallback callback) {
-    return [weak_this = this->GetWeakPtr(),
-            callback = std::move(callback)](fuchsia::ledger::Status status) {
-      if (weak_this) {
-        callback(status);
-      }
-    };
-  }
 
  private:
   fuchsia::ledger::Ledger* const ledger_;
@@ -240,26 +212,21 @@ class WriteDataCall : public PageOperation<> {
     FXL_CHECK(fsl::VmoFromString(json, &vmo));
     page()->CreateReferenceFromBuffer(
         std::move(vmo).ToTransport(),
-        [this, weak_ptr = GetWeakPtr(), flow](
-            fuchsia::ledger::CreateReferenceStatus status,
-            std::unique_ptr<fuchsia::ledger::Reference> reference) {
+        [this, weak_ptr = GetWeakPtr(),
+         flow](fuchsia::ledger::Page_CreateReferenceFromBuffer_Result result) {
           if (!weak_ptr) {
             return;
           }
-          PutReference(std::move(reference), flow);
+          if (result.is_err()) {
+            FXL_LOG(ERROR) << trace_name() << " " << key_ << " "
+                           << "Page.Put() could not construct reference: "
+                           << zx_status_get_string(result.err());
+            return;
+          }
+          page()->PutReference(to_array(key_),
+                               std::move(result.response().reference),
+                               fuchsia::ledger::Priority::EAGER);
         });
-  }
-
-  void PutReference(std::unique_ptr<fuchsia::ledger::Reference> reference,
-                    FlowToken flow) {
-    if (!reference) {
-      FXL_LOG(ERROR) << trace_name() << " " << key_ << " "
-                     << "Page.Put() could not construct reference.";
-      return;
-    }
-
-    page()->PutReference(to_array(key_), std::move(*reference),
-                         fuchsia::ledger::Priority::EAGER);
   }
 
   const std::string key_;

@@ -1,9 +1,6 @@
-// Copyright 2019 The Fuchsia Authors
-//
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file or at
-// https://opensource.org/licenses/MIT
-//
+// Copyright 2019 The Fuchsia Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 #pragma once
 
 #include "allocation.h"
@@ -63,10 +60,7 @@ namespace pci {
 class PciAllocation {
 public:
     // Delete Copy and Assignment ctors
-    PciAllocation(const PciAllocation&) = delete;
-    PciAllocation(PciAllocation&) = delete;
-    PciAllocation& operator=(const PciAllocation&) = delete;
-    PciAllocation& operator=(PciAllocation&&) = delete;
+    DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(PciAllocation);
 
     virtual ~PciAllocation() = default;
     virtual zx_paddr_t base() const = 0;
@@ -74,7 +68,7 @@ public:
     // Create a VMO bounded by the base/size of this allocation using the
     // provided resource. This is used to provide VMOs for device BAR
     // allocations.
-    zx_status_t CreateVmObject(fbl::unique_ptr<zx::vmo>* out_vmo) const;
+    virtual zx_status_t CreateVmObject(zx::vmo* out_vmo) const;
 
 protected:
     PciAllocation(zx::resource&& resource)
@@ -82,36 +76,37 @@ protected:
     const zx::resource resource_;
 
 private:
-    // Allow PciRegionAllocator to duplicate the resource for use further
+    // Allow PciRegionAllocator / Device to duplicate the resource for use further
     // down the bridge chain. The security implications of this are not a
     // concern because:
     // 1. The allocation object strictly bounds the VMO to the specified base & size
     // 2. The resource is already in the driver process's address space, so we're not
     //    leaking it anywhere out of band.
+    // 3. Device needs to be able to pass a resource to DeviceProxy for setting
+    //    IO permission bits.
     // This is only needed for PciRegionAllocators because PciRootAllocators do not
     // hold a backing PciAllocation object.
     friend class PciRegionAllocator;
+    friend class Device;
     const zx::resource& resource() const { return resource_; }
 };
 
 class PciRootAllocation final : public PciAllocation {
 public:
-    PciRootAllocation(const ddk::PcirootProtocolClient pciroot,
+    PciRootAllocation(const ddk::PcirootProtocolClient client,
                       const pci_address_space_t type,
                       zx::resource&& resource,
                       zx_paddr_t base,
                       size_t size)
-        : PciAllocation(std::move(resource)), pciroot_(pciroot), type_(type), base_(base),
+        : PciAllocation(std::move(resource)), pciroot_client_(client), type_(type), base_(base),
           size_(size) {}
-    ~PciRootAllocation() {
-        pciroot_.FreeAddressSpace(base_, size_, type_);
-    }
+    ~PciRootAllocation() final { pciroot_client_.FreeAddressSpace(base_, size_, type_); }
 
     zx_paddr_t base() const final { return base_; }
     size_t size() const final { return size_; }
 
 private:
-    ddk::PcirootProtocolClient const pciroot_;
+    const ddk::PcirootProtocolClient pciroot_client_;
     const pci_address_space_t type_;
     const zx_paddr_t base_;
     const size_t size_;
@@ -121,6 +116,7 @@ class PciRegionAllocation final : public PciAllocation {
 public:
     PciRegionAllocation(zx::resource&& resource, RegionAllocator::Region::UPtr&& region)
         : PciAllocation(std::move(resource)), region_(std::move(region)) {}
+
     zx_paddr_t base() const final { return region_->base; }
     size_t size() const final { return region_->size; }
 
@@ -134,19 +130,19 @@ class PciAllocator {
 public:
     virtual ~PciAllocator() = default;
     // Delete Copy and Assignment ctors
-    PciAllocator(const PciAllocator&) = delete;
-    PciAllocator(PciAllocator&&) = delete;
-    PciAllocator& operator=(const PciAllocator&) = delete;
-    PciAllocator& operator=(PciAllocator&&) = delete;
-    // Request a region of address space spanning from |base| to |base| + |size|.
-    virtual zx_status_t GetRegion(zx_paddr_t base,
-                                  size_t size,
-                                  fbl::unique_ptr<PciAllocation>* out_alloc) = 0;
-    // Request a region of address space of size |size| anywhere in the window.
-    zx_status_t GetRegion(size_t size, fbl::unique_ptr<PciAllocation>* out_alloc) {
-        return GetRegion(/* base */ 0, size, out_alloc);
+    DISALLOW_COPY_ASSIGN_AND_MOVE(PciAllocator);
+    // Request a region of address space spanning from |base| to |base| + |size|
+    // for a downstream device or bridge.
+    virtual zx_status_t AllocateWindow(zx_paddr_t base, size_t size,
+                                       std::unique_ptr<PciAllocation>* out_alloc) = 0;
+    // Request a region of address space of size |size| anywhere in the window for
+    // a downstream device or bridge.
+    zx_status_t AllocateWindow(size_t size, std::unique_ptr<PciAllocation>* out_alloc) {
+        return AllocateWindow(/* base */ 0, size, out_alloc);
     }
-    virtual zx_status_t AddAddressSpace(fbl::unique_ptr<PciAllocation> alloc) = 0;
+    // Provide this allocator with a PciAllocation, granting it ownership of that
+    // range of address space for calls to AllocateWindow.
+    virtual zx_status_t GrantAddressSpace(std::unique_ptr<PciAllocation> alloc) = 0;
 
 protected:
     PciAllocator() = default;
@@ -159,10 +155,9 @@ class PciRootAllocator : public PciAllocator {
 public:
     PciRootAllocator(ddk::PcirootProtocolClient proto, pci_address_space_t type, bool low)
         : pciroot_(proto), type_(type), low_(low) {}
-    zx_status_t GetRegion(zx_paddr_t base,
-                          size_t size,
-                          fbl::unique_ptr<PciAllocation>* alloc) final;
-    zx_status_t AddAddressSpace(fbl::unique_ptr<PciAllocation> alloc);
+    zx_status_t AllocateWindow(zx_paddr_t base, size_t size,
+                               std::unique_ptr<PciAllocation>* out_alloc) final;
+    zx_status_t GrantAddressSpace(std::unique_ptr<PciAllocation> alloc) final;
 
 private:
     // The bus driver outlives allocator objects.
@@ -180,17 +175,20 @@ private:
 class PciRegionAllocator : public PciAllocator {
 public:
     PciRegionAllocator() = default;
-    zx_status_t GetRegion(zx_paddr_t base,
-                          size_t size,
-                          fbl::unique_ptr<PciAllocation>* alloc) final;
-    zx_status_t AddAddressSpace(fbl::unique_ptr<PciAllocation> alloc) final;
-    void SetRegionPool(RegionAllocator::RegionPool::RefPtr pool) { allocator_.SetRegionPool(pool); }
+    zx_status_t AllocateWindow(zx_paddr_t base, size_t size,
+                               std::unique_ptr<PciAllocation>* out_alloc) final;
+    zx_status_t GrantAddressSpace(std::unique_ptr<PciAllocation> alloc) final;
+    // Called by bridges to create a RegionPool for any windows they allocate
+    // through calls to AllocateWindow.
+    void SetRegionPool(RegionAllocator::RegionPool::RefPtr pool) {
+        allocator_.SetRegionPool(pool);
+    }
 
 private:
-    // This PciAllocation is the object handed to the bridge by the upstream node
-    // and holds a reservation for that address space in the upstream bridge's window
-    // for use downstream this bridge.
-    fbl::unique_ptr<PciAllocation> backing_alloc_;
+    std::unique_ptr<PciAllocation> backing_alloc_;
+    // Unlike a Root allocator which has bookkeeping handled by Pciroot, a
+    // Region allocator has a backing RegionAllocator object to handle that
+    // metadata.
     RegionAllocator allocator_;
 };
 

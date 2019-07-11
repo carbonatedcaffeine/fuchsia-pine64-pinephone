@@ -5,8 +5,8 @@
 #include "src/media/audio/audio_core/audio_device.h"
 
 #include "src/lib/fxl/logging.h"
-#include "src/lib/fxl/time/time_delta.h"
 #include "src/media/audio/audio_core/audio_device_manager.h"
+#include "src/media/audio/audio_core/audio_driver.h"
 #include "src/media/audio/audio_core/audio_link.h"
 #include "src/media/audio/audio_core/audio_output.h"
 #include "src/media/audio/audio_core/utils.h"
@@ -22,8 +22,8 @@ std::string AudioDeviceUniqueIdToString(const audio_stream_unique_id_t& id) {
   snprintf(buf, sizeof(buf),
            "%02x%02x%02x%02x%02x%02x%02x%02x"
            "%02x%02x%02x%02x%02x%02x%02x%02x",
-           d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9], d[10],
-           d[11], d[12], d[13], d[14], d[15]);
+           d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9], d[10], d[11], d[12], d[13],
+           d[14], d[15]);
   return std::string(buf, sizeof(buf) - 1);
 }
 }  // namespace
@@ -49,10 +49,9 @@ uint64_t AudioDevice::token() const {
 }
 
 // Change a device's gain, propagating the change to the affected links.
-void AudioDevice::SetGainInfo(const ::fuchsia::media::AudioGainInfo& info,
-                              uint32_t set_flags) {
+void AudioDevice::SetGainInfo(const fuchsia::media::AudioGainInfo& info, uint32_t set_flags) {
   // Limit the request to what the hardware can support
-  ::fuchsia::media::AudioGainInfo limited = info;
+  fuchsia::media::AudioGainInfo limited = info;
   ApplyGainLimits(&limited, set_flags);
 
   // For outputs, change the gain of all links where it is the destination.
@@ -60,8 +59,8 @@ void AudioDevice::SetGainInfo(const ::fuchsia::media::AudioGainInfo& info,
     fbl::AutoLock links_lock(&links_lock_);
     for (auto& link : source_links_) {
       if (link.GetSource()->type() == AudioObject::Type::AudioRenderer) {
-        link.bookkeeping()->gain.SetDestMute(
-            limited.flags & fuchsia::media::AudioGainInfoFlag_Mute);
+        link.bookkeeping()->gain.SetDestMute(limited.flags &
+                                             fuchsia::media::AudioGainInfoFlag_Mute);
         link.bookkeeping()->gain.SetDestGain(limited.gain_db);
       }
     }
@@ -71,8 +70,8 @@ void AudioDevice::SetGainInfo(const ::fuchsia::media::AudioGainInfo& info,
     fbl::AutoLock links_lock(&links_lock_);
     for (auto& link : dest_links_) {
       if (link.GetDest()->type() == AudioObject::Type::AudioCapturer) {
-        link.bookkeeping()->gain.SetSourceMute(
-            limited.flags & fuchsia::media::AudioGainInfoFlag_Mute);
+        link.bookkeeping()->gain.SetSourceMute(limited.flags &
+                                               fuchsia::media::AudioGainInfoFlag_Mute);
         link.bookkeeping()->gain.SetSourceGain(limited.gain_db);
       }
     }
@@ -94,16 +93,15 @@ zx_status_t AudioDevice::Init() {
     return res;
   }
 
-  mix_domain_ = ::dispatcher::ExecutionDomain::Create(std::move(profile));
-  mix_wakeup_ = ::dispatcher::WakeupEvent::Create();
+  mix_domain_ = dispatcher::ExecutionDomain::Create(std::move(profile));
+  mix_wakeup_ = dispatcher::WakeupEvent::Create();
 
   if ((mix_domain_ == nullptr) || (mix_wakeup_ == nullptr)) {
     return ZX_ERR_NO_MEMORY;
   }
 
-  ::dispatcher::WakeupEvent::ProcessHandler process_handler(
-      [output = fbl::WrapRefPtr(this)](
-          ::dispatcher::WakeupEvent* event) -> zx_status_t {
+  dispatcher::WakeupEvent::ProcessHandler process_handler(
+      [output = fbl::WrapRefPtr(this)](dispatcher::WakeupEvent* event) -> zx_status_t {
         OBTAIN_EXECUTION_DOMAIN_TOKEN(token, output->mix_domain_);
         output->OnWakeup();
         return ZX_OK;
@@ -111,8 +109,7 @@ zx_status_t AudioDevice::Init() {
 
   res = mix_wakeup_->Activate(mix_domain_, std::move(process_handler));
   if (res != ZX_OK) {
-    FXL_LOG(ERROR) << "Failed to activate wakeup event for AudioDevice!  "
-                   << "(res " << res << ")";
+    FXL_PLOG(ERROR, res) << "Failed to activate wakeup event for AudioDevice";
     return res;
   }
 
@@ -138,10 +135,9 @@ void AudioDevice::ActivateSelf() {
 
     // Now poke our manager.
     FXL_DCHECK(manager_);
-    manager_->ScheduleMainThreadTask(
-        [manager = manager_, self = fbl::WrapRefPtr(this)]() {
-          manager->ActivateDevice(std::move(self));
-        });
+    manager_->ScheduleMainThreadTask([manager = manager_, self = fbl::WrapRefPtr(this)]() {
+      manager->ActivateDevice(std::move(self));
+    });
   }
 }
 
@@ -156,9 +152,7 @@ void AudioDevice::ShutdownSelf() {
 
     FXL_DCHECK(manager_);
     manager_->ScheduleMainThreadTask(
-        [manager = manager_, self = fbl::WrapRefPtr(this)]() {
-          manager->RemoveDevice(self);
-        });
+        [manager = manager_, self = fbl::WrapRefPtr(this)]() { manager->RemoveDevice(self); });
   }
 }
 
@@ -218,13 +212,11 @@ const fbl::RefPtr<DriverRingBuffer>& AudioDevice::driver_ring_buffer() const {
   return driver_->ring_buffer();
 };
 
-const TimelineFunction& AudioDevice::driver_clock_mono_to_ring_pos_bytes()
-    const {
+const TimelineFunction& AudioDevice::driver_clock_mono_to_ring_pos_bytes() const {
   return driver_->clock_mono_to_ring_pos_bytes();
 };
 
-void AudioDevice::GetDeviceInfo(
-    ::fuchsia::media::AudioDeviceInfo* out_info) const {
+void AudioDevice::GetDeviceInfo(fuchsia::media::AudioDeviceInfo* out_info) const {
   const auto& drv = *driver();
   out_info->name = drv.manufacturer_name() + ' ' + drv.product_name();
   out_info->unique_id = AudioDeviceUniqueIdToString(drv.persistent_unique_id());

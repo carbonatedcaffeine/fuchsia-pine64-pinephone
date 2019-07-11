@@ -4,12 +4,12 @@
 
 test("compiler") {
   sources = [
-    "integer.cpp",
+    "integer.cc",
   ]
   configs += [ "$zx/public/gn/config:integer-paranoia" ]
   deps = [
     "$zx/system/ulib/fdio",
-    "$zx/system/ulib/unittest",
     "$zx/system/ulib/zircon",
+    "$zx/system/ulib/zxtest",
   ]
 }

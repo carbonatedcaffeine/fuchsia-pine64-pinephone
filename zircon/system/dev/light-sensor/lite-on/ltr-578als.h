@@ -5,7 +5,7 @@
 #pragma once
 
 #include <ddktl/device.h>
-#include <ddktl/i2c-channel.h>
+#include <lib/device-protocol/i2c-channel.h>
 #include <ddktl/protocol/hidbus.h>
 #include <fbl/mutex.h>
 #include <hid/ltr-578als.h>
@@ -20,7 +20,7 @@ using DeviceType = ddk::Device<Ltr578Als>;
 
 class Ltr578Als : public DeviceType, public ddk::HidbusProtocol<Ltr578Als, ddk::base_protocol> {
 public:
-    static zx_status_t Create(zx_device_t* parent);
+    static zx_status_t Create(void* ctx, zx_device_t* parent);
 
     void DdkRelease() { delete this; }
 

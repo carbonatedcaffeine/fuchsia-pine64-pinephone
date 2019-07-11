@@ -37,9 +37,7 @@ const std::string& ObjectDigest::Serialize() const {
 bool operator==(const ObjectDigest& lhs, const ObjectDigest& rhs) {
   return lhs.digest_ == rhs.digest_;
 }
-bool operator!=(const ObjectDigest& lhs, const ObjectDigest& rhs) {
-  return !(lhs == rhs);
-}
+bool operator!=(const ObjectDigest& lhs, const ObjectDigest& rhs) { return !(lhs == rhs); }
 bool operator<(const ObjectDigest& lhs, const ObjectDigest& rhs) {
   return lhs.digest_ < rhs.digest_;
 }
@@ -51,8 +49,7 @@ std::ostream& operator<<(std::ostream& os, const ObjectDigest& e) {
 ObjectIdentifier::ObjectIdentifier()
     : key_index_(0), deletion_scope_id_(0), object_digest_(ObjectDigest()) {}
 
-ObjectIdentifier::ObjectIdentifier(uint32_t key_index,
-                                   uint32_t deletion_scope_id,
+ObjectIdentifier::ObjectIdentifier(uint32_t key_index, uint32_t deletion_scope_id,
                                    ObjectDigest object_digest)
     : key_index_(key_index),
       deletion_scope_id_(deletion_scope_id),
@@ -60,8 +57,7 @@ ObjectIdentifier::ObjectIdentifier(uint32_t key_index,
 
 ObjectIdentifier::ObjectIdentifier(const ObjectIdentifier&) = default;
 ObjectIdentifier::ObjectIdentifier(ObjectIdentifier&&) = default;
-ObjectIdentifier& ObjectIdentifier::operator=(const ObjectIdentifier&) =
-    default;
+ObjectIdentifier& ObjectIdentifier::operator=(const ObjectIdentifier&) = default;
 ObjectIdentifier& ObjectIdentifier::operator=(ObjectIdentifier&&) = default;
 
 bool operator==(const ObjectIdentifier& lhs, const ObjectIdentifier& rhs) {
@@ -69,9 +65,7 @@ bool operator==(const ObjectIdentifier& lhs, const ObjectIdentifier& rhs) {
          std::tie(rhs.key_index_, rhs.deletion_scope_id_, rhs.object_digest_);
 }
 
-bool operator!=(const ObjectIdentifier& lhs, const ObjectIdentifier& rhs) {
-  return !(lhs == rhs);
-}
+bool operator!=(const ObjectIdentifier& lhs, const ObjectIdentifier& rhs) { return !(lhs == rhs); }
 
 bool operator<(const ObjectIdentifier& lhs, const ObjectIdentifier& rhs) {
   return std::tie(lhs.key_index_, lhs.deletion_scope_id_, lhs.object_digest_) <
@@ -93,75 +87,30 @@ bool operator!=(const Entry& lhs, const Entry& rhs) { return !(lhs == rhs); }
 
 std::ostream& operator<<(std::ostream& os, const Entry& e) {
   return os << "Entry{key: " << e.key << ", value: " << e.object_identifier
-            << ", priority: "
-            << (e.priority == KeyPriority::EAGER ? "EAGER" : "LAZY") << "}";
+            << ", priority: " << (e.priority == KeyPriority::EAGER ? "EAGER" : "LAZY") << "}";
 }
 
 bool operator==(const EntryChange& lhs, const EntryChange& rhs) {
   return lhs.deleted == rhs.deleted &&
-         (lhs.deleted ? lhs.entry.key == rhs.entry.key
-                      : lhs.entry == rhs.entry);
+         (lhs.deleted ? lhs.entry.key == rhs.entry.key : lhs.entry == rhs.entry);
 }
 
-bool operator!=(const EntryChange& lhs, const EntryChange& rhs) {
-  return !(lhs == rhs);
-}
+bool operator!=(const EntryChange& lhs, const EntryChange& rhs) { return !(lhs == rhs); }
 
 std::ostream& operator<<(std::ostream& os, const EntryChange& e) {
-  return os << "EntryChange{entry: " << e.entry << ", deleted: " << e.deleted
-            << "}";
+  return os << "EntryChange{entry: " << e.entry << ", deleted: " << e.deleted << "}";
 }
 
 bool operator==(const ThreeWayChange& lhs, const ThreeWayChange& rhs) {
-  return util::EqualPtr(lhs.base, rhs.base) &&
-         util::EqualPtr(lhs.left, rhs.left) &&
+  return util::EqualPtr(lhs.base, rhs.base) && util::EqualPtr(lhs.left, rhs.left) &&
          util::EqualPtr(lhs.right, rhs.right);
 }
 
-bool operator!=(const ThreeWayChange& lhs, const ThreeWayChange& rhs) {
-  return !(lhs == rhs);
-}
+bool operator!=(const ThreeWayChange& lhs, const ThreeWayChange& rhs) { return !(lhs == rhs); }
 
 std::ostream& operator<<(std::ostream& os, const ThreeWayChange& e) {
-  return os << "ThreeWayChange{base: " << e.base << ", left: " << e.left
-            << ", right: " << e.right << "}";
-}
-
-fxl::StringView StatusToString(Status status) {
-  switch (status) {
-    case Status::OK:
-      return "OK";
-    case Status::IO_ERROR:
-      return "IO_ERROR";
-    case Status::PAGE_NOT_FOUND:
-      return "PAGE_NOT_FOUND";
-    case Status::KEY_NOT_FOUND:
-      return "KEY_NOT_FOUND";
-    case Status::REFERENCE_NOT_FOUND:
-      return "REFERENCE_NOT_FOUND";
-    case Status::FORMAT_ERROR:
-      return "FORMAT_ERROR";
-    case Status::ILLEGAL_STATE:
-      return "ILLEGAL_STATE";
-    case Status::INTERNAL_NOT_FOUND:
-      return "INTERNAL_NOT_FOUND";
-    case Status::INTERNAL_ERROR:
-      return "INTERNAL_ERROR";
-    case Status::INTERRUPTED:
-      return "INTERRUPTED";
-    case Status::NETWORK_ERROR:
-      return "NETWORK_ERROR";
-    case Status::NO_SUCH_CHILD:
-      return "NO_SUCH_CHILD";
-    case Status::OBJECT_DIGEST_MISMATCH:
-      return "OBJECT_DIGEST_MISMATCH";
-    case Status::NOT_IMPLEMENTED:
-      return "NOT_IMPLEMENTED";
-  }
-}
-
-std::ostream& operator<<(std::ostream& os, Status status) {
-  return os << StatusToString(status);
+  return os << "ThreeWayChange{base: " << e.base << ", left: " << e.left << ", right: " << e.right
+            << "}";
 }
 
 }  // namespace storage

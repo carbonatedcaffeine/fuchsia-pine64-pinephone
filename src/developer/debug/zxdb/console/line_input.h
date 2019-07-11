@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_LINE_INPUT_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_LINE_INPUT_H_
 
 #include <deque>
 #include <functional>
@@ -54,8 +55,7 @@ struct SpecialCharacters {
 class LineInputBase {
  public:
   // Given some typing, returns a prioritized list of completions.
-  using CompletionCallback =
-      std::function<std::vector<std::string>(const std::string&)>;
+  using CompletionCallback = std::function<std::vector<std::string>(const std::string&)>;
 
   explicit LineInputBase(const std::string& prompt);
   virtual ~LineInputBase();
@@ -66,9 +66,7 @@ class LineInputBase {
 
   // The completion callback provides suggestions for tab completion. When
   // unset, tab completion will be disabled.
-  void set_completion_callback(CompletionCallback cc) {
-    completion_callback_ = cc;
-  }
+  void set_completion_callback(CompletionCallback cc) { completion_callback_ = cc; }
 
   // Returns the current line text.
   const std::string& line() const { return history_[history_index_]; }
@@ -233,3 +231,5 @@ class LineInputBlockingStdio : public LineInputStdout {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_LINE_INPUT_H_

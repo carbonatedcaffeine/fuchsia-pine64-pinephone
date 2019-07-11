@@ -18,7 +18,7 @@ The examples in this doc will be focused around a testing mod under
 The name is derived from how it is an example mod relating to the use of
 [Flutter Driver](https://docs.flutter.io/flutter/flutter_driver/flutter_driver-library.html).
 In addition, you'll see how to set up a hermetic test with Fuchsia
-[component testing](/docs/development/tests/test_component.md).
+[component testing](/docs/development/testing/test_component.md).
 
 The ultimate goal of this document is to make it possible for you to add
 integration tests into
@@ -73,7 +73,7 @@ library.
 Tests live in a `test` subfolder of your mod and end in `_test.dart`. These
 requirements are stipulated by
 [`dart_fuchsia_test`](https://fuchsia.googlesource.com/topaz/+/master/runtime/dart/dart_fuchsia_test.gni),
-described [later](#build_gn-target). The tests for `driver_example_mod` are in
+described [later](#build-gn-target). The tests for `driver_example_mod` are in
 [`driver_example_mod_test.dart`](https://fuchsia.googlesource.com/topaz/+/HEAD/examples/test/driver_example_mod/test/driver_example_mod_test.dart).
 
 ### Boilerplate
@@ -180,7 +180,7 @@ If you’d like to see an example test that pushes a few buttons, you can check
 A
 [component manifest](/docs/the-book/package_metadata.md#Component-manifest)
 allows the test to run as a hermetic
-[test component](/docs/development/tests/test_component.md)
+[test component](/docs/development/testing/test_component.md)
 under its own dedicated environment that will sandbox its services and tear
 everything down on completion or failure. This is particularly important for
 Flutter Driver tests and other graphical tests as only one Scenic instance may
@@ -197,7 +197,7 @@ The component manifest for our tests is
             "injected-services": {
                 "fuchsia.fonts.Provider": "fuchsia-pkg://fuchsia.com/fonts#meta/fonts.cmx",
                 "fuchsia.sysmem.Allocator": "fuchsia-pkg://fuchsia.com/sysmem_connector#meta/sysmem_connector.cmx",
-                "fuchsia.tracelink.Registry": "fuchsia-pkg://fuchsia.com/trace_manager#meta/trace_manager.cmx",
+                "fuchsia.tracing.provider.Registry": "fuchsia-pkg://fuchsia.com/trace_manager#meta/trace_manager.cmx",
                 "fuchsia.ui.input.ImeService": "fuchsia-pkg://fuchsia.com/ime_service#meta/ime_service.cmx",
                 "fuchsia.ui.policy.Presenter": "fuchsia-pkg://fuchsia.com/root_presenter#meta/root_presenter.cmx",
                 "fuchsia.ui.scenic.Scenic": "fuchsia-pkg://fuchsia.com/scenic#meta/scenic.cmx",
@@ -224,13 +224,13 @@ The component manifest for our tests is
 ```
 
 The
-[injected-services](/docs/development/tests/test_component.md#run-external-services)
+[injected-services](/docs/development/testing/test_component.md#run-external-services)
 entry starts the hermetic services our mod will need, mostly related to
 graphics. In addition, the `fuchsia.net.SocketProvider` system service and
 `shell` feature are needed to allow Flutter Driver to interact with the Dart
 Observatory.
 
-### BUILD.gn target
+### BUILD.gn target {:#build-gn-target}
 
 The test itself also needs a target in the
 [`BUILD.gn`](https://fuchsia.googlesource.com/topaz/+/HEAD/examples/test/driver_example_mod/BUILD.gn).
@@ -267,7 +267,7 @@ dart_fuchsia_test("driver_example_mod_tests") {
 defines a Dart test that runs on a Fuchsia device. It uses each file in the
 `test` subfolder that ends in `_test.dart` as an entrypoint for tests. In
 addition, it links the component manifest for the tests and specifies the
-[environments](/docs/development/tests/environments.md)
+[environments](/docs/development/testing/environments.md)
 in which to run the test in automated testing (CI/CQ). (See also the predefined
 environments in
 [//build/testing/environments.gni](/build/testing/environments.gni).)
@@ -317,3 +317,7 @@ The tests can then be run using
 ```bash
 $ fx run-test driver_example_mod_tests
 ```
+
+> If the test hangs after the module shows up, make sure you're building in
+> debug mode (omit `--release` from your `fx set`) as the Dart Observatory will
+> not be available in release builds.

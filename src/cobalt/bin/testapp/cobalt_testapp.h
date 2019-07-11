@@ -15,10 +15,10 @@
 #include <sstream>
 #include <string>
 
+#include "lib/syslog/cpp/logger.h"
 #include "src/cobalt/bin/testapp/cobalt_testapp_logger.h"
 #include "src/lib/fxl/command_line.h"
 #include "src/lib/fxl/log_settings_command_line.h"
-#include "src/lib/fxl/logging.h"
 #include "src/lib/fxl/macros.h"
 #include "src/lib/fxl/strings/string_view.h"
 #include "third_party/cobalt/util/clock.h"
@@ -30,10 +30,14 @@ constexpr size_t kEventAggregatorBackfillDays = 2;
 
 class CobaltTestApp {
  public:
-  CobaltTestApp(bool use_network)
+  CobaltTestApp(bool use_network, bool test_for_prober)
       : context_(sys::ComponentContext::Create()),
-        logger_(use_network, &cobalt_controller_) {
+        logger_(use_network, &cobalt_controller_),
+        test_for_prober_(test_for_prober) {
     clock_.reset(new util::SystemClock);
+    if (test_for_prober) {
+      FX_LOGS(INFO) << "Running the Cobalt test app in prober mode";
+    }
   }
 
   // Runs all of the tests. Returns true if they all pass.
@@ -48,12 +52,16 @@ class CobaltTestApp {
       bool start_event_aggregator_worker = false,
       uint32_t initial_interval_seconds = 0);
 
+  void SetChannel(const std::string &current_channel);
+  bool DoChannelFilteringTests();
   bool DoLocalAggregationTests(const size_t backfill_days);
 
   std::unique_ptr<sys::ComponentContext> context_;
   fuchsia::sys::ComponentControllerPtr controller_;
   fuchsia::cobalt::ControllerSyncPtr cobalt_controller_;
+  fuchsia::cobalt::SystemDataUpdaterSyncPtr system_data_updater_;
   CobaltTestAppLogger logger_;
+  bool test_for_prober_;
   std::unique_ptr<util::ClockInterface> clock_;
 
   FXL_DISALLOW_COPY_AND_ASSIGN(CobaltTestApp);

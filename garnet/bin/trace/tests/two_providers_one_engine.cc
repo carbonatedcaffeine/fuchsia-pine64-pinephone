@@ -6,6 +6,8 @@
 // The test is to exercise graceful handling when a process contains
 // two providers.
 
+#include <memory>
+
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/async/cpp/wait.h>
 #include <lib/zx/eventpair.h>
@@ -33,16 +35,16 @@ int main(int argc, char* argv[]) {
   loop.StartThread("provider-thread", nullptr);
   async_dispatcher_t* dispatcher = loop.dispatcher();
 
-  fbl::unique_ptr<trace::TraceProvider> provider1;
+  std::unique_ptr<trace::TraceProviderWithFdio> provider1;
   bool already_started;
-  if (!trace::TraceProvider::CreateSynchronously(
+  if (!trace::TraceProviderWithFdio::CreateSynchronously(
           dispatcher, "provider1", &provider1, &already_started)) {
     FXL_LOG(ERROR) << "Failed to create provider1";
     return EXIT_FAILURE;
   }
 
-  fbl::unique_ptr<trace::TraceProvider> provider2;
-  if (!trace::TraceProvider::CreateSynchronously(
+  std::unique_ptr<trace::TraceProviderWithFdio> provider2;
+  if (!trace::TraceProviderWithFdio::CreateSynchronously(
           dispatcher, "provider2", &provider2, &already_started)) {
     FXL_LOG(ERROR) << "Failed to create provider2";
     return EXIT_FAILURE;

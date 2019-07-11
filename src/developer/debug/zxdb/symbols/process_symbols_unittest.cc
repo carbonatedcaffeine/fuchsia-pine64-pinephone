@@ -44,9 +44,7 @@ class NotificationsImpl : public ProcessSymbols::Notifications {
   }
 
   // Notifications implementation.
-  void DidLoadModuleSymbols(LoadedModuleSymbols* module) override {
-    loaded_.push_back(module);
-  }
+  void DidLoadModuleSymbols(LoadedModuleSymbols* module) override { loaded_.push_back(module); }
   void WillUnloadModuleSymbols(LoadedModuleSymbols* module) override {
     unloaded_.push_back(module->load_address());
   }
@@ -72,8 +70,10 @@ TEST(ProcessSymbols, SetModules) {
   std::string fake_build_id_2 = "67890";
   std::string test_file_name = TestSymbolModule::GetTestFileName();
   SystemSymbols system(nullptr);
-  system.build_id_index().AddBuildIDMapping(fake_build_id_1, test_file_name);
-  system.build_id_index().AddBuildIDMapping(fake_build_id_2, test_file_name);
+  system.build_id_index().AddBuildIDMapping(fake_build_id_1, test_file_name,
+                                            DebugSymbolFileType::kDebugInfo);
+  system.build_id_index().AddBuildIDMapping(fake_build_id_2, test_file_name,
+                                            DebugSymbolFileType::kDebugInfo);
 
   TargetSymbols target(&system);
 
@@ -94,8 +94,7 @@ TEST(ProcessSymbols, SetModules) {
   ASSERT_EQ(1u, notifications.loaded().size());
   LoadedModuleSymbols* loaded_symbols = notifications.loaded()[0];
   EXPECT_EQ(base1, loaded_symbols->load_address());
-  EXPECT_EQ(test_file_name,
-            loaded_symbols->module_symbols()->GetStatus().symbol_file);
+  EXPECT_EQ(test_file_name, loaded_symbols->module_symbols()->GetStatus().symbol_file);
   EXPECT_EQ(0, notifications.err_count());
 
   // Replace with a different one at the same address.

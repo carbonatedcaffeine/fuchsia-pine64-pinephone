@@ -3,13 +3,15 @@
 #include <fuchsia/io/llcpp/fidl.h>
 #include <memory>
 
+namespace llcpp {
+
 namespace fuchsia {
 namespace io {
 
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kDirectoryWatcher_OnEvent_Ordinal = 546032797u;
+constexpr uint64_t kDirectoryWatcher_OnEvent_Ordinal = 546032797lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryWatcherOnEventRequestTable;
 
 }  // namespace
@@ -111,18 +113,15 @@ bool DirectoryWatcher::Dispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transa
 }
 
 
-::fuchsia::io::NodeInfo::NodeInfo() {
+::llcpp::fuchsia::io::NodeInfo::NodeInfo() {
   tag_ = Tag::Invalid;
-  memset(reinterpret_cast<uint8_t*>(&tag_) + sizeof(tag_),
-         0,
-         offsetof(NodeInfo, service_) - sizeof(tag_));
 }
 
-::fuchsia::io::NodeInfo::~NodeInfo() {
+::llcpp::fuchsia::io::NodeInfo::~NodeInfo() {
   Destroy();
 }
 
-void ::fuchsia::io::NodeInfo::Destroy() {
+void ::llcpp::fuchsia::io::NodeInfo::Destroy() {
   switch (which()) {
   case Tag::kService:
     service_.~Service();
@@ -145,13 +144,16 @@ void ::fuchsia::io::NodeInfo::Destroy() {
   case Tag::kTty:
     tty_.~Tty();
     break;
+  case Tag::kSocket:
+    socket_.~Socket();
+    break;
   default:
     break;
   }
   tag_ = Tag::Invalid;
 }
 
-void ::fuchsia::io::NodeInfo::MoveImpl_(NodeInfo&& other) {
+void ::llcpp::fuchsia::io::NodeInfo::MoveImpl_(NodeInfo&& other) {
   switch (other.which()) {
   case Tag::kService:
     mutable_service() = std::move(other.mutable_service());
@@ -174,130 +176,127 @@ void ::fuchsia::io::NodeInfo::MoveImpl_(NodeInfo&& other) {
   case Tag::kTty:
     mutable_tty() = std::move(other.mutable_tty());
     break;
+  case Tag::kSocket:
+    mutable_socket() = std::move(other.mutable_socket());
+    break;
   default:
     break;
   }
   other.Destroy();
 }
 
-void ::fuchsia::io::NodeInfo::SizeAndOffsetAssertionHelper() {
-  static_assert(offsetof(::fuchsia::io::NodeInfo, service_) == 8);
-  static_assert(offsetof(::fuchsia::io::NodeInfo, file_) == 8);
-  static_assert(offsetof(::fuchsia::io::NodeInfo, directory_) == 8);
-  static_assert(offsetof(::fuchsia::io::NodeInfo, pipe_) == 8);
-  static_assert(offsetof(::fuchsia::io::NodeInfo, vmofile_) == 8);
-  static_assert(offsetof(::fuchsia::io::NodeInfo, device_) == 8);
-  static_assert(offsetof(::fuchsia::io::NodeInfo, tty_) == 8);
-  static_assert(sizeof(::fuchsia::io::NodeInfo) == ::fuchsia::io::NodeInfo::PrimarySize);
+void ::llcpp::fuchsia::io::NodeInfo::SizeAndOffsetAssertionHelper() {
+  static_assert(offsetof(::llcpp::fuchsia::io::NodeInfo, service_) == 8);
+  static_assert(offsetof(::llcpp::fuchsia::io::NodeInfo, file_) == 8);
+  static_assert(offsetof(::llcpp::fuchsia::io::NodeInfo, directory_) == 8);
+  static_assert(offsetof(::llcpp::fuchsia::io::NodeInfo, pipe_) == 8);
+  static_assert(offsetof(::llcpp::fuchsia::io::NodeInfo, vmofile_) == 8);
+  static_assert(offsetof(::llcpp::fuchsia::io::NodeInfo, device_) == 8);
+  static_assert(offsetof(::llcpp::fuchsia::io::NodeInfo, tty_) == 8);
+  static_assert(offsetof(::llcpp::fuchsia::io::NodeInfo, socket_) == 8);
+  static_assert(sizeof(::llcpp::fuchsia::io::NodeInfo) == ::llcpp::fuchsia::io::NodeInfo::PrimarySize);
 }
 
 
-Service& ::fuchsia::io::NodeInfo::mutable_service() {
+Service& ::llcpp::fuchsia::io::NodeInfo::mutable_service() {
   if (which() != Tag::kService) {
     Destroy();
     new (&service_) Service;
-    memset(reinterpret_cast<uint8_t*>(&service_) + sizeof(Service),
-           0,
-           sizeof(NodeInfo) - offsetof(NodeInfo, service_) - sizeof(Service));
   }
   tag_ = Tag::kService;
   return service_;
 }
 
-FileObject& ::fuchsia::io::NodeInfo::mutable_file() {
+FileObject& ::llcpp::fuchsia::io::NodeInfo::mutable_file() {
   if (which() != Tag::kFile) {
     Destroy();
     new (&file_) FileObject;
-    memset(reinterpret_cast<uint8_t*>(&file_) + sizeof(FileObject),
-           0,
-           sizeof(NodeInfo) - offsetof(NodeInfo, file_) - sizeof(FileObject));
   }
   tag_ = Tag::kFile;
   return file_;
 }
 
-DirectoryObject& ::fuchsia::io::NodeInfo::mutable_directory() {
+DirectoryObject& ::llcpp::fuchsia::io::NodeInfo::mutable_directory() {
   if (which() != Tag::kDirectory) {
     Destroy();
     new (&directory_) DirectoryObject;
-    memset(reinterpret_cast<uint8_t*>(&directory_) + sizeof(DirectoryObject),
-           0,
-           sizeof(NodeInfo) - offsetof(NodeInfo, directory_) - sizeof(DirectoryObject));
   }
   tag_ = Tag::kDirectory;
   return directory_;
 }
 
-Pipe& ::fuchsia::io::NodeInfo::mutable_pipe() {
+Pipe& ::llcpp::fuchsia::io::NodeInfo::mutable_pipe() {
   if (which() != Tag::kPipe) {
     Destroy();
     new (&pipe_) Pipe;
-    memset(reinterpret_cast<uint8_t*>(&pipe_) + sizeof(Pipe),
-           0,
-           sizeof(NodeInfo) - offsetof(NodeInfo, pipe_) - sizeof(Pipe));
   }
   tag_ = Tag::kPipe;
   return pipe_;
 }
 
-Vmofile& ::fuchsia::io::NodeInfo::mutable_vmofile() {
+Vmofile& ::llcpp::fuchsia::io::NodeInfo::mutable_vmofile() {
   if (which() != Tag::kVmofile) {
     Destroy();
     new (&vmofile_) Vmofile;
-    memset(reinterpret_cast<uint8_t*>(&vmofile_) + sizeof(Vmofile),
-           0,
-           sizeof(NodeInfo) - offsetof(NodeInfo, vmofile_) - sizeof(Vmofile));
   }
   tag_ = Tag::kVmofile;
   return vmofile_;
 }
 
-Device& ::fuchsia::io::NodeInfo::mutable_device() {
+Device& ::llcpp::fuchsia::io::NodeInfo::mutable_device() {
   if (which() != Tag::kDevice) {
     Destroy();
     new (&device_) Device;
-    memset(reinterpret_cast<uint8_t*>(&device_) + sizeof(Device),
-           0,
-           sizeof(NodeInfo) - offsetof(NodeInfo, device_) - sizeof(Device));
   }
   tag_ = Tag::kDevice;
   return device_;
 }
 
-Tty& ::fuchsia::io::NodeInfo::mutable_tty() {
+Tty& ::llcpp::fuchsia::io::NodeInfo::mutable_tty() {
   if (which() != Tag::kTty) {
     Destroy();
     new (&tty_) Tty;
-    memset(reinterpret_cast<uint8_t*>(&tty_) + sizeof(Tty),
-           0,
-           sizeof(NodeInfo) - offsetof(NodeInfo, tty_) - sizeof(Tty));
   }
   tag_ = Tag::kTty;
   return tty_;
+}
+
+Socket& ::llcpp::fuchsia::io::NodeInfo::mutable_socket() {
+  if (which() != Tag::kSocket) {
+    Destroy();
+    new (&socket_) Socket;
+  }
+  tag_ = Tag::kSocket;
+  return socket_;
 }
 
 
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kNode_Clone_Ordinal = 402549324u;
+constexpr uint64_t kNode_Clone_Ordinal = 402549324lu << 32;
 extern "C" const fidl_type_t fuchsia_io_NodeCloneRequestTable;
 [[maybe_unused]]
-constexpr uint32_t kNode_Close_Ordinal = 1387878023u;
+constexpr uint64_t kNode_Close_Ordinal = 1387878023lu << 32;
+extern "C" const fidl_type_t fuchsia_io_NodeCloseResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kNode_Describe_Ordinal = 526573406u;
+constexpr uint64_t kNode_Describe_Ordinal = 526573406lu << 32;
 extern "C" const fidl_type_t fuchsia_io_NodeDescribeResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kNode_OnOpen_Ordinal = 1191225277u;
+constexpr uint64_t kNode_OnOpen_Ordinal = 1191225277lu << 32;
 extern "C" const fidl_type_t fuchsia_io_NodeOnOpenEventTable;
 [[maybe_unused]]
-constexpr uint32_t kNode_Sync_Ordinal = 1648508842u;
+constexpr uint64_t kNode_Sync_Ordinal = 1648508842lu << 32;
+extern "C" const fidl_type_t fuchsia_io_NodeSyncResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kNode_GetAttr_Ordinal = 1166403528u;
+constexpr uint64_t kNode_GetAttr_Ordinal = 1166403528lu << 32;
+extern "C" const fidl_type_t fuchsia_io_NodeGetAttrResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kNode_SetAttr_Ordinal = 198530458u;
+constexpr uint64_t kNode_SetAttr_Ordinal = 198530458lu << 32;
+extern "C" const fidl_type_t fuchsia_io_NodeSetAttrRequestTable;
+extern "C" const fidl_type_t fuchsia_io_NodeSetAttrResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kNode_Ioctl_Ordinal = 905161895u;
+constexpr uint64_t kNode_Ioctl_Ordinal = 905161895lu << 32;
 extern "C" const fidl_type_t fuchsia_io_NodeIoctlRequestTable;
 extern "C" const fidl_type_t fuchsia_io_NodeIoctlResponseTable;
 
@@ -1282,48 +1281,61 @@ void Node::Interface::IoctlCompleterBase::Reply(::fidl::DecodedMessage<IoctlResp
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kFile_Clone_Ordinal = 402549324u;
+constexpr uint64_t kFile_Clone_Ordinal = 402549324lu << 32;
 extern "C" const fidl_type_t fuchsia_io_FileCloneRequestTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_Close_Ordinal = 1387878023u;
+constexpr uint64_t kFile_Close_Ordinal = 1387878023lu << 32;
+extern "C" const fidl_type_t fuchsia_io_FileCloseResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_Describe_Ordinal = 526573406u;
+constexpr uint64_t kFile_Describe_Ordinal = 526573406lu << 32;
 extern "C" const fidl_type_t fuchsia_io_FileDescribeResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_OnOpen_Ordinal = 1191225277u;
+constexpr uint64_t kFile_OnOpen_Ordinal = 1191225277lu << 32;
 extern "C" const fidl_type_t fuchsia_io_FileOnOpenEventTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_Sync_Ordinal = 1648508842u;
+constexpr uint64_t kFile_Sync_Ordinal = 1648508842lu << 32;
+extern "C" const fidl_type_t fuchsia_io_FileSyncResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_GetAttr_Ordinal = 1166403528u;
+constexpr uint64_t kFile_GetAttr_Ordinal = 1166403528lu << 32;
+extern "C" const fidl_type_t fuchsia_io_FileGetAttrResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_SetAttr_Ordinal = 198530458u;
+constexpr uint64_t kFile_SetAttr_Ordinal = 198530458lu << 32;
+extern "C" const fidl_type_t fuchsia_io_FileSetAttrRequestTable;
+extern "C" const fidl_type_t fuchsia_io_FileSetAttrResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_Ioctl_Ordinal = 905161895u;
+constexpr uint64_t kFile_Ioctl_Ordinal = 905161895lu << 32;
 extern "C" const fidl_type_t fuchsia_io_FileIoctlRequestTable;
 extern "C" const fidl_type_t fuchsia_io_FileIoctlResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_Read_Ordinal = 636961156u;
+constexpr uint64_t kFile_Read_Ordinal = 636961156lu << 32;
 extern "C" const fidl_type_t fuchsia_io_FileReadResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_ReadAt_Ordinal = 2087865796u;
+constexpr uint64_t kFile_ReadAt_Ordinal = 2087865796lu << 32;
 extern "C" const fidl_type_t fuchsia_io_FileReadAtResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_Write_Ordinal = 85125024u;
+constexpr uint64_t kFile_Write_Ordinal = 85125024lu << 32;
 extern "C" const fidl_type_t fuchsia_io_FileWriteRequestTable;
+extern "C" const fidl_type_t fuchsia_io_FileWriteResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_WriteAt_Ordinal = 1045766885u;
+constexpr uint64_t kFile_WriteAt_Ordinal = 1045766885lu << 32;
 extern "C" const fidl_type_t fuchsia_io_FileWriteAtRequestTable;
+extern "C" const fidl_type_t fuchsia_io_FileWriteAtResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_Seek_Ordinal = 2016048965u;
+constexpr uint64_t kFile_Seek_Ordinal = 2016048965lu << 32;
+extern "C" const fidl_type_t fuchsia_io_FileSeekRequestTable;
+extern "C" const fidl_type_t fuchsia_io_FileSeekResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_Truncate_Ordinal = 1118517818u;
+constexpr uint64_t kFile_Truncate_Ordinal = 1118517818lu << 32;
+extern "C" const fidl_type_t fuchsia_io_FileTruncateResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_GetFlags_Ordinal = 1679205366u;
+constexpr uint64_t kFile_GetFlags_Ordinal = 1679205366lu << 32;
 [[maybe_unused]]
-constexpr uint32_t kFile_SetFlags_Ordinal = 1059310710u;
+constexpr uint64_t kFile_SetFlags_Ordinal = 1059310710lu << 32;
+extern "C" const fidl_type_t fuchsia_io_FileSetFlagsRequestTable;
+extern "C" const fidl_type_t fuchsia_io_FileSetFlagsResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kFile_GetBuffer_Ordinal = 1958938995u;
+constexpr uint64_t kFile_GetBuffer_Ordinal = 1958938995lu << 32;
+extern "C" const fidl_type_t fuchsia_io_FileGetBufferRequestTable;
 extern "C" const fidl_type_t fuchsia_io_FileGetBufferResponseTable;
 
 }  // namespace
@@ -2593,11 +2605,11 @@ zx_status_t File::Call::SetFlags(zx::unowned_channel _client_end, uint32_t flags
 }
 
 
-::fidl::DecodeResult<File::GetBufferResponse> File::SyncClient::GetBuffer(::fidl::BytePart _request_buffer, uint32_t flags, ::fidl::BytePart _response_buffer, int32_t* out_s, ::fuchsia::mem::Buffer** out_buffer) {
+::fidl::DecodeResult<File::GetBufferResponse> File::SyncClient::GetBuffer(::fidl::BytePart _request_buffer, uint32_t flags, ::fidl::BytePart _response_buffer, int32_t* out_s, ::llcpp::fuchsia::mem::Buffer** out_buffer) {
   return File::Call::GetBuffer(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(flags), std::move(_response_buffer), out_s, out_buffer);
 }
 
-::fidl::DecodeResult<File::GetBufferResponse> File::Call::GetBuffer(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t flags, ::fidl::BytePart _response_buffer, int32_t* out_s, ::fuchsia::mem::Buffer** out_buffer) {
+::fidl::DecodeResult<File::GetBufferResponse> File::Call::GetBuffer(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t flags, ::fidl::BytePart _response_buffer, int32_t* out_s, ::llcpp::fuchsia::mem::Buffer** out_buffer) {
   if (_request_buffer.capacity() < GetBufferRequest::PrimarySize) {
     return ::fidl::DecodeResult<GetBufferResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
   }
@@ -3410,7 +3422,7 @@ void File::Interface::SetFlagsCompleterBase::Reply(::fidl::DecodedMessage<SetFla
 }
 
 
-void File::Interface::GetBufferCompleterBase::Reply(int32_t s, ::fuchsia::mem::Buffer* buffer) {
+void File::Interface::GetBufferCompleterBase::Reply(int32_t s, ::llcpp::fuchsia::mem::Buffer* buffer) {
   constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetBufferResponse>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize];
   GetBufferResponse _response = {};
@@ -3426,7 +3438,7 @@ void File::Interface::GetBufferCompleterBase::Reply(int32_t s, ::fuchsia::mem::B
   CompleterBase::SendReply(std::move(_linearize_result.message));
 }
 
-void File::Interface::GetBufferCompleterBase::Reply(::fidl::BytePart _buffer, int32_t s, ::fuchsia::mem::Buffer* buffer) {
+void File::Interface::GetBufferCompleterBase::Reply(::fidl::BytePart _buffer, int32_t s, ::llcpp::fuchsia::mem::Buffer* buffer) {
   if (_buffer.capacity() < GetBufferResponse::PrimarySize) {
     CompleterBase::Close(ZX_ERR_INTERNAL);
     return;
@@ -3453,49 +3465,59 @@ void File::Interface::GetBufferCompleterBase::Reply(::fidl::DecodedMessage<GetBu
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kDirectory_Clone_Ordinal = 402549324u;
+constexpr uint64_t kDirectory_Clone_Ordinal = 402549324lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryCloneRequestTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_Close_Ordinal = 1387878023u;
+constexpr uint64_t kDirectory_Close_Ordinal = 1387878023lu << 32;
+extern "C" const fidl_type_t fuchsia_io_DirectoryCloseResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_Describe_Ordinal = 526573406u;
+constexpr uint64_t kDirectory_Describe_Ordinal = 526573406lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryDescribeResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_OnOpen_Ordinal = 1191225277u;
+constexpr uint64_t kDirectory_OnOpen_Ordinal = 1191225277lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryOnOpenEventTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_Sync_Ordinal = 1648508842u;
+constexpr uint64_t kDirectory_Sync_Ordinal = 1648508842lu << 32;
+extern "C" const fidl_type_t fuchsia_io_DirectorySyncResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_GetAttr_Ordinal = 1166403528u;
+constexpr uint64_t kDirectory_GetAttr_Ordinal = 1166403528lu << 32;
+extern "C" const fidl_type_t fuchsia_io_DirectoryGetAttrResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_SetAttr_Ordinal = 198530458u;
+constexpr uint64_t kDirectory_SetAttr_Ordinal = 198530458lu << 32;
+extern "C" const fidl_type_t fuchsia_io_DirectorySetAttrRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectorySetAttrResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_Ioctl_Ordinal = 905161895u;
+constexpr uint64_t kDirectory_Ioctl_Ordinal = 905161895lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryIoctlRequestTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryIoctlResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_Open_Ordinal = 2011483371u;
+constexpr uint64_t kDirectory_Open_Ordinal = 2011483371lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryOpenRequestTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_Unlink_Ordinal = 750443289u;
+constexpr uint64_t kDirectory_Unlink_Ordinal = 750443289lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryUnlinkRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryUnlinkResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_ReadDirents_Ordinal = 782580781u;
+constexpr uint64_t kDirectory_ReadDirents_Ordinal = 782580781lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryReadDirentsResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_Rewind_Ordinal = 1886584199u;
+constexpr uint64_t kDirectory_Rewind_Ordinal = 1886584199lu << 32;
+extern "C" const fidl_type_t fuchsia_io_DirectoryRewindResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_GetToken_Ordinal = 840416493u;
+constexpr uint64_t kDirectory_GetToken_Ordinal = 840416493lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryGetTokenResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_Rename_Ordinal = 1251258540u;
+constexpr uint64_t kDirectory_Rename_Ordinal = 1251258540lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryRenameRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryRenameResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_Link_Ordinal = 462052964u;
+constexpr uint64_t kDirectory_Link_Ordinal = 462052964lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryLinkRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryLinkResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectory_Watch_Ordinal = 1522700084u;
+constexpr uint64_t kDirectory_Watch_Ordinal = 1522700084lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryWatchRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryWatchResponseTable;
 
 }  // namespace
 
@@ -5487,65 +5509,78 @@ void Directory::Interface::WatchCompleterBase::Reply(::fidl::DecodedMessage<Watc
 namespace {
 
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Clone_Ordinal = 402549324u;
+constexpr uint64_t kDirectoryAdmin_Clone_Ordinal = 402549324lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminCloneRequestTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Close_Ordinal = 1387878023u;
+constexpr uint64_t kDirectoryAdmin_Close_Ordinal = 1387878023lu << 32;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminCloseResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Describe_Ordinal = 526573406u;
+constexpr uint64_t kDirectoryAdmin_Describe_Ordinal = 526573406lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminDescribeResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_OnOpen_Ordinal = 1191225277u;
+constexpr uint64_t kDirectoryAdmin_OnOpen_Ordinal = 1191225277lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminOnOpenEventTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Sync_Ordinal = 1648508842u;
+constexpr uint64_t kDirectoryAdmin_Sync_Ordinal = 1648508842lu << 32;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminSyncResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_GetAttr_Ordinal = 1166403528u;
+constexpr uint64_t kDirectoryAdmin_GetAttr_Ordinal = 1166403528lu << 32;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminGetAttrResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_SetAttr_Ordinal = 198530458u;
+constexpr uint64_t kDirectoryAdmin_SetAttr_Ordinal = 198530458lu << 32;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminSetAttrRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminSetAttrResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Ioctl_Ordinal = 905161895u;
+constexpr uint64_t kDirectoryAdmin_Ioctl_Ordinal = 905161895lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminIoctlRequestTable;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminIoctlResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Open_Ordinal = 2011483371u;
+constexpr uint64_t kDirectoryAdmin_Open_Ordinal = 2011483371lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminOpenRequestTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Unlink_Ordinal = 750443289u;
+constexpr uint64_t kDirectoryAdmin_Unlink_Ordinal = 750443289lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminUnlinkRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminUnlinkResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_ReadDirents_Ordinal = 782580781u;
+constexpr uint64_t kDirectoryAdmin_ReadDirents_Ordinal = 782580781lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminReadDirentsResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Rewind_Ordinal = 1886584199u;
+constexpr uint64_t kDirectoryAdmin_Rewind_Ordinal = 1886584199lu << 32;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminRewindResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_GetToken_Ordinal = 840416493u;
+constexpr uint64_t kDirectoryAdmin_GetToken_Ordinal = 840416493lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminGetTokenResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Rename_Ordinal = 1251258540u;
+constexpr uint64_t kDirectoryAdmin_Rename_Ordinal = 1251258540lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminRenameRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminRenameResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Link_Ordinal = 462052964u;
+constexpr uint64_t kDirectoryAdmin_Link_Ordinal = 462052964lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminLinkRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminLinkResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Watch_Ordinal = 1522700084u;
+constexpr uint64_t kDirectoryAdmin_Watch_Ordinal = 1522700084lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminWatchRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminWatchResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Mount_Ordinal = 2120159974u;
+constexpr uint64_t kDirectoryAdmin_Mount_Ordinal = 2120159974lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminMountRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminMountResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_MountAndCreate_Ordinal = 841348753u;
+constexpr uint64_t kDirectoryAdmin_MountAndCreate_Ordinal = 841348753lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminMountAndCreateRequestTable;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminMountAndCreateResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_Unmount_Ordinal = 620898132u;
+constexpr uint64_t kDirectoryAdmin_Unmount_Ordinal = 620898132lu << 32;
+extern "C" const fidl_type_t fuchsia_io_DirectoryAdminUnmountResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_UnmountNode_Ordinal = 383400103u;
+constexpr uint64_t kDirectoryAdmin_UnmountNode_Ordinal = 383400103lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminUnmountNodeResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_QueryFilesystem_Ordinal = 1713999250u;
+constexpr uint64_t kDirectoryAdmin_QueryFilesystem_Ordinal = 1713999250lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminQueryFilesystemResponseTable;
 [[maybe_unused]]
-constexpr uint32_t kDirectoryAdmin_GetDevicePath_Ordinal = 787943096u;
+constexpr uint64_t kDirectoryAdmin_GetDevicePath_Ordinal = 787943096lu << 32;
 extern "C" const fidl_type_t fuchsia_io_DirectoryAdminGetDevicePathResponseTable;
 
 }  // namespace
@@ -8293,3 +8328,4 @@ void DirectoryAdmin::Interface::GetDevicePathCompleterBase::Reply(::fidl::Decode
 
 }  // namespace io
 }  // namespace fuchsia
+}  // namespace llcpp

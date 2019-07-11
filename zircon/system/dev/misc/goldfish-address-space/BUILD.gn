@@ -4,10 +4,11 @@
 
 driver("goldfish-address-space") {
   sources = [
-    "address-space-device.cpp",
+    "address-space-device.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.pci",
+    "$zx/system/dev/lib/device-protocol-pci",
     "$zx/system/dev/lib/mmio",
     "$zx/system/fidl/fuchsia-hardware-goldfish-address-space:c",
     "$zx/system/ulib/ddk",

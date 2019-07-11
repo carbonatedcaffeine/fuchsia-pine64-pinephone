@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_STEP_OVER_THREAD_CONTROLLER_H_
+#define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_STEP_OVER_THREAD_CONTROLLER_H_
 
 #include <functional>
 #include <memory>
@@ -55,12 +56,10 @@ class StepOverThreadController : public ThreadController {
   }
 
   // ThreadController implementation.
-  void InitWithThread(Thread* thread,
-                      std::function<void(const Err&)> cb) override;
+  void InitWithThread(Thread* thread, std::function<void(const Err&)> cb) override;
   ContinueOp GetContinueOp() override;
-  StopOp OnThreadStop(
-      debug_ipc::NotifyException::Type stop_type,
-      const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) override;
+  StopOp OnThreadStop(debug_ipc::NotifyException::Type stop_type,
+                      const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) override;
   const char* GetName() const override { return "Step Over"; }
 
  private:
@@ -72,6 +71,10 @@ class StepOverThreadController : public ThreadController {
 
   // When construction_mode_ == kSourceLine, this represents the line
   // information of the line we're stepping over.
+  //
+  // IMPORTANT: This class should not perform logic or comparisons on this
+  // value. Reasoning about the file/line in the current stack frame should be
+  // delegated to the StepThreadController.
   FileLine file_line_;
 
   // The fingerprint of the frame we're stepping in. Anything newer than this
@@ -87,3 +90,5 @@ class StepOverThreadController : public ThreadController {
 };
 
 }  // namespace zxdb
+
+#endif  // SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_STEP_OVER_THREAD_CONTROLLER_H_

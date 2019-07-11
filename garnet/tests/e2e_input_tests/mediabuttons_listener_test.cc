@@ -1,6 +1,6 @@
 // Copyright 2019 The Fuchsia Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.#include <cstdio>
+// found in the LICENSE file.
 
 #include <fuchsia/ui/input/cpp/fidl.h>
 #include <fuchsia/ui/policy/cpp/fidl.h>
@@ -21,15 +21,16 @@
 #include <string>
 #include <vector>
 
-#include "src/lib/fxl/command_line.h"
-#include "src/lib/fxl/log_settings_command_line.h"
 #include "src/lib/fxl/logging.h"
+
+// NOTE WELL. Run each of these e2e tests in its own executable.  They each
+// consume and maintain process-global context, so it's better to keep them
+// separate.  Plus, separation means they start up components in a known good
+// state, instead of reusing component state possibly dirtied by other tests.
 
 namespace {
 
-using fuchsia::ui::input::InputEvent;
 using fuchsia::ui::input::MediaButtonsEvent;
-using Phase = fuchsia::ui::input::PointerEventPhase;
 
 // Shared context for all tests in this process.
 // Set it up once, never delete it.
@@ -105,13 +106,6 @@ class MinimalClientView : public scenic::BaseView {
     root_node().AddChild(background);
   }
 
-  void Update(uint64_t present_time) {
-    session()->Present(
-        present_time, [this](fuchsia::images::PresentationInfo info) {
-          Update(info.presentation_time + info.presentation_interval);
-        });
-  }
-
  private:
   // |scenic::SessionListener|
   void OnScenicError(std::string error) override { FXL_LOG(FATAL) << error; }
@@ -182,11 +176,12 @@ class MediaButtonsListenerTest : public gtest::RealLoopFixture {
           << ", " << display_height_ << ").";
 
       view_->CreateScene(display_width_, display_height_);
-      view_->Update(zx_clock_get_monotonic());
-
-      inject_input_();  // Display up, content ready. Send in input.
-
-      test_was_run_ = true;  // Actually did work for this test.
+      view_->session()->Present(
+          zx_clock_get_monotonic(),
+          [this](fuchsia::images::PresentationInfo info) {
+            inject_input_();       // Display up, content ready. Send in input.
+            test_was_run_ = true;  // Actually did work for this test.
+          });
     });
 
     // Post a "just in case" quit task, if the test hangs.
@@ -257,8 +252,11 @@ class MediaButtonsListenerTest : public gtest::RealLoopFixture {
 
 TEST_F(MediaButtonsListenerTest, MediaButtons) {
   // Set up inputs. Fires when display and content are available.
+  // Inject a media button input with all buttons but the factory reset button
+  // set. If fdr is set, FactoryResetManager will handle the buttons event
+  // instead of the MediaButtonListener, which we are testing.
   SetInjectInputCallback([this] {
-    InjectInput({"media_button", "1", "1", "1", "1", nullptr});
+    InjectInput({"media_button", "1", "1", "1", "0", nullptr});
   });
 
   // Set up expectations. Terminate when we see 1 message.
@@ -266,7 +264,7 @@ TEST_F(MediaButtonsListenerTest, MediaButtons) {
       [this](const std::vector<MediaButtonsEvent>& observed) {
         EXPECT_EQ(observed.size(), 1U);
         QuitLoop();
-        // Today, we can't quietly break the View/ViewHolder connection.
+        // TODO(SCN-1449): Cleanly break the View/ViewHolder connection.
       },
       1);
 
