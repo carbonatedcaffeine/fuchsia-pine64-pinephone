@@ -8,8 +8,8 @@
 #include "src/developer/debug/zxdb/common/function.h"
 #include "src/developer/debug/zxdb/expr/eval_context.h"
 #include "src/developer/debug/zxdb/expr/expr.h"
-#include "src/developer/debug/zxdb/expr/format_expr_value_options.h"
 #include "src/developer/debug/zxdb/expr/format_node.h"
+#include "src/developer/debug/zxdb/expr/format_options.h"
 #include "src/developer/debug/zxdb/expr/resolve_array.h"
 #include "src/developer/debug/zxdb/expr/resolve_collection.h"
 #include "src/developer/debug/zxdb/expr/resolve_ptr_ref.h"
@@ -32,7 +32,7 @@ namespace zxdb {
 
 namespace {
 
-using NumFormat = FormatExprValueOptions::NumFormat;
+using NumFormat = FormatOptions::NumFormat;
 
 // Returns true if the base type is some kind of number such that the NumFormat of the format
 // options should be applied.
@@ -106,7 +106,7 @@ void FormatSignedInt(FormatNode* node) {
     node->set_description(fxl::StringPrintf("%" PRId64, int_val));
 }
 
-void FormatUnsignedInt(FormatNode* node, const FormatExprValueOptions& options) {
+void FormatUnsignedInt(FormatNode* node, const FormatOptions& options) {
   // This formatter handles unsigned and hex output.
   uint64_t int_val = 0;
   Err err = node->value().PromoteTo64(&int_val);
@@ -153,7 +153,7 @@ void FormatChar(FormatNode* node) {
 
 // Formats a numeric-style input. This assumes the type of the value in the given node has already
 // been determined to be numeric. This may also be called as a fallback for things like enums.
-void FormatNumeric(FormatNode* node, const FormatExprValueOptions& options) {
+void FormatNumeric(FormatNode* node, const FormatOptions& options) {
   node->set_description_kind(FormatNode::kBaseType);
 
   if (options.num_format != NumFormat::kDefault) {
@@ -196,7 +196,7 @@ void FormatNumeric(FormatNode* node, const FormatExprValueOptions& options) {
     }
   }
 }
-void FormatZxStatusT(FormatNode* node, const FormatExprValueOptions& options) {
+void FormatZxStatusT(FormatNode* node, const FormatOptions& options) {
   FormatNumeric(node, options);
 
   // Caller should have checked this is the right size.
@@ -205,8 +205,7 @@ void FormatZxStatusT(FormatNode* node, const FormatExprValueOptions& options) {
                         fxl::StringPrintf(" (%s)", debug_ipc::ZxStatusToString(int_val)));
 }
 
-void FormatEnum(FormatNode* node, const Enumeration* enum_type,
-                const FormatExprValueOptions& options) {
+void FormatEnum(FormatNode* node, const Enumeration* enum_type, const FormatOptions& options) {
   // Get the value out casted to a uint64.
   Err err;
   uint64_t numeric_value;
@@ -238,7 +237,7 @@ void FormatEnum(FormatNode* node, const Enumeration* enum_type,
 
   // Invalid enum values of explicitly overridden numeric formatting gets printed as a number.
   // Be explicit about the number formatting since the enum won't be a BaseType.
-  FormatExprValueOptions modified_opts = options;
+  FormatOptions modified_opts = options;
   if (modified_opts.num_format == NumFormat::kDefault)
     modified_opts.num_format = enum_type->is_signed() ? NumFormat::kSigned : NumFormat::kUnsigned;
   FormatNumeric(node, modified_opts);
@@ -257,7 +256,7 @@ void FormatEnum(FormatNode* node, const Enumeration* enum_type,
 //       The struct will have two values, __0 and __1, etc.
 //   Struct{x:u32, y:u32}
 //       The struct will have "x" and "y" members.
-void FormatRustEnum(FormatNode* node, const Collection* coll, const FormatExprValueOptions& options,
+void FormatRustEnum(FormatNode* node, const Collection* coll, const FormatOptions& options,
                     fxl::RefPtr<EvalContext> eval_context) {
   node->set_description_kind(FormatNode::kRustEnum);
 
@@ -311,8 +310,8 @@ void FormatRustEnum(FormatNode* node, const Collection* coll, const FormatExprVa
   node->set_description(enum_name);
 }
 
-void FormatRustTuple(FormatNode* node, const Collection* coll,
-                     const FormatExprValueOptions& options, fxl::RefPtr<EvalContext> eval_context) {
+void FormatRustTuple(FormatNode* node, const Collection* coll, const FormatOptions& options,
+                     fxl::RefPtr<EvalContext> eval_context) {
   node->set_description_kind(FormatNode::kRustTuple);
 
   // Rust tuple (and tuple struct) symbols have the tuple members encoded as "__0", "__1", etc.
@@ -341,8 +340,7 @@ void FormatRustTuple(FormatNode* node, const Collection* coll,
   // When we have a use for the short description, this should be set to: "(<0>, <1>, ...)"
 }
 
-void FormatCollection(FormatNode* node, const Collection* coll,
-                      const FormatExprValueOptions& options,
+void FormatCollection(FormatNode* node, const Collection* coll, const FormatOptions& options,
                       fxl::RefPtr<EvalContext> eval_context) {
   if (coll->is_declaration()) {
     // Sometimes a value will have a type that's a forward declaration and we couldn't resolve its
@@ -386,14 +384,16 @@ void FormatCollection(FormatNode* node, const Collection* coll,
 
     // Derived class nodes are named by the type of the base class.
     std::string from_name = from->GetFullName();
+    std::unique_ptr<FormatNode> base_class_node;
 
     ExprValue from_value;
-    Err err = ResolveInherited(node->value(), inherited, &from_value);
-    if (err.has_error()) {
-      node->children().push_back(std::make_unique<FormatNode>(from_name, err));
-    } else {
-      node->children().push_back(std::make_unique<FormatNode>(from_name, from_value));
-    }
+    if (Err err = ResolveInherited(node->value(), inherited, &from_value); err.has_error())
+      base_class_node = std::make_unique<FormatNode>(from_name, err);
+    else
+      base_class_node = std::make_unique<FormatNode>(from_name, from_value);
+
+    base_class_node->set_child_kind(FormatNode::kBaseClass);
+    node->children().push_back(std::move(base_class_node));
   }
 
   // Data members.
@@ -419,7 +419,7 @@ void FormatCollection(FormatNode* node, const Collection* coll,
   node->set_description_kind(FormatNode::kCollection);
 }
 
-void FormatPointer(FormatNode* node, const FormatExprValueOptions& options,
+void FormatPointer(FormatNode* node, const FormatOptions& options,
                    fxl::RefPtr<EvalContext> eval_context) {
   node->set_description_kind(FormatNode::kPointer);
 
@@ -433,20 +433,23 @@ void FormatPointer(FormatNode* node, const FormatExprValueOptions& options,
   }
 
   // The address goes in the description.
-  node->set_description(fxl::StringPrintf("0x%" PRIx64, node->value().GetAs<TargetPointer>()));
+  TargetPointer pointer_value = node->value().GetAs<TargetPointer>();
+  node->set_description(fxl::StringPrintf("0x%" PRIx64, pointer_value));
 
   // Make a child node that's the dereferenced pointer value. If/when we support GUIs, we should
   // probably remove the intermediate node and put the dereferenced struct members directly as
   // children on this node. Otherwise it's an annoying extra step to expand to things.
-
-  // Use our name but with a "*" to show it dereferenced.
-  auto deref_node = std::make_unique<FormatNode>(
-      "*" + node->name(),
-      [ptr_value = node->value()](fxl::RefPtr<EvalContext> context,
-                                  fit::callback<void(const Err& err, ExprValue value)> cb) {
-        ResolvePointer(context, ptr_value, FitCallbackToStdFunction(std::move(cb)));
-      });
-  node->children().push_back(std::move(deref_node));
+  if (pointer_value != 0) {
+    // Use our name but with a "*" to show it dereferenced.
+    auto deref_node = std::make_unique<FormatNode>(
+        "*" + node->name(),
+        [ptr_value = node->value()](fxl::RefPtr<EvalContext> context,
+                                    fit::callback<void(const Err& err, ExprValue value)> cb) {
+          ResolvePointer(context, ptr_value, FitCallbackToStdFunction(std::move(cb)));
+        });
+    deref_node->set_child_kind(FormatNode::kPointerExpansion);
+    node->children().push_back(std::move(deref_node));
+  }
 }
 
 // For now a reference is formatted like a pointer where the outer node is the address, and the
@@ -456,7 +459,7 @@ void FormatPointer(FormatNode* node, const FormatExprValueOptions& options,
 // If this is put into a GUI, we'll want the reference value to be in the main description and not
 // have any children. Visual Studio shows references the same as if it was a value which is probably
 // the correct behavior.
-void FormatReference(FormatNode* node, const FormatExprValueOptions& options,
+void FormatReference(FormatNode* node, const FormatOptions& options,
                      fxl::RefPtr<EvalContext> eval_context) {
   node->set_description_kind(FormatNode::kReference);
 
@@ -475,10 +478,11 @@ void FormatReference(FormatNode* node, const FormatExprValueOptions& options,
                             fit::callback<void(const Err& err, ExprValue value)> cb) {
         EnsureResolveReference(context, ref, FitCallbackToStdFunction(std::move(cb)));
       });
+  deref_node->set_child_kind(FormatNode::kPointerExpansion);
   node->children().push_back(std::move(deref_node));
 }
 
-void FormatFunctionPointer(FormatNode* node, const FormatExprValueOptions& options,
+void FormatFunctionPointer(FormatNode* node, const FormatOptions& options,
                            fxl::RefPtr<EvalContext> eval_context) {
   node->set_description_kind(FormatNode::kFunctionPointer);
 
@@ -495,6 +499,14 @@ void FormatFunctionPointer(FormatNode* node, const FormatExprValueOptions& optio
     return;
   }
 
+  // Allow overrides for the number format. Normally one would expect to
+  // provide a hex override to get the address rather than the resolved
+  // function name.
+  if (options.num_format != NumFormat::kDefault) {
+    FormatNumeric(node, options);
+    return;
+  }
+
   // Try to symbolize the function being pointed to.
   Location loc = eval_context->GetLocationForAddress(address);
   std::string function_name;
@@ -506,11 +518,11 @@ void FormatFunctionPointer(FormatNode* node, const FormatExprValueOptions& optio
     // No function name, just print out the address.
     node->set_description(fxl::StringPrintf("0x%" PRIx64, address));
   } else {
-    node->set_description(fxl::StringPrintf("&%s (0x%" PRIx64 ")", function_name.c_str(), address));
+    node->set_description("&" + function_name);
   }
 }
 
-void FormatMemberPtr(FormatNode* node, const MemberPtr* type, const FormatExprValueOptions& options,
+void FormatMemberPtr(FormatNode* node, const MemberPtr* type, const FormatOptions& options,
                      fxl::RefPtr<EvalContext> eval_context) {
   const Type* container_type = type->container_type().Get()->AsType();
   const Type* pointed_to_type = type->member_type().Get()->AsType();
@@ -567,8 +579,10 @@ void FormatCharArray(FormatNode* node, fxl::RefPtr<Type> char_type, const uint8_
   // Add children to the first null unless the length was known in advance.
   size_t child_len = length_was_known ? length : output_len;
   for (size_t i = 0; i < child_len; i++) {
-    node->children().push_back(std::make_unique<FormatNode>(fxl::StringPrintf("[%zu]", i),
-                                                            ExprValue(char_type, {data[i]})));
+    auto char_node = std::make_unique<FormatNode>(fxl::StringPrintf("[%zu]", i),
+                                                  ExprValue(char_type, {data[i]}));
+    char_node->set_child_kind(FormatNode::kArrayItem);
+    node->children().push_back(std::move(char_node));
   }
 
   // Add an indication if the string was truncated to the max size.
@@ -580,9 +594,8 @@ void FormatCharArray(FormatNode* node, fxl::RefPtr<Type> char_type, const uint8_
   node->set_description(result);
 }
 
-void FormatCharPointer(FormatNode* node, const Type* char_type,
-                       const FormatExprValueOptions& options, fxl::RefPtr<EvalContext> eval_context,
-                       fit::deferred_callback cb) {
+void FormatCharPointer(FormatNode* node, const Type* char_type, const FormatOptions& options,
+                       fxl::RefPtr<EvalContext> eval_context, fit::deferred_callback cb) {
   node->set_description_kind(FormatNode::kString);
 
   if (node->value().data().size() != kTargetPointerSize) {
@@ -635,7 +648,7 @@ void FormatCharPointer(FormatNode* node, const Type* char_type,
 
 // Formats an array with a known length. This is for non-char arrays (which are special-cased in
 // FormatCharArray).
-void FormatArray(FormatNode* node, int elt_count, const FormatExprValueOptions& options,
+void FormatArray(FormatNode* node, int elt_count, const FormatOptions& options,
                  fxl::RefPtr<EvalContext> eval_context) {
   node->set_description_kind(FormatNode::kArray);
 
@@ -651,12 +664,16 @@ void FormatArray(FormatNode* node, int elt_count, const FormatExprValueOptions& 
   }
 
   for (size_t i = 0; i < items.size(); i++) {
-    node->children().push_back(
-        std::make_unique<FormatNode>(fxl::StringPrintf("[%zu]", i), std::move(items[i])));
+    auto item_node =
+        std::make_unique<FormatNode>(fxl::StringPrintf("[%zu]", i), std::move(items[i]));
+    item_node->set_child_kind(FormatNode::kArrayItem);
+    node->children().push_back(std::move(item_node));
   }
 
   if (static_cast<uint32_t>(elt_count) > items.size()) {
     // Add "..." annotation to show some things were clipped.
+    //
+    // We may want to put a flag on the node that it was clipped.
     node->children().push_back(std::make_unique<FormatNode>("..."));
   }
 }
@@ -669,8 +686,7 @@ void FormatArray(FormatNode* node, int elt_count, const FormatExprValueOptions& 
 //
 // A false return value means this was not an array or a string and other types of formatting should
 // be attempted. The callback will be unmodified.
-bool TryFormatArrayOrString(FormatNode* node, const Type* type,
-                            const FormatExprValueOptions& options,
+bool TryFormatArrayOrString(FormatNode* node, const Type* type, const FormatOptions& options,
                             fxl::RefPtr<EvalContext> eval_context, fit::deferred_callback& cb) {
   FXL_DCHECK(type == type->StripCVT());
 
@@ -723,43 +739,12 @@ void FormatUnspecified(FormatNode* node) {
     node->set_description(fxl::StringPrintf("0x%" PRIx64, unspecified_value));
 }
 
-}  // namespace
-
-void FillFormatNodeValue(FormatNode* node, fxl::RefPtr<EvalContext> context,
-                         fit::deferred_callback cb) {
-  switch (node->source()) {
-    case FormatNode::kValue:
-      // Already has the value.
-      return;
-    case FormatNode::kExpression: {
-      // Evaluate the expression.
-      // TODO(brettw) remove this make_shared when EvalExpression takes a fit::callback.
-      auto shared_cb = std::make_shared<fit::deferred_callback>(std::move(cb));
-      EvalExpression(node->expression(), context, true,
-                     [weak_node = node->GetWeakPtr(), shared_cb](const Err& err, ExprValue value) {
-                       if (!weak_node)
-                         return;
-                       if (err.has_error()) {
-                         weak_node->set_err(err);
-                         weak_node->SetValue(ExprValue());
-                       } else {
-                         weak_node->SetValue(std::move(value));
-                       }
-                     });
-      return;
-    }
-    case FormatNode::kProgramatic:
-      // Lambda provides the value.
-      node->FillProgramaticValue(std::move(context), std::move(cb));
-      return;
-  }
-  FXL_NOTREACHED();
-}
-
-void FillFormatNodeDescription(FormatNode* node, const FormatExprValueOptions& options,
-                               fxl::RefPtr<EvalContext> context, fit::deferred_callback cb) {
-  if (node->state() == FormatNode::kEmpty || node->state() == FormatNode::kUnevaluated ||
-      node->err().has_error()) {
+// Given a node with a value already filled, fills the description.
+void FillFormatNodeDescriptionFromValue(FormatNode* node, const FormatOptions& options,
+                                        fxl::RefPtr<EvalContext> context,
+                                        fit::deferred_callback cb) {
+  FXL_DCHECK(node->state() != FormatNode::kUnevaluated);
+  if (node->state() == FormatNode::kEmpty || node->err().has_error()) {
     node->set_state(FormatNode::kDescribed);
     return;
   }
@@ -838,6 +823,61 @@ void FillFormatNodeDescription(FormatNode* node, const FormatExprValueOptions& o
     FormatUnspecified(node);
   } else {
     node->set_err(Err("Unsupported type for new formatting system."));
+  }
+}
+
+}  // namespace
+
+void FillFormatNodeValue(FormatNode* node, fxl::RefPtr<EvalContext> context,
+                         fit::deferred_callback cb) {
+  switch (node->source()) {
+    case FormatNode::kValue:
+      // Already has the value.
+      return;
+    case FormatNode::kExpression: {
+      // Evaluate the expression.
+      // TODO(brettw) remove this make_shared when EvalExpression takes a fit::callback.
+      auto shared_cb = std::make_shared<fit::deferred_callback>(std::move(cb));
+      EvalExpression(node->expression(), context, true,
+                     [weak_node = node->GetWeakPtr(), shared_cb](const Err& err, ExprValue value) {
+                       if (!weak_node)
+                         return;
+                       if (err.has_error()) {
+                         weak_node->set_err(err);
+                         weak_node->SetValue(ExprValue());
+                       } else {
+                         weak_node->SetValue(std::move(value));
+                       }
+                     });
+      return;
+    }
+    case FormatNode::kProgramatic:
+      // Lambda provides the value.
+      node->FillProgramaticValue(std::move(context), std::move(cb));
+      return;
+  }
+  FXL_NOTREACHED();
+}
+
+void FillFormatNodeDescription(FormatNode* node, const FormatOptions& options,
+                               fxl::RefPtr<EvalContext> context, fit::deferred_callback cb) {
+  if (node->state() == FormatNode::kEmpty || node->err().has_error()) {
+    node->set_state(FormatNode::kDescribed);
+    return;
+  }
+
+  if (node->state() == FormatNode::kUnevaluated) {
+    // Need to compute the value (possibly asynchronously).
+    FillFormatNodeValue(node, context,
+                        fit::defer_callback([weak_node = node->GetWeakPtr(), options, context,
+                                             cb = std::move(cb)]() mutable {
+                          if (weak_node)
+                            FillFormatNodeDescriptionFromValue(weak_node.get(), options, context,
+                                                               std::move(cb));
+                        }));
+  } else {
+    // Value already available, can format now.
+    FillFormatNodeDescriptionFromValue(node, options, context, std::move(cb));
   }
 }
 

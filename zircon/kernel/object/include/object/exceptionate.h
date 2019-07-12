@@ -10,7 +10,7 @@
 #include <object/channel_dispatcher.h>
 #include <object/excp_port.h>
 #include <object/handle.h>
-#include <zircon/thread_annotations.h>
+#include <lib/zircon-internal/thread_annotations.h>
 #include <zircon/types.h>
 
 #include <fbl/ref_ptr.h>
@@ -78,7 +78,7 @@ public:
     // Returns:
     //   ZX_ERR_NEXT if there is no valid underlying channel.
     //   ZX_ERR_NO_MEMORY if we failed to allocate memory.
-    zx_status_t SendException(fbl::RefPtr<ExceptionDispatcher> exception);
+    zx_status_t SendException(const fbl::RefPtr<ExceptionDispatcher>& exception);
 
 private:
     bool HasValidChannelLocked() const TA_REQ(lock_);

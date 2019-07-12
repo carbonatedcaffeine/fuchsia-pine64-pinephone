@@ -28,6 +28,8 @@ if (is_mac) {
       "fs/hack_filesystem_unittest.cc",
       "geometry/bounding_box_unittest.cc",
       "geometry/indexed_triangle_mesh_clip_unittest.cc",
+      "geometry/intersection_unittest.cc",
+      "geometry/interval_unittest.cc",
       "geometry/plane_unittest.cc",
       "gpu_allocator_unittest.cc",
       "gpu_mem_unittest.cc",
@@ -80,11 +82,9 @@ if (is_mac) {
       ":gtest_escher",
       "base:base_unittests",
       "//src/lib/fxl",
+      "//third_party/glslang:glslang_sources",
       "//third_party/googletest:gmock",
-      "//third_party/shaderc/libshaderc",
-      "//third_party/shaderc/third_party/glslang",
-      "//third_party/shaderc/third_party/glslang:SPIRV",
-      "//third_party/shaderc/third_party/glslang:glslang-default-resource-limits",
+      "//third_party/shaderc:libshaderc",
     ]
 
     if (is_linux) {

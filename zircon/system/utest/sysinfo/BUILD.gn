@@ -4,14 +4,14 @@
 
 test("sysinfo") {
   sources = [
-    "main.cc",
+    "sysinfo-test.cc",
   ]
   deps = [
     "$zx/system/fidl/fuchsia-sysinfo:c",
     "$zx/system/ulib/fbl",
     "$zx/system/ulib/fdio",
-    "$zx/system/ulib/unittest",
     "$zx/system/ulib/zircon",
     "$zx/system/ulib/zx",
+    "$zx/system/ulib/zxtest",
   ]
 }

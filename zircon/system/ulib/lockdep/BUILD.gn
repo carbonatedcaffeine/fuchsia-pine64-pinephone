@@ -20,17 +20,36 @@ library("lockdep") {
   ]
   kernel = true
   static = true
-  sources = [
-    "lock_dep.cc",
-  ]
+  sources = []
   public_deps = [
     "$zx/system/ulib/fbl:headers",
   ]
   if (!is_kernel) {
+    sources += [ "lock_dep.cc" ]
     configs += [ "$zx/public/gn/config:visibility_hidden" ]
     deps = [
       "$zx/system/ulib/fbl",
       "$zx/system/ulib/zx",
     ]
   }
+}
+
+test("lockdep-test") {
+  testonly = true
+  sources = [
+    "lock_dep_test.cc",
+  ]
+  deps = [
+    ":lockdep",
+    "$zx/system/ulib/fdio",
+    "$zx/system/ulib/zircon-internal",
+    "$zx/system/ulib/zxtest",
+  ]
+}
+
+group("test") {
+  testonly = true
+  deps = [
+    ":lockdep-test",
+  ]
 }

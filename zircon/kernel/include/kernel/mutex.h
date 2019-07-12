@@ -18,7 +18,7 @@
 #include <ktl/atomic.h>
 #include <stdint.h>
 #include <zircon/compiler.h>
-#include <zircon/thread_annotations.h>
+#include <lib/zircon-internal/thread_annotations.h>
 
 // Kernel mutex support.
 //
@@ -39,6 +39,14 @@ public:
     // does the current thread hold the mutex?
     bool IsHeld() const {
         return (holder() == get_current_thread());
+    }
+
+    // Panic unless the given lock is held.
+    //
+    // Can be used when thread safety analysis can't prove you are holding
+    // a lock. The asserts may be optimized away in release builds.
+    void AssertHeld() const TA_ASSERT() {
+      DEBUG_ASSERT(IsHeld());
     }
 
 private:
@@ -88,6 +96,12 @@ struct MutexPolicy {
     template <typename LockType>
     static void Release(LockType* lock, State*) TA_REL(lock) TA_EXCL(thread_lock) {
         lock->Release();
+    }
+
+    // Runtime lock assertions.
+    template <typename LockType>
+    static void AssertHeld(const LockType& lock) TA_ASSERT(lock) {
+        lock.AssertHeld();
     }
 
     // A enum tag that can be passed to Guard<Mutex>::Release(...) to

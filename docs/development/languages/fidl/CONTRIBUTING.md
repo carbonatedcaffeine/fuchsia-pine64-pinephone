@@ -21,14 +21,14 @@ The [FIDL](README.md) toolchain is composed of roughly three parts:
 
 ### Code Location
 
-The front-end lives at [//zircon/system/host/fidl/][fidlc-source],
+The front-end lives at [//zircon/tools/fidl/][fidlc-source],
 with tests in [//zircon/system/utest/fidl/][fidlc-tests].
 
 The back-end and runtime library locations are based on the target:
 
 Target    | Back-end                                               | Runtime Libraries
 ----------|--------------------------------------------------------|------------------
-C         | [//zircon/system/host/fidl/lib/c_generator.cc][be-c]   | [//zircon/system/ulib/fidl/][rtl-c]
+C         | [//zircon/tools/fidl/lib/c_generator.cc][be-c]         | [//zircon/system/ulib/fidl/][rtl-c]
 C++       | [//garnet/go/src/fidl/compiler/backend/cpp/][be-cpp]   | [//zircon/system/ulib/fidl/][rtl-c] & [//garnet/public/lib/fidl/cpp/][rtl-cpp]
 Go        | [//garnet/go/src/fidl/compiler/backend/golang/][be-go] | [//third_party/go/src/syscall/zx/fidl/][rtl-go]
 Rust      | [//garnet/go/src/fidl/compiler/backend/rust/][be-rust] | [//garnet/public/lib/fidl/rust/fidl/][rtl-rust]
@@ -85,7 +85,7 @@ fx set terminal.x64 --with //bundles:kitchen_sink --with //vendor/google/bundles
 To symbolize backtraces, you'll need a symbolizer in scope:
 
 ```sh
-export ASAN_SYMBOLIZER_PATH="$FUCHSIA_DIR/zircon/prebuilt/downloads/clang/bin/llvm-symbolizer"
+export ASAN_SYMBOLIZER_PATH="$FUCHSIA_DIR/buildtools/linux-x64/clang/bin/llvm-symbolizer"
 ```
 
 ## Compiling, and Running Tests
@@ -95,8 +95,6 @@ When in doubt, refer to the "`Test:`" comment in the git commit message;
 we do our best to describe the commands used to validate our work there.
 
 ### fidlc
-
-In `zircon/`:
 
 ```sh
 # optional; builds fidlc for the host with ASan <https://github.com/google/sanitizers/wiki/AddressSanitizer>
@@ -126,11 +124,32 @@ fx build
 fx run -k -c zircon.autorun.boot=/boot/bin/runtests+-t+fidl-coding-tables-test
 ```
 
+To regenerate the FIDL definitions used in unit testing, run:
+```sh
+fx build zircon/tools
+$FUCHSIA_DIR/out/default.zircon/tools/fidlc \
+  --tables $FUCHSIA_DIR/zircon/system/utest/fidl/fidl/extra_messages.cc \
+  --files $FUCHSIA_DIR/zircon/system/utest/fidl/fidl/extra_messages.test.fidl
+```
+
 ### fidlgen (LLCPP, HLCPP, Rust, Go)
+
+Build:
+
+```sh
+fx build garnet/go/src/fidl
+```
+
+Run:
+
+```sh
+$FUCHSIA_DIR/out/default/host_x64/fidlgen
+```
 
 Some example tests you can run:
 
 ```sh
+fx run-host-tests fidlgen_cpp_test
 fx run-host-tests fidlgen_cpp_ir_test
 fx run-host-tests fidlgen_golang_ir_test
 ```
@@ -297,7 +316,7 @@ fidl fmt --library my_library.fidl -i
 
 <!-- xrefs -->
 [cpp-style]: /docs/development/languages/c-cpp/cpp-style.md
-[be-c]: /zircon/system/host/fidl/lib/c_generator.cc
+[be-c]: /zircon/tools/fidl/lib/c_generator.cc
 [be-cpp]: /garnet/go/src/fidl/compiler/backend/cpp/
 [be-dart]: https://fuchsia.googlesource.com/topaz/+/master/bin/fidlgen_dart/
 [be-go]: /garnet/go/src/fidl/compiler/backend/golang/
@@ -305,7 +324,7 @@ fidl fmt --library my_library.fidl -i
 [be-js]: https://chromium.googlesource.com/chromium/src/+/master/build/fuchsia/fidlgen_js/
 [bindings_test-dart]: https://fuchsia.googlesource.com/topaz/+/master/bin/fidl_bindings_test
 [compatibility_test]: https://fuchsia.googlesource.com/topaz/+/master/bin/fidl_compatibility_test
-[fidlc-source]: /zircon/system/host/fidl/
+[fidlc-source]: /zircon/tools/fidl/
 [fidlc-coding-tables-tests]: /zircon/system/utest/fidl-coding-tables/
 [fidlc-compiler-tests]: /zircon/system/utest/fidl-compiler/
 [fidlc-tests]: /zircon/system/utest/fidl/
