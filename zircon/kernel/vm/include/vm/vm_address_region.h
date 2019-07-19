@@ -53,6 +53,7 @@
   (VMAR_FLAG_CAN_MAP_READ | VMAR_FLAG_CAN_MAP_WRITE | VMAR_FLAG_CAN_MAP_EXECUTE)
 
 class VmAspace;
+class VmAddressRegionDispatcher;
 
 // forward declarations
 class VmAddressRegion;
@@ -108,6 +109,7 @@ class VmAddressRegionOrMapping : public fbl::RefCounted<VmAddressRegionOrMapping
   size_t size() const { return size_; }
   uint32_t flags() const { return flags_; }
   const fbl::RefPtr<VmAspace>& aspace() const { return aspace_; }
+  fbl::RefPtr<VmAddressRegion> parent();
 
   // Recursively compute the number of allocated pages within this region
   virtual size_t AllocatedPages() const;
@@ -245,6 +247,7 @@ class VmAddressRegion : public VmAddressRegionOrMapping {
   const char* name() const { return name_; }
   bool is_mapping() const override { return false; }
   bool has_parent() const;
+  VmAddressRegionDispatcher* dispatcher() { return dispatcher_; }
 
   void Dump(uint depth, bool verbose) const override;
   zx_status_t PageFault(vaddr_t va, uint pf_flags, PageRequest* page_request) override;
@@ -347,6 +350,9 @@ class VmAddressRegion : public VmAddressRegionOrMapping {
 
   // list of subregions, indexed by base address
   ChildList subregions_;
+
+  VmAddressRegionDispatcher* dispatcher_ = nullptr;
+  friend class VmAddressRegionDispatcher;
 
   const char name_[32] = {};
 };

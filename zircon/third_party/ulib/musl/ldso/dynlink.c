@@ -2437,6 +2437,10 @@ __NO_SAFESTACK __attribute__((__visibility__("hidden"))) void _dl_log_write(cons
   }
 }
 
+__EXPORT zx_handle_t _dl_get_logger() {
+  return logger;
+}
+
 __NO_SAFESTACK static size_t errormsg_write(FILE* f, const unsigned char* buf, size_t len) {
   if (f != NULL && f->wpos > f->wbase) {
     _dl_log_write((const char*)f->wbase, f->wpos - f->wbase);

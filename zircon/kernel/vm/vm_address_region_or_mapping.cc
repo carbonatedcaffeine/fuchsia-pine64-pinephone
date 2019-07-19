@@ -93,3 +93,8 @@ size_t VmAddressRegionOrMapping::AllocatedPages() const {
   }
   return AllocatedPagesLocked();
 }
+
+fbl::RefPtr<VmAddressRegion> VmAddressRegionOrMapping::parent() {
+  Guard<fbl::Mutex> guard{aspace_->lock()};
+  return fbl::RefPtr<VmAddressRegion>(parent_);
+}

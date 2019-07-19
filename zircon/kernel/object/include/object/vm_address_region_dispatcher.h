@@ -47,6 +47,8 @@ class VmAddressRegionDispatcher final
   // protections.
   static bool is_valid_mapping_protection(uint32_t flags);
 
+  void on_zero_handles();
+
  private:
   explicit VmAddressRegionDispatcher(fbl::RefPtr<VmAddressRegion> vmar, uint base_arch_mmu_flags);
 

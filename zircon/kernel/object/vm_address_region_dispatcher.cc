@@ -120,6 +120,7 @@ VmAddressRegionDispatcher::VmAddressRegionDispatcher(fbl::RefPtr<VmAddressRegion
                                                      uint base_arch_mmu_flags)
     : vmar_(ktl::move(vmar)), base_arch_mmu_flags_(base_arch_mmu_flags) {
   kcounter_add(dispatcher_vmar_create_count, 1);
+  vmar_->dispatcher_ = this;
 }
 
 VmAddressRegionDispatcher::~VmAddressRegionDispatcher() {
@@ -239,4 +240,8 @@ bool VmAddressRegionDispatcher::is_valid_mapping_protection(uint32_t flags) {
     }
   }
   return true;
+}
+
+void VmAddressRegionDispatcher::on_zero_handles() {
+  vmar_->dispatcher_ = nullptr;
 }

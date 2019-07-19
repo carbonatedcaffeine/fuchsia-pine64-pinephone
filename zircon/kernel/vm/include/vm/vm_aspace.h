@@ -30,6 +30,7 @@ class GuestPhysicalAddressSpace;
 }  // namespace hypervisor
 
 class VmObject;
+class ProcessDispatcher;
 
 class VmAspace : public fbl::DoublyLinkedListable<VmAspace*>, public fbl::RefCounted<VmAspace> {
  public:
@@ -87,6 +88,9 @@ class VmAspace : public fbl::DoublyLinkedListable<VmAspace*>, public fbl::RefCou
   // any methods of |ve| return false, the traversal stops and this method
   // returns false. Returns true otherwise.
   bool EnumerateChildren(VmEnumerator* ve);
+
+  zx_status_t ClowncopterizeUpon(fbl::RefPtr<ProcessDispatcher> new_proc,
+                                 fbl::RefPtr<ProcessDispatcher> old_proc);
 
   // A collection of memory usage counts.
   struct vm_usage_t {

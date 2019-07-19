@@ -67,6 +67,7 @@ zx_status_t fdio_ns_bind_fd(fdio_ns_t* ns, const char* path, int fd) {
   return fdio_ns_bind(ns, path, handle);
 }
 
+__EXPORT
 fdio_t* fdio_ns_open_root(fdio_ns_t* ns) { return ns->OpenRoot(); }
 
 __EXPORT

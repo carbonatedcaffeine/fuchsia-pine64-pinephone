@@ -457,6 +457,13 @@ protocol Api {
                          array<voidptr>:buffer_size buffer, usize buffer_size) ->
         (zx.status status, usize actual);
 
+    /// Do not use
+    [argtype="name IN"]
+    process_clowncopterize(handle<job> job, handle<process> handle, string:name_size name, usize name_size) ->
+        (zx.status status, handle<process> proc_handle, handle<vmar> vmar_handle);
+    // Also do not use
+    process_clowncopter_handle(handle<process> process, handle handle, handle number) -> (zx.status status);
+
 
     //
     //

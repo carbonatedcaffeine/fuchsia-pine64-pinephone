@@ -338,6 +338,65 @@ zx_status_t sys_process_create(zx_handle_t job_handle, user_in_ptr<const char> _
   return result;
 }
 
+zx_status_t sys_process_clowncopterize(zx_handle_t job_handle, zx_handle_t handle,
+                                       user_in_ptr<const char> _name, size_t name_len,
+                                       user_out_handle* process_handle,
+                                       user_out_handle* vmar_handle) {
+  auto up = ProcessDispatcher::GetCurrent();
+
+  fbl::RefPtr<JobDispatcher> job;
+  auto status = up->GetDispatcher(job_handle, &job);
+  if (status != ZX_OK) return status;
+  fbl::RefPtr<ProcessDispatcher> old_process;
+  status = up->GetDispatcher(handle, &old_process);
+  if (status != ZX_OK) return status;
+
+  // copy out the name
+  char name[ZX_MAX_NAME_LEN];
+  fbl::StringPiece sp;
+  // Silently truncate the given name.
+  if (name_len > sizeof(name))
+    name_len = sizeof(name);
+  status = copy_user_string(_name, name_len, name, sizeof(name), &sp);
+  if (status != ZX_OK) {
+    printf("copy name clowncopter fail %d\n", status);
+    return status;
+  }
+
+  KernelHandle<ProcessDispatcher> new_process_handle;
+  KernelHandle<VmAddressRegionDispatcher> new_vmar_handle;
+  zx_rights_t proc_rights, vmar_rights;
+  status = ProcessDispatcher::Create(ktl::move(job), fbl::StringPiece(name), 0, &new_process_handle,
+                                     &proc_rights, &new_vmar_handle, &vmar_rights);
+  if (status != ZX_OK) return status;
+  auto process = new_process_handle.dispatcher();
+
+  status = old_process->aspace()->ClowncopterizeUpon(process, old_process);
+  if (status != ZX_OK) return status;
+
+  status = process_handle->make(ktl::move(new_process_handle), proc_rights);
+  if (status == ZX_OK)
+    status = vmar_handle->make(ktl::move(new_vmar_handle), vmar_rights);
+  return status;
+}
+
+zx_status_t sys_process_clowncopter_handle(zx_handle_t proc_handle, zx_handle_t handle_value,
+                                           zx_handle_t new_value) {
+  auto up = ProcessDispatcher::GetCurrent();
+
+  fbl::RefPtr<ProcessDispatcher> process;
+  auto status = up->GetDispatcher(proc_handle, &process);
+  if (status != ZX_OK) return status;
+
+  HandleOwner handle = up->RemoveHandle(handle_value);
+  if (!handle) return status;
+  status = process->OverrideHandle(handle, new_value);
+  if (status != ZX_OK) {
+    up->AddHandle(ktl::move(handle)); // NOTE: this is probably very broken!
+  }
+  return status;
+}
+
 // Note: This is used to start the main thread (as opposed to using
 // sys_thread_start for that) for a few reasons:
 // - less easily exploitable

@@ -80,6 +80,7 @@ static constexpr fdio_state_t initialize_fdio_state() {
   state.cwd_path[1] = '\0';
   return state;
 }
+__EXPORT
 fdio_state_t __fdio_global_state = initialize_fdio_state();
 
 static bool fdio_is_reserved_or_null(fdio_t* io) {

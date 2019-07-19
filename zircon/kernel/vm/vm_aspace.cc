@@ -30,6 +30,10 @@
 #include <vm/vm_object_paged.h>
 #include <vm/vm_object_physical.h>
 
+#include "object/dispatcher.h"
+#include "object/vm_object_dispatcher.h"
+#include "object/vm_address_region_dispatcher.h"
+#include "object/process_dispatcher.h"
 #include "vm_priv.h"
 
 #define LOCAL_TRACE MAX(VM_GLOBAL_TRACE, 0)
@@ -640,4 +644,175 @@ uintptr_t VmAspace::vdso_base_address() const {
 uintptr_t VmAspace::vdso_code_address() const {
   Guard<fbl::Mutex> guard{&lock_};
   return vdso_code_mapping_ ? vdso_code_mapping_->base() : 0;
+}
+
+/*
+void* operator new(size_t count) {
+  fbl::AllocChecker ac;
+  void* data = operator new(count, &ac);
+  if (!ac.check()) panic("I want to die");
+  return data;
+}
+*/
+
+extern int scream_time;
+
+class ClowncopterizeVmoEnumerator : public VmEnumerator {
+ public:
+  bool OnVmAddressRegion(const VmAddressRegion* vmar, uint depth) override {
+    if (depth == 0)
+      return true;
+    LTRACEF("clowncopterizing vmar %p depth=%d base=%#lx size=%#lx\n", vmar, depth, vmar->base(),
+           vmar->size());
+    Ascend(depth);
+    zx_status_t status = p_->CreateSubVmar(vmar->base() - p_->base(), vmar->size(), 0,
+                                           VMAR_FLAG_SPECIFIC | vmar->flags(), vmar->name(), &p_);
+    depth_++;
+    ASSERT(depth + 1 == depth_);
+    if (status != ZX_OK) {
+      *status_out = status;
+      return false;
+    }
+    LTRACEF("created vmar %p for %p\n", p_.get(), vmar);
+    return true;
+  }
+  bool OnVmMapping(const VmMapping* map, const VmAddressRegion* vmar, uint depth) override {
+    Ascend(depth);
+    LTRACEF("clowncopterizing vmo %p depth=%d base=%#lx size=%lx vmo=%p\n", map, depth, map->base(),
+           map->size(), map->vmo_locked().get());
+    fbl::RefPtr<VmObject> vmo = map->vmo_locked();
+    fbl::RefPtr<VmObject> vmo_clone;
+    if (VDso::vmo_is_vdso(vmo)) {
+      // Don't clone the VDSO.
+      vmo_clone = vmo;
+    } else {
+      auto vmo_clone_find = cloned_.find(vmo.get());
+      if (vmo_clone_find == cloned_.end()) {
+        zx_status_t status = vmo->CreateClone(
+            vmo->is_resizable() ? Resizability::Resizable : Resizability::NonResizable,
+            CloneType::CopyOnWrite, 0, vmo->size(), true, &vmo_clone);
+        LTRACEF("created cow %p for %p\n", vmo_clone.get(), vmo.get());
+        if (status != ZX_OK) {
+          *status_out = status;
+          return false;
+        }
+
+        fbl::AllocChecker ac;
+        auto cloned_vmo = fbl::make_unique_checked<ClonedVmo>(&ac, vmo.get(), vmo_clone);
+        ASSERT(cloned_vmo != nullptr);
+        ASSERT(ac.check());
+        cloned_.insert(std::move(cloned_vmo));
+      } else {
+        vmo_clone = vmo_clone_find->new_vmo;
+        LTRACEF("reusing cow %p for %p\n", vmo_clone.get(), vmo.get());
+      }
+    }
+    fbl::RefPtr<VmMapping> new_map;
+    LTRACEF("CreateVmMapping(%#lx, %#lx, 0, %x, %p, 0, %#x, null, blah)\n", map->base(),
+            map->size(), VMAR_FLAG_SPECIFIC | map->flags(), vmo_clone.get(), map->arch_mmu_flags());
+    zx_status_t status = p_->CreateVmMapping(
+        map->base() - p_->base(), map->size(), 0, VMAR_FLAG_SPECIFIC | map->flags(), vmo_clone,
+        map->object_offset(), map->arch_mmu_flags(), nullptr, &new_map);
+    if (status != ZX_OK) {
+      *status_out = status;
+      return false;
+    }
+    LTRACEF("created mapping %p for %p\n", new_map.get(), map);
+    return true;
+  }
+
+  zx_status_t CreateClowncopterOverrides(fbl::RefPtr<ProcessDispatcher> new_proc,
+                                         fbl::RefPtr<ProcessDispatcher> old_proc) {
+    return old_proc->ForEachHandle([&](zx_handle_t handle, zx_rights_t rights,
+                                       const Dispatcher* dispatcher) {
+      fbl::RefPtr<Dispatcher> new_dispatcher;
+      KernelHandle<VmAddressRegionDispatcher> dummy;
+      if (auto vmo_dispatcher = DownCastDispatcher<const VmObjectDispatcher>(dispatcher)) {
+        auto vmo = vmo_dispatcher->vmo();
+        auto cloned_vmo = cloned_.find(vmo.get());
+        if (cloned_vmo != cloned_.end()) {
+          new_dispatcher = cloned_vmo->new_vmo_dispatcher.dispatcher();
+        }
+      } else if (auto vmar_dispatcher =
+                     DownCastDispatcher<const VmAddressRegionDispatcher>(dispatcher)) {
+        // we must traverse
+        auto old_vmar = vmar_dispatcher->vmar();
+        zx_vaddr_t base = old_vmar->base();
+        int depth = 0;
+        while (old_vmar->has_parent()) {
+          old_vmar = old_vmar->parent();
+          depth++;
+        }
+        auto vmar = new_proc->aspace()->RootVmar();
+        for (int i = 0; i < depth; i++) {
+          auto next = vmar->FindRegion(base);
+          if (next == nullptr || next->is_mapping()) {
+            vmar = nullptr;
+            break;
+          }
+          vmar = next->as_vm_address_region();
+        }
+        if (vmar) {
+          if (vmar->dispatcher() == nullptr) {
+            zx_rights_t rights;
+            VmAddressRegionDispatcher::Create(vmar, ARCH_MMU_FLAG_PERM_USER, &dummy, &rights);
+          }
+          new_dispatcher = fbl::RefPtr(vmar->dispatcher());
+        }
+      }
+      if (new_dispatcher) {
+        zx_handle_t value = handle;
+        HandleOwner handle_owner = Handle::Make(new_dispatcher, rights);
+        zx_status_t status = new_proc->OverrideHandle(handle_owner, value);
+        if (status != ZX_OK)
+          return status;
+      }
+      return ZX_OK;
+    });
+  }
+
+  fbl::RefPtr<VmAddressRegion> p_;
+  zx_status_t* status_out;
+
+ private:
+  void Ascend(uint depth) {
+    ASSERT(depth <= depth_);
+    while (depth < depth_) {
+      p_ = p_->parent();
+      depth_--;
+    }
+  }
+  uint depth_ = 1;
+
+  struct ClonedVmo : public fbl::SinglyLinkedListable<ktl::unique_ptr<ClonedVmo>> {
+    ClonedVmo(VmObject* oldvmo, fbl::RefPtr<VmObject> newvmo)
+        : old_vmo(oldvmo), new_vmo(std::move(newvmo)) {
+      fbl::RefPtr<Dispatcher> disp;
+      zx_status_t status =
+          VmObjectDispatcher::Create(new_vmo, &disp, &new_vmo_rights);
+      ASSERT(status == ZX_OK);
+      new_vmo_dispatcher.reset(DownCastDispatcher<VmObjectDispatcher>(&disp));
+    }
+    VmObject* old_vmo;
+    fbl::RefPtr<VmObject> new_vmo;
+    KernelHandle<VmObjectDispatcher> new_vmo_dispatcher;
+    zx_rights_t new_vmo_rights;
+    VmObject* GetKey() const { return old_vmo; }
+    static size_t GetHash(VmObject* key) { return reinterpret_cast<size_t>(key); }
+  };
+  fbl::HashTable<VmObject*, ktl::unique_ptr<ClonedVmo>> cloned_;
+};
+
+zx_status_t VmAspace::ClowncopterizeUpon(fbl::RefPtr<ProcessDispatcher> new_proc,
+                                         fbl::RefPtr<ProcessDispatcher> old_proc) {
+  canary_.Assert();
+  fbl::RefPtr<VmAspace> new_aspace = new_proc->aspace();
+  ClowncopterizeVmoEnumerator e;
+  e.p_ = new_aspace->RootVmar();
+  zx_status_t status = ZX_OK;
+  e.status_out = &status;
+  EnumerateChildren(&e);
+  if (status == ZX_OK)
+    status = e.CreateClowncopterOverrides(new_proc, old_proc);
+  return status;
 }
