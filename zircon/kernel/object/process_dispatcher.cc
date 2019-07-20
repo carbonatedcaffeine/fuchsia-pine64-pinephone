@@ -42,6 +42,9 @@ static_assert(kHandleMustBeOneMask == ZX_HANDLE_FIXED_BITS_MASK,
               "kHandleMustBeOneMask must match ZX_HANDLE_FIXED_BITS_MASK!");
 
 static zx_handle_t map_handle_to_value(const Handle* handle, uint32_t mixer) {
+  if (handle->overridden_value() != ZX_HANDLE_INVALID)
+    return handle->overridden_value();
+
   // Ensure that the last two bits of the result is not zero, and make sure we
   // don't lose any base_value bits when shifting.
   constexpr uint32_t kBaseValueMustBeZeroMask =
@@ -55,7 +58,12 @@ static zx_handle_t map_handle_to_value(const Handle* handle, uint32_t mixer) {
   return static_cast<zx_handle_t>(mixer ^ handle_id);
 }
 
-static Handle* map_value_to_handle(zx_handle_t value, uint32_t mixer) {
+static Handle* map_value_to_handle(zx_handle_t value, uint32_t mixer,
+                                   ProcessDispatcher::OverridesHash& overrides) {
+  auto overridden = overrides.find(value);
+  if (overridden != overrides.end())
+    return &(*overridden);
+
   // Validate that the "must be one" bits are actually one.
   if ((value & kHandleMustBeOneMask) != kHandleMustBeOneMask) {
     return nullptr;
@@ -137,6 +145,9 @@ ProcessDispatcher::~ProcessDispatcher() {
   // Remove ourselves from the parent job's raw ref to us. Note that this might
   // have been called when transitioning State::DEAD. The Job can handle double calls.
   job_->RemoveChildProcess(this);
+
+  // Clear out the hashtable *before* the linked list that owns the handles is destroyed.
+  handle_overrides_.clear();
 
   LTRACE_EXIT_OBJ;
 }
@@ -417,6 +428,10 @@ void ProcessDispatcher::FinishDeadTransition() {
     Guard<BrwLockPi, BrwLockPi::Writer> guard{&handle_table_lock_};
     for (auto& handle : handles_) {
       handle.set_process_id(ZX_KOID_INVALID);
+      if (handle.overridden_value() != ZX_HANDLE_INVALID) {
+        handle_overrides_.erase(handle);
+        handle.set_overridden_value(ZX_HANDLE_INVALID);
+      }
     }
     to_clean.swap(handles_);
   }
@@ -464,9 +479,13 @@ zx_handle_t ProcessDispatcher::MapHandleToValue(const HandleOwner& handle) const
 }
 
 Handle* ProcessDispatcher::GetHandleLocked(zx_handle_t handle_value, bool skip_policy) {
-  auto handle = map_value_to_handle(handle_value, handle_rand_);
-  if (handle && handle->process_id() == get_koid())
-    return handle;
+  auto handle = map_value_to_handle(handle_value, handle_rand_, handle_overrides_);
+  if (handle && handle->process_id() == get_koid()) {
+    if (handle->overridden_value() == ZX_HANDLE_INVALID ||
+        handle->overridden_value() == handle_value) {
+      return handle;
+    }
+  }
 
   if (likely(!skip_policy)) {
     // Handle lookup failed.  We potentially generate an exception or kill the process,
@@ -491,6 +510,10 @@ void ProcessDispatcher::AddHandleLocked(HandleOwner handle) {
 
 HandleOwner ProcessDispatcher::RemoveHandleLocked(Handle* handle) {
   handle->set_process_id(ZX_KOID_INVALID);
+  if (handle->overridden_value() != ZX_HANDLE_INVALID) {
+    handle_overrides_.erase(*handle);
+    handle->set_overridden_value(ZX_HANDLE_INVALID);
+  }
   handles_.erase(*handle);
   return HandleOwner(handle);
 }
@@ -519,6 +542,23 @@ zx_status_t ProcessDispatcher::RemoveHandles(const zx_handle_t* handles, size_t 
       status = ZX_ERR_BAD_HANDLE;
   }
   return status;
+}
+
+zx_status_t ProcessDispatcher::OverrideHandle(HandleOwner& handle_owner, zx_handle_t new_value) {
+  Guard<BrwLockPi, BrwLockPi::Writer> guard{handle_table_lock()};
+  if ((new_value & kHandleMustBeOneMask) != kHandleMustBeOneMask)
+    return ZX_ERR_INVALID_ARGS;
+  if (GetHandleLocked(new_value, true) != nullptr)
+    return ZX_ERR_INVALID_ARGS;
+  Handle* handle = handle_owner.release();
+  AddHandleLocked(HandleOwner(handle));
+  if (handle->overridden_value() != ZX_HANDLE_INVALID) {
+    handle_overrides_.erase(*handle);
+    handle->set_overridden_value(ZX_HANDLE_INVALID);
+  }
+  handle->set_overridden_value(new_value);
+  handle_overrides_.insert(handle);
+  return ZX_OK;
 }
 
 zx_koid_t ProcessDispatcher::GetKoidForHandle(zx_handle_t handle_value) {

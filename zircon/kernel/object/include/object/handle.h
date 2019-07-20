@@ -127,6 +127,18 @@ class Handle final : public fbl::DoublyLinkedListable<Handle*> {
   static HandleOwner Make(KernelHandle<Dispatcher> kernel_handle, zx_rights_t rights);
   static HandleOwner Dup(Handle* source, zx_rights_t rights);
 
+  // Bunch of crap
+  using HashTableNodeState = fbl::DoublyLinkedListNodeState<Handle*>;
+  struct HashTableTraits {
+    static HashTableNodeState& node_state(Handle& handle) {
+      return handle.hashtable_state_;
+    }
+  };
+  zx_handle_t GetKey() const { return overridden_value_; }
+  static size_t GetHash(zx_handle_t handle) { return handle; }
+  zx_handle_t overridden_value() const { return overridden_value_; }
+  void set_overridden_value(zx_handle_t value) { overridden_value_ = value; }
+
  private:
   DISALLOW_COPY_ASSIGN_AND_MOVE(Handle);
 
@@ -161,6 +173,11 @@ class Handle final : public fbl::DoublyLinkedListable<Handle*> {
 
   // The handle arena.
   static fbl::Arena TA_GUARDED(ArenaLock::Get()) arena_;
+
+  // Extension of bunch of crap
+  zx_handle_t overridden_value_;
+  HashTableNodeState hashtable_state_;
+  friend struct HashTableTraits;
 
   // NOTE! This can return an invalid address.  It must be checked
   // against the arena bounds before being cast to a Handle*.

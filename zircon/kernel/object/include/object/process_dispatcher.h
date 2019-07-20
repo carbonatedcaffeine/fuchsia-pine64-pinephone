@@ -105,6 +105,10 @@ class ProcessDispatcher final
   // handles were removed, and returns ZX_ERR_BAD_HANDLE if any were not.
   zx_status_t RemoveHandles(const zx_handle_t* handles, size_t num_handles);
 
+  // Return ZX_ERR_INVALID_ARGS if new_value doesn't have ZX_HANDLE_FIXED_BITS_MASK set
+  // or new_value is already a valid handle value.
+  zx_status_t OverrideHandle(HandleOwner& handle, zx_handle_t new_value);
+
   // Get the dispatcher corresponding to this handle value.
   template <typename T>
   zx_status_t GetDispatcher(zx_handle_t handle_value, fbl::RefPtr<T>* dispatcher) {
@@ -304,6 +308,9 @@ class ProcessDispatcher final
     return vdso_code_address_;
   }
 
+  using OverridesHash =
+      fbl::HashTable<zx_handle_t, Handle*, fbl::DoublyLinkedList<Handle*, Handle::HashTableTraits>>;
+
  private:
   // compute the vdso code address and store in vdso_code_address_
   uintptr_t cache_vdso_code_address();
@@ -363,6 +370,7 @@ class ProcessDispatcher final
   // our list of handles
   mutable DECLARE_BRWLOCK_PI(ProcessDispatcher) handle_table_lock_;  // protects |handles_|.
   fbl::DoublyLinkedList<Handle*> handles_ TA_GUARDED(handle_table_lock_);
+  OverridesHash handle_overrides_ TA_GUARDED(handle_table_lock_);
 
   FutexContext futex_context_;
 
