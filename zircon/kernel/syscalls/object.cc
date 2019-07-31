@@ -650,6 +650,15 @@ zx_status_t sys_object_get_info(zx_handle_t handle, uint32_t topic, user_out_ptr
   }
 }
 
+static zx_status_t is_current_thread(fbl::RefPtr<Dispatcher>* dispatcher) {
+  auto thread_dispatcher = DownCastDispatcher<ThreadDispatcher>(dispatcher);
+  if (!thread_dispatcher)
+    return ZX_ERR_WRONG_TYPE;
+  if (thread_dispatcher.get() != ThreadDispatcher::GetCurrent())
+    return ZX_ERR_ACCESS_DENIED;
+  return ZX_OK;
+}
+
 // zx_status_t zx_object_get_property
 zx_status_t sys_object_get_property(zx_handle_t handle_value, uint32_t property,
                                     user_out_ptr<void> _value, size_t size) {
@@ -671,6 +680,26 @@ zx_status_t sys_object_get_property(zx_handle_t handle_value, uint32_t property,
         return ZX_ERR_INVALID_ARGS;
       return ZX_OK;
     }
+#if ARCH_X86
+    case ZX_PROP_REGISTER_FS: {
+      if (size < sizeof(uintptr_t))
+        return ZX_ERR_BUFFER_TOO_SMALL;
+      zx_status_t status = is_current_thread(&dispatcher);
+      if (status != ZX_OK)
+        return status;
+      uintptr_t addr = read_msr(X86_MSR_IA32_FS_BASE);
+      return _value.reinterpret<uintptr_t>().copy_to_user(addr);
+    }
+    case ZX_PROP_REGISTER_GS: {
+      if (size < sizeof(uintptr_t))
+        return ZX_ERR_BUFFER_TOO_SMALL;
+      zx_status_t status = is_current_thread(&dispatcher);
+      if (status != ZX_OK)
+        return status;
+      uintptr_t addr = read_msr(X86_MSR_IA32_KERNEL_GS_BASE);
+      return _value.reinterpret<uintptr_t>().copy_to_user(addr);
+    }
+#endif
     case ZX_PROP_PROCESS_DEBUG_ADDR: {
       if (size < sizeof(uintptr_t))
         return ZX_ERR_BUFFER_TOO_SMALL;
@@ -726,15 +755,6 @@ zx_status_t sys_object_get_property(zx_handle_t handle_value, uint32_t property,
   }
 
   __UNREACHABLE;
-}
-
-static zx_status_t is_current_thread(fbl::RefPtr<Dispatcher>* dispatcher) {
-  auto thread_dispatcher = DownCastDispatcher<ThreadDispatcher>(dispatcher);
-  if (!thread_dispatcher)
-    return ZX_ERR_WRONG_TYPE;
-  if (thread_dispatcher.get() != ThreadDispatcher::GetCurrent())
-    return ZX_ERR_ACCESS_DENIED;
-  return ZX_OK;
 }
 
 // zx_status_t zx_object_set_property
