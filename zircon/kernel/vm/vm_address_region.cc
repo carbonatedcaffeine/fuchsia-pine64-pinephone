@@ -851,7 +851,7 @@ zx_status_t VmAddressRegion::LinearRegionAllocatorLocked(size_t size, uint8_t al
                                                          uint arch_mmu_flags, vaddr_t* spot) {
     DEBUG_ASSERT(aspace_->lock()->lock().IsHeld());
 
-    const vaddr_t base = 0;
+    const vaddr_t base = 0x800000000;
 
     if (align_pow2 < PAGE_SIZE_SHIFT) {
         align_pow2 = PAGE_SIZE_SHIFT;

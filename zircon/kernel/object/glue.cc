@@ -43,13 +43,12 @@ fbl::RefPtr<EventDispatcher> GetLowMemEvent() {
 }
 
 static void oom_lowmem(size_t shortfall_bytes) {
-    zx_status_t status;
     printf("OOM: oom_lowmem(shortfall_bytes=%zu) called\n", shortfall_bytes);
 
-    status = low_mem_event->user_signal_self(0, ZX_EVENT_SIGNALED);
-    if (status != ZX_OK) {
-        printf("OOM: signal low mem failed: %d\n", status);
-    }
+//    status = low_mem_event->user_signal_self(0, ZX_EVENT_SIGNALED);
+//    if (status != ZX_OK) {
+//        printf("OOM: signal low mem failed: %d\n", status);
+//    }
 
 #if defined(ENABLE_KERNEL_DEBUGGING_FEATURES)
     // See ZX-3637 for the product details on when this path vs. the reboot
@@ -77,7 +76,7 @@ static void oom_lowmem(size_t shortfall_bytes) {
 #else
     const int kSleepSeconds = 8;
     printf("OOM: pausing for %ds after low mem signal\n", kSleepSeconds);
-    status = thread_sleep_relative(ZX_SEC(kSleepSeconds));
+    zx_status_t status = thread_sleep_relative(ZX_SEC(kSleepSeconds));
     if (status != ZX_OK) {
         printf("OOM: sleep failed: %d\n", status);
     }
