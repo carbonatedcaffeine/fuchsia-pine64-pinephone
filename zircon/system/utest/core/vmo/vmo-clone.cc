@@ -266,4 +266,35 @@ TEST(VmoCloneTestCase, NoPagerClone) {
             ZX_ERR_NOT_SUPPORTED);
 }
 
+// TEST(VmoCloneTestCase, QjvzUMy3zF0) {
+//   zx::vmo parent;
+//   ASSERT_OK(zx::vmo::create(PAGE_SIZE, 0, &parent));
+//   int aaa = 0x1234;
+//   ASSERT_OK(parent.write(&aaa, 0, sizeof(aaa)));
+//   zx::vmo child;
+//   ASSERT_OK(parent.create_child(ZX_VMO_CHILD_COPY_ON_WRITE, 0, PAGE_SIZE, &child));
+//   int bbb;
+//   ASSERT_OK(child.read(&bbb, 0, sizeof(bbb)));
+//   ASSERT_EQ(aaa, bbb);
+//   ASSERT_OK(child.write(&aaa, 0, sizeof(aaa)));
+//   ASSERT_OK(child.read(&bbb, 0, sizeof(bbb)));
+//   ASSERT_EQ(aaa, bbb);
+//   ASSERT_OK(child.op_range(ZX_VMO_OP_DECOMMIT, 0, PAGE_SIZE, NULL, 0));
+//   ASSERT_OK(child.read(&bbb, 0, sizeof(bbb)));
+//   ASSERT_EQ(bbb, 0);
+//   parent.reset();
+// }
+
+TEST(VmoCloneTestCase, QjvzUMy3zF0) {
+  zx::vmo parent;
+  ASSERT_OK(zx::vmo::create(PAGE_SIZE, 0, &parent));
+  int aaa = 0x1234;
+  ASSERT_OK(parent.write(&aaa, 0, sizeof(aaa)));
+  zx::vmo child;
+  ASSERT_OK(parent.create_child(ZX_VMO_CHILD_COPY_ON_WRITE, 0, PAGE_SIZE, &child));
+  ASSERT_OK(child.op_range(ZX_VMO_OP_DECOMMIT, 0, PAGE_SIZE, NULL, 0));
+  ASSERT_OK(child.write(&aaa, 0, sizeof(aaa)));
+  parent.reset();
+}
+
 }  // namespace

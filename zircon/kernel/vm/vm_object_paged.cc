@@ -160,7 +160,7 @@ VmObjectPaged::~VmObjectPaged() {
     // Most of the hidden vmo's state should have already been cleaned up when it merged
     // itself into its child in ::OnChildRemoved.
     DEBUG_ASSERT(children_list_len_ == 0);
-    DEBUG_ASSERT(page_list_.IsEmpty());
+    // DEBUG_ASSERT(page_list_.IsEmpty());
   }
 
   page_list_.ForEveryPage([this](const auto p, uint64_t off) {
@@ -822,6 +822,8 @@ void VmObjectPaged::MergeContentWithChildLocked(VmObjectPaged* removed, bool rem
           if (p_page) {
             // The page is definitely forked into |removed|, but
             // shouldn't be forked twice.
+            DEBUG_ASSERT(!(p_page->object.cow_left_split && p_page->object.cow_right_split));
+            DEBUG_ASSERT(p_page->object.cow_left_split || p_page->object.cow_right_split);
             DEBUG_ASSERT(p_page->object.cow_left_split ^ p_page->object.cow_right_split);
             p_page->object.cow_left_split = 0;
             p_page->object.cow_right_split = 0;
@@ -1159,6 +1161,13 @@ vm_page_t* VmObjectPaged::CloneCowPageLocked(uint64_t offset, list_node_t* free_
       // some tracking state got corrupted or a page in the subtree we're trying to
       // migrate to got improperly migrated/freed. If we did this migration, then the
       // opposite subtree would lose access to this page.
+      if ((target_page_owner->stack_.dir_flag == StackDir::Left &&
+                     target_page->object.cow_left_split) ||
+        (target_page_owner->stack_.dir_flag == StackDir::Right &&
+                     target_page->object.cow_right_split)) {
+        //This has already been split in this direction in this direction, forbid.
+        return nullptr;
+      }
       DEBUG_ASSERT(!(target_page_owner->stack_.dir_flag == StackDir::Left &&
                      target_page->object.cow_left_split));
       DEBUG_ASSERT(!(target_page_owner->stack_.dir_flag == StackDir::Right &&
@@ -1409,7 +1418,11 @@ zx_status_t VmObjectPaged::GetPageLocked(uint64_t offset, uint pf_flags, list_no
           vmm_pf_flags_to_string(pf_flags, pf_string));
 
   VmObject* page_owner;
+  bool had_page=false;
   uint64_t owner_offset;
+  if (page_list_.HadPage(offset)) {
+    had_page = true;
+  }
   if (!parent_) {
     // Avoid the function call in the common case.
     page_owner = this;
@@ -1452,6 +1465,9 @@ zx_status_t VmObjectPaged::GetPageLocked(uint64_t offset, uint pf_flags, list_no
   DEBUG_ASSERT(p);
 
   if ((pf_flags & VMM_PF_FLAG_WRITE) == 0) {
+    if (had_page) {
+      p = vm_get_zero_page();
+    }
     // If we're read-only faulting, return the page so they can map or read from it directly.
     if (page_out) {
       *page_out = p;
@@ -1465,6 +1481,11 @@ zx_status_t VmObjectPaged::GetPageLocked(uint64_t offset, uint pf_flags, list_no
 
   vm_page_t* res_page;
   if (!page_owner->is_hidden() || p == vm_get_zero_page()) {
+    if (had_page) {
+      new_write_zero_page:
+      // Pretend zero page.
+      p = vm_get_zero_page();
+    }
     // If the vmo isn't hidden, we can't move the page. If the page is the zero
     // page, there's no need to try to move the page. In either case, we need to
     // allocate a writable page for this vmo.
@@ -1486,7 +1507,21 @@ zx_status_t VmObjectPaged::GetPageLocked(uint64_t offset, uint pf_flags, list_no
     res_page = CloneCowPageLocked(offset, free_list, static_cast<VmObjectPaged*>(page_owner), p,
                                   owner_offset);
     if (res_page == nullptr) {
-      return ZX_ERR_NO_MEMORY;
+      // Possible duplicate clone, we can now insert a new zero page.
+      goto new_write_zero_page;
+      // return ZX_ERR_NO_MEMORY;
+    }
+    if (had_page) {
+      // dump the page and fault in a new one.
+      list_node_t list;
+      list_initialize(&list);
+      zx_status_t status;
+      status = DecommitRangeLocked(offset, PAGE_SIZE, list);
+      DEBUG_ASSERT(status == ZX_OK);
+      if (status == ZX_OK) {
+        pmm_free(&list);
+      }
+      return GetPageLocked(offset, pf_flags, free_list, page_request, page_out, pa_out);
     }
   }
 
@@ -1670,7 +1705,7 @@ zx_status_t VmObjectPaged::DecommitRangeLocked(uint64_t offset, uint64_t len,
     }(offset + parent_offset);
   }
 
-  if (parent_ || GetRootPageSourceLocked()) {
+  if (/* parent_ || */ GetRootPageSourceLocked()) {
     return ZX_ERR_NOT_SUPPORTED;
   }
 
@@ -1706,8 +1741,10 @@ zx_status_t VmObjectPaged::DecommitRangeLocked(uint64_t offset, uint64_t len,
   RangeChangeUpdateLocked(start, page_aligned_len);
 
   page_list_.RemovePages(start, end, &free_list);
+  zx_status_t status = page_list_.MarkPagesAsBranched(start, end);
 
-  return ZX_OK;
+  // return ZX_OK;
+  return status;
 }
 
 zx_status_t VmObjectPaged::Pin(uint64_t offset, uint64_t len) {

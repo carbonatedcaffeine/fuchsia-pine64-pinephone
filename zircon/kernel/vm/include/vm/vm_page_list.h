@@ -40,48 +40,23 @@ class VmPageListNode final : public fbl::WAVLTreeContainable<ktl::unique_ptr<VmP
   // for every valid page in the node call the passed in function
   template <typename F>
   zx_status_t ForEveryPage(F func, uint64_t start_offset, uint64_t end_offset, uint64_t skew) {
-    return ForEveryPage(this, func, start_offset, end_offset, skew);
-  }
-
-  // for every valid page in the node call the passed in function
-  template <typename F>
-  zx_status_t ForEveryPage(F func, uint64_t start_offset, uint64_t end_offset,
-                           uint64_t skew) const {
-    return ForEveryPage(this, func, start_offset, end_offset, skew);
-  }
-
-  vm_page* GetPage(size_t index) const;
-  vm_page* RemovePage(size_t index);
-  zx_status_t AddPage(vm_page* p, size_t index);
-
-  bool IsEmpty() const {
-    for (const auto p : pages_) {
-      if (p) {
-        return false;
-      }
-    }
-    return true;
-  }
-
- private:
-  template <typename S, typename F>
-  static zx_status_t ForEveryPage(S self, F func, uint64_t start_offset, uint64_t end_offset,
-                                  uint64_t skew) {
     DEBUG_ASSERT(end_offset >= start_offset);
     size_t start = 0;
     size_t end = kPageFanOut;
-    if (start_offset > self->obj_offset_) {
-      start = (start_offset - self->obj_offset_) / PAGE_SIZE;
+    if (start_offset > obj_offset_) {
+      start = (start_offset - obj_offset_) / PAGE_SIZE;
     }
-    if (end_offset < self->obj_offset_) {
+    if (end_offset < obj_offset_) {
       return ZX_ERR_NEXT;
     }
-    if (end_offset < self->obj_offset_ + kPageFanOut * PAGE_SIZE) {
-      end = (end_offset - self->obj_offset_) / PAGE_SIZE;
+    if (end_offset < obj_offset_ + kPageFanOut * PAGE_SIZE) {
+      end = (end_offset - obj_offset_) / PAGE_SIZE;
     }
     for (size_t i = start; i < end; i++) {
-      if (self->pages_[i]) {
-        zx_status_t status = func(self->pages_[i], self->obj_offset_ + i * PAGE_SIZE - skew);
+      vm_page *p = RemovePage(i);
+      if (p) {
+        zx_status_t status = func(p, obj_offset_ + i * PAGE_SIZE - skew);
+        AddPage(p, i);
         if (unlikely(status != ZX_ERR_NEXT)) {
           return status;
         }
@@ -90,6 +65,58 @@ class VmPageListNode final : public fbl::WAVLTreeContainable<ktl::unique_ptr<VmP
     return ZX_ERR_NEXT;
   }
 
+  // for every valid page in the node call the passed in function
+  template <typename F>
+  zx_status_t ForEveryPage(F func, uint64_t start_offset, uint64_t end_offset,
+                           uint64_t skew) const {
+    DEBUG_ASSERT(end_offset >= start_offset);
+    size_t start = 0;
+    size_t end = kPageFanOut;
+    if (start_offset > obj_offset_) {
+      start = (start_offset - obj_offset_) / PAGE_SIZE;
+    }
+    if (end_offset < obj_offset_) {
+      return ZX_ERR_NEXT;
+    }
+    if (end_offset < obj_offset_ + kPageFanOut * PAGE_SIZE) {
+      end = (end_offset - obj_offset_) / PAGE_SIZE;
+    }
+    for (size_t i = start; i < end; i++) {
+      vm_page *p = GetPage(i);
+      if (p) {
+        zx_status_t status = func(p, obj_offset_ + i * PAGE_SIZE - skew);
+        if (unlikely(status != ZX_ERR_NEXT)) {
+          return status;
+        }
+      }
+    }
+    return ZX_ERR_NEXT;  }
+
+  vm_page* GetPage(size_t index) const;
+  vm_page* RemovePage(size_t index);
+  zx_status_t AddPage(vm_page* p, size_t index);
+
+  bool IsEmpty() const {
+    // for (const auto p : pages_) {
+      // if (p) {
+    for (size_t i = 0; i < kPageFanOut; i++) {
+      if (pages_[i] != nullptr) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void MarkPageAsBranched(size_t index) {
+    if (!GetPage(index)) {
+      pages_[index] = reinterpret_cast<vm_page*>(1);
+    }
+  }
+  bool HadPage(size_t index) const {
+    return reinterpret_cast<uintptr_t>(pages_[index]) == 1;
+  }
+
+ private:
   fbl::Canary<fbl::magic("PLST")> canary_;
 
   uint64_t obj_offset_ = 0;
@@ -273,6 +300,9 @@ class VmPageList final {
 
   // Takes the pages in the range [offset, length) out of this page list.
   VmPageSpliceList TakePages(uint64_t offset, uint64_t length);
+
+  zx_status_t MarkPagesAsBranched(uint64_t start_offset, uint64_t end_offset);
+  bool HadPage(uint64_t offset);
 
   // Allow the implementation to use a one-past-the-end for VmPageListNode offsets,
   // plus to account for skew_.

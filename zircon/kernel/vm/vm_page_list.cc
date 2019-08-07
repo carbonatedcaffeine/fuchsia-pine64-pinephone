@@ -52,14 +52,19 @@ VmPageListNode::~VmPageListNode() {
   LTRACEF("%p offset %#" PRIx64 "\n", this, obj_offset_);
   canary_.Assert();
 
-  for (__UNUSED auto p : pages_) {
-    DEBUG_ASSERT(p == nullptr);
+  for (size_t i = 0; i < kPageFanOut; i++) {
+    vm_page *page = pages_[i];
+    if (reinterpret_cast<uintptr_t>(page) > 1) {
+      panic("Found page %p\n", page);
+    }
+    DEBUG_ASSERT(reinterpret_cast<uintptr_t>(page) <= 1);
   }
 }
 
 vm_page* VmPageListNode::GetPage(size_t index) const {
   canary_.Assert();
   DEBUG_ASSERT(index < kPageFanOut);
+  if (reinterpret_cast<uintptr_t>(pages_[index]) == 1) return nullptr;
   return pages_[index];
 }
 
@@ -67,12 +72,14 @@ vm_page* VmPageListNode::RemovePage(size_t index) {
   canary_.Assert();
   DEBUG_ASSERT(index < kPageFanOut);
 
-  auto p = pages_[index];
+  auto p = GetPage(index);
+  // auto p = pages_[index];
   if (!p) {
     return nullptr;
   }
 
-  pages_[index] = nullptr;
+  pages_[index] = reinterpret_cast<vm_page*>(1);
+  // pages_[index] = nullptr;
 
   return p;
 }
@@ -80,7 +87,11 @@ vm_page* VmPageListNode::RemovePage(size_t index) {
 zx_status_t VmPageListNode::AddPage(vm_page* p, size_t index) {
   canary_.Assert();
   DEBUG_ASSERT(index < kPageFanOut);
-  if (pages_[index]) {
+  if (p == nullptr) {
+    return ZX_ERR_ALREADY_EXISTS;
+  }
+  if (GetPage(index)) {    
+  // if (pages_[index]) {
     return ZX_ERR_ALREADY_EXISTS;
   }
   pages_[index] = p;
@@ -360,6 +371,38 @@ VmPageSpliceList VmPageList::TakePages(uint64_t offset, uint64_t length) {
   }
 
   return res;
+}
+
+zx_status_t VmPageList::MarkPagesAsBranched(uint64_t start_offset, uint64_t end_offset) {
+  uint64_t offset = start_offset;
+  while (offset < end_offset) {
+    // lookup the tree node that holds this page
+    uint64_t node_offset = offset_to_node_offset(offset, list_skew_);
+    auto pln = list_.find(node_offset);
+    if (!pln.IsValid()) {
+      fbl::AllocChecker ac;
+      ktl::unique_ptr<VmPageListNode> pl =
+          ktl::unique_ptr<VmPageListNode>(new (&ac) VmPageListNode(node_offset));
+      if (!ac.check()) {
+        return ZX_ERR_NO_MEMORY;
+      }
+
+      list_.insert(ktl::move(pl));
+      pln = list_.find(node_offset);
+    }
+    size_t index = offset_to_node_index(offset, list_skew_);
+    pln->MarkPageAsBranched(index);
+    offset += PAGE_SIZE;
+  }
+  return ZX_OK;
+}
+
+bool VmPageList::HadPage(uint64_t offset) {
+  uint64_t node_offset = offset_to_node_offset(offset, list_skew_);
+  size_t index = offset_to_node_index(offset, list_skew_);
+  auto pln = list_.find(node_offset);
+  if (!pln.IsValid()) return false;
+  return pln->HadPage(index);
 }
 
 VmPageSpliceList::VmPageSpliceList() : VmPageSpliceList(0, 0) {}
