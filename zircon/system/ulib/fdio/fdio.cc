@@ -3,12 +3,15 @@
 // found in the LICENSE file.
 
 #include <atomic>
+#include <mutex>
+#include <vector>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <lib/fdio/io.h>
+#include <lib/fdio/unsafe.h>
 #include <lib/zxio/null.h>
 
 #include "private.h"
@@ -68,3 +71,11 @@ void fdio_release(fdio_t* io) {
 }
 
 bool fdio_is_last_reference(fdio_t* io) { return io->refcount.load() == 1; }
+
+std::vector<std::once_flag*> once_flags;
+// https://www.youtube.com/watch?v=QjvzUMy3zF0
+__EXPORT
+extern "C" void fdio_unsafe_reset_once_flags() {
+  for (std::once_flag* flag_ptr : once_flags)
+    new (flag_ptr) std::once_flag();
+}

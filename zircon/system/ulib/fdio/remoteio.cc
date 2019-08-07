@@ -10,6 +10,7 @@
 #include <lib/fdio/io.h>
 #include <lib/fdio/namespace.h>
 #include <string.h>
+#include <vector>
 #include <zircon/device/vfs.h>
 #include <zircon/syscalls.h>
 
@@ -94,6 +95,7 @@ zx_status_t fdio_service_connect_by_name(const char name[], zx::channel* out) {
     static std::once_flag once;
     static zx_status_t status;
     std::call_once(once, [&]() {
+      once_flags.push_back(&once);
       zx::channel c0, c1;
       status = zx::channel::create(0, &c0, &c1);
       if (status != ZX_OK) {

@@ -27,6 +27,7 @@
 #include <zircon/syscalls.h>
 
 #include <mutex>
+#include <vector>
 
 #include "private-socket.h"
 #include "private.h"
@@ -42,6 +43,7 @@ namespace fsocket = ::llcpp::fuchsia::posix::socket;
     static std::once_flag once;                                  \
     static zx_status_t status;                                   \
     std::call_once(once, [&]() {                                 \
+      once_flags.push_back(&once);                               \
       zx::channel out;                                           \
       status = fdio_service_connect_by_name(symbol::Name, &out); \
       if (status != ZX_OK) {                                     \

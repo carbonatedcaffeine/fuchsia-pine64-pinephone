@@ -11,6 +11,7 @@
 #include <lib/fdio/limits.h>
 #include <lib/fdio/vfs.h>
 #include <lib/zxio/ops.h>
+#include <mutex>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -84,6 +85,8 @@ typedef struct fdio_ops {
 #define IOFLAG_FD_FLAGS IOFLAG_CLOEXEC
 
 typedef struct fdio fdio_t;
+
+extern std::vector<std::once_flag*> once_flags;
 
 __BEGIN_CDECLS
 

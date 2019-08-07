@@ -65,6 +65,7 @@ fdio_unbind_from_fd
 fdio_unsafe_borrow_channel
 fdio_unsafe_fd_to_io
 fdio_unsafe_release
+fdio_unsafe_reset_once_flags
 fdio_unsafe_wait_begin
 fdio_unsafe_wait_end
 fdio_wait_fd
