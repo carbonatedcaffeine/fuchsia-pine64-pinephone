@@ -16,7 +16,7 @@
 
 namespace fidl {
 namespace internal {
-class WeakMessageSender;
+class WeakStubController;
 
 // Controls the server endpoint of a FIDL channel.
 //
@@ -69,7 +69,7 @@ class StubController final : public MessageHandler, public MessageSender {
   // |PendingResponse| objects from sending messages.
   void InvalidateWeakIfNeeded();
 
-  WeakMessageSender* weak_;
+  WeakStubController* weak_;
   MessageReader reader_;
   Stub* stub_;
 };
