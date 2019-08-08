@@ -17,6 +17,8 @@
 #include <zircon/syscalls.h>
 #include <zircon/syscalls/object.h>
 
+#include <string>
+
 namespace {
 
 // This is a reasonable upper limit on the number of program headers that are
@@ -35,6 +37,10 @@ constexpr size_t kWindowSize = 0x400;
 // md5 and sha1 are the most common hashes used for build ids and they use 20
 // and 16 bytes respectively. This makes 32 a generous upper bound.
 constexpr size_t kMaxBuildIDSize = 32;
+// An upper limit on the length of the DT_SONAME.
+constexpr size_t kMaxSonameSize = 256;
+// The maximum length of the buffer used for the module name.
+constexpr size_t kNameBufferSize = 512;
 
 bool IsPossibleLoadedEhdr(const Elf64_Ehdr& ehdr) {
   // Do some basic sanity checks including checking the ELF identifier
@@ -67,6 +73,24 @@ class ProcessMemReader {
   template <typename T>
   [[nodiscard]] zx_status_t ReadArray(uintptr_t vaddr, T* arr, size_t sz) {
     return ReadBytes(vaddr, reinterpret_cast<uint8_t*>(arr), sz * sizeof(T));
+  }
+
+  [[nodiscard]] zx_status_t ReadString(uintptr_t vaddr, char* str, size_t limit) {
+    char ch;
+    size_t i = 0;
+    do {
+      if (i >= limit) {
+        str[i-1] = '\0';
+        break;
+      }
+      zx_status_t status = Read(vaddr + i, &ch);
+      if (status != ZX_OK) {
+        return status;
+      }
+      str[i] = ch;
+      i++;
+    } while (ch != '\0');
+    return ZX_OK;
   }
 
  private:
@@ -224,6 +248,48 @@ zx_status_t ForEachModule(const zx::process& process, ModuleAction action) {
       continue;
     }
 
+    // Find the string table (needed to resolve DT_SONAME).
+    zx_vaddr_t dynamic;
+    size_t dynamic_count = 0;
+    for (const auto& phdr : phdrs) {
+      if (phdr.p_type == PT_DYNAMIC) {
+        dynamic = map.base + phdr.p_vaddr;
+        dynamic_count = phdr.p_filesz / sizeof(Elf64_Dyn);
+        break;
+      }
+    }
+    zx_vaddr_t strtab = 0;
+    for (size_t i = 0; i < dynamic_count; i++) {
+      Elf64_Dyn dyn;
+      status = reader.Read(dynamic + i * sizeof(Elf64_Dyn), &dyn);
+      if (status != ZX_OK) {
+        break;
+      }
+      if (dyn.d_tag == DT_STRTAB) {
+        strtab = map.base + dyn.d_un.d_val;
+        break;
+      }
+    }
+
+    // Look for a DT_SONAME.
+    char soname[kMaxSonameSize] = "";
+    if (strtab != 0) {
+      for (size_t i = 0; i < dynamic_count; i++) {
+        Elf64_Dyn dyn;
+        status = reader.Read(dynamic + i * sizeof(Elf64_Dyn), &dyn);
+        if (status != ZX_OK) {
+          break;
+        }
+        if (dyn.d_tag != DT_SONAME) {
+          continue;
+        }
+        status = reader.ReadString(strtab + dyn.d_un.d_val, &soname[0], sizeof(soname));
+        if (status != ZX_OK) {
+          continue;
+        }
+      }
+    }
+
     // Loop though program headers looking for a build ID.
     uint8_t build_id_buf[kMaxBuildIDSize];
     ArrayRef<uint8_t> build_id;
@@ -243,12 +309,13 @@ zx_status_t ForEachModule(const zx::process& process, ModuleAction action) {
       continue;
     }
 
-    // TODO(jakehehrlich): Synthesize a better name via PT_DYNAMIC->DT_SONAME.
-    char name[ZX_MAX_NAME_LEN];
-    if (map.name[0] == '\0') {
-      snprintf(name, sizeof(name), "<VMO#%" PRIu64 ">", map.u.mapping.vmo_koid);
-    } else {
+    char name[kNameBufferSize];
+    if (soname[0] != '\0') {
+      snprintf(name, sizeof(name), "%s", soname);
+    } else if (map.name[0] != '\0') {
       snprintf(name, sizeof(name), "<VMO#%" PRIu64 "=%s>", map.u.mapping.vmo_koid, map.name);
+    } else {
+      snprintf(name, sizeof(name), "<VMO#%" PRIu64 ">", map.u.mapping.vmo_koid);
     }
 
     // All checks have passed so we can give the user a module.
