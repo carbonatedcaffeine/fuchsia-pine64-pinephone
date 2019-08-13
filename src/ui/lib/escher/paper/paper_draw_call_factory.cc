@@ -4,8 +4,6 @@
 
 #include "src/ui/lib/escher/paper/paper_draw_call_factory.h"
 
-#include <glm/gtc/matrix_access.hpp>
-
 #include "src/ui/lib/escher/escher.h"
 #include "src/ui/lib/escher/paper/paper_material.h"
 #include "src/ui/lib/escher/paper/paper_render_funcs.h"
@@ -21,6 +19,8 @@
 #include "src/ui/lib/escher/util/hasher.h"
 #include "src/ui/lib/escher/util/trace_macros.h"
 
+#include <glm/gtc/matrix_access.hpp>
+
 namespace escher {
 
 namespace {
@@ -33,6 +33,33 @@ TexturePtr CreateWhiteTexture(Escher* escher) {
   channels[0] = channels[1] = channels[2] = channels[3] = 255;
   auto image = escher->NewRgbaImage(1, 1, channels);
   return escher->NewTexture(std::move(image), vk::Filter::eNearest);
+}
+
+PaperDrawCallFactory::SortKey GetSortKey(const Material& mat, Hash pipeline_hash, Hash draw_hash,
+                                         float depth) {
+  auto type = mat.type();
+  switch (type) {
+    case Material::Type::kTranslucent:
+      return PaperDrawCallFactory::SortKey::NewTranslucent(pipeline_hash, draw_hash, depth);
+    case Material::Type::kWireframe:
+      return PaperDrawCallFactory::SortKey::NewWireframe(pipeline_hash, draw_hash, depth);
+    case Material::Type::kOpaque:
+    default:
+      return PaperDrawCallFactory::SortKey::NewOpaque(pipeline_hash, draw_hash, depth);
+  }
+}
+
+PaperRenderQueueFlagBits GetRenderQueueFlagBits(const Material& mat) {
+  auto type = mat.type();
+  switch (type) {
+    case Material::Type::kTranslucent:
+      return PaperRenderQueueFlagBits::kTranslucent;
+    case Material::Type::kWireframe:
+      return PaperRenderQueueFlagBits::kWireframe;
+    case Material::Type::kOpaque:
+    default:
+      return PaperRenderQueueFlagBits::kOpaque;
+  }
 }
 
 }  // anonymous namespace
@@ -80,6 +107,22 @@ void PaperDrawCallFactory::DrawRoundedRect(const RoundedRectSpec& spec,
   const auto& transform = transform_stack_->Top();
   const auto& entry = shape_cache_->GetRoundedRectMesh(spec, transform.clip_planes.data(),
                                                        transform.clip_planes.size());
+  EnqueueDrawCalls(entry, material, flags);
+}
+
+void PaperDrawCallFactory::DrawBoundingBox(const PaperMaterial& material,
+                                           PaperDrawableFlags flags) {
+  FXL_DCHECK(frame_);
+  const auto& transform = transform_stack_->Top();
+  const auto& entry =
+      shape_cache_->GetBoxMesh(transform.clip_planes.data(), transform.clip_planes.size());
+  EnqueueDrawCalls(entry, material, flags);
+}
+
+void PaperDrawCallFactory::DrawMesh(const MeshPtr& mesh, const PaperMaterial& material,
+                                    PaperDrawableFlags flags) {
+  FXL_DCHECK(frame_);
+  PaperShapeCacheEntry entry = {shape_cache_->frame_number(), mesh, mesh->num_indices(), 0};
   EnqueueDrawCalls(entry, material, flags);
 }
 
@@ -161,12 +204,8 @@ void PaperDrawCallFactory::EnqueueDrawCalls(const PaperShapeCacheEntry& cache_en
   float depth = glm::dot(vec3(transform[3]) - camera_pos_, camera_dir_);
 #endif
 
-  auto sort_key = material.opaque()
-                      ? SortKey::NewOpaque(pipeline_hash, mesh_hash, depth).key()
-                      : SortKey::NewTranslucent(pipeline_hash, mesh_hash, depth).key();
-
-  auto queue_flags = material.opaque() ? PaperRenderQueueFlagBits::kOpaque
-                                       : PaperRenderQueueFlagBits::kTranslucent;
+  auto sort_key = GetSortKey(material, pipeline_hash, mesh_hash, depth).key();
+  auto queue_flags = GetRenderQueueFlagBits(material);
 
   render_queue_->PushDrawCall(
       {.render_queue_item = {.sort_key = sort_key,
@@ -244,6 +283,13 @@ PaperDrawCallFactory::SortKey PaperDrawCallFactory::SortKey::NewTranslucent(Hash
   // Prioritize back-to-front order over state changes.
   uint64_t depth_key(glm::floatBitsToUint(depth) ^ 0xffffffffu);
   return SortKey((depth_key << 32) | (pipeline_hash.val & 0xffff0000u) | (draw_hash.val & 0xffffu));
+}
+
+PaperDrawCallFactory::SortKey PaperDrawCallFactory::SortKey::NewWireframe(Hash pipeline_hash,
+                                                                          Hash draw_hash,
+                                                                          float depth) {
+  // Simply use opaque function for now, we may want to do this differently in the future.
+  return NewOpaque(pipeline_hash, draw_hash, depth);
 }
 
 }  // namespace escher

@@ -20,6 +20,18 @@ namespace internal {
 
 // Predefined error messages in the binding
 constexpr char kErrorRequestBufferTooSmall[] = "request buffer too small";
+constexpr char kErrorWriteFailed[] = "failed writing to the underlying transport";
+
+template <typename Sub>
+struct FromFailureMixin {
+  // Initialize ourself from one of EncodeResult, DecodeResult, LinearizeResult, in the case of
+  // error hence there is no message.
+  template <typename SomeResult>
+  static Sub FromFailure(SomeResult failure) {
+    ZX_DEBUG_ASSERT(failure.status != ZX_OK);
+    return Sub(failure.status, failure.error);
+  }
+};
 
 }  // namespace internal
 
@@ -32,6 +44,7 @@ struct AnyZeroArgMessage final {
   static constexpr uint32_t MaxNumHandles = 0;
   static constexpr uint32_t PrimarySize = sizeof(fidl_message_header_t);
   static constexpr uint32_t MaxOutOfLine = 0;
+  static constexpr bool HasFlexibleEnvelope = false;
 };
 
 template <>
@@ -45,7 +58,7 @@ struct IsFidlMessage<AnyZeroArgMessage> : public std::true_type {};
 // If |status| is ZX_OK, |message| contains a valid decoded message of type FidlType.
 // Otherwise, |error| contains a human-readable string for debugging purposes.
 template <typename FidlType>
-struct DecodeResult final {
+struct DecodeResult final : internal::FromFailureMixin<DecodeResult<FidlType>> {
   zx_status_t status = ZX_ERR_INTERNAL;
   const char* error = nullptr;
   DecodedMessage<FidlType> message;
@@ -72,7 +85,7 @@ struct DecodeResult final {
 // If |status| is ZX_OK, |message| contains a valid encoded message of type FidlType.
 // Otherwise, |error| contains a human-readable string for debugging purposes.
 template <typename FidlType>
-struct EncodeResult final {
+struct EncodeResult final : internal::FromFailureMixin<EncodeResult<FidlType>> {
   zx_status_t status = ZX_ERR_INTERNAL;
   const char* error = nullptr;
   EncodedMessage<FidlType> message;
@@ -90,12 +103,18 @@ struct EncodeResult final {
 // If |status| is ZX_OK, |message| contains a valid message in decoded form, of type FidlType.
 // Otherwise, |error| contains a human-readable string for debugging purposes.
 template <typename FidlType>
-struct LinearizeResult final {
+struct LinearizeResult final : internal::FromFailureMixin<LinearizeResult<FidlType>> {
   zx_status_t status = ZX_ERR_INTERNAL;
   const char* error = nullptr;
   DecodedMessage<FidlType> message;
 
   LinearizeResult() = default;
+
+  LinearizeResult(zx_status_t status, const char* error,
+                  DecodedMessage<FidlType> message = DecodedMessage<FidlType>())
+      : status(status), error(error), message(std::move(message)) {
+    ZX_DEBUG_ASSERT(status != ZX_OK || this->message.is_valid());
+  }
 };
 
 // Consumes an encoded message object containing FIDL encoded bytes and handles.
@@ -301,9 +320,10 @@ EncodeResult<ResponseType> Call(zx::channel& chan, EncodedMessage<RequestType> r
 
 // Calculates the maximum possible message size for a FIDL type,
 // clamped at the Zircon channel packet size.
-template <typename FidlType>
+// TODO(FIDL-771): Always request the message context.
+template <typename FidlType, const MessageDirection Direction = MessageDirection::kReceiving>
 constexpr uint32_t MaxSizeInChannel() {
-  return internal::ClampedMessageSize<FidlType>();
+  return internal::ClampedMessageSize<FidlType, Direction>();
 }
 
 #endif

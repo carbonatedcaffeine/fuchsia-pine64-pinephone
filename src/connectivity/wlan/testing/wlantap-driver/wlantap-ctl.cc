@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+#include <mutex>
+
 #include <ddk/binding.h>
 #include <ddk/debug.h>
 #include <ddk/device.h>
@@ -10,13 +13,8 @@
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/async/dispatcher.h>
 #include <wlan/common/channel.h>
-#include <wlan/protocol/ioctl.h>
-#include <wlan/protocol/wlantap.h>
 #include <zircon/fidl.h>
 #include <zircon/status.h>
-
-#include <memory>
-#include <mutex>
 
 #include "wlantap-phy.h"
 
@@ -45,8 +43,7 @@ class WlantapDriver {
   std::unique_ptr<async::Loop> loop_;
 };
 
-zx_status_t SendCreatePhyResponse(zx_txid_t txid, zx_status_t status,
-                                  fidl_txn_t* txn) {
+zx_status_t SendCreatePhyResponse(zx_txid_t txid, zx_status_t status, fidl_txn_t* txn) {
   fuchsia_wlan_tap_WlantapCtlCreatePhyResponse resp{
       .hdr =
           {
@@ -55,10 +52,8 @@ zx_status_t SendCreatePhyResponse(zx_txid_t txid, zx_status_t status,
           },
       .status = status,
   };
-  fidl_msg_t resp_msg = {.bytes = &resp,
-                         .num_bytes = sizeof(resp),
-                         .handles = nullptr,
-                         .num_handles = 0};
+  fidl_msg_t resp_msg = {
+      .bytes = &resp, .num_bytes = sizeof(resp), .handles = nullptr, .num_handles = 0};
   zx_status_t st = txn->reply(txn, &resp_msg);
   if (st != ZX_OK) {
     zxlogf(ERROR, "error sending response: %s\n", zx_status_get_string(st));
@@ -67,10 +62,9 @@ zx_status_t SendCreatePhyResponse(zx_txid_t txid, zx_status_t status,
   return status;
 }
 
-zx_status_t DecodeCreatePhyRequest(
-    fidl_msg_t* msg, fidl_txn_t* txn,
-    fidl::InterfaceRequest<wlantap::WlantapPhy>* out_req,
-    wlantap::WlantapPhyConfig* out_config, zx_txid_t* out_txid) {
+zx_status_t DecodeCreatePhyRequest(fidl_msg_t* msg, fidl_txn_t* txn,
+                                   fidl::InterfaceRequest<wlantap::WlantapPhy>* out_req,
+                                   wlantap::WlantapPhyConfig* out_config, zx_txid_t* out_txid) {
   zx_status_t status = ZX_OK;
   if (msg->num_bytes < sizeof(fidl_message_header_t)) {
     zxlogf(ERROR, "wlantapctl: CreatePhyRequest too short for header\n");
@@ -89,23 +83,20 @@ zx_status_t DecodeCreatePhyRequest(
   }
 
   const char* error_msg = nullptr;
-  status = fidl_decode_msg(&fuchsia_wlan_tap_WlantapCtlCreatePhyRequestTable,
-                           msg, &error_msg);
+  status = fidl_decode_msg(&fuchsia_wlan_tap_WlantapCtlCreatePhyRequestTable, msg, &error_msg);
   if (status != ZX_OK) {
     zxlogf(ERROR, "wlantapctl: cannot decode CreatePhy request: %s - %s\n",
            zx_status_get_string(status), error_msg);
     return status;
   }
 
-  fidl::Message fidl_msg(fidl::BytePart(static_cast<uint8_t*>(msg->bytes),
-                                        msg->num_bytes, msg->num_bytes),
-                         fidl::HandlePart(msg->handles, msg->num_handles));
+  fidl::Message fidl_msg(
+      fidl::BytePart(static_cast<uint8_t*>(msg->bytes), msg->num_bytes, msg->num_bytes),
+      fidl::HandlePart(msg->handles, msg->num_handles));
   fidl::Decoder decoder(std::move(fidl_msg));
-  *out_config = fidl::DecodeAs<wlantap::WlantapPhyConfig>(
-      &decoder, sizeof(fidl_message_header_t));
+  *out_config = fidl::DecodeAs<wlantap::WlantapPhyConfig>(&decoder, sizeof(fidl_message_header_t));
   *out_req = fidl::DecodeAs<fidl::InterfaceRequest<wlantap::WlantapPhy>>(
-      &decoder, sizeof(fidl_message_header_t) +
-                    sizeof(fuchsia_wlan_tap_WlantapPhyConfig));
+      &decoder, sizeof(fidl_message_header_t) + sizeof(fuchsia_wlan_tap_WlantapPhyConfig));
   return ZX_OK;
 }
 
@@ -118,8 +109,7 @@ struct WlantapCtl {
     fidl::InterfaceRequest<wlantap::WlantapPhy> request;
     wlantap::WlantapPhyConfig config;
     zx_txid_t txid;
-    zx_status_t status =
-        DecodeCreatePhyRequest(msg, txn, &request, &config, &txid);
+    zx_status_t status = DecodeCreatePhyRequest(msg, txn, &request, &config, &txid);
     if (status != ZX_OK) {
       return SendCreatePhyResponse(txid, status, txn);
     }
@@ -134,14 +124,11 @@ struct WlantapCtl {
       return SendCreatePhyResponse(txid, status, txn);
     }
 
-    auto phy_config =
-        std::make_unique<wlantap::WlantapPhyConfig>(std::move(config));
+    auto phy_config = std::make_unique<wlantap::WlantapPhyConfig>(std::move(config));
     auto channel = request.TakeChannel();
-    status = wlan::CreatePhy(self.device_, std::move(channel),
-                             std::move(phy_config), loop);
+    status = wlan::CreatePhy(self.device_, std::move(channel), std::move(phy_config), loop);
     if (status != ZX_OK) {
-      zxlogf(ERROR, "wlantapctl: could not create phy: %s\n",
-             zx_status_get_string(status));
+      zxlogf(ERROR, "wlantapctl: could not create phy: %s\n", zx_status_get_string(status));
     }
     return SendCreatePhyResponse(txid, status, txn);
   }

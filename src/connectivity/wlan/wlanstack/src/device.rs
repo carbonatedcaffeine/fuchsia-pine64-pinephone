@@ -7,7 +7,6 @@ use {
     fidl_fuchsia_wlan_device as fidl_wlan_dev,
     fidl_fuchsia_wlan_mlme::{self as fidl_mlme, DeviceInfo},
     fuchsia_cobalt::CobaltSender,
-    fuchsia_wlan_dev as wlan_dev,
     futures::{
         channel::mpsc,
         future::{Future, FutureExt, FutureObj},
@@ -15,6 +14,7 @@ use {
         stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt},
     },
     log::{error, info},
+    pin_utils::pin_mut,
     std::{marker::Unpin, sync::Arc},
     void::Void,
     wlan_inspect,
@@ -89,8 +89,13 @@ pub struct IfaceDevice {
 pub type PhyMap = WatchableMap<u16, PhyDevice>;
 pub type IfaceMap = WatchableMap<u16, IfaceDevice>;
 
-pub async fn serve_phys(phys: Arc<PhyMap>) -> Result<Void, Error> {
-    let mut new_phys = device_watch::watch_phy_devices()?;
+pub async fn serve_phys(phys: Arc<PhyMap>, isolated_devmgr: bool) -> Result<Void, Error> {
+    let new_phys = if isolated_devmgr {
+        device_watch::watch_phy_devices::<wlan_dev::IsolatedDeviceEnv>()?.left_stream()
+    } else {
+        device_watch::watch_phy_devices::<wlan_dev::RealDeviceEnv>()?.right_stream()
+    };
+    pin_mut!(new_phys);
     let mut active_phys = FuturesUnordered::new();
     loop {
         select! {
@@ -114,7 +119,7 @@ async fn serve_phy(phys: &PhyMap, new_phy: device_watch::NewPhyDevice) {
     let id = new_phy.id;
     let event_stream = new_phy.proxy.take_event_stream();
     phys.insert(id, PhyDevice { proxy: new_phy.proxy, device: new_phy.device });
-    let r = await!(event_stream.map_ok(|_| ()).try_collect::<()>());
+    let r = event_stream.map_ok(|_| ()).try_collect::<()>().await;
     phys.remove(&id);
     if let Err(e) = r {
         error!("error reading from the FIDL channel of phy #{}: {}", id, e);
@@ -127,9 +132,15 @@ pub async fn serve_ifaces(
     ifaces: Arc<IfaceMap>,
     cobalt_sender: CobaltSender,
     inspect_tree: Arc<inspect::WlanstackTree>,
+    isolated_devmgr: bool,
 ) -> Result<Void, Error> {
     #[allow(deprecated)]
-    let mut new_ifaces = device_watch::watch_iface_devices()?;
+    let new_ifaces = if isolated_devmgr {
+        device_watch::watch_iface_devices::<wlan_dev::IsolatedDeviceEnv>()?.left_stream()
+    } else {
+        device_watch::watch_iface_devices::<wlan_dev::RealDeviceEnv>()?.right_stream()
+    };
+    pin_mut!(new_ifaces);
     let mut active_ifaces = FuturesUnordered::new();
     loop {
         select! {
@@ -168,7 +179,7 @@ async fn query_and_serve_iface_deprecated(
     let event_stream = proxy.take_event_stream();
     let (stats_sched, stats_reqs) = stats_scheduler::create_scheduler();
 
-    let device_info = match await!(proxy.query_device_info()) {
+    let device_info = match proxy.query_device_info().await {
         Ok(x) => x,
         Err(e) => {
             error!("Failed to query new iface '{}': {}", device.path().display(), e);
@@ -211,7 +222,7 @@ async fn query_and_serve_iface_deprecated(
         },
     );
 
-    let r = await!(sme_fut);
+    let r = sme_fut.await;
     if let Err(e) = r {
         error!("Error serving station for iface #{}: {}", id, e);
     }
@@ -231,7 +242,7 @@ pub async fn query_and_serve_iface(
     let event_stream = mlme_proxy.take_event_stream();
     let (stats_sched, stats_reqs) = stats_scheduler::create_scheduler();
 
-    let device_info = await!(mlme_proxy.query_device_info())
+    let device_info = mlme_proxy.query_device_info().await
         .map_err(|e| format_err!("failed querying iface: {}", e))?;
     let (sme, sme_fut) = create_sme(
         cfg,
@@ -258,7 +269,7 @@ pub async fn query_and_serve_iface(
         },
     );
 
-    let result = await!(sme_fut).map_err(|e| format_err!("error while serving SME: {}", e));
+    let result = sme_fut.await.map_err(|e| format_err!("error while serving SME: {}", e));
     info!("iface removed: {:?}", id);
     ifaces.remove(&id);
     result
@@ -327,6 +338,7 @@ mod tests {
         futures::sink::SinkExt,
         futures::task::Poll,
         pin_utils::pin_mut,
+        wlan_common::assert_variant,
     };
 
     fn fake_device_info() -> DeviceInfo {
@@ -362,44 +374,35 @@ mod tests {
         );
         pin_mut!(serve_fut);
         // Progress to cause query request.
-        match exec.run_until_stalled(&mut serve_fut) {
-            Poll::Pending => (),
-            _ => panic!("expected pending iface creation"),
-        };
+        let fut_result = exec.run_until_stalled(&mut serve_fut);
+        assert_variant!(fut_result, Poll::Pending, "expected pending iface creation");
 
         // The call above should trigger a Query message to the iface.
-        let responder = match exec.run_until_stalled(&mut mlme_stream.next()) {
+        assert_variant!(exec.run_until_stalled(&mut mlme_stream.next()),
             Poll::Ready(Some(Ok(fidl_mlme::MlmeRequest::QueryDeviceInfo { responder }))) => {
-                responder
+                // Respond with query message.
+                responder.send(&mut fake_device_info()).expect("failed to send QueryResponse");
             }
-            _ => panic!("phy_stream returned unexpected result"),
-        };
-
-        // Respond with query message.
-        responder.send(&mut fake_device_info()).expect("failed to send QueryResponse");
+        );
 
         // Progress to cause SME creation and serving.
         assert!(iface_map.get(&5).is_none());
-        match exec.run_until_stalled(&mut serve_fut) {
-            Poll::Pending => (),
-            _ => panic!("expected pending SME serving"),
-        };
+        let fut_result = exec.run_until_stalled(&mut serve_fut);
+        assert_variant!(fut_result, Poll::Pending, "expected pending SME serving");
 
         // Retrieve SME instance and close SME (iface must be acquired).
         let mut iface = iface_map.get(&5).expect("expected iface");
         iface_map.remove(&5);
         let mut_iface = Arc::get_mut(&mut iface).expect("error yielding iface");
-        match mut_iface.sme_server {
-            SmeServer::Client(ref mut sme) => {
-                let close_fut = sme.close();
-                pin_mut!(close_fut);
-                match exec.run_until_stalled(&mut close_fut) {
-                    Poll::Ready(_) => (),
-                    _ => panic!("expected closing SME to succeed"),
-                };
-            }
-            _ => panic!("expected Client SME to be spawned"),
-        };
+        let sme = assert_variant!(
+            mut_iface.sme_server,
+            SmeServer::Client(ref mut sme) => sme,
+            "expected Client SME to be spawned"
+        );
+        let close_fut = sme.close();
+        pin_mut!(close_fut);
+        let fut_result = exec.run_until_stalled(&mut close_fut);
+        assert_variant!(fut_result, Poll::Ready(_), "expected closing SME to succeed");
 
         // Insert iface back into map.
         let (mlme_proxy, _) = create_proxy::<MlmeMarker>().expect("failed to create MlmeProxy");
@@ -419,10 +422,8 @@ mod tests {
         iface_map.get(&5).expect("expected iface");
 
         // Progress SME serving to completion and verify iface was deleted
-        match exec.run_until_stalled(&mut serve_fut) {
-            Poll::Ready(_) => (),
-            _ => panic!("expected SME serving to be terminated"),
-        };
+        let fut_result = exec.run_until_stalled(&mut serve_fut);
+        assert_variant!(fut_result, Poll::Ready(_), "expected SME serving to be terminated");
         assert!(iface_map.get(&5).is_none());
     }
 }

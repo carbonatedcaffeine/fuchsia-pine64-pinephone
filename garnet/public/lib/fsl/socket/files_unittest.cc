@@ -25,15 +25,13 @@ TEST_F(SockAndFileTest, CopyToFileDescriptor) {
   std::string tmp_file;
   tmp_dir.NewTempFile(&tmp_file);
 
-  fxl::UniqueFD destination(open(tmp_file.c_str(), O_WRONLY));
+  fbl::unique_fd destination(open(tmp_file.c_str(), O_WRONLY));
   EXPECT_TRUE(destination.is_valid());
 
   bool success;
-  CopyToFileDescriptor(fsl::WriteStringToSocket("Hello"),
-                       std::move(destination), dispatcher(),
-                       [&success](bool success_value, fxl::UniqueFD fd) {
-                         success = success_value;
-                       });
+  CopyToFileDescriptor(
+      fsl::WriteStringToSocket("Hello"), std::move(destination), dispatcher(),
+      [&success](bool success_value, fbl::unique_fd fd) { success = success_value; });
   RunLoopUntilIdle();
 
   EXPECT_TRUE(success);
@@ -48,17 +46,16 @@ TEST_F(SockAndFileTest, CopyFromFileDescriptor) {
   tmp_dir.NewTempFile(&tmp_file);
 
   files::WriteFile(tmp_file, "Hello", 5);
-  fxl::UniqueFD source(open(tmp_file.c_str(), O_RDONLY));
+  fbl::unique_fd source(open(tmp_file.c_str(), O_RDONLY));
   EXPECT_TRUE(source.is_valid());
 
   zx::socket socket1, socket2;
   EXPECT_EQ(ZX_OK, zx::socket::create(0u, &socket1, &socket2));
 
   bool success;
-  CopyFromFileDescriptor(std::move(source), std::move(socket1), dispatcher(),
-                         [&success](bool success_value, fxl::UniqueFD fd) {
-                           success = success_value;
-                         });
+  CopyFromFileDescriptor(
+      std::move(source), std::move(socket1), dispatcher(),
+      [&success](bool success_value, fbl::unique_fd fd) { success = success_value; });
   RunLoopUntilIdle();
 
   EXPECT_TRUE(success);

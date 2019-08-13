@@ -49,13 +49,13 @@ class TreeNodeTest : public StorageTest {
     ObjectIdentifier root_identifier;
     EXPECT_TRUE(GetEmptyNodeIdentifier(&root_identifier));
     std::unique_ptr<const TreeNode> node;
-    EXPECT_TRUE(CreateNodeFromIdentifier(root_identifier, &node));
+    EXPECT_TRUE(CreateNodeFromIdentifier(root_identifier, PageStorage::Location::Local(), &node));
     return node;
   }
 
   Entry GetEntry(const TreeNode* node, int index) {
     Entry found_entry;
-    EXPECT_EQ(Status::OK, node->GetEntry(index, &found_entry));
+    EXPECT_EQ(node->GetEntry(index, &found_entry), Status::OK);
     return found_entry;
   }
 
@@ -80,19 +80,21 @@ TEST_F(TreeNodeTest, CreateGetTreeNode) {
   Status status;
   std::unique_ptr<const TreeNode> found_node;
   TreeNode::FromIdentifier(
-      &fake_storage_, node->GetIdentifier(),
+      &fake_storage_, {node->GetIdentifier(), PageStorage::Location::Local()},
       callback::Capture(callback::SetWhenCalled(&called), &status, &found_node));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   EXPECT_NE(nullptr, found_node);
 
   TreeNode::FromIdentifier(
-      &fake_storage_, RandomObjectIdentifier(environment_.random()),
+      &fake_storage_,
+      {RandomObjectIdentifier(environment_.random(), fake_storage_.GetObjectIdentifierFactory()),
+       PageStorage::Location::Local()},
       callback::Capture(callback::SetWhenCalled(&called), &status, &found_node));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::INTERNAL_NOT_FOUND, status);
+  EXPECT_EQ(status, Status::INTERNAL_NOT_FOUND);
 }
 
 TEST_F(TreeNodeTest, GetEntry) {
@@ -101,9 +103,9 @@ TEST_F(TreeNodeTest, GetEntry) {
   ASSERT_TRUE(CreateEntries(size, &entries));
   std::unique_ptr<const TreeNode> node;
   ASSERT_TRUE(CreateNodeFromEntries(entries, {}, &node));
-  EXPECT_EQ(size, node->GetKeyCount());
+  EXPECT_EQ(node->GetKeyCount(), size);
   for (int i = 0; i < size; ++i) {
-    EXPECT_EQ(entries[i], GetEntry(node.get(), i));
+    EXPECT_EQ(GetEntry(node.get(), i), entries[i]);
   }
 }
 
@@ -115,26 +117,26 @@ TEST_F(TreeNodeTest, FindKeyOrChild) {
   ASSERT_TRUE(CreateNodeFromEntries(entries, {}, &node));
 
   int index;
-  EXPECT_EQ(Status::OK, node->FindKeyOrChild("key00", &index));
-  EXPECT_EQ(0, index);
+  EXPECT_EQ(node->FindKeyOrChild("key00", &index), Status::OK);
+  EXPECT_EQ(index, 0);
 
-  EXPECT_EQ(Status::OK, node->FindKeyOrChild("key02", &index));
-  EXPECT_EQ(2, index);
+  EXPECT_EQ(node->FindKeyOrChild("key02", &index), Status::OK);
+  EXPECT_EQ(index, 2);
 
-  EXPECT_EQ(Status::OK, node->FindKeyOrChild("key09", &index));
-  EXPECT_EQ(9, index);
+  EXPECT_EQ(node->FindKeyOrChild("key09", &index), Status::OK);
+  EXPECT_EQ(index, 9);
 
-  EXPECT_EQ(Status::KEY_NOT_FOUND, node->FindKeyOrChild("0", &index));
-  EXPECT_EQ(0, index);
+  EXPECT_EQ(node->FindKeyOrChild("0", &index), Status::KEY_NOT_FOUND);
+  EXPECT_EQ(index, 0);
 
-  EXPECT_EQ(Status::KEY_NOT_FOUND, node->FindKeyOrChild("key001", &index));
-  EXPECT_EQ(1, index);
+  EXPECT_EQ(node->FindKeyOrChild("key001", &index), Status::KEY_NOT_FOUND);
+  EXPECT_EQ(index, 1);
 
-  EXPECT_EQ(Status::KEY_NOT_FOUND, node->FindKeyOrChild("key020", &index));
-  EXPECT_EQ(3, index);
+  EXPECT_EQ(node->FindKeyOrChild("key020", &index), Status::KEY_NOT_FOUND);
+  EXPECT_EQ(index, 3);
 
-  EXPECT_EQ(Status::KEY_NOT_FOUND, node->FindKeyOrChild("key999", &index));
-  EXPECT_EQ(10, index);
+  EXPECT_EQ(node->FindKeyOrChild("key999", &index), Status::KEY_NOT_FOUND);
+  EXPECT_EQ(index, 10);
 }
 
 TEST_F(TreeNodeTest, Serialization) {
@@ -148,23 +150,25 @@ TEST_F(TreeNodeTest, Serialization) {
   bool called;
   Status status;
   std::unique_ptr<const Object> object;
-  fake_storage_.GetObject(node->GetIdentifier(), PageStorage::Location::LOCAL,
+  fake_storage_.GetObject(node->GetIdentifier(), PageStorage::Location::Local(),
                           callback::Capture(callback::SetWhenCalled(&called), &status, &object));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   std::unique_ptr<const TreeNode> retrieved_node;
-  EXPECT_EQ(node->GetIdentifier(), object->GetIdentifier());
-  ASSERT_TRUE(CreateNodeFromIdentifier(node->GetIdentifier(), &retrieved_node));
+  EXPECT_EQ(object->GetIdentifier(), node->GetIdentifier());
+  ASSERT_TRUE(CreateNodeFromIdentifier(node->GetIdentifier(), PageStorage::Location::Local(),
+                                       &retrieved_node));
 
   fxl::StringView data;
-  EXPECT_EQ(Status::OK, object->GetData(&data));
+  EXPECT_EQ(object->GetData(&data), Status::OK);
   uint8_t level;
   std::vector<Entry> parsed_entries;
   std::map<size_t, ObjectIdentifier> parsed_children;
-  EXPECT_TRUE(DecodeNode(data, &level, &parsed_entries, &parsed_children));
-  EXPECT_EQ(entries, parsed_entries);
-  EXPECT_EQ(children, parsed_children);
+  EXPECT_TRUE(DecodeNode(data, fake_storage_.GetObjectIdentifierFactory(), &level, &parsed_entries,
+                         &parsed_children));
+  EXPECT_EQ(parsed_entries, entries);
+  EXPECT_EQ(parsed_children, children);
 }
 
 TEST_F(TreeNodeTest, References) {
@@ -179,8 +183,14 @@ TEST_F(TreeNodeTest, References) {
   // References to inline objects are ignored so we ensure object00 and object01
   // are big enough not to be inlined.
   std::unique_ptr<const Object> object0, object1, object2;
-  ASSERT_TRUE(AddObject(ObjectData("object00", InlineBehavior::PREVENT).value, &object0));
-  ASSERT_TRUE(AddObject(ObjectData("object01", InlineBehavior::PREVENT).value, &object1));
+  ASSERT_TRUE(AddObject(
+      ObjectData(fake_storage_.GetObjectIdentifierFactory(), "object00", InlineBehavior::PREVENT)
+          .value,
+      &object0));
+  ASSERT_TRUE(AddObject(
+      ObjectData(fake_storage_.GetObjectIdentifierFactory(), "object01", InlineBehavior::PREVENT)
+          .value,
+      &object1));
   // Inline object, the references to it should be skipped.
   ASSERT_TRUE(AddObject("object02", &object2));
   const ObjectIdentifier object0_id = object0->GetIdentifier();
@@ -190,21 +200,24 @@ TEST_F(TreeNodeTest, References) {
   const std::vector<Entry> entries = {
       // A single node pointing to the same value with both eager and lazy
       // links.
-      Entry{"key00", object0_id, KeyPriority::LAZY}, Entry{"key01", object1_id, KeyPriority::EAGER},
-      Entry{"key02", object0_id, KeyPriority::EAGER},
+      Entry{"key00", object0_id, KeyPriority::LAZY, EntryId()},
+      Entry{"key01", object1_id, KeyPriority::EAGER, EntryId()},
+      Entry{"key02", object0_id, KeyPriority::EAGER, EntryId()},
 
-      Entry{"key03", object1_id, KeyPriority::LAZY},
+      Entry{"key03", object1_id, KeyPriority::LAZY, EntryId()},
 
       // Two lazy references for the same object.
-      Entry{"key04", object0_id, KeyPriority::LAZY}, Entry{"key05", object1_id, KeyPriority::EAGER},
-      Entry{"key06", object0_id, KeyPriority::LAZY},
+      Entry{"key04", object0_id, KeyPriority::LAZY, EntryId()},
+      Entry{"key05", object1_id, KeyPriority::EAGER, EntryId()},
+      Entry{"key06", object0_id, KeyPriority::LAZY, EntryId()},
 
-      Entry{"key07", object1_id, KeyPriority::EAGER},
+      Entry{"key07", object1_id, KeyPriority::EAGER, EntryId()},
 
       // Two eager references for the same object, and an inlined object.
-      Entry{"key08", object0_id, KeyPriority::EAGER}, Entry{"key09", object1_id, KeyPriority::LAZY},
-      Entry{"key10", object0_id, KeyPriority::EAGER},
-      Entry{"key11", inlined_object_id, KeyPriority::EAGER}};
+      Entry{"key08", object0_id, KeyPriority::EAGER, EntryId()},
+      Entry{"key09", object1_id, KeyPriority::LAZY, EntryId()},
+      Entry{"key10", object0_id, KeyPriority::EAGER, EntryId()},
+      Entry{"key11", inlined_object_id, KeyPriority::EAGER, EntryId()}};
 
   std::unique_ptr<const TreeNode> root, child0, child1, child2;
   ASSERT_TRUE(CreateNodeFromEntries({entries[0], entries[1], entries[2]}, {}, &child0));

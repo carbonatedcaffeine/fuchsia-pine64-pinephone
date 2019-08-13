@@ -1,0 +1,30 @@
+# Please, read https://fuchsia.dev/fuchsia-src/best-practices/documentation_navigation_toc
+# before making changes to this file, and add a member of the fuchsia.dev
+# team as reviewer.
+toc:
+- name: "Overview"
+  contents:
+  - title: "Overview"
+    path: /docs
+  - title: "Getting started"
+    path: /docs/getting_started.md
+  - title: "Glossary"
+    path: /docs/glossary.md
+  - title: "Contributing"
+    path: /CONTRIBUTING.md
+  - title: "Code of conduct"
+    path: /CODE_OF_CONDUCT.md
+  - title: "Run the examples"
+    path: /docs/run-examples.md
+  - title: "Best practices"
+    section:
+    - include: /docs/best-practices/_toc.yaml
+- name: "Development"
+  contents:
+  - include: /docs/development/_toc.yaml
+- name: "System"
+  contents:
+  - include: /docs/the-book/_toc.yaml
+- name: "Zircon"
+  contents:
+  - include: /docs/zircon/_toc.yaml

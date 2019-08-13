@@ -54,6 +54,7 @@ class InterceptingThreadObserver : public zxdb::ThreadObserver {
  private:
   InterceptionWorkflow* workflow_;
   std::map<int64_t, SyscallDecoder*> breakpoint_map_;
+  std::unordered_set<int64_t> threads_in_error_;
 };
 
 class InterceptingProcessObserver : public zxdb::ProcessObserver {
@@ -166,6 +167,7 @@ class InterceptionWorkflow {
   }
 
   zxdb::Session* session() const { return session_; }
+  std::unordered_set<uint64_t>& configured_processes() { return configured_processes_; }
   SyscallDecoderDispatcher* syscall_decoder_dispatcher() const {
     return syscall_decoder_dispatcher_.get();
   }
@@ -186,6 +188,9 @@ class InterceptionWorkflow {
   bool delete_loop_;
   // -1 means "we already shut down".
   int target_count_;
+
+  // All the processes for which the breapoints have been set.
+  std::unordered_set<uint64_t> configured_processes_;
 
   std::unique_ptr<SyscallDecoderDispatcher> syscall_decoder_dispatcher_;
 

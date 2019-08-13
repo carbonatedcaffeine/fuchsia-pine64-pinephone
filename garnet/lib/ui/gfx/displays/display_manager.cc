@@ -6,8 +6,9 @@
 
 #include <lib/async/default.h>
 #include <lib/fdio/directory.h>
-#include <trace/event.h>
 #include <zircon/syscalls.h>
+
+#include <trace/event.h>
 
 #include "fuchsia/ui/scenic/cpp/fidl.h"
 
@@ -49,7 +50,7 @@ void DisplayManager::WaitForDefaultDisplayController(fit::closure callback) {
     dispatcher->Vsync = [this](uint64_t display_id, uint64_t timestamp,
                                ::std::vector<uint64_t> images) {
       if (display_id == default_display_->display_id() && vsync_cb_) {
-        vsync_cb_(timestamp, images);
+        vsync_cb_(zx::time(timestamp), images);
       }
     };
 
@@ -98,10 +99,7 @@ void DisplayManager::DisplaysChanged(::std::vector<fuchsia::hardware::display::I
       return;
     }
 
-    std::vector<uint64_t> layers;
-    layers.push_back(layer_id_);
-    ::fidl::VectorPtr<uint64_t> fidl_layers(std::move(layers));
-    status = display_controller_->SetDisplayLayers(display.id, std::move(fidl_layers));
+    status = display_controller_->SetDisplayLayers(display.id, {layer_id_});
     if (status != ZX_OK) {
       FXL_LOG(ERROR) << "Failed to configure display layers";
       return;

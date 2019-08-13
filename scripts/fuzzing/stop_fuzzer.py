@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 # Copyright 2019 The Fuchsia Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -13,20 +13,20 @@ from lib.host import Host
 
 
 def main():
-  parser = Args.make_parser('Stops the named fuzzer.')
-  args = parser.parse_args()
+    parser = Args.make_parser('Stops the named fuzzer.')
+    args = parser.parse_args()
 
-  host = Host.from_build()
-  device = Device.from_args(host, args)
-  fuzzer = Fuzzer.from_args(device, args)
+    host = Host.from_build()
+    device = Device.from_args(host, args)
+    fuzzer = Fuzzer.from_args(device, args)
 
-  if fuzzer.is_running():
-    print('Stopping ' + str(fuzzer) + '.')
-    fuzzer.stop()
-  else:
-    print(str(fuzzer) + ' is already stopped.')
-  return 0
+    if fuzzer.is_running():
+        print('Stopping ' + str(fuzzer) + '.')
+        fuzzer.stop()
+    else:
+        print(str(fuzzer) + ' is already stopped.')
+    return 0
 
 
 if __name__ == '__main__':
-  sys.exit(main())
+    sys.exit(main())

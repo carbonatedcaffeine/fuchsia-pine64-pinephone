@@ -70,9 +70,6 @@ protocol Api {
     /// Acquire the current time.
     clock_get(zx.clock clock_id) -> (zx.status status, zx.time out);
 
-    /// Acquire the current time.
-    clock_get_new(zx.clock clock_id) -> (zx.status status, zx.time out);
-
     /// Acquire the current monotonic time.
     clock_get_monotonic() -> (zx.time time);
 
@@ -372,16 +369,6 @@ protocol Api {
     socket_read(handle<socket> handle, uint32 options,
                 array<voidptr>:buffer_size buffer, usize buffer_size) ->
         (zx.status status, usize actual);
-
-    /// Send another socket object via a socket.
-    [rights="handle must be of type ZX_OBJ_TYPE_SOCKET and have ZX_RIGHT_WRITE.",
-     rights="socket_to_share must be of type ZX_OBJ_TYPE_SOCKET and have ZX_RIGHT_TRANSFER."]
-    socket_share(handle<socket> handle, handle<socket> socket_to_share) -> (zx.status status);
-
-    /// Receive another socket object via a socket.
-    [rights="handle must be of type ZX_OBJ_TYPE_SOCKET and have ZX_RIGHT_READ.",
-     argtype="out_socket handle_acquire"]
-    socket_accept(handle<socket> handle) -> (zx.status status, handle<socket> out_socket);
 
     /// Prevent reading or writing.
     [rights="handle must be of type ZX_OBJ_TYPE_SOCKET and have ZX_RIGHT_WRITE."]
@@ -996,6 +983,9 @@ protocol Api {
     [rights="resource must have resource kind ZX_RSRC_KIND_IOPORT."]
     ioports_request(handle<resource> resource, uint16 io_addr, uint32 len) -> (zx.status status);
 
+    [rights="resource must have resource kind ZX_RSRC_KIND_IOPORT."]
+    ioports_release(handle<resource> resource, uint16 io_addr, uint32 len) -> (zx.status status);
+
     [rights="bti must be of type ZX_OBJ_TYPE_BTI and have ZX_RIGHT_MAP.",
      argtype="out handle_acquire"]
     vmo_create_contiguous(handle<bti> bti, usize size, uint32 alignment_log2) ->
@@ -1321,6 +1311,9 @@ protocol Api {
         (zx.status status);
 
     syscall_test_wrapper(int32 a, int32 b, int32 c) -> (zx.status status);
+
+    [argtype="out handle_acquire"]
+    syscall_test_handle_create(zx.status return_value) -> (zx.status status, handle<event> out);
 };
 
 // vim: set ft=fidl:

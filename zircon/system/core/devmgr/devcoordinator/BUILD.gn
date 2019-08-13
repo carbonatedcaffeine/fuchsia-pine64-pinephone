@@ -21,6 +21,7 @@ executable("devcoordinator") {
     "../fshost",
     "$zx/system/core/miscsvc",
     "$zx/system/core/netsvc",
+    "$zx/system/core/netsvc:device-name-provider",
     "$zx/system/core/svchost",
     "$zx/system/core/virtcon:virtual-console",
     "$zx/system/core/pwrbtn-monitor",
@@ -63,6 +64,7 @@ source_set("common") {
   public_deps = [
     "$zx/system/fidl/fuchsia-boot:c",
     "$zx/system/fidl/fuchsia-device-manager:c",
+    "$zx/system/fidl/fuchsia-device-manager:llcpp",
     "$zx/system/fidl/fuchsia-driver-test:c",
     "$zx/system/fidl/fuchsia-io:c",
     "$zx/system/fidl/fuchsia-mem:c",

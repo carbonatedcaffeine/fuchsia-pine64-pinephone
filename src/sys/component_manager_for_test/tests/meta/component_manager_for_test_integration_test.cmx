@@ -1,0 +1,21 @@
+{
+    "facets": {
+        "fuchsia.test": {
+            "injected-services": {
+                "fuchsia.pkg.PackageResolver": "fuchsia-pkg://fuchsia.com/component_manager_for_test_integration_test#meta/mock_pkg_resolver.cmx"
+            }
+        }
+    },
+    "program": {
+        "binary": "test/component_manager_for_test_integration_test"
+    },
+    "sandbox": {
+        "features": [
+            "deprecated-ambient-replace-as-executable"
+        ],
+        "services": [
+            "fuchsia.sys.Launcher",
+            "fuchsia.logger.LogSink"
+        ]
+    }
+}

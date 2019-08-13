@@ -4,14 +4,14 @@
 
 #include "tools/fidlcat/lib/message_decoder.h"
 
-#include <fuchsia/sys/cpp/fidl.h>
-#include <lib/async-loop/cpp/loop.h>
-
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include <fuchsia/sys/cpp/fidl.h>
+#include <lib/async-loop/cpp/loop.h>
 
 #include "gtest/gtest.h"
 #include "lib/fidl/cpp/test/frobinator_impl.h"
@@ -51,12 +51,28 @@ class MessageDecoderTest : public ::testing::Test {
     zx_handle_t handle = ZX_HANDLE_INVALID;                                                        \
     InterceptRequest<_interface>(                                                                  \
         message, [&](fidl::InterfacePtr<_interface>& ptr) { ptr->_iface(__VA_ARGS__); });          \
+    zx_handle_info_t* handle_infos = nullptr;                                                      \
+    if (message.handles().size() > 0) {                                                            \
+      handle_infos = new zx_handle_info_t[message.handles().size()];                               \
+      for (uint32_t i = 0; i < message.handles().size(); ++i) {                                    \
+        handle_infos[i].handle = message.handles().data()[i];                                      \
+        handle_infos[i].type = ZX_OBJ_TYPE_NONE;                                                   \
+        handle_infos[i].rights = 0;                                                                \
+      }                                                                                            \
+    }                                                                                              \
     decoder_->DecodeMessage(process_koid_, handle, message.bytes().data(), message.bytes().size(), \
-                            message.handles().data(), message.handles().size(),                    \
+                            handle_infos, message.handles().size(),                                \
                             SyscallFidlType::kOutputMessage, result_);                             \
+    delete[] handle_infos;                                                                         \
     ASSERT_EQ(result_.str(), _expected)                                                            \
         << "expected = " << _expected << " actual = " << result_.str();                            \
   } while (0)
+
+TEST_F(MessageDecoderTest, TestEmptyLaunched) {
+  decoder_->AddLaunchedProcess(process_koid_);
+  TEST_DECODE_MESSAGE(FidlcatTestInterface, Empty,
+                      "sent request test.fidlcat.examples/FidlcatTestInterface.Empty = {}\n");
+}
 
 TEST_F(MessageDecoderTest, TestStringLaunched) {
   decoder_->AddLaunchedProcess(process_koid_);

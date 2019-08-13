@@ -43,6 +43,7 @@
 
 #include "lib/fidl/cpp/coding_traits.h"
 #include "lib/fidl/cpp/enum.h"
+#include "lib/fidl/cpp/internal/logging.h"
 
 #ifdef __Fuchsia__
 #include "lib/fidl/cpp/interface_ptr.h"
@@ -50,6 +51,8 @@
 #include "lib/fidl/cpp/internal/stub_controller.h"
 #include "lib/fidl/cpp/internal/synchronous_proxy.h"
 #include "lib/fidl/cpp/synchronous_interface_ptr.h"
+#include "lib/fidl/cpp/member_connector.h"
+#include "lib/fidl/cpp/service_handler_base.h"
 #endif
 
 #include "lib/fidl/cpp/comparison.h"

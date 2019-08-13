@@ -4,6 +4,14 @@
 
 #include "device.h"
 
+#include <cinttypes>
+#include <cstdarg>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <limits>
+#include <utility>
+
 #include <ddk/device.h>
 #include <ddk/hw/wlan/wlaninfo.h>
 #include <lib/zx/thread.h>
@@ -20,20 +28,11 @@
 #include <wlan/mlme/timer_manager.h>
 #include <wlan/mlme/validate_frame.h>
 #include <wlan/mlme/wlan.h>
-#include <wlan/protocol/ioctl.h>
 #include <zircon/assert.h>
 #include <zircon/compiler.h>
 #include <zircon/status.h>
 #include <zircon/syscalls.h>
 #include <zircon/syscalls/port.h>
-
-#include <cinttypes>
-#include <cstdarg>
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
-#include <limits>
-#include <utility>
 
 #include "probe_sequence.h"
 
@@ -57,12 +56,8 @@ static zx_protocol_device_t wlan_device_ops = {
     .version = DEVICE_OPS_VERSION,
     .unbind = [](void* ctx) { DEV(ctx)->WlanUnbind(); },
     .release = [](void* ctx) { DEV(ctx)->WlanRelease(); },
-    .ioctl = [](void* ctx, uint32_t op, const void* in_buf, size_t in_len,
-                void* out_buf, size_t out_len,
-                size_t* out_actual) -> zx_status_t {
-      return DEV(ctx)->WlanIoctl(op, in_buf, in_len, out_buf, out_len,
-                                 out_actual);
-    },
+    .message = [](void* ctx, fidl_msg_t* msg,
+                  fidl_txn_t* txn) { return DEV(ctx)->WlanMessage(msg, txn); },
 };
 
 static zx_protocol_device_t eth_device_ops = {
@@ -72,19 +67,12 @@ static zx_protocol_device_t eth_device_ops = {
 };
 
 static wlanmac_ifc_t wlanmac_ifc_ops = {
-    .status = [](void* cookie,
-                 uint32_t status) { DEV(cookie)->WlanmacStatus(status); },
-    .recv =
-        [](void* cookie, uint32_t flags, const void* data, size_t length,
-           wlan_rx_info_t* info) {
-          DEV(cookie)->WlanmacRecv(flags, data, length, info);
-        },
-    .complete_tx =
-        [](void* cookie, wlan_tx_packet_t* pkt, zx_status_t status) {
-          DEV(cookie)->WlanmacCompleteTx(pkt, status);
-        },
-    .indication = [](void* cookie,
-                     uint32_t ind) { DEV(cookie)->WlanmacIndication(ind); },
+    .status = [](void* cookie, uint32_t status) { DEV(cookie)->WlanmacStatus(status); },
+    .recv = [](void* cookie, uint32_t flags, const void* data, size_t length,
+               wlan_rx_info_t* info) { DEV(cookie)->WlanmacRecv(flags, data, length, info); },
+    .complete_tx = [](void* cookie, wlan_tx_packet_t* pkt,
+                      zx_status_t status) { DEV(cookie)->WlanmacCompleteTx(pkt, status); },
+    .indication = [](void* cookie, uint32_t ind) { DEV(cookie)->WlanmacIndication(ind); },
     .report_tx_status =
         [](void* cookie, const wlan_tx_status_t* tx_status) {
           DEV(cookie)->WlanmacReportTxStatus(tx_status);
@@ -96,18 +84,19 @@ static wlanmac_ifc_t wlanmac_ifc_ops = {
 };
 
 static ethernet_impl_protocol_ops_t ethernet_impl_ops = {
-    .query = [](void* ctx, uint32_t options, ethernet_info_t* info)
-        -> zx_status_t { return DEV(ctx)->EthernetImplQuery(options, info); },
+    .query = [](void* ctx, uint32_t options, ethernet_info_t* info) -> zx_status_t {
+      return DEV(ctx)->EthernetImplQuery(options, info);
+    },
     .stop = [](void* ctx) { DEV(ctx)->EthernetImplStop(); },
     .start = [](void* ctx, const ethernet_ifc_protocol_t* ifc) -> zx_status_t {
       return DEV(ctx)->EthernetImplStart(ifc);
     },
-    .queue_tx = [](void* ctx, uint32_t options, ethernet_netbuf_t* netbuf)
-        -> zx_status_t { return DEV(ctx)->EthernetImplQueueTx(options, netbuf); },
-    .set_param = [](void* ctx, uint32_t param, int32_t value, const void* data,
-                    size_t data_size) -> zx_status_t {
-      return DEV(ctx)->EthernetImplSetParam(param, value, data, data_size);
+    .queue_tx = [](void* ctx, uint32_t options, ethernet_netbuf_t* netbuf,
+                   ethernet_impl_queue_tx_callback completion_cb, void* cookie)  {
+      DEV(ctx)->EthernetImplQueueTx(options, netbuf, completion_cb, cookie);
     },
+    .set_param = [](void* ctx, uint32_t param, int32_t value, const void* data, size_t data_size)
+        -> zx_status_t { return DEV(ctx)->EthernetImplSetParam(param, value, data, data_size); },
 };
 #undef DEV
 
@@ -153,8 +142,7 @@ zx_status_t Device::Bind() __TA_NO_THREAD_SAFETY_ANALYSIS {
   zx_handle_t sme_channel = ZX_HANDLE_INVALID;
   status = wlanmac_proxy_.Start(&wlanmac_ifc_ops, &sme_channel, this);
   if (status != ZX_OK) {
-    errorf("failed to start wlanmac device: %s\n",
-           zx_status_get_string(status));
+    errorf("failed to start wlanmac device: %s\n", zx_status_get_string(status));
     return status;
   }
 
@@ -197,8 +185,7 @@ zx_status_t Device::Bind() __TA_NO_THREAD_SAFETY_ANALYSIS {
 
   work_thread_ = std::thread(&Device::MainLoop, this);
 
-  if (wlanmac_info_.ifc_info.driver_features &
-      WLAN_INFO_DRIVER_FEATURE_TEMP_DIRECT_SME_CHANNEL) {
+  if (wlanmac_info_.ifc_info.driver_features & WLAN_INFO_DRIVER_FEATURE_TEMP_DIRECT_SME_CHANNEL) {
     ZX_DEBUG_ASSERT(sme_channel != ZX_HANDLE_INVALID);
     status = AddEthDevice(parent_);
     if (status != ZX_OK) {
@@ -228,11 +215,9 @@ zx_status_t Device::Bind() __TA_NO_THREAD_SAFETY_ANALYSIS {
 
   // Clean up if either device add failed.
   if (status != ZX_OK) {
-    zx_status_t shutdown_status =
-        QueueDevicePortPacket(DevicePacket::kShutdown);
+    zx_status_t shutdown_status = QueueDevicePortPacket(DevicePacket::kShutdown);
     if (shutdown_status != ZX_OK) {
-      ZX_PANIC("wlan: could not send shutdown loop message: %d\n",
-               shutdown_status);
+      ZX_PANIC("wlan: could not send shutdown loop message: %d\n", shutdown_status);
     }
     if (work_thread_.joinable()) {
       work_thread_.join();
@@ -242,6 +227,28 @@ zx_status_t Device::Bind() __TA_NO_THREAD_SAFETY_ANALYSIS {
   }
 
   return status;
+}
+
+zx_status_t Device::WlanMessage(fidl_msg_t* msg, fidl_txn_t* txn) {
+  auto connect = [](void* ctx, zx_handle_t request) {
+    return static_cast<Device*>(ctx)->Connect(zx::channel(request));
+  };
+  static const fuchsia_wlan_mlme_Connector_ops_t ops = {
+      .Connect = connect,
+  };
+  return fuchsia_wlan_mlme_Connector_dispatch(this, txn, msg, &ops);
+}
+
+zx_status_t Device::Connect(zx::channel request) {
+  debugfn();
+  std::lock_guard<std::mutex> lock(lock_);
+  channel_ = std::move(request);
+  auto status = RegisterChannelWaitLocked();
+  if (status != ZX_OK) {
+    errorf("could not wait on channel: %s\n", zx_status_get_string(status));
+    channel_.reset();
+  }
+  return ZX_OK;
 }
 
 zx_status_t Device::AddWlanDevice() {
@@ -265,8 +272,7 @@ zx_status_t Device::AddEthDevice(zx_device* parent) {
   return device_add(parent, &args, &ethdev_);
 }
 
-fbl::unique_ptr<Packet> Device::PreparePacket(const void* data, size_t length,
-                                              Packet::Peer peer) {
+fbl::unique_ptr<Packet> Device::PreparePacket(const void* data, size_t length, Packet::Peer peer) {
   fbl::unique_ptr<Buffer> buffer = GetBuffer(length);
   if (buffer == nullptr) {
     errorf("could not get buffer for packet of length %zu\n", length);
@@ -335,30 +341,6 @@ void Device::WlanRelease() {
   DestroySelf();
 }
 
-zx_status_t Device::WlanIoctl(uint32_t op, const void* in_buf, size_t in_len,
-                              void* out_buf, size_t out_len,
-                              size_t* out_actual) {
-  debugfn();
-  if (op != IOCTL_WLAN_GET_CHANNEL) {
-    return ZX_ERR_NOT_SUPPORTED;
-  }
-  if (out_buf == nullptr || out_actual == nullptr ||
-      out_len < sizeof(zx_handle_t)) {
-    return ZX_ERR_BUFFER_TOO_SMALL;
-  }
-
-  zx::channel out;
-  zx_status_t status = GetChannel(&out);
-  if (status != ZX_OK) {
-    return status;
-  }
-
-  zx_handle_t* outh = static_cast<zx_handle_t*>(out_buf);
-  *outh = out.release();
-  *out_actual = sizeof(zx_handle_t);
-  return ZX_OK;
-}
-
 // ddk ethernet_impl_protocol_ops methods
 
 void Device::EthUnbind() {
@@ -371,8 +353,7 @@ void Device::EthRelease() {
   debugfn();
   // If no wlanif device was added we need to clean-up memory here. Otherwise
   // WlanRelease() will do the clean-up as |ethdev_| is a child of |zxdev_|.
-  if (wlanmac_info_.ifc_info.driver_features &
-      WLAN_INFO_DRIVER_FEATURE_TEMP_DIRECT_SME_CHANNEL) {
+  if (wlanmac_info_.ifc_info.driver_features & WLAN_INFO_DRIVER_FEATURE_TEMP_DIRECT_SME_CHANNEL) {
     DestroySelf();
   }
 }
@@ -389,7 +370,7 @@ zx_status_t Device::EthernetImplQuery(uint32_t options, ethernet_info_t* info) {
     info->features |= ETHERNET_FEATURE_SYNTH;
   }
   info->mtu = 1500;
-  info->netbuf_size = sizeof(ethernet_netbuf_t);
+  info->netbuf_size = eth::BorrowedOperation<>::OperationSize(sizeof(ethernet_netbuf_t));
 
   return ZX_OK;
 }
@@ -418,11 +399,11 @@ void Device::EthernetImplStop() {
   while (!queued_packets.is_empty()) {
     auto packet = queued_packets.Dequeue();
     if (packet->peer() == Packet::Peer::kEthernet) {
-      auto netbuf = packet->ext_data();
-      ZX_DEBUG_ASSERT(netbuf != nullptr);
+      auto netbuf = std::move(packet->ext_data());
+      ZX_DEBUG_ASSERT(netbuf != std::nullopt);
       ZX_DEBUG_ASSERT(ethernet_proxy_ != nullptr);
-      if (netbuf != nullptr && ethernet_proxy_ != nullptr) {
-        ethernet_proxy_->CompleteTx(netbuf, ZX_ERR_CANCELED);
+      if (netbuf != std::nullopt) {
+        netbuf->Complete(ZX_ERR_CANCELED);
       }
       // Outgoing ethernet frames are dropped.
     } else {
@@ -433,28 +414,29 @@ void Device::EthernetImplStop() {
   ethernet_proxy_.reset();
 }
 
-zx_status_t Device::EthernetImplQueueTx(uint32_t options, ethernet_netbuf_t* netbuf) {
+void Device::EthernetImplQueueTx(uint32_t options, ethernet_netbuf_t* netbuf,
+                                 ethernet_impl_queue_tx_callback completion_cb, void* cookie) {
+  eth::BorrowedOperation<> op(netbuf, completion_cb, cookie, sizeof(ethernet_netbuf_t));
   // no debugfn() because it's too noisy
-  auto packet = PreparePacket(netbuf->data_buffer, netbuf->data_size,
+  auto packet = PreparePacket(op.operation()->data_buffer, op.operation()->data_size,
                               Packet::Peer::kEthernet);
   if (packet == nullptr) {
-    warnf("could not prepare Ethernet packet with len %zu\n",
-          netbuf->data_size);
-    return ZX_ERR_NO_RESOURCES;
+    warnf("could not prepare Ethernet packet with len %zu\n", netbuf->data_size);
+    op.Complete(ZX_ERR_NO_RESOURCES);
+    return;
   }
-  packet->set_ext_data(netbuf, 0);
+  packet->set_ext_data(std::move(op), 0);
   zx_status_t status = QueuePacket(std::move(packet));
   if (status != ZX_OK) {
-    warnf("could not queue Ethernet packet err=%s\n",
-          zx_status_get_string(status));
+    warnf("could not queue Ethernet packet err=%s\n", zx_status_get_string(status));
     ZX_DEBUG_ASSERT(status != ZX_ERR_SHOULD_WAIT);
-    return status;
+    op.Complete(status);
+    return;
   }
-  return ZX_ERR_SHOULD_WAIT;
 }
 
-zx_status_t Device::EthernetImplSetParam(uint32_t param, int32_t value,
-                                   const void* data, size_t data_size) {
+zx_status_t Device::EthernetImplSetParam(uint32_t param, int32_t value, const void* data,
+                                         size_t data_size) {
   debugfn();
 
   zx_status_t status = ZX_ERR_NOT_SUPPORTED;
@@ -483,8 +465,7 @@ void Device::WlanmacStatus(uint32_t status) {
   SetStatusLocked(status);
 }
 
-void Device::WlanmacRecv(uint32_t flags, const void* data, size_t length,
-                         wlan_rx_info_t* info) {
+void Device::WlanmacRecv(uint32_t flags, const void* data, size_t length, wlan_rx_info_t* info) {
   // no debugfn() because it's too noisy
   auto packet = PreparePacket(data, length, Packet::Peer::kWlan, *info);
   if (packet == nullptr) {
@@ -523,8 +504,7 @@ void Device::WlanmacReportTxStatus(const wlan_tx_status_t* tx_status) {
 
 void Device::WlanmacHwScanComplete(const wlan_hw_scan_result_t* result) {
   debugf("WlanmacHwScanComplete %u\n", result->code);
-  auto status =
-      QueueDevicePortPacket(DevicePacket::kHwScanComplete, result->code);
+  auto status = QueueDevicePortPacket(DevicePacket::kHwScanComplete, result->code);
   if (status != ZX_OK) {
     errorf("could not queue hw scan complete packet err=%d\n", status);
   }
@@ -536,8 +516,7 @@ zx_status_t Device::GetTimer(uint64_t id, fbl::unique_ptr<Timer>* timer) {
   ZX_DEBUG_ASSERT(port_.is_valid());
 
   zx::timer t;
-  zx_status_t status =
-      zx::timer::create(ZX_TIMER_SLACK_LATE, ZX_CLOCK_MONOTONIC, &t);
+  zx_status_t status = zx::timer::create(ZX_TIMER_SLACK_LATE, ZX_CLOCK_MONOTONIC, &t);
   if (status != ZX_OK) {
     return status;
   }
@@ -549,8 +528,7 @@ zx_status_t Device::GetTimer(uint64_t id, fbl::unique_ptr<Timer>* timer) {
 
 zx_status_t Device::DeliverEthernet(fbl::Span<const uint8_t> eth_frame) {
   if (eth_frame.size() > ETH_FRAME_MAX_SIZE) {
-    errorf("Attempted to deliver an ethernet frame of invalid length: %zu\n",
-           eth_frame.size());
+    errorf("Attempted to deliver an ethernet frame of invalid length: %zu\n", eth_frame.size());
     return ZX_ERR_INVALID_ARGS;
   }
 
@@ -592,16 +570,14 @@ TxVector GetTxVector(const fbl::unique_ptr<MinstrelRateSelector>& minstrel,
   }
 }
 
-wlan_tx_info_t MakeTxInfo(const fbl::unique_ptr<Packet>& packet,
-                          const TxVector& tv, bool has_minstrel,
-                          uint32_t flags) {
+wlan_tx_info_t MakeTxInfo(const fbl::unique_ptr<Packet>& packet, const TxVector& tv,
+                          bool has_minstrel, uint32_t flags) {
   tx_vec_idx_t idx;
   zx_status_t status = tv.ToIdx(&idx);
   ZX_DEBUG_ASSERT(status == ZX_OK);
 
-  uint32_t valid_fields = WLAN_TX_INFO_VALID_PHY |
-                          WLAN_TX_INFO_VALID_CHAN_WIDTH |
-                          WLAN_TX_INFO_VALID_MCS;
+  uint32_t valid_fields =
+      WLAN_TX_INFO_VALID_PHY | WLAN_TX_INFO_VALID_CHAN_WIDTH | WLAN_TX_INFO_VALID_MCS;
   if (has_minstrel) {
     valid_fields |= WLAN_TX_INFO_VALID_TX_VECTOR_IDX;
   }
@@ -645,8 +621,7 @@ zx_status_t Device::SendWlan(fbl::unique_ptr<Packet> packet, uint32_t flags) {
 // the syscall fails, and we return an error.
 // TODO(tkilbourn): consider refactoring this so we don't have to abandon the
 // safety analysis.
-zx_status_t Device::SendService(fbl::Span<const uint8_t> span)
-    __TA_NO_THREAD_SAFETY_ANALYSIS {
+zx_status_t Device::SendService(fbl::Span<const uint8_t> span) __TA_NO_THREAD_SAFETY_ANALYSIS {
   if (channel_.is_valid()) {
     return channel_.write(0u, span.data(), span.size(), nullptr, 0);
   }
@@ -655,18 +630,15 @@ zx_status_t Device::SendService(fbl::Span<const uint8_t> span)
 
 // TODO(tkilbourn): figure out how to make sure we have the lock for accessing
 // dispatcher_.
-zx_status_t Device::SetChannel(wlan_channel_t chan)
-    __TA_NO_THREAD_SAFETY_ANALYSIS {
+zx_status_t Device::SetChannel(wlan_channel_t chan) __TA_NO_THREAD_SAFETY_ANALYSIS {
   // TODO(porce): Implement == operator for wlan_channel_t, or an equality test
   // function.
 
   char buf[80];
   snprintf(buf, sizeof(buf), "channel set: from %s to %s",
-           common::ChanStr(state_->channel()).c_str(),
-           common::ChanStr(chan).c_str());
+           common::ChanStr(state_->channel()).c_str(), common::ChanStr(chan).c_str());
 
-  if (chan.primary == state_->channel().primary &&
-      chan.cbw == state_->channel().cbw) {
+  if (chan.primary == state_->channel().primary && chan.cbw == state_->channel().cbw) {
     warnf("%s suppressed\n", buf);
     return ZX_OK;
   }
@@ -703,10 +675,10 @@ zx_status_t Device::ConfigureBss(wlan_bss_config_t* cfg) {
 
 zx_status_t Device::EnableBeaconing(wlan_bcn_config_t* bcn_cfg) {
   if (bcn_cfg != nullptr) {
-    ZX_DEBUG_ASSERT(ValidateFrame("Malformed beacon template",
-                                  {reinterpret_cast<const uint8_t*>(
-                                       bcn_cfg->tmpl.packet_head.data_buffer),
-                                   bcn_cfg->tmpl.packet_head.data_size}));
+    ZX_DEBUG_ASSERT(
+        ValidateFrame("Malformed beacon template",
+                      {reinterpret_cast<const uint8_t*>(bcn_cfg->tmpl.packet_head.data_buffer),
+                       bcn_cfg->tmpl.packet_head.data_size}));
   }
   return wlanmac_proxy_.EnableBeaconing(0u, bcn_cfg);
 }
@@ -760,8 +732,7 @@ zx_status_t Device::GetMinstrelPeers(wlan_minstrel::Peers* peers_fidl) {
   return minstrel_->GetListToFidl(peers_fidl);
 }
 
-zx_status_t Device::GetMinstrelStats(const common::MacAddr& addr,
-                                     wlan_minstrel::Peer* peer_fidl) {
+zx_status_t Device::GetMinstrelStats(const common::MacAddr& addr, wlan_minstrel::Peer* peer_fidl) {
   if (minstrel_ == nullptr) {
     return ZX_ERR_NOT_SUPPORTED;
   }
@@ -771,8 +742,7 @@ zx_status_t Device::GetMinstrelStats(const common::MacAddr& addr,
 void Device::MainLoop() {
   infof("starting MainLoop\n");
   const char kThreadName[] = "wlan-mainloop";
-  zx::thread::self()->set_property(ZX_PROP_NAME, kThreadName,
-                                   sizeof(kThreadName));
+  zx::thread::self()->set_property(ZX_PROP_NAME, kThreadName, sizeof(kThreadName));
 
   zx_port_packet_t pkt;
   bool running = true;
@@ -815,7 +785,7 @@ void Device::MainLoop() {
             while (!queued_packets.is_empty()) {
               auto packet = queued_packets.Dequeue();
               ZX_DEBUG_ASSERT(packet != nullptr);
-              ethernet_netbuf_t* netbuf = nullptr;
+              std::optional<eth::BorrowedOperation<>> netbuf = std::nullopt;
               auto peer = packet->peer();
               if (peer == Packet::Peer::kEthernet) {
                 // ethernet driver somehow decided to send frame after itself is
@@ -824,19 +794,18 @@ void Device::MainLoop() {
                 if (ethernet_proxy_ == nullptr) {
                   continue;
                 }
-                netbuf = packet->ext_data();
-                ZX_ASSERT(netbuf != nullptr);
+                netbuf = std::move(packet->ext_data());
+                ZX_ASSERT(netbuf != std::nullopt);
               }
               zx_status_t status = dispatcher_->HandlePacket(std::move(packet));
               if (peer == Packet::Peer::kEthernet) {
-                ethernet_proxy_->CompleteTx(netbuf, status);
+                netbuf->Complete(status);
               }
             }
             break;
           }
           default:
-            errorf("unknown device port key subtype: %" PRIu64 "\n",
-                   pkt.user.u64[0]);
+            errorf("unknown device port key subtype: %" PRIu64 "\n", pkt.user.u64[0]);
             break;
         }
         break;
@@ -883,8 +852,8 @@ void Device::ProcessChannelPacketLocked(uint64_t signal_count) {
 
   for (size_t i = 0; i < signal_count; ++i) {
     uint32_t read = 0;
-    zx_status_t status = channel_.read(0, fidl_msg_buf_.data(), nullptr,
-                                       fidl_msg_buf_.size(), 0, &read, nullptr);
+    zx_status_t status =
+        channel_.read(0, fidl_msg_buf_.data(), nullptr, fidl_msg_buf_.size(), 0, &read, nullptr);
     if (status == ZX_ERR_SHOULD_WAIT) {
       break;
     }
@@ -900,8 +869,7 @@ void Device::ProcessChannelPacketLocked(uint64_t signal_count) {
 
     status = dispatcher_->HandleAnyMlmeMessage({fidl_msg_buf_.data(), read});
     if (status != ZX_OK) {
-      errorf("Could not handle service packet: %s\n",
-             zx_status_get_string(status));
+      errorf("Could not handle service packet: %s\n", zx_status_get_string(status));
     }
   }
   RegisterChannelWaitLocked();
@@ -909,8 +877,7 @@ void Device::ProcessChannelPacketLocked(uint64_t signal_count) {
 
 zx_status_t Device::RegisterChannelWaitLocked() {
   zx_signals_t sigs = ZX_CHANNEL_READABLE | ZX_CHANNEL_PEER_CLOSED;
-  return channel_.wait_async(port_, ToPortKey(PortKeyType::kService, 0u), sigs,
-                             ZX_WAIT_ASYNC_ONCE);
+  return channel_.wait_async(port_, ToPortKey(PortKeyType::kService, 0u), sigs, ZX_WAIT_ASYNC_ONCE);
 }
 
 zx_status_t Device::QueueDevicePortPacket(DevicePacket id, uint32_t status) {
@@ -923,38 +890,6 @@ zx_status_t Device::QueueDevicePortPacket(DevicePacket id, uint32_t status) {
     return ZX_ERR_BAD_STATE;
   }
   return port_.queue(&pkt);
-}
-
-zx_status_t Device::GetChannel(zx::channel* out) {
-  ZX_DEBUG_ASSERT(out != nullptr);
-
-  std::lock_guard<std::mutex> lock(lock_);
-  if (dead_) {
-    return ZX_ERR_PEER_CLOSED;
-  }
-  if (!port_.is_valid()) {
-    return ZX_ERR_BAD_STATE;
-  }
-  if (channel_.is_valid()) {
-    return ZX_ERR_ALREADY_BOUND;
-  }
-
-  zx_status_t status = zx::channel::create(0, &channel_, out);
-  if (status != ZX_OK) {
-    errorf("could not create channel: %d\n", status);
-    return status;
-  }
-
-  status = RegisterChannelWaitLocked();
-  if (status != ZX_OK) {
-    errorf("could not wait on channel: %d\n", status);
-    out->reset();
-    channel_.reset();
-    return status;
-  }
-
-  infof("channel opened\n");
-  return ZX_OK;
 }
 
 zx_status_t ValidateWlanMacInfo(const wlanmac_info& wlanmac_info) {
@@ -993,8 +928,7 @@ zx_status_t ValidateWlanMacInfo(const wlanmac_info& wlanmac_info) {
         }
         break;
       default:
-        errorf("wlanmac band info for %u MHz not supported\n",
-               supported_channels.base_freq);
+        errorf("wlanmac band info for %u MHz not supported\n", supported_channels.base_freq);
         errorf("wlanmac info: %s\n", debug::Describe(wlanmac_info).c_str());
         return ZX_ERR_NOT_SUPPORTED;
     }
@@ -1016,18 +950,15 @@ zx_status_t Device::CreateMinstrel(uint32_t features) {
   ObjectId timer_id;
   timer_id.set_subtype(to_enum_type(ObjectSubtype::kTimer));
   timer_id.set_target(to_enum_type(ObjectTarget::kMinstrel));
-  auto status =
-      GetTimer(ToPortKey(PortKeyType::kDevice, timer_id.val()), &timer);
+  auto status = GetTimer(ToPortKey(PortKeyType::kDevice, timer_id.val()), &timer);
   if (status != ZX_OK) {
     errorf("could not create minstrel timer: %d\n", status);
     return status;
   }
-  const zx::duration minstrel_update_interval =
-      (features & WLAN_INFO_DRIVER_FEATURE_SYNTH) != 0
-          ? kMinstrelUpdateIntervalForHwSim
-          : kMinstrelUpdateIntervalNormal;
-  minstrel_.reset(new MinstrelRateSelector(std::move(timer),
-                                           ProbeSequence::RandomSequence(),
+  const zx::duration minstrel_update_interval = (features & WLAN_INFO_DRIVER_FEATURE_SYNTH) != 0
+                                                    ? kMinstrelUpdateIntervalForHwSim
+                                                    : kMinstrelUpdateIntervalNormal;
+  minstrel_.reset(new MinstrelRateSelector(std::move(timer), ProbeSequence::RandomSequence(),
                                            minstrel_update_interval));
   return ZX_OK;
 }
@@ -1039,8 +970,8 @@ void Device::AddMinstrelPeer(const wlan_assoc_ctx_t& assoc_ctx) {
   minstrel_->AddPeer(assoc_ctx);
 }
 
-zx_status_t Device::TimerSchedulerImpl::Schedule(
-    Timer* timer, zx::time deadline) __TA_NO_THREAD_SAFETY_ANALYSIS {
+zx_status_t Device::TimerSchedulerImpl::Schedule(Timer* timer,
+                                                 zx::time deadline) __TA_NO_THREAD_SAFETY_ANALYSIS {
   auto sys_timer = static_cast<SystemTimer*>(timer);
   zx_status_t status = sys_timer->inner()->set(deadline, zx::nsec(0));
   if (status != ZX_OK) {
@@ -1052,8 +983,8 @@ zx_status_t Device::TimerSchedulerImpl::Schedule(
     return ZX_OK;
   } else {
     scheduled_timers_.insert(sys_timer->id());
-    return sys_timer->inner()->wait_async(
-        device_->port_, sys_timer->id(), ZX_TIMER_SIGNALED, ZX_WAIT_ASYNC_ONCE);
+    return sys_timer->inner()->wait_async(device_->port_, sys_timer->id(), ZX_TIMER_SIGNALED,
+                                          ZX_WAIT_ASYNC_ONCE);
   }
 }
 

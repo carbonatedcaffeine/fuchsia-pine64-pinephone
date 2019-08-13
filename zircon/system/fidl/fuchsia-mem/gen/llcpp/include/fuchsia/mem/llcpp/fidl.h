@@ -7,6 +7,7 @@
 #include <lib/fidl/cpp/string_view.h>
 #include <lib/fidl/llcpp/array.h>
 #include <lib/fidl/llcpp/coding.h>
+#include <lib/fidl/llcpp/sync_call.h>
 #include <lib/fidl/llcpp/traits.h>
 #include <lib/fidl/llcpp/transaction.h>
 #include <lib/fit/function.h>
@@ -33,14 +34,14 @@ struct Range {
   static constexpr uint32_t MaxOutOfLine = 0;
 
   // The vmo that contains the bytes.
-  ::zx::vmo vmo{};
+  ::zx::vmo vmo = {};
 
   // The offset of the first byte within the range relative to the start of
   // the VMO.
   //
   // For example, if `offset` is zero, then the first byte in the range is
   // the first byte in the VMO.
-  uint64_t offset{};
+  uint64_t offset = {};
 
   // The number of bytes in the range.
   //
@@ -49,7 +50,7 @@ struct Range {
   //
   // The sum of the offset and the size must not be greater than the
   // physical size of the VMO.
-  uint64_t size{};
+  uint64_t size = {};
 };
 
 extern "C" const fidl_type_t fuchsia_mem_BufferTable;
@@ -69,7 +70,7 @@ struct Buffer {
   static constexpr uint32_t MaxOutOfLine = 0;
 
   // The vmo that contains the buffer.
-  ::zx::vmo vmo{};
+  ::zx::vmo vmo = {};
 
   // The number of bytes in the buffer.
   //
@@ -78,7 +79,7 @@ struct Buffer {
   // the beginning of the VMO, use `Range` rather than buffer.
   //
   // This size must not be greater than the physical size of the VMO.
-  uint64_t size{};
+  uint64_t size = {};
 };
 
 extern "C" const fidl_type_t fuchsia_mem_DataTable;

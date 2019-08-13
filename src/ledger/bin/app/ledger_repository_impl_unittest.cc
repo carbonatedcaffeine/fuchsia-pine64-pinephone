@@ -79,7 +79,8 @@ class LedgerRepositoryImplTest : public TestWithEnvironment {
     repository_ = std::make_unique<LedgerRepositoryImpl>(
         DetachedPath(tmpfs_.root_fd()), &environment_,
         std::make_unique<storage::fake::FakeDbFactory>(dispatcher()), nullptr, nullptr,
-        std::move(fake_page_eviction_manager), disk_cleanup_manager_,
+        std::move(fake_page_eviction_manager),
+        std::vector<PageUsageListener*>{disk_cleanup_manager_},
         attachment_node_.CreateChild(kInspectPathComponent));
   }
 
@@ -126,8 +127,8 @@ TEST_F(LedgerRepositoryImplTest, ConcurrentCalls) {
   RunLoopUntilIdle();
   EXPECT_TRUE(callback_called1);
   EXPECT_TRUE(callback_called2);
-  EXPECT_EQ(Status::OK, status1);
-  EXPECT_EQ(Status::OK, status2);
+  EXPECT_EQ(status1, Status::OK);
+  EXPECT_EQ(status2, Status::OK);
 }
 
 TEST_F(LedgerRepositoryImplTest, InspectAPIRequestsMetricOnMultipleBindings) {
@@ -298,8 +299,8 @@ TEST_F(LedgerRepositoryImplTest, Close) {
   EXPECT_TRUE(ptr1_closed);
   EXPECT_TRUE(ptr2_closed);
 
-  EXPECT_EQ(ZX_OK, ptr1_closed_status);
-  EXPECT_EQ(ZX_OK, ptr2_closed_status);
+  EXPECT_EQ(ptr1_closed_status, ZX_OK);
+  EXPECT_EQ(ptr2_closed_status, ZX_OK);
 }
 
 }  // namespace

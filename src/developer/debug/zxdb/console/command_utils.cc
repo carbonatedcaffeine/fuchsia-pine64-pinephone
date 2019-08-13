@@ -84,8 +84,11 @@ Err AssertStoppedThreadWithFrameCommand(ConsoleContext* context, const Command& 
   if (err.has_error())
     return err;
 
-  // Stopped threads should always have a frame.
-  FXL_DCHECK(cmd.frame());
+  if (!cmd.frame()) {
+    return Err("\"%s\" requires a stack frame but none is available.\n"
+               "You may need to \"pause\" the thread or sync the frames with \"frame\".",
+               command_name);
+  }
 
   return cmd.ValidateNouns({Noun::kProcess, Noun::kThread, Noun::kFrame});
 }
@@ -501,7 +504,7 @@ fxl::RefPtr<EvalContext> GetEvalContextForCommand(const Command& cmd) {
 
 Err EvalCommandExpression(const Command& cmd, const char* verb,
                           fxl::RefPtr<EvalContext> eval_context, bool follow_references,
-                          std::function<void(const Err& err, ExprValue value)> cb) {
+                          fit::callback<void(const Err& err, ExprValue value)> cb) {
   Err err = cmd.ValidateNouns({Noun::kProcess, Noun::kThread, Noun::kFrame});
   if (err.has_error())
     return err;
@@ -527,10 +530,10 @@ Err EvalCommandExpression(const Command& cmd, const char* verb,
 
 Err EvalCommandAddressExpression(
     const Command& cmd, const char* verb, fxl::RefPtr<EvalContext> eval_context,
-    std::function<void(const Err& err, uint64_t address, std::optional<uint32_t> size)> cb) {
+    fit::callback<void(const Err& err, uint64_t address, std::optional<uint32_t> size)> cb) {
   return EvalCommandExpression(
       cmd, verb, eval_context, true,
-      [eval_context, cb = std::move(cb)](const Err& err, ExprValue value) {
+      [eval_context, cb = std::move(cb)](const Err& err, ExprValue value) mutable {
         if (err.has_error()) {
           cb(err, 0, std::nullopt);
           return;

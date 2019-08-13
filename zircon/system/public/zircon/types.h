@@ -117,10 +117,6 @@ typedef uint32_t zx_signals_t;
 #define ZX_SOCKET_PEER_CLOSED         __ZX_OBJECT_PEER_CLOSED
 #define ZX_SOCKET_PEER_WRITE_DISABLED __ZX_OBJECT_SIGNAL_4
 #define ZX_SOCKET_WRITE_DISABLED      __ZX_OBJECT_SIGNAL_5
-#define ZX_SOCKET_CONTROL_READABLE    __ZX_OBJECT_SIGNAL_6
-#define ZX_SOCKET_CONTROL_WRITABLE    __ZX_OBJECT_SIGNAL_7
-#define ZX_SOCKET_ACCEPT              __ZX_OBJECT_SIGNAL_8
-#define ZX_SOCKET_SHARE               __ZX_OBJECT_SIGNAL_9
 #define ZX_SOCKET_READ_THRESHOLD      __ZX_OBJECT_SIGNAL_10
 #define ZX_SOCKET_WRITE_THRESHOLD     __ZX_OBJECT_SIGNAL_11
 
@@ -194,11 +190,8 @@ typedef struct zx_wait_item {
 #define ZX_VMO_CLONE_COPY_ON_WRITE        ((uint32_t)1u << 0)
 #define ZX_VMO_CHILD_COPY_ON_WRITE        ((uint32_t)1u << 0)
 #define ZX_VMO_CHILD_RESIZABLE            ((uint32_t)1u << 2)
-// TODO(stevensd): COW2 is bidirectional. Once things are ready to
-// move away from unidirectional COW, remove this alternate flag
-// and change the semantics of ZX_VMO_CHILD_COPY_ON_WRITE
-#define ZX_VMO_CHILD_COPY_ON_WRITE2       ((uint32_t)1u << 3)
-#define ZX_VMO_CHILD_SLICE                ((uint32_t)1u << 4)
+#define ZX_VMO_CHILD_SLICE                ((uint32_t)1u << 3)
+#define ZX_VMO_CHILD_PRIVATE_PAGER_COPY   ((uint32_t)1u << 4)
 
 typedef uint32_t zx_vm_option_t;
 // Mapping flags to vmar routines
@@ -295,12 +288,7 @@ typedef uint64_t zx_off_t;
 // These can be passed to zx_socket_create().
 #define ZX_SOCKET_STREAM                    ((uint32_t)0u)
 #define ZX_SOCKET_DATAGRAM                  ((uint32_t)1u << 0)
-#define ZX_SOCKET_HAS_CONTROL               ((uint32_t)1u << 1)
-#define ZX_SOCKET_HAS_ACCEPT                ((uint32_t)1u << 2)
-#define ZX_SOCKET_CREATE_MASK               (ZX_SOCKET_DATAGRAM | ZX_SOCKET_HAS_CONTROL | ZX_SOCKET_HAS_ACCEPT)
-
-// These can be passed to zx_socket_read() and zx_socket_write().
-#define ZX_SOCKET_CONTROL                   ((uint32_t)1u << 2)
+#define ZX_SOCKET_CREATE_MASK               (ZX_SOCKET_DATAGRAM)
 
 // These can be passed to zx_socket_read().
 #define ZX_SOCKET_PEEK                      ((uint32_t)1u << 3)
@@ -417,6 +405,22 @@ typedef struct zx_channel_call_args {
 #define ZX_VM_FLAG_CAN_MAP_EXECUTE        ((uint32_t)1u << 9)
 #define ZX_VM_FLAG_MAP_RANGE              ((uint32_t)1u << 10)
 #define ZX_VM_FLAG_REQUIRE_NON_RESIZABLE  ((uint32_t)1u << 11)
+
+// CPU masks specifying sets of CPUs.
+//
+// We currently are limited to systems with 512 CPUs or less.
+#define ZX_CPU_SET_MAX_CPUS 512
+#define ZX_CPU_SET_BITS_PER_WORD 64
+
+typedef struct zx_cpu_set {
+    // The |N|'th CPU is considered in the CPU set if the bit:
+    //
+    //   cpu_mask[N / ZX_CPU_SET_BITS_PER_WORD]
+    //       & (1 << (N % ZX_CPU_SET_BITS_PER_WORD))
+    //
+    // is set.
+    uint64_t mask[ZX_CPU_SET_MAX_CPUS / ZX_CPU_SET_BITS_PER_WORD];
+} zx_cpu_set_t;
 
 #ifdef __cplusplus
 // We cannot use <stdatomic.h> with C++ code as _Atomic qualifier defined by

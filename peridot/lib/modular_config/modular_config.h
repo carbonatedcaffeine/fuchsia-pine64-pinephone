@@ -7,6 +7,7 @@
 
 #include <fuchsia/modular/session/cpp/fidl.h>
 #include <fuchsia/sys/cpp/fidl.h>
+
 #include <src/lib/files/unique_fd.h>
 
 #include "lib/json/json_parser.h"
@@ -27,7 +28,7 @@ class ModularConfigReader {
   //  /config/data/startup.config
   //
   // If one doesn't exist, uses defaults.
-  explicit ModularConfigReader(fxl::UniqueFD dir_fd);
+  explicit ModularConfigReader(fbl::unique_fd dir_fd);
 
   // Parses |config| into modular configs. If |config| cannot be parsed,
   // defaults will be used.
@@ -39,8 +40,7 @@ class ModularConfigReader {
   static ModularConfigReader CreateFromNamespace();
 
   // Parses |doc| into |basemgr_config_| and |sessionmgr_config_|.
-  void ParseConfig(json::JSONParser json_parser, rapidjson::Document doc,
-                   std::string config_path);
+  void ParseConfig(json::JSONParser json_parser, rapidjson::Document doc, std::string config_path);
 
   // Returns the parsed `basemgr` section of the config.
   fuchsia::modular::session::BasemgrConfig GetBasemgrConfig() const;
@@ -49,8 +49,12 @@ class ModularConfigReader {
   fuchsia::modular::session::SessionmgrConfig GetSessionmgrConfig() const;
 
   // Returns a SessionmgrConfig with all default values
-  fuchsia::modular::session::SessionmgrConfig GetDefaultSessionmgrConfig()
-      const;
+  fuchsia::modular::session::SessionmgrConfig GetDefaultSessionmgrConfig() const;
+
+  // Returns the given configuration as a JSON formatted string.
+  static std::string GetConfigAsString(
+      fuchsia::modular::session::BasemgrConfig* basemgr_config,
+      fuchsia::modular::session::SessionmgrConfig* sessionmgr_config);
 
  private:
   fuchsia::modular::session::SessionmgrConfig sessionmgr_config_;

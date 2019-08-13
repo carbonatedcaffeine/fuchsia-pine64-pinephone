@@ -5,10 +5,14 @@
 use {
     failure::{err_msg, format_err, Error},
     fidl::endpoints::RequestStream,
-    fidl_fuchsia_bluetooth_control::{AdapterInfo, AdapterState, RemoteDevice, TechnologyType},
+    fidl_fuchsia_bluetooth_control::{AdapterState, TechnologyType},
     fidl_fuchsia_bluetooth_host::{HostControlHandle, HostMarker, HostRequest, HostRequestStream},
     fuchsia_async::{DurationExt, TimeoutExt},
-    fuchsia_bluetooth::{bt_fidl_status, types::BondingData},
+    fuchsia_bluetooth::{
+        bt_fidl_status,
+        inspect::{placeholder_node, Inspectable},
+        types::{AdapterInfo, BondingData, Peer},
+    },
     fuchsia_zircon::DurationNum,
     futures::FutureExt,
     futures::{future::join3, stream::StreamExt},
@@ -25,7 +29,7 @@ use crate::{
 
 // An impl that ignores all events
 impl HostListener for () {
-    fn on_peer_updated(&mut self, _device: RemoteDevice) {}
+    fn on_peer_updated(&mut self, _peer: Peer) {}
     fn on_peer_removed(&mut self, _identifier: String) {}
     fn on_new_host_bond(&mut self, _data: BondingData) -> Result<(), failure::Error> {
         Ok(())
@@ -37,12 +41,13 @@ impl HostListener for () {
 async fn host_device_set_local_name() -> Result<(), Error> {
     let (client, server) = create_fidl_endpoints::<HostMarker>()?;
 
-    let info = AdapterInfo {
-        identifier: "foo".to_string(),
-        technology: TechnologyType::DualMode,
-        address: "00:00:00:00:00:00".to_string(),
-        state: None,
-    };
+    let info = AdapterInfo::new(
+        "foo".to_string(),
+        TechnologyType::DualMode,
+        "00:00:00:00:00:00".to_string(),
+        None,
+    );
+    let info = Inspectable::new(info, placeholder_node());
     let host = Arc::new(RwLock::new(HostDevice::new(
         PathBuf::from("/dev/class/bt-host/test"),
         client,
@@ -73,13 +78,14 @@ async fn host_device_set_local_name() -> Result<(), Error> {
     );
 
     let timeout = 5.seconds();
-    await!(run_test
+    run_test
         .map(|r| {
             r.0.map_err(types::Error::as_failure)
                 .and(r.1)
                 .and(r.2.map_err(types::Error::as_failure))
         })
-        .on_timeout(timeout.after_now(), move || Err(format_err!("Timed out"))))?;
+        .on_timeout(timeout.after_now(), move || Err(format_err!("Timed out")))
+        .await?;
 
     let host_name =
         host.read().get_info().state.as_ref().and_then(|s| s.local_name.as_ref().cloned());
@@ -92,7 +98,7 @@ where
     F: FnOnce(Arc<HostControlHandle>, HostRequest) -> Result<(), Error>,
 {
     let control_handle = Arc::new(stream.control_handle());
-    if let Some(event) = await!(stream.next()) {
+    if let Some(event) = stream.next().await {
         let event = event?;
         f(control_handle, event)
     } else {

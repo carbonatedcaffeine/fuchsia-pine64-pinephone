@@ -6,11 +6,11 @@
 #define LIB_MODULAR_TESTING_CPP_TEST_HARNESS_BUILDER_H_
 
 #include <fuchsia/modular/testing/cpp/fidl.h>
-#include <lib/sys/cpp/component_context.h>
 #include <lib/sys/cpp/service_directory.h>
+#include <lib/vfs/cpp/pseudo_dir.h>
+#include <lib/vfs/cpp/service.h>
 
-namespace modular {
-namespace testing {
+namespace modular_testing {
 
 // TestHarnessBuilder is a utility for building a
 // |fuchsia.modular.testing.TestHarnessSpec|. This utility provides methods for
@@ -26,8 +26,8 @@ namespace testing {
 // class MyTest : gtest::RealLoopFixture {};
 //
 // TEST_F(MyTest, TestOne) {
-//   modular::testing::TestHarnessLauncher test_harness_launcher;
-//   modular::testing::TestHarnessBuilder builder;
+//   modular_testing::TestHarnessLauncher test_harness_launcher;
+//   modular_testing::TestHarnessBuilder builder;
 //
 //   // Instruct the test harness to intercept the launch of a new component
 //   // within the test harness environment. Specify that the component should
@@ -68,18 +68,19 @@ class TestHarnessBuilder final {
     std::vector<std::string> sandbox_services;
   };
 
-  using OnNewComponentHandler = fit::function<void(
-      fuchsia::sys::StartupInfo startup_info,
-      fidl::InterfaceHandle<fuchsia::modular::testing::InterceptedComponent>
-          intercepted_component)>;
+  using OnNewComponentHandler =
+      fit::function<void(fuchsia::sys::StartupInfo startup_info,
+                         fidl::InterfaceHandle<fuchsia::modular::testing::InterceptedComponent>
+                             intercepted_component)>;
 
   // Builds on top of an empty |fuchsia.modular.testing.TestHarnessSpec|.
   TestHarnessBuilder();
-  TestHarnessBuilder(TestHarnessBuilder&&) = default;
-
   // Builds on top of the supplied |spec|.
   explicit TestHarnessBuilder(fuchsia::modular::testing::TestHarnessSpec spec);
 
+  // Movable.
+  TestHarnessBuilder(TestHarnessBuilder&&) = default;
+  TestHarnessBuilder& operator=(TestHarnessBuilder&&) = default;
   // Not copyable.
   TestHarnessBuilder(const TestHarnessBuilder&) = delete;
   TestHarnessBuilder& operator=(const TestHarnessBuilder&) = delete;
@@ -89,33 +90,28 @@ class TestHarnessBuilder final {
   // route the Intercept*() calls issued below.
   //
   // Can only be called once.
-  void BuildAndRun(
-      const fuchsia::modular::testing::TestHarnessPtr& test_harness);
+  void BuildAndRun(const fuchsia::modular::testing::TestHarnessPtr& test_harness);
 
   // Amends the TestHarnessSpec to include interception instructions based on
   // |options| and stores |on_create| for use in the router function created
   // through BuildOnNewComponentHandler().
-  TestHarnessBuilder& InterceptComponent(
-      OnNewComponentHandler on_new_component,
-      InterceptOptions options = InterceptOptions());
+  TestHarnessBuilder& InterceptComponent(OnNewComponentHandler on_new_component,
+                                         InterceptOptions options = InterceptOptions());
 
   // Convenience variant of InterceptComponent() which sets the base shell URL
   // in the ModularConfig to |options.url|.
-  TestHarnessBuilder& InterceptBaseShell(
-      OnNewComponentHandler on_new_component,
-      InterceptOptions options = InterceptOptions());
+  TestHarnessBuilder& InterceptBaseShell(OnNewComponentHandler on_new_component,
+                                         InterceptOptions options = InterceptOptions());
 
   // Convenience variant of InterceptComponent() which adds a session shell URL
   // to the ModularConfig for |options.url|.
-  TestHarnessBuilder& InterceptSessionShell(
-      OnNewComponentHandler on_new_component,
-      InterceptOptions options = InterceptOptions());
+  TestHarnessBuilder& InterceptSessionShell(OnNewComponentHandler on_new_component,
+                                            InterceptOptions options = InterceptOptions());
 
   // Convenience variant of InterceptComponent() which sets the story shell URL
   // in the ModularConfig to |options.url|.
-  TestHarnessBuilder& InterceptStoryShell(
-      OnNewComponentHandler on_new_component,
-      InterceptOptions options = InterceptOptions());
+  TestHarnessBuilder& InterceptStoryShell(OnNewComponentHandler on_new_component,
+                                          InterceptOptions options = InterceptOptions());
 
   // Make a service named |service_name| available in the test harness
   // environment. |connector| is called every time a client requests to
@@ -129,15 +125,12 @@ class TestHarnessBuilder final {
   // establish a new connection. This service is hosted for as long as this
   // TestHarnessBuilder object is kept alive.
   template <typename Interface>
-  TestHarnessBuilder& AddService(
-      fidl::InterfaceRequestHandler<Interface> request_handler) {
-    return AddService(
-        Interface::Name_,
-        [request_handler = std::move(request_handler)](
-            zx::channel request, async_dispatcher_t* dispatcher) mutable {
-          request_handler(
-              fidl::InterfaceRequest<Interface>(std::move(request)));
-        });
+  TestHarnessBuilder& AddService(fidl::InterfaceRequestHandler<Interface> request_handler) {
+    return AddService(Interface::Name_,
+                      [request_handler = std::move(request_handler)](
+                          zx::channel request, async_dispatcher_t* dispatcher) mutable {
+                        request_handler(fidl::InterfaceRequest<Interface>(std::move(request)));
+                      });
   }
 
   // Make the specified |service_name| available in the test harness
@@ -153,8 +146,7 @@ class TestHarnessBuilder final {
   // kept alive for the duration of the test harness environment. See
   // |TestHarnessSpec.env_services.services_from_components| for more details.
   template <typename Interface>
-  TestHarnessBuilder& AddServiceFromComponent(
-      const std::string& component_url) {
+  TestHarnessBuilder& AddServiceFromComponent(const std::string& component_url) {
     return AddServiceFromComponent(Interface::Name_, component_url);
   }
 
@@ -162,8 +154,7 @@ class TestHarnessBuilder final {
   // harness environment. |services| and the service are both kept alive for the
   // duration of this builder object's life time.
   TestHarnessBuilder& AddServiceFromServiceDirectory(
-      const std::string& service_name,
-      std::shared_ptr<sys::ServiceDirectory> services);
+      const std::string& service_name, std::shared_ptr<sys::ServiceDirectory> services);
 
   // Make the templated service from |services| available in the test
   // harness environment. |services| and the service are both kept alive for the
@@ -171,9 +162,13 @@ class TestHarnessBuilder final {
   template <typename Interface>
   TestHarnessBuilder& AddServiceFromServiceDirectory(
       std::shared_ptr<sys::ServiceDirectory> services) {
-    return AddServiceFromServiceDirectory(Interface::Name_,
-                                          std::move(services));
+    return AddServiceFromServiceDirectory(Interface::Name_, std::move(services));
   }
+
+  // Returns a generated fake URL. Subsequent calls to this method will generate
+  // a different URL. If |name| is provided, adds its contents to the component
+  // name. Non alpha-num characters (a-zA-Z0-9) are stripped.
+  static std::string GenerateFakeUrl(std::string name = "");
 
  private:
   // Takes the TestHarnessSpec built so far with the builder functions below.
@@ -198,12 +193,6 @@ class TestHarnessBuilder final {
   std::unique_ptr<vfs::PseudoDir> env_services_;
 };
 
-// Returns a generated fake URL. Subsequent calls to this method will generate
-// a different URL. If |name| is provided, adds its contents to the component
-// name. Non alpha-num characters (a-zA-Z0-9) are stripped.
-std::string GenerateFakeUrl(std::string name = "");
-
-}  // namespace testing
-}  // namespace modular
+}  // namespace modular_testing
 
 #endif  // LIB_MODULAR_TESTING_CPP_TEST_HARNESS_BUILDER_H_

@@ -2,9 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef SRC_CAMERA_DRIVERS_ISP_MODULES_SENSOR_H_
+#define SRC_CAMERA_DRIVERS_ISP_MODULES_SENSOR_H_
+
+#include <lib/mmio/mmio.h>
+
 #include <ddktl/protocol/camerasensor.h>
 #include <fbl/unique_ptr.h>
-#include <lib/mmio/mmio.h>
 
 namespace camera {
 
@@ -19,21 +23,17 @@ class Sensor {
   DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(Sensor);
   Sensor(ddk::MmioView isp_mmio, ddk::MmioView isp_mmio_local,
          ddk::CameraSensorProtocolClient camera_sensor)
-      : isp_mmio_(isp_mmio),
-        isp_mmio_local_(isp_mmio_local),
-        camera_sensor_(camera_sensor) {}
+      : isp_mmio_(isp_mmio), isp_mmio_local_(isp_mmio_local), camera_sensor_(camera_sensor) {}
 
-  static fbl::unique_ptr<Sensor> Create(
-      ddk::MmioView isp_mmio, ddk::MmioView isp_mmio_local,
-      ddk::CameraSensorProtocolClient camera_sensor);
+  static fbl::unique_ptr<Sensor> Create(ddk::MmioView isp_mmio, ddk::MmioView isp_mmio_local,
+                                        ddk::CameraSensorProtocolClient camera_sensor);
   zx_status_t Init();
 
   // Sensor APIs for Camera manager to use
   zx_status_t Update();
   zx_status_t SetMode(uint8_t mode);
   zx_status_t GetInfo(sensor_info_t* out_info);
-  zx_status_t GetSupportedModes(sensor_mode_t* out_modes_list,
-                                size_t modes_count);
+  zx_status_t GetSupportedModes(sensor_mode_t* out_modes_list, size_t modes_count);
   int32_t SetAnalogGain(int32_t gain);
   int32_t SetDigitalGain(int32_t gain);
   zx_status_t StartStreaming();
@@ -53,3 +53,5 @@ class Sensor {
 };
 
 }  // namespace camera
+
+#endif  // SRC_CAMERA_DRIVERS_ISP_MODULES_SENSOR_H_

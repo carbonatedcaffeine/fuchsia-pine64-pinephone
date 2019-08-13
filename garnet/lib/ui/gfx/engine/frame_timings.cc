@@ -5,13 +5,14 @@
 #include "garnet/lib/ui/gfx/engine/frame_timings.h"
 
 #include "garnet/lib/ui/gfx/engine/frame_scheduler.h"
+#include "garnet/lib/ui/gfx/util/time.h"
 
 namespace scenic_impl {
 namespace gfx {
 
 FrameTimings::FrameTimings(FrameScheduler* frame_scheduler, uint64_t frame_number,
-                           zx_time_t target_presentation_time, zx_time_t latch_time,
-                           zx_time_t rendering_started_time)
+                           zx::time target_presentation_time, zx::time latch_time,
+                           zx::time rendering_started_time)
     : frame_scheduler_(frame_scheduler),
       frame_number_(frame_number),
       target_presentation_time_(target_presentation_time),
@@ -29,18 +30,20 @@ size_t FrameTimings::RegisterSwapchain() {
   return swapchain_records_.size() - 1;
 }
 
-void FrameTimings::OnFrameUpdated(zx_time_t time) {
+void FrameTimings::OnFrameUpdated(zx::time time) {
   FXL_DCHECK(!finalized()) << "Frame was finalized, cannot record update time";
   FXL_DCHECK(updates_finished_time_ == kTimeUninitialized)
       << "Error, update time already recorded.";
   updates_finished_time_ = time;
 
-  FXL_DCHECK(updates_finished_time_ >= latch_point_time_) << "Error, updates took negative time";
+  FXL_DCHECK(updates_finished_time_ >= latch_point_time_)
+      << "Error, updates took negative time: latch_point_time_ = " << latch_point_time_
+      << ", updates_finished_time_ = " << updates_finished_time_;
 }
 
-void FrameTimings::OnFrameRendered(size_t swapchain_index, zx_time_t time) {
+void FrameTimings::OnFrameRendered(size_t swapchain_index, zx::time time) {
   FXL_DCHECK(swapchain_index < swapchain_records_.size());
-  FXL_DCHECK(time > 0);
+  FXL_DCHECK(time.get() > 0);
 
   auto& record = swapchain_records_[swapchain_index];
   FXL_DCHECK(record.frame_rendered_time == kTimeUninitialized)
@@ -73,10 +76,10 @@ void FrameTimings::OnFrameRendered(size_t swapchain_index, zx_time_t time) {
   }
 }
 
-void FrameTimings::OnFramePresented(size_t swapchain_index, zx_time_t time) {
+void FrameTimings::OnFramePresented(size_t swapchain_index, zx::time time) {
   FXL_DCHECK(swapchain_index < swapchain_records_.size());
   FXL_DCHECK(frame_presented_count_ < swapchain_records_.size());
-  FXL_DCHECK(time > 0);
+  FXL_DCHECK(time.get() > 0);
 
   auto& record = swapchain_records_[swapchain_index];
   FXL_DCHECK(record.frame_presented_time == kTimeUninitialized)
@@ -117,6 +120,10 @@ void FrameTimings::OnFrameDropped(size_t swapchain_index) {
   }
 }
 
+void FrameTimings::OnFrameCpuRendered(zx::time time) {
+  rendering_cpu_finished_time_ = std::max(rendering_cpu_finished_time_, time);
+}
+
 FrameTimings::Timestamps FrameTimings::GetTimestamps() const {
   // Copy the current time values to a Timestamps struct. Some callers may call
   // this before all times are finalized - it is the caller's responsibility to
@@ -128,7 +135,7 @@ FrameTimings::Timestamps FrameTimings::GetTimestamps() const {
       .latch_point_time = latch_point_time_,
       .update_done_time = updates_finished_time_,
       .render_start_time = rendering_started_time_,
-      .render_done_time = rendering_finished_time_,
+      .render_done_time = std::max(rendering_finished_time_, rendering_cpu_finished_time_),
       .target_presentation_time = target_presentation_time_,
       .actual_presentation_time = actual_presentation_time_,
   };

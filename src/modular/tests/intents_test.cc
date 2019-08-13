@@ -29,7 +29,7 @@ class IntentsTest : public modular::testing::TestHarnessFixture {
           latest_handled_intent_ = std::move(intent);
           number_of_intents_handled_++;
         });
-    test_module_url_ = modular::testing::GenerateFakeUrl();
+    test_module_url_ = modular_testing::TestHarnessBuilder::GenerateFakeUrl();
     builder_.InterceptComponent(
         test_module_->GetOnCreateHandler(),
         {.url = test_module_url_,
@@ -52,7 +52,8 @@ class IntentsTest : public modular::testing::TestHarnessFixture {
     fsl::SizedVmo vmo;
     FXL_CHECK(fsl::VmoFromString(parameter_data, &vmo));
     intent_parameter.data.set_json(std::move(vmo).ToTransport());
-    intent.parameters.push_back(std::move(intent_parameter));
+    intent.parameters.emplace();
+    intent.parameters->push_back(std::move(intent_parameter));
 
     return intent;
   }
@@ -88,7 +89,7 @@ class IntentsTest : public modular::testing::TestHarnessFixture {
 
   int number_of_intents_handled_;
   std::unique_ptr<modular::testing::FakeModule> test_module_;
-  modular::testing::TestHarnessBuilder builder_;
+  modular_testing::TestHarnessBuilder builder_;
   std::string test_module_url_;
   fuchsia::modular::Intent latest_handled_intent_;
 };
@@ -184,7 +185,7 @@ TEST_F(IntentsTest, DifferentHandler) {
   bool module_started{false};
 
   // Use different handler
-  auto different_module_url = modular::testing::GenerateFakeUrl();
+  auto different_module_url = modular_testing::TestHarnessBuilder::GenerateFakeUrl();
   auto different_intent_param_name = "different_param_name";
   auto different_intent_param_data = "\"different_param_data\"";
   auto different_intent =

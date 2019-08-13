@@ -28,17 +28,18 @@ impl SystemStreamHandler {
         // watch calls per connection, and ends when the stream ends.
         let last_seen_settings = Arc::new(RwLock::new(HashMap::new()));
 
-        while let Some(req) = await!(stream.try_next())? {
+        while let Some(req) = stream.try_next().await? {
             // Support future expansion of FIDL
             #[allow(unreachable_patterns)]
             match req {
-                fidl_fuchsia_settings::SystemRequest::SetLoginOverride {
-                    login_override,
-                    responder,
-                } => {
-                    self.set_login_override(login_override, |mut result| {
-                        responder.send(&mut result)
-                    })?;
+                fidl_fuchsia_settings::SystemRequest::Set { settings, responder } => {
+                    if let Some(login_override) = settings.mode {
+                        self.set_login_override(login_override, |mut result| {
+                            responder.send(&mut result)
+                        })?;
+                    } else {
+                        panic!("No operation requested");
+                    }
                 }
                 fidl_fuchsia_settings::SystemRequest::Watch { responder } => {
                     self.watch(last_seen_settings.clone(), |mut result| {
@@ -88,9 +89,9 @@ impl SystemStreamHandler {
         self.setui_handler.watch(SettingType::Account, last_seen_settings, |data| {
             if let SettingData::Account(account_settings) = data {
                 if let Some(mode) = account_settings.mode {
-                    return responder(Ok(fidl_fuchsia_settings::SystemSettings {
-                        mode: Some(convert_setui_login_override(mode)),
-                    }));
+                    let mut settings = fidl_fuchsia_settings::SystemSettings::empty();
+                    settings.mode = Some(convert_setui_login_override(mode));
+                    return responder(Ok(settings));
                 }
             }
             responder(Err(fidl_fuchsia_settings::Error::Failed))
@@ -179,7 +180,7 @@ mod tests {
             sender,
             fidl_fuchsia_settings::LoginOverride::None,
         );
-        let result = await!(receiver);
+        let result = receiver.await;
         assert!(result.is_ok());
 
         // Set login override
@@ -193,7 +194,7 @@ mod tests {
             },
         );
         assert!(result.is_ok());
-        let result = await!(receiver);
+        let result = receiver.await;
         assert!(result.is_ok());
 
         // Check new value
@@ -205,7 +206,7 @@ mod tests {
             sender,
             fidl_fuchsia_settings::LoginOverride::AutologinGuest,
         );
-        let result = await!(receiver);
+        let result = receiver.await;
         assert!(result.is_ok());
     }
 
@@ -222,7 +223,7 @@ mod tests {
             sender,
             fidl_fuchsia_settings::LoginOverride::AutologinGuest,
         );
-        let result = await!(receiver);
+        let result = receiver.await;
         assert!(result.is_ok());
 
         // watch again to hang the watch callback.
@@ -243,11 +244,11 @@ mod tests {
                 Ok(())
             });
         assert!(result.is_ok());
-        let result = await!(mutate_receiver);
+        let result = mutate_receiver.await;
         assert!(result.is_ok());
 
         // should change here
-        let result = await!(receiver);
+        let result = receiver.await;
         assert!(result.is_ok());
     }
 

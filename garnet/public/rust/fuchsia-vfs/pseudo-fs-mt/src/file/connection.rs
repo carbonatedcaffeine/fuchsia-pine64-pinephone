@@ -70,7 +70,7 @@ pub struct FileConnection {
     scope: ExecutionScope,
 
     /// File this connection is associated with.
-    file: Arc<FileWithPerConnectionBuffer>,
+    file: Arc<dyn FileWithPerConnectionBuffer>,
 
     /// Wraps a FIDL connection, providing messages coming from the client.
     requests: FileRequestStream,
@@ -129,7 +129,7 @@ impl FileConnection {
     /// connection initialization.
     pub fn create_connection(
         scope: ExecutionScope,
-        file: Arc<FileWithPerConnectionBuffer>,
+        file: Arc<dyn FileWithPerConnectionBuffer>,
         flags: u32,
         mode: u32,
         server_end: ServerEnd<NodeMarker>,
@@ -156,7 +156,7 @@ impl FileConnection {
 
     async fn create_connection_task(
         scope: ExecutionScope,
-        file: Arc<FileWithPerConnectionBuffer>,
+        file: Arc<dyn FileWithPerConnectionBuffer>,
         flags: u32,
         mode: u32,
         server_end: ServerEnd<NodeMarker>,
@@ -179,7 +179,7 @@ impl FileConnection {
         } else {
             let res = match file.clone().init_buffer() {
                 AsyncInitBuffer::Immediate(res) => res,
-                AsyncInitBuffer::Future(fut) => await!(fut),
+                AsyncInitBuffer::Future(fut) => fut.await,
             };
 
             match res {
@@ -224,11 +224,11 @@ impl FileConnection {
             was_written,
         }
         .handle_requests();
-        await!(handle_requests);
+        handle_requests.await;
     }
 
     async fn handle_requests(mut self) {
-        while let Some(request_or_err) = await!(self.requests.next()) {
+        while let Some(request_or_err) = self.requests.next().await {
             match request_or_err {
                 Err(_) => {
                     // FIDL level error, such as invalid message format and alike.  Close the
@@ -236,7 +236,7 @@ impl FileConnection {
                     // TODO: Send an epitaph.
                     break;
                 }
-                Ok(request) => match await!(self.handle_request(request)) {
+                Ok(request) => match self.handle_request(request).await {
                     Ok(ConnectionState::Alive) => (),
                     Ok(ConnectionState::Closed) => break,
                     Err(_) => {
@@ -270,7 +270,7 @@ impl FileConnection {
             FileRequest::Close { responder } => {
                 // We are going to close the connection anyways, so there is no way to handle this
                 // error.  TODO We may want to send it in an epitaph.
-                let _ = await!(self.handle_close(|status| responder.send(status.into_raw())));
+                let _ = self.handle_close(|status| responder.send(status.into_raw())).await;
                 return Ok(ConnectionState::Closed);
             }
             FileRequest::Describe { responder } => {
@@ -377,7 +377,7 @@ impl FileConnection {
     /// error directly.
     fn handle_read<R>(&mut self, count: u64, responder: R) -> Result<(), fidl::Error>
     where
-        R: FnOnce(Status, &mut ExactSizeIterator<Item = u8>) -> Result<(), fidl::Error>,
+        R: FnOnce(Status, &mut dyn ExactSizeIterator<Item = u8>) -> Result<(), fidl::Error>,
     {
         let actual = self.handle_read_at(self.seek, count, responder)?;
         self.seek += actual;
@@ -396,7 +396,7 @@ impl FileConnection {
         responder: R,
     ) -> Result<u64, fidl::Error>
     where
-        R: FnOnce(Status, &mut ExactSizeIterator<Item = u8>) -> Result<(), fidl::Error>,
+        R: FnOnce(Status, &mut dyn ExactSizeIterator<Item = u8>) -> Result<(), fidl::Error>,
     {
         if self.flags & OPEN_RIGHT_READABLE == 0 {
             responder(Status::ACCESS_DENIED, &mut iter::empty())?;
@@ -574,7 +574,7 @@ impl FileConnection {
         let buffer = mem::replace(&mut self.buffer, vec![]);
         let res = match self.file.clone().update(buffer) {
             AsyncUpdate::Immediate(res) => res,
-            AsyncUpdate::Future(fut) => await!(fut),
+            AsyncUpdate::Future(fut) => fut.await,
         };
 
         let status = match res {

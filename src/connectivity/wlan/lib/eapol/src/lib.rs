@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(test)]
-#![deny(warnings)]
+#![cfg_attr(feature = "benchmarks", feature(test))]
 
 use {
     core::mem,
@@ -265,6 +264,9 @@ impl KeyDescriptor {
     pub const RESERVED: Self = Self(0);
     pub const RC4: Self = Self(1);
     pub const IEEE802DOT11: Self = Self(2);
+
+    // This descriptor is specified by the WiFi Alliance WPA standard rather than IEEE.
+    pub const LEGACY_WPA1: Self = Self(254);
 }
 
 // IEEE Std 802.11-2016, 12.7.2 b.2)
@@ -390,29 +392,34 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    extern crate test;
-    use test::{black_box, Bencher};
-    use wlan_common::buffer_writer::BufferWriter;
+    use wlan_common::{assert_variant, buffer_writer::BufferWriter};
 
-    #[bench]
-    fn bench_key_frame_from_bytes(b: &mut Bencher) {
-        let frame: Vec<u8> = vec![
-            0x01, 0x03, 0x00, 0xb3, 0x02, 0x00, 0x8a, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x01, 0x39, 0x5c, 0xc7, 0x6e, 0x1a, 0xe9, 0x9f, 0xa0, 0xb1, 0x22, 0x79,
-            0xfe, 0xc3, 0xb9, 0xa9, 0x9e, 0x1d, 0x9a, 0x21, 0xb8, 0x47, 0x51, 0x38, 0x98, 0x25,
-            0xf8, 0xc7, 0xca, 0x55, 0x86, 0xbc, 0xda, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x54, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01,
-            0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03,
-            0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02,
-            0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01,
-            0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03,
-            0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02,
-            0x03,
-        ];
-        b.iter(|| KeyFrameRx::parse(black_box(16), &frame[..]));
+    #[cfg(feature = "benchmarks")]
+    mod benches {
+        use super::*;
+        extern crate test;
+        use test::{black_box, Bencher};
+
+        #[bench]
+        fn bench_key_frame_from_bytes(b: &mut Bencher) {
+            let frame: Vec<u8> = vec![
+                0x01, 0x03, 0x00, 0xb3, 0x02, 0x00, 0x8a, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x01, 0x39, 0x5c, 0xc7, 0x6e, 0x1a, 0xe9, 0x9f, 0xa0, 0xb1, 0x22, 0x79,
+                0xfe, 0xc3, 0xb9, 0xa9, 0x9e, 0x1d, 0x9a, 0x21, 0xb8, 0x47, 0x51, 0x38, 0x98, 0x25,
+                0xf8, 0xc7, 0xca, 0x55, 0x86, 0xbc, 0xda, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x54, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01,
+                0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03,
+                0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02,
+                0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01,
+                0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03,
+                0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02,
+                0x03,
+            ];
+            b.iter(|| KeyFrameRx::parse(black_box(16), &frame[..]));
+        }
     }
 
     #[test]
@@ -438,13 +445,7 @@ mod tests {
             0x00,
         ];
         let result = KeyFrameRx::parse(16, &frame[..]);
-        match result {
-            Err(error) => match error {
-                Error::WrongEapolFrame => (),
-                e => panic!("parsing a non-keyframe as a keyframe had wrong failure: {:?}", e),
-            },
-            _ => panic!("parsing a non-keyframe as a keyframe unexpectedly passed"),
-        }
+        assert_variant!(result, Err(Error::WrongEapolFrame));
     }
 
     #[test]
@@ -460,13 +461,7 @@ mod tests {
             0x03, 0x01, 0x02, 0x03, 0x04,
         ];
         let result = KeyFrameRx::parse(16, &frame[..]);
-        match result {
-            Err(error) => match error {
-                Error::FramePadded => (),
-                e => panic!("parsing a too-long keyframe had wrong failure: {:?}", e),
-            },
-            _ => panic!("parsing a too-long keyframe unexpectedly passed"),
-        }
+        assert_variant!(result, Err(Error::FramePadded));
     }
 
     #[test]
@@ -482,13 +477,7 @@ mod tests {
             0x03, 0x01,
         ];
         let result = KeyFrameRx::parse(16, &frame[..]);
-        match result {
-            Err(error) => match error {
-                Error::FrameTruncated => (),
-                e => panic!("parsing a too-short keyframe had wrong failure: {:?}", e),
-            },
-            _ => panic!("parsing a too-short keyframe unexpectedly passed"),
-        }
+        assert_variant!(result, Err(Error::FrameTruncated));
     }
 
     #[test]
@@ -504,13 +493,7 @@ mod tests {
             0x03, 0x01, 0x02, 0x03,
         ];
         let result = KeyFrameRx::parse(16, &frame[..]);
-        match result {
-            Err(error) => match error {
-                Error::WrongPacketBodyLength(0xff, 0x62) => (),
-                e => panic!("parsing a bad packet body length had wrong error: {:?}", e),
-            },
-            _ => panic!("parsing a bad packet body length unexpectedly passed"),
-        }
+        assert_variant!(result, Err(Error::WrongPacketBodyLength(0xff, 0x62)));
     }
 
     #[test]
@@ -526,11 +509,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x03, 0x01, 0x02, 0x03,
         ];
-        let result = KeyFrameRx::parse(32, &frame[..]);
-        match result {
-            Err(e) => panic!("parsing keyframe failed: {}", e),
-            Ok(_) => (),
-        }
+        KeyFrameRx::parse(32, &frame[..]).expect("parsing keyframe failed");
     }
 
     #[test]
@@ -545,11 +524,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x03, 0x01, 0x02, 0x03,
         ];
-        let result = KeyFrameRx::parse(16, &frame[..]);
-        let keyframe = match result {
-            Err(e) => panic!("parsing keyframe failed: {}", e),
-            Ok(keyframe) => keyframe,
-        };
+        let keyframe = KeyFrameRx::parse(16, &frame[..]).expect("parsing keyframe failed");
         verify_as_bytes_result(keyframe, false, &frame[..]);
     }
 
@@ -566,11 +541,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x03, 0x01, 0x02, 0x03,
         ];
-        let result = KeyFrameRx::parse(32, &frame[..]);
-        let keyframe = match result {
-            Err(e) => panic!("parsing keyframe failed: {}", e),
-            Ok(keyframe) => keyframe,
-        };
+        let keyframe = KeyFrameRx::parse(32, &frame[..]).expect("parsing keyframe failed");
         verify_as_bytes_result(keyframe, false, &frame[..]);
     }
 
@@ -587,20 +558,11 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x03, 0x01, 0x02, 0x03,
         ];
-        let result = KeyFrameRx::parse(32, &frame[..]);
-        let keyframe = match result {
-            Err(e) => panic!("parsing keyframe failed: {}", e),
-            Ok(keyframe) => keyframe,
-        };
+        let keyframe = KeyFrameRx::parse(32, &frame[..]).expect("parsing keyframe failed");
         let mut buf = [0u8; 40];
         let mut writer = BufferWriter::new(&mut buf[..]);
-        match keyframe.write_into(true, &mut writer) {
-            Err(error) => match error {
-                Error::BufferTooShort => (),
-                e => panic!("writing frame into too-small buffer had wrong error: {:?}", e),
-            },
-            _ => panic!("writing frame into too-small buffer unexpectedly passed"),
-        }
+        let result = keyframe.write_into(true, &mut writer);
+        assert_variant!(result, Err(Error::BufferTooShort));
     }
 
     #[test]
@@ -618,11 +580,7 @@ mod tests {
                 0x0F, 0x10,
                 0x00, 0x03, 0x01, 0x02, 0x03,
             ];
-        let result = KeyFrameRx::parse(16, &frame[..]);
-        let keyframe = match result {
-            Err(e) => panic!("parsing keyframe failed: {}", e),
-            Ok(keyframe) => keyframe,
-        };
+        let keyframe = KeyFrameRx::parse(16, &frame[..]).expect("parsing keyframe failed");
 
         #[rustfmt::skip]
             let expected: Vec<u8> = vec![
@@ -662,10 +620,7 @@ mod tests {
             0x03, 0x01, 0x02, 0x03,
         ];
         let result = KeyFrameRx::parse(16, &frame[..]);
-        let keyframe = match result {
-            Err(e) => panic!("parsing keyframe failed: {}", e),
-            Ok(keyframe) => keyframe,
-        };
+        let keyframe = result.expect("parsing keyframe failed");
         assert_eq!({ keyframe.eapol_fields.version }, ProtocolVersion::IEEE802DOT1X2001);
         assert_eq!({ keyframe.eapol_fields.packet_type }, PacketType::KEY);
         assert_eq!(keyframe.eapol_fields.packet_body_len.to_native(), 98);

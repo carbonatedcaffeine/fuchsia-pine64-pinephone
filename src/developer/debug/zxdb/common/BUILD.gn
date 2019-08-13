@@ -7,14 +7,16 @@
 # itself.
 static_library("common") {
   public = [
+    "adapters.h",
     "address_range.h",
     "address_ranges.h",
     "completion_callback.h",
     "err.h",
+    "err_or.h",
     "file_util.h",
-    "function.h",
     "host_util.h",
     "ref_ptr_to.h",
+    "scoped_temp_file.h",
     "string_util.h",
   ]
 
@@ -24,6 +26,7 @@ static_library("common") {
     "err.cc",
     "file_util.cc",
     "host_util.cc",
+    "scoped_temp_file.cc",
     "string_util.cc",
   ]
 
@@ -48,14 +51,17 @@ source_set("tests") {
   testonly = true
 
   sources = [
+    "adapters_unittest.cc",
     "address_ranges_unittest.cc",
     "completion_callback_unittest.cc",
+    "err_or_unittest.cc",
     "file_util_unittest.cc",
   ]
 
   deps = [
     ":common",
     "//third_party/googletest:gtest",
+    "//zircon/public/lib/fbl",
   ]
 }
 

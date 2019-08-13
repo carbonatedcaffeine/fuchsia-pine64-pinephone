@@ -20,8 +20,7 @@ zx::channel CloneChannelFromFileDescriptor(int fd) {
     return zx::channel();
 
   zx_info_handle_basic_t info = {};
-  status =
-      handle.get_info(ZX_INFO_HANDLE_BASIC, &info, sizeof(info), NULL, NULL);
+  status = handle.get_info(ZX_INFO_HANDLE_BASIC, &info, sizeof(info), NULL, NULL);
 
   if (status != ZX_OK || info.type != ZX_OBJ_TYPE_CHANNEL)
     return zx::channel();
@@ -29,13 +28,13 @@ zx::channel CloneChannelFromFileDescriptor(int fd) {
   return zx::channel(handle.release());
 }
 
-fxl::UniqueFD OpenChannelAsFileDescriptor(zx::channel channel) {
+fbl::unique_fd OpenChannelAsFileDescriptor(zx::channel channel) {
   int fd = -1;
   zx_status_t status = fdio_fd_create(channel.release(), &fd);
   if (status != ZX_OK) {
-    return fxl::UniqueFD();
+    return fbl::unique_fd();
   }
-  return fxl::UniqueFD(fd);
+  return fbl::unique_fd(fd);
 }
 
 }  // namespace fsl

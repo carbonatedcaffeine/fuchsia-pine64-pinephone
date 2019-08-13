@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_TOKEN_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_TOKEN_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_TOKEN_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_TOKEN_H_
 
 #include <stdint.h>
 
@@ -35,8 +35,7 @@ class Token {
 
   class KindAndSubkind {
    public:
-    constexpr KindAndSubkind(Kind kind, Subkind subkind)
-        : kind_(kind), subkind_(subkind) {}
+    constexpr KindAndSubkind(Kind kind, Subkind subkind) : kind_(kind), subkind_(subkind) {}
 
     constexpr Kind kind() const { return kind_; }
     constexpr Subkind subkind() const { return subkind_; }
@@ -91,4 +90,4 @@ class Token {
 
 }  // namespace fidl
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_TOKEN_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_TOKEN_H_

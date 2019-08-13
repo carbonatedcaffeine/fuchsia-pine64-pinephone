@@ -9,6 +9,7 @@
 #include <lib/modular_test_harness/cpp/fake_story_shell.h>
 #include <lib/modular_test_harness/cpp/test_harness_fixture.h>
 #include <lib/ui/scenic/cpp/view_token_pair.h>
+
 #include <src/lib/fxl/logging.h>
 
 namespace {
@@ -33,7 +34,7 @@ class StoryShellEmbeddedModTest : public modular::testing::TestHarnessFixture {
     // Listen for parent module interception
     parent_module_ =
         std::make_unique<modular::testing::FakeModule>([](fuchsia::modular::Intent intent) {});
-    parent_module_url_ = modular::testing::GenerateFakeUrl();
+    parent_module_url_ = modular_testing::TestHarnessBuilder::GenerateFakeUrl();
     builder_.InterceptComponent(
         parent_module_->GetOnCreateHandler(),
         {.url = parent_module_url_,
@@ -42,7 +43,7 @@ class StoryShellEmbeddedModTest : public modular::testing::TestHarnessFixture {
     // Listen for embedded module interception
     embedded_module_ =
         std::make_unique<modular::testing::FakeModule>([](fuchsia::modular::Intent intent) {});
-    embedded_module_url_ = modular::testing::GenerateFakeUrl();
+    embedded_module_url_ = modular_testing::TestHarnessBuilder::GenerateFakeUrl();
     builder_.InterceptComponent(
         embedded_module_->GetOnCreateHandler(),
         {.url = embedded_module_url_,
@@ -51,7 +52,7 @@ class StoryShellEmbeddedModTest : public modular::testing::TestHarnessFixture {
     // Listen for third module interception
     third_module_ =
         std::make_unique<modular::testing::FakeModule>([](fuchsia::modular::Intent intent) {});
-    third_module_url_ = modular::testing::GenerateFakeUrl();
+    third_module_url_ = modular_testing::TestHarnessBuilder::GenerateFakeUrl();
     builder_.InterceptComponent(
         third_module_->GetOnCreateHandler(),
         {.url = third_module_url_,
@@ -105,7 +106,7 @@ class StoryShellEmbeddedModTest : public modular::testing::TestHarnessFixture {
   std::unique_ptr<modular::testing::FakeModule> parent_module_;
   std::unique_ptr<modular::testing::FakeModule> embedded_module_;
   std::unique_ptr<modular::testing::FakeModule> third_module_;
-  modular::testing::TestHarnessBuilder builder_;
+  modular_testing::TestHarnessBuilder builder_;
   std::string parent_module_url_;
   std::string embedded_module_url_;
   std::string third_module_url_;
@@ -139,7 +140,7 @@ TEST_F(StoryShellEmbeddedModTest, SurfaceRelationships) {
 }
 
 // Checks that embedded modules are not reinflated when stories are retarted.
-TEST_F(StoryShellEmbeddedModTest, DISABLED_ReinflateModules) {
+TEST_F(StoryShellEmbeddedModTest, ReinflateModules) {
   LaunchParentModule();
   ParentModuleEmbedsModule();
   EmbeddedModuleLaunchesModule();

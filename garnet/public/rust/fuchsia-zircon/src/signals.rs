@@ -11,7 +11,7 @@ bitflags! {
     /// Signals that can be waited upon.
     ///
     /// See
-    /// [Objects and signals](https://fuchsia.googlesource.com/fuchsia/+/master/zircon/docs/concepts.md#Objects-and-Signals)
+    /// [Objects and signals](https://fuchsia.googlesource.com/fuchsia/+/master/docs/zircon/concepts.md#Objects-and-Signals)
     /// in the Zircon kernel documentation. Note: the names of signals are still in flux.
     #[repr(transparent)]
     pub struct Signals: zx_signals_t {
@@ -79,10 +79,6 @@ bitflags! {
         const SOCKET_PEER_CLOSED         = ZX_SOCKET_PEER_CLOSED;
         const SOCKET_PEER_WRITE_DISABLED = ZX_SOCKET_PEER_WRITE_DISABLED;
         const SOCKET_WRITE_DISABLED      = ZX_SOCKET_WRITE_DISABLED;
-        const SOCKET_CONTROL_READABLE    = ZX_SOCKET_CONTROL_READABLE;
-        const SOCKET_CONTROL_WRITABLE    = ZX_SOCKET_CONTROL_WRITABLE;
-        const SOCKET_ACCEPT              = ZX_SOCKET_ACCEPT;
-        const SOCKET_SHARE               = ZX_SOCKET_SHARE;
         const SOCKET_READ_THRESHOLD      = ZX_SOCKET_READ_THRESHOLD;
         const SOCKET_WRITE_THRESHOLD     = ZX_SOCKET_WRITE_THRESHOLD;
 

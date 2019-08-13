@@ -7,7 +7,7 @@ use pest_derive::Parser;
 #[derive(Parser)]
 #[grammar_inline = r#"
 COMMENT = _{ "//" ~ !("/") ~ (" " | SYMBOL | PUNCTUATION | ASCII_ALPHANUMERIC)* ~ "\n"}
-WHITESPACE = _{ " " | "\n" }
+WHITESPACE = _{ " " | "\n" | "\t" }
 file = { SOI ~ contents ~ EOI }
 
 contents = _{ library_header ~ (using_list)* ~ declaration_list }
@@ -20,7 +20,9 @@ using = { "using" ~ compound_ident ~ ("as" ~ ident)? ~ ";" }
 
 declaration_list = _{ ( declaration ~ ";" )* }
 
-declaration = _{ const_declaration | enum_declaration | union_declaration | struct_declaration | protocol_declaration }
+declaration = _{ resource_declaration | const_declaration | enum_declaration | union_declaration | struct_declaration | protocol_declaration }
+
+resource_declaration = { attributes ~ "resource" ~ (handle_type | identifier_type) ~ (":" ~ constant ~ ("," ~ constant)*)? }
 
 const_declaration = { attributes ~ "const" ~ ( primitive_type | string_type | identifier_type ) ~ ident ~ "=" ~ constant }
 
@@ -36,7 +38,7 @@ struct_field  = { attributes? ~ type_ ~ ident ~ ("=" ~ constant)? }
 union_declaration = { attributes ~ "union" ~ ident ~ "{" ~ (union_field ~ ";")* ~ "}" }
 union_field  = { attributes? ~ type_ ~ ident }
 
-enum_declaration = { attributes ~ "enum" ~ ident ~ (":" ~ integer_type)? ~ "{" ~ (enum_field ~ ";")* ~ "}" }
+enum_declaration = { attributes ~ "enum" ~ ident ~ (":" ~ (integer_type | identifier_type))? ~ "{" ~ (enum_field ~ ";")* ~ "}" }
 enum_field  = { attributes? ~ ident ~ "=" ~ constant }
 
 protocol_method = { attributes ~ protocol_parameters }
@@ -67,9 +69,9 @@ integer_type = { "usize" | "int8" | "int16" | "int32" | "int64" |
 handle_type = { "handle" ~ ( "<" ~ handle_subtype ~ ">" )? ~ reference? }
 
 handle_subtype = { "process" | "thread" | "vmo" | "channel" | "eventpair" | "port" |
-                 "interrupt" | "debuglog" | "socket" | "resource" | "event" |
+                 "interrupt" | "log" | "socket" | "resource" | "event" |
                  "job" | "vmar" | "fifo" | "guest" | "timer" | "bti" | "profile" |
-                 "vcpu" | "iommu" | "pager" | "pmt" }
+                 "debuglog" | "vcpu" | "iommu" | "pager" | "pmt" }
 
 compound_ident = ${ ident ~ ("." ~ ident)* }
 ident = { ("@")? ~ (alpha | digit | "_")+ }

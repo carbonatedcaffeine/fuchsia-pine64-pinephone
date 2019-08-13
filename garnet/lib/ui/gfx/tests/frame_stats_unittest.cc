@@ -10,9 +10,9 @@
 #include <lib/fit/bridge.h>
 #include <lib/fit/defer.h>
 #include <lib/gtest/real_loop_fixture.h>
-#include <lib/inspect/inspect.h>
-#include <lib/inspect/reader.h>
-#include <lib/inspect/testing/inspect.h>
+#include <lib/inspect_deprecated/inspect.h>
+#include <lib/inspect_deprecated/reader.h>
+#include <lib/inspect_deprecated/testing/inspect.h>
 #include <lib/ui/gfx/tests/mocks.h>
 
 #include <thread>
@@ -25,13 +25,13 @@ namespace scenic_impl {
 namespace gfx {
 namespace test {
 
-using inspect::Node;
-using inspect::ObjectHierarchy;
+using inspect_deprecated::Node;
+using inspect_deprecated::ObjectHierarchy;
 using testing::AllOf;
 using testing::IsEmpty;
 using testing::SizeIs;
 using testing::UnorderedElementsAre;
-using namespace inspect::testing;
+using namespace inspect_deprecated::testing;
 
 constexpr char kFrameStatsNodeName[] = "FrameStatsTest";
 
@@ -67,11 +67,12 @@ class FrameStatsTest : public gtest::RealLoopFixture {
 
   // Helper function for test boiler plate.
   fit::result<fuchsia::inspect::Object> ReadInspectVmo() {
-    inspect::ObjectReader reader(std::move(client_));
+    inspect_deprecated::ObjectReader reader(std::move(client_));
     fit::result<fuchsia::inspect::Object> result;
     SchedulePromise(
         reader.OpenChild(kFrameStatsNodeName)
-            .and_then([](inspect::ObjectReader& child_reader) { return child_reader.Read(); })
+            .and_then(
+                [](inspect_deprecated::ObjectReader& child_reader) { return child_reader.Read(); })
             .then([&](fit::result<fuchsia::inspect::Object>& res) { result = std::move(res); }));
     RunLoopUntil([&] { return !!result; });
 
@@ -80,7 +81,7 @@ class FrameStatsTest : public gtest::RealLoopFixture {
 
  protected:
   std::shared_ptr<component::Object> object_;
-  inspect::Node root_object_;
+  inspect_deprecated::Node root_object_;
   fidl::InterfaceHandle<fuchsia::inspect::Inspect> client_;
 
  private:
@@ -94,7 +95,7 @@ TEST_F(FrameStatsTest, SmokeTest_TriggerLazyStringProperties) {
 
   fit::result<fuchsia::inspect::Object> result = ReadInspectVmo();
 
-  EXPECT_THAT(inspect::ReadFromFidlObject(result.take_value()),
+  EXPECT_THAT(inspect_deprecated::ReadFromFidlObject(result.take_value()),
               NodeMatches(AllOf(NameMatches(kFrameStatsNodeName), MetricList(IsEmpty()),
                                 PropertyList(SizeIs(1)))));
 }
@@ -102,63 +103,62 @@ TEST_F(FrameStatsTest, SmokeTest_TriggerLazyStringProperties) {
 TEST_F(FrameStatsTest, SmokeTest_DummyFrameTimings) {
   FrameStats stats(root_object_.CreateChild(kFrameStatsNodeName));
 
-  const zx_duration_t vsync_interval = zx::msec(16).get();
+  const zx::duration vsync_interval = zx::msec(16);
   FrameTimings::Timestamps frame_times = {
-      .latch_point_time = zx::msec(4).get(),
-      .update_done_time = zx::msec(6).get(),
-      .render_start_time = zx::msec(6).get(),
-      .render_done_time = zx::msec(12).get(),
-      .target_presentation_time = zx::msec(16).get(),
-      .actual_presentation_time = zx::msec(16).get(),
+      .latch_point_time = zx::time(0) + zx::msec(4),
+      .update_done_time = zx::time(0) + zx::msec(6),
+      .render_start_time = zx::time(0) + zx::msec(6),
+      .render_done_time = zx::time(0) + zx::msec(12),
+      .target_presentation_time = zx::time(0) + zx::msec(16),
+      .actual_presentation_time = zx::time(0) + zx::msec(16),
   };
   for (int i = 0; i < 200; i++) {
     stats.RecordFrame(frame_times, vsync_interval);
 
-    frame_times.latch_point_time += zx::msec(16).get();
-    frame_times.update_done_time += zx::msec(16).get();
-    frame_times.render_start_time += zx::msec(16).get();
-    frame_times.render_done_time += zx::msec(16).get();
-    frame_times.target_presentation_time += zx::msec(16).get();
-    frame_times.actual_presentation_time += zx::msec(16).get();
+    frame_times.latch_point_time += zx::msec(16);
+    frame_times.update_done_time += zx::msec(16);
+    frame_times.render_start_time += zx::msec(16);
+    frame_times.render_done_time += zx::msec(16);
+    frame_times.target_presentation_time += zx::msec(16);
+    frame_times.actual_presentation_time += zx::msec(16);
   }
 
-  FrameTimings::Timestamps dropped_times = {.latch_point_time = zx::msec(4).get(),
-                                            .update_done_time = zx::msec(6).get(),
-                                            .render_start_time = zx::msec(6).get(),
-                                            .render_done_time = zx::msec(12).get(),
-                                            .target_presentation_time = zx::msec(16).get(),
+  FrameTimings::Timestamps dropped_times = {.latch_point_time = zx::time(0) + zx::msec(4),
+                                            .update_done_time = zx::time(0) + zx::msec(6),
+                                            .render_start_time = zx::time(0) + zx::msec(6),
+                                            .render_done_time = zx::time(0) + zx::msec(12),
+                                            .target_presentation_time = zx::time(0) + zx::msec(16),
                                             .actual_presentation_time = FrameTimings::kTimeDropped};
   for (int i = 0; i < 15; i++) {
     stats.RecordFrame(dropped_times, vsync_interval);
 
-    dropped_times.latch_point_time += zx::msec(16).get();
-    dropped_times.update_done_time += zx::msec(16).get();
-    dropped_times.render_start_time += zx::msec(16).get();
-    dropped_times.render_done_time += zx::msec(16).get();
-    dropped_times.target_presentation_time += zx::msec(16).get();
+    dropped_times.latch_point_time += zx::msec(16);
+    dropped_times.update_done_time += zx::msec(16);
+    dropped_times.render_start_time += zx::msec(16);
+    dropped_times.render_done_time += zx::msec(16);
+    dropped_times.target_presentation_time += zx::msec(16);
   }
 
-  FrameTimings::Timestamps delayed_times = {.latch_point_time = zx::msec(4).get(),
-                                            .update_done_time = zx::msec(6).get(),
-                                            .render_start_time = zx::msec(6).get(),
-                                            .render_done_time = zx::msec(22).get(),
-                                            .target_presentation_time = zx::msec(16).get(),
-                                            .actual_presentation_time = zx::msec(32).get()};
+  FrameTimings::Timestamps delayed_times = {.latch_point_time = zx::time(0) + zx::msec(4),
+                                            .update_done_time = zx::time(0) + zx::msec(6),
+                                            .render_start_time = zx::time(0) + zx::msec(6),
+                                            .render_done_time = zx::time(0) + zx::msec(22),
+                                            .target_presentation_time = zx::time(0) + zx::msec(16),
+                                            .actual_presentation_time = zx::time(0) + zx::msec(32)};
   for (int i = 0; i < 15; i++) {
     stats.RecordFrame(delayed_times, vsync_interval);
 
-    delayed_times.latch_point_time = delayed_times.actual_presentation_time + zx::msec(1).get();
-    delayed_times.update_done_time = delayed_times.actual_presentation_time + zx::msec(4).get();
-    delayed_times.render_start_time = delayed_times.actual_presentation_time + zx::msec(4).get();
-    delayed_times.render_done_time = delayed_times.actual_presentation_time + zx::msec(20).get();
-    delayed_times.target_presentation_time =
-        delayed_times.actual_presentation_time + zx::msec(16).get();
-    delayed_times.actual_presentation_time += zx::msec(32).get();
+    delayed_times.latch_point_time = delayed_times.actual_presentation_time + zx::msec(1);
+    delayed_times.update_done_time = delayed_times.actual_presentation_time + zx::msec(4);
+    delayed_times.render_start_time = delayed_times.actual_presentation_time + zx::msec(4);
+    delayed_times.render_done_time = delayed_times.actual_presentation_time + zx::msec(20);
+    delayed_times.target_presentation_time = delayed_times.actual_presentation_time + zx::msec(16);
+    delayed_times.actual_presentation_time += zx::msec(32);
   }
 
   fit::result<fuchsia::inspect::Object> result = ReadInspectVmo();
 
-  EXPECT_THAT(inspect::ReadFromFidlObject(result.take_value()),
+  EXPECT_THAT(inspect_deprecated::ReadFromFidlObject(result.take_value()),
               NodeMatches(AllOf(NameMatches(kFrameStatsNodeName), MetricList(IsEmpty()),
                                 PropertyList(SizeIs(1)))));
 }

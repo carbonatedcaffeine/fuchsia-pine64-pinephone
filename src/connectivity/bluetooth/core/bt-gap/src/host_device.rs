@@ -5,13 +5,16 @@
 use {
     fidl::endpoints::ClientEnd,
     fidl_fuchsia_bluetooth_control::{
-        self as control, AdapterInfo, DeviceClass, HostData, InputCapabilityType,
-        OutputCapabilityType, PairingDelegateMarker, RemoteDevice,
+        self as control, DeviceClass, HostData, InputCapabilityType, OutputCapabilityType,
+        PairingDelegateMarker,
     },
     fidl_fuchsia_bluetooth_gatt::ClientProxy,
     fidl_fuchsia_bluetooth_host::{HostEvent, HostProxy},
     fidl_fuchsia_bluetooth_le::CentralProxy,
-    fuchsia_bluetooth::types::BondingData,
+    fuchsia_bluetooth::{
+        inspect::Inspectable,
+        types::{AdapterInfo, BondingData, Peer},
+    },
     fuchsia_syslog::{fx_log_err, fx_log_info},
     futures::{Future, FutureExt, StreamExt},
     parking_lot::RwLock,
@@ -20,15 +23,12 @@ use {
     std::sync::Arc,
 };
 
-use crate::{
-    types::{self, from_fidl_status, Error},
-    util::clone_host_state,
-};
+use crate::types::{self, from_fidl_status, Error};
 
 pub struct HostDevice {
     pub path: PathBuf,
     host: HostProxy,
-    info: AdapterInfo,
+    info: Inspectable<AdapterInfo>,
     gatt: HashMap<String, (CentralProxy, ClientProxy)>,
 }
 
@@ -38,7 +38,7 @@ pub struct HostDevice {
 // If they were instead declared async, the function body would not be executed until the first time
 // the future was polled.
 impl HostDevice {
-    pub fn new(path: PathBuf, host: HostProxy, info: AdapterInfo) -> Self {
+    pub fn new(path: PathBuf, host: HostProxy, info: Inspectable<AdapterInfo>) -> Self {
         HostDevice { path, host, info, gatt: HashMap::new() }
     }
 
@@ -63,7 +63,7 @@ impl HostDevice {
         let gatt_entry = self.gatt.remove(&id);
         async move {
             if let Some((central, _)) = gatt_entry {
-                from_fidl_status(await!(central.disconnect_peripheral(id.as_str())))
+                from_fidl_status(central.disconnect_peripheral(id.as_str()).await)
             } else {
                 Err(Error::not_found("Unknown Peripheral"))
             }
@@ -87,6 +87,10 @@ impl HostDevice {
 
     pub fn connect(&mut self, device_id: String) -> impl Future<Output = types::Result<()>> {
         self.host.connect(&device_id).map(from_fidl_status)
+    }
+
+    pub fn disconnect(&mut self, device_id: String) -> impl Future<Output = types::Result<()>> {
+        self.host.disconnect(&device_id).map(from_fidl_status)
     }
 
     pub fn forget(&mut self, peer_id: String) -> impl Future<Output = types::Result<()>> {
@@ -132,7 +136,7 @@ impl HostDevice {
 }
 
 pub trait HostListener {
-    fn on_peer_updated(&mut self, device: RemoteDevice);
+    fn on_peer_updated(&mut self, peer: Peer);
     fn on_peer_removed(&mut self, identifier: String);
     fn on_new_host_bond(&mut self, data: BondingData) -> Result<(), failure::Error>;
 }
@@ -143,14 +147,14 @@ pub async fn handle_events<H: HostListener>(
 ) -> types::Result<()> {
     let mut stream = host.read().host.take_event_stream();
 
-    while let Some(event) = await!(stream.next()) {
+    while let Some(event) = stream.next().await {
         let host_ = host.clone();
         match event? {
             HostEvent::OnAdapterStateChanged { ref state } => {
-                host_.write().info.state = Some(Box::new(clone_host_state(&state)));
+                host_.write().info.update_state(Some(state.into()));
             }
             // TODO(NET-968): Add integration test for this.
-            HostEvent::OnDeviceUpdated { device } => listener.on_peer_updated(device),
+            HostEvent::OnDeviceUpdated { device } => listener.on_peer_updated(Peer::from(device)),
             // TODO(NET-1038): Add integration test for this.
             HostEvent::OnDeviceRemoved { identifier } => listener.on_peer_removed(identifier),
             HostEvent::OnNewBondingData { data } => {

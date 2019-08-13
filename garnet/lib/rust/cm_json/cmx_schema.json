@@ -93,6 +93,7 @@
               "shell-commands",
               "root-ssl-certificates",
               "system-temp",
+              "isolated-temp",
               "vulkan",
               "deprecated-ambient-replace-as-executable"
             ]
@@ -106,6 +107,28 @@
             "$id": "/properties/sandbox/properties/system/items",
             "type": "string",
             "title": "Paths within the system package provided to the component",
+            "allOf": [
+              {
+                "not": {
+                  "pattern": "^/*data/"
+                }
+              },
+              {
+                "not": {
+                  "pattern": "^/*data$"
+                }
+              },
+              {
+                "not": {
+                  "pattern": "^/*deprecated-data/"
+                }
+              },
+              {
+                "not": {
+                  "pattern": "^/*deprecated-data$"
+                }
+              }
+            ],
             "examples": [
               "data/build"
             ]

@@ -37,7 +37,7 @@ pub(crate) enum Ipv6PacketAction {
 
 /// Handle IPv6 extension headers.
 ///
-/// What this function does depents on whether or not the `at_destination` flag
+/// What this function does depends on whether or not the `at_destination` flag
 /// is set. If it is `true`, then we will attempt to process all the extension
 /// headers in `packet`. Otherwise, we will only attempt to process the hop-by-hop
 /// extension header (which MUST be the first extension header if present) as
@@ -133,6 +133,8 @@ fn handle_hop_by_hop_options_ext_hdr<
             // Safely skip and continue, as we know that if we parsed an unrecognized
             // option, the option's action was set to skip and continue.
             HopByHopOptionData::Unrecognized { kind, len, data } => {}
+            // Also skip RouterAlert because router part of MLD is not implemented.
+            HopByHopOptionData::RouterAlert { .. } => {}
         }
     }
 
@@ -199,7 +201,7 @@ mod tests {
     use crate::ip::IpProto;
     use crate::testutil::{DummyEventDispatcher, DummyEventDispatcherBuilder, DUMMY_CONFIG_V6};
     use crate::wire::ipv6::{Ipv6Packet, Ipv6PacketBuilder};
-    use packet::serialize::{Buf, BufferSerializer, Serializer};
+    use packet::serialize::{Buf, Serializer};
     use packet::ParseBuffer;
 
     #[test]
@@ -218,10 +220,8 @@ mod tests {
         );
         let device_id = DeviceId::new_ethernet(0);
         let frame_dst = FrameDestination::Unicast;
-        let mut buffer = BufferSerializer::new_vec(Buf::new(vec![1, 2, 3, 4, 5], ..))
-            .encapsulate(builder)
-            .serialize_outer()
-            .unwrap();
+        let mut buffer =
+            Buf::new(vec![1, 2, 3, 4, 5], ..).encapsulate(builder).serialize_vec_outer().unwrap();
         let mut packet = buffer.parse::<Ipv6Packet<_>>().unwrap();
 
         assert_eq!(

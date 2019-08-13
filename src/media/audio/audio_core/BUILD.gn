@@ -27,7 +27,7 @@ action_foreach("generate_schemas") {
 package("audio_core") {
   deps = [
     "//src/media/audio/audio_core:audio_core_bin",
-    "//src/media/audio/audio_core/audiofx",
+    "//src/media/audio/effects/passthrough:audio_effects",
   ]
 
   binaries = [
@@ -39,7 +39,7 @@ package("audio_core") {
   loadable_modules = [
     {
       # This audio processing library is hosted in the audio_core process.
-      name = "audiofx.so"
+      name = "audio_effects.so"
     },
   ]
 
@@ -47,6 +47,14 @@ package("audio_core") {
     {
       path = rebase_path("meta/audio_core.cmx")
       dest = "audio_core.cmx"
+    },
+
+    # The nodevfs cmx is used in some test environments where we would like to provide our own
+    # devfs for the test. At this time we need to remove any dev sandbox metadata as appmgr does
+    # not allow these namespaces to be overridden.
+    {
+      path = rebase_path("meta/audio_core_nodevfs.cmx")
+      dest = "audio_core_nodevfs.cmx"
     },
   ]
 }
@@ -85,6 +93,8 @@ source_set("audio_core_lib") {
     "audio_renderer_format_info.h",
     "audio_renderer_impl.cc",
     "audio_renderer_impl.h",
+    "command_line_options.cc",
+    "command_line_options.h",
     "driver_output.cc",
     "driver_output.h",
     "driver_ring_buffer.cc",
@@ -92,7 +102,6 @@ source_set("audio_core_lib") {
     "driver_utils.cc",
     "driver_utils.h",
     "fwd_decls.h",
-    "logging.h",
     "pending_flush_token.cc",
     "pending_flush_token.h",
     "reporter.cc",
@@ -119,6 +128,8 @@ source_set("audio_core_lib") {
     "//sdk/lib/sys/cpp:cpp",
     "//src/lib/fxl",
     "//src/media/audio/audio_core/mixer:audio_mixer_lib",
+    "//src/media/audio/lib/effects_loader",
+    "//src/media/audio/lib/logging",
     "//src/media/audio/lib/wav_writer:wav_writer",
     "//zircon/public/fidl/fuchsia-hardware-audio",
     "//zircon/public/fidl/fuchsia-scheduler",
@@ -151,6 +162,7 @@ executable("unittest_bin") {
 
   sources = [
     "audio_link_packet_source_unittest.cc",
+    "command_line_options_unittest.cc",
   ]
 
   deps = [

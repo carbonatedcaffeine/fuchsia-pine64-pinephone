@@ -32,10 +32,13 @@ enum class InlineBehavior {
 // provides accessor to transform into a data source and data chunks.
 class ObjectData {
  public:
-  explicit ObjectData(std::string value) : ObjectData(value, InlineBehavior::ALLOW) {}
-  explicit ObjectData(std::string value, InlineBehavior inline_behavior)
-      : ObjectData(value, ObjectType::BLOB, inline_behavior) {}
-  explicit ObjectData(std::string value, ObjectType object_type, InlineBehavior inline_behavior);
+  explicit ObjectData(ObjectIdentifierFactory* factory, std::string value)
+      : ObjectData(factory, value, InlineBehavior::ALLOW) {}
+  explicit ObjectData(ObjectIdentifierFactory* factory, std::string value,
+                      InlineBehavior inline_behavior)
+      : ObjectData(factory, value, ObjectType::BLOB, inline_behavior) {}
+  explicit ObjectData(ObjectIdentifierFactory* factory, std::string value, ObjectType object_type,
+                      InlineBehavior inline_behavior);
   std::unique_ptr<DataSource> ToDataSource();
   std::unique_ptr<DataSource::DataChunk> ToChunk();
   std::unique_ptr<Piece> ToPiece();
@@ -50,7 +53,7 @@ class ObjectData {
 ObjectDigest MakeObjectDigest(std::string content,
                               InlineBehavior inline_behavior = InlineBehavior::ALLOW);
 
-// Computes the object identifier for the given content. If |inline_behavior| is
+// Computes an untracked object identifier for the given content. If |inline_behavior| is
 // InlineBehavior::PREVENT, resize |content| so that it cannot be inlined.
 ObjectIdentifier MakeObjectIdentifier(std::string content,
                                       InlineBehavior inline_behavior = InlineBehavior::ALLOW);
@@ -58,6 +61,7 @@ ObjectIdentifier MakeObjectIdentifier(std::string content,
 // Splits the given content in chunks and calls the callback on each of them.
 // Returns the object identifier for the root piece.
 ObjectIdentifier ForEachPiece(std::string content, ObjectType type,
+                              ObjectIdentifierFactory* factory,
                               fit::function<void(std::unique_ptr<const Piece>)> callback);
 
 // Returns a random string of the given length.
@@ -66,11 +70,11 @@ std::string RandomString(rng::Random* random, size_t size);
 // Create a new random commit id.
 CommitId RandomCommitId(rng::Random* random);
 
-// Create a new random object digest.
+// Create a new random, non-inline object digest.
 ObjectDigest RandomObjectDigest(rng::Random* random);
 
 // Create a new random object identifier.
-ObjectIdentifier RandomObjectIdentifier(rng::Random* random);
+ObjectIdentifier RandomObjectIdentifier(rng::Random* random, ObjectIdentifierFactory* factory);
 
 // Creates and returns a new EntryChange adding or updating the entry with the
 // given information.
@@ -129,6 +133,7 @@ class StorageTest : public ledger::TestWithEnvironment {
 
   // Returns the tree node corresponding to the given id.
   ::testing::AssertionResult CreateNodeFromIdentifier(ObjectIdentifier identifier,
+                                                      PageStorage::Location location,
                                                       std::unique_ptr<const btree::TreeNode>* node);
 
   // Creates a new tree node from the given entries and children and updates

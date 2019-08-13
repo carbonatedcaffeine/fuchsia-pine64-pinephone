@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall/zx"
 
 	"syslog"
 
@@ -23,7 +24,7 @@ import (
 	"netstack/routes"
 	"netstack/util"
 
-	"fidl/fuchsia/devicesettings"
+	"fidl/fuchsia/device"
 	"fidl/fuchsia/hardware/ethernet"
 	"fidl/fuchsia/net"
 	"fidl/fuchsia/netstack"
@@ -39,9 +40,6 @@ import (
 )
 
 const (
-	deviceSettingsManagerNodenameKey = "DeviceName"
-	defaultNodename                  = "fuchsia-unset-device-name"
-
 	defaultInterfaceMetric routes.Metric = 100
 
 	metricNotSet routes.Metric = 0
@@ -50,18 +48,25 @@ const (
 
 	ipv4Loopback tcpip.Address = "\x7f\x00\x00\x01"
 	ipv6Loopback tcpip.Address = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01"
-
-	// Values used to indicate no IP is assigned to an interface.
-	zeroIpAddr tcpip.Address     = header.IPv4Any
-	zeroIpMask tcpip.AddressMask = "\xff\xff\xff\xff"
 )
+
+var ipv4LoopbackBytes = func() [4]byte {
+	var b [4]uint8
+	copy(b[:], ipv4Loopback)
+	return b
+}()
+var ipv6LoopbackBytes = func() [16]byte {
+	var b [16]uint8
+	copy(b[:], ipv6Loopback)
+	return b
+}()
 
 // A Netstack tracks all of the running state of the network stack.
 type Netstack struct {
 	arena *eth.Arena
 
-	deviceSettings *devicesettings.DeviceSettingsManagerInterface
-	dnsClient      *dns.Client
+	nameProvider *device.NameProviderInterface
+	dnsClient    *dns.Client
 
 	mu struct {
 		sync.Mutex
@@ -81,16 +86,16 @@ type Netstack struct {
 
 // Each ifState tracks the state of a network interface.
 type ifState struct {
-	ns    *Netstack
-	eth   link.Controller
-	nicid tcpip.NICID
+	ns       *Netstack
+	eth      link.Controller
+	nicid    tcpip.NICID
+	filepath string
 	// features can include any value that's valid in fuchsia.hardware.ethernet.Info.features.
 	features uint32
 	mu       struct {
 		sync.Mutex
 		state          link.State
 		hasDynamicAddr bool
-		name           string
 		// metric is used by default for routes that originate from this NIC.
 		metric     routes.Metric
 		dnsServers []tcpip.Address
@@ -138,6 +143,13 @@ func subnetRoute(addr tcpip.Address, mask tcpip.AddressMask, nicid tcpip.NICID) 
 		Mask:        mask,
 		NIC:         nicid,
 	}
+}
+
+func (ns *Netstack) nameLocked(nicid tcpip.NICID) string {
+	if nicInfo, ok := ns.mu.stack.NICInfo()[nicid]; ok {
+		return nicInfo.Name
+	}
+	return fmt.Sprintf("stack.NICInfo()[%d]: %s", nicid, tcpip.ErrUnknownNICID)
 }
 
 // AddRoute adds a single route to the route table in a sorted fashion. This
@@ -259,34 +271,16 @@ func (ns *Netstack) removeInterfaceAddress(nic tcpip.NICID, protocol tcpip.Netwo
 
 	ns.mu.Lock()
 	if err := func() error {
-		addresses, subnets := ns.getAddressesLocked(nic)
-		allOnes := int(prefixLen) == 8*len(addr)
-		hasAddr := containsAddress(addresses, protocol, addr)
-		hasSubnet := containsSubnet(subnets, addr, prefixLen)
-		if !hasAddr && !hasSubnet {
-			return fmt.Errorf("neither address nor subnet %s/%d exists on NIC ID %d", addr, prefixLen, nic)
-		}
-
-		if !allOnes {
-			if hasSubnet {
-				if err := ns.mu.stack.RemoveSubnet(nic, subnet); err == tcpip.ErrUnknownNICID {
-					panic(fmt.Sprintf("stack.RemoveSubnet(_): NIC [%d] not found", nic))
-				} else if err != nil {
-					return fmt.Errorf("error removing subnet %s/%d from NIC ID %d: %s", addr, prefixLen, nic, err)
-				}
-			} else {
-				return fmt.Errorf("no such subnet %s/%d for NIC ID %d", addr, prefixLen, nic)
-			}
+		if _, found := ns.findAddress(nic, protocol, addr); !found {
+			return fmt.Errorf("address %s doesn't exist on NIC ID %d", addr, nic)
 		}
 
 		ns.DelRouteLocked(route)
 
-		if allOnes && hasAddr {
-			if err := ns.mu.stack.RemoveAddress(nic, addr); err == tcpip.ErrUnknownNICID {
-				panic(fmt.Sprintf("stack.RemoveAddress(_): NIC [%d] not found", nic))
-			} else if err != nil {
-				return fmt.Errorf("error removing address %s from NIC ID %d: %s", addr, nic, err)
-			}
+		if err := ns.mu.stack.RemoveAddress(nic, addr); err == tcpip.ErrUnknownNICID {
+			panic(fmt.Sprintf("stack.RemoveAddress(_): NIC [%d] not found", nic))
+		} else if err != nil {
+			return fmt.Errorf("error removing address %s from NIC ID %d: %s", addr, nic, err)
 		}
 
 		return nil
@@ -319,22 +313,25 @@ func (ns *Netstack) addInterfaceAddress(nic tcpip.NICID, protocol tcpip.NetworkP
 
 	ns.mu.Lock()
 	if err := func() error {
-		addresses, subnets := ns.getAddressesLocked(nic)
-		hasAddr := containsAddress(addresses, protocol, addr)
-		hasSubnet := containsSubnet(subnets, addr, prefixLen)
-		if hasAddr && hasSubnet {
-			return fmt.Errorf("address/prefix combination %s/%d already exists on NIC ID %d", addr, prefixLen, nic)
-		}
-		if !hasAddr {
-			if err := ns.mu.stack.AddAddress(nic, protocol, addr); err != nil {
-				return fmt.Errorf("error adding address %s to NIC ID %d: %s", addr, nic, err)
+		if a, found := ns.findAddress(nic, protocol, addr); found {
+			if int(prefixLen) == a.AddressWithPrefix.PrefixLen {
+				return fmt.Errorf("address %s/%d already exists on NIC ID %d", addr, prefixLen, nic)
+			}
+			// Same address but different prefix. Remove the address and re-add it
+			// with the new prefix (below).
+			if err := ns.mu.stack.RemoveAddress(nic, addr); err != nil {
+				syslog.Infof("NIC %d: failed to remove address %s: %s", nic, addr, err)
 			}
 		}
 
-		if !hasSubnet {
-			if err := ns.mu.stack.AddSubnet(nic, protocol, subnet); err != nil {
-				return fmt.Errorf("error adding subnet %+v to NIC ID %d: %s", subnet, nic, err)
-			}
+		if err := ns.mu.stack.AddProtocolAddress(nic, tcpip.ProtocolAddress{
+			Protocol: protocol,
+			AddressWithPrefix: tcpip.AddressWithPrefix{
+				Address:   addr,
+				PrefixLen: int(prefixLen),
+			},
+		}); err != nil {
+			return fmt.Errorf("error adding address %s/%d to NIC ID %d: %s", addr, prefixLen, nic, err)
 		}
 
 		if err := ns.AddRouteLocked(route, metricNotSet, false); err != nil {
@@ -359,12 +356,13 @@ func (ifs *ifState) updateMetric(metric routes.Metric) {
 }
 
 func (ifs *ifState) dhcpAcquired(oldAddr, newAddr tcpip.Address, oldSubnet, newSubnet tcpip.Subnet, config dhcp.Config) {
-	ifs.mu.Lock()
-	name := ifs.mu.name
-	ifs.mu.Unlock()
-
 	ifs.ns.mu.Lock()
-	if oldAddr != newAddr {
+
+	name := ifs.ns.nameLocked(ifs.nicid)
+
+	if oldAddr == newAddr && oldSubnet == newSubnet {
+		syslog.Infof("NIC %s: DHCP renewed address %s/%d for %s", name, newAddr, newSubnet.Prefix(), config.LeaseLength)
+	} else {
 		if len(oldAddr) != 0 {
 			if err := ifs.ns.mu.stack.RemoveAddress(ifs.nicid, oldAddr); err != nil {
 				syslog.Infof("NIC %s: failed to remove expired DHCP address %s: %s", name, oldAddr, err)
@@ -373,36 +371,24 @@ func (ifs *ifState) dhcpAcquired(oldAddr, newAddr tcpip.Address, oldSubnet, newS
 			}
 		}
 		if len(newAddr) != 0 {
-			if err := ifs.ns.mu.stack.AddAddressWithOptions(ifs.nicid, ipv4.ProtocolNumber, newAddr, stack.FirstPrimaryEndpoint); err != nil {
+			if err := ifs.ns.mu.stack.AddProtocolAddressWithOptions(ifs.nicid, tcpip.ProtocolAddress{
+				Protocol: ipv4.ProtocolNumber,
+				AddressWithPrefix: tcpip.AddressWithPrefix{
+					Address:   newAddr,
+					PrefixLen: newSubnet.Prefix(),
+				},
+			}, stack.FirstPrimaryEndpoint); err != nil {
 				syslog.Infof("NIC %s: failed to add DHCP acquired address %s: %s", name, newAddr, err)
 			} else {
-				syslog.Infof("NIC %s: DHCP acquired address %s for %s", name, newAddr, config.LeaseLength)
+				syslog.Infof("NIC %s: DHCP acquired address %s/%d for %s", name, newAddr, newSubnet.Prefix(), config.LeaseLength)
 			}
 		} else {
 			syslog.Errorf("NIC %s: DHCP could not acquire address", name)
 		}
 	}
-	if oldSubnet != newSubnet {
-		if oldSubnet != (tcpip.Subnet{}) {
-			if err := ifs.ns.mu.stack.RemoveSubnet(ifs.nicid, oldSubnet); err != nil {
-				syslog.Infof("NIC %s: failed to remove expired DHCP subnet %s/%d: %s", name, oldSubnet.ID(), oldSubnet.Prefix(), err)
-			} else {
-				syslog.Infof("NIC %s: removed expired DHCP subnet %s/%d", name, oldSubnet.ID(), oldSubnet.Prefix())
-			}
-		}
-		if newSubnet != (tcpip.Subnet{}) {
-			if err := ifs.ns.mu.stack.AddSubnet(ifs.nicid, ipv4.ProtocolNumber, newSubnet); err != nil {
-				syslog.Infof("NIC %s: failed to add DHCP acquired subnet %s/%d: %s", name, newSubnet.ID(), oldSubnet.Prefix(), err)
-			} else {
-				syslog.Infof("NIC %s: DHCP acquired subnet %s/%d for %s", name, newSubnet.ID(), newSubnet.Prefix(), config.LeaseLength)
-			}
-		} else {
-			syslog.Errorf("NIC %s: DHCP could not acquire subnet", name)
-		}
-	}
 	ifs.ns.mu.Unlock()
 
-	if len(newAddr) == 0 || newSubnet == (tcpip.Subnet{}) {
+	if len(newAddr) == 0 {
 		return
 	}
 
@@ -429,17 +415,17 @@ func (ifs *ifState) dhcpAcquired(oldAddr, newAddr tcpip.Address, oldSubnet, newS
 	ifs.ns.OnInterfacesChanged(interfaces)
 }
 
-func (ifs *ifState) setDHCPStatusLocked(enabled bool) {
+func (ifs *ifState) setDHCPStatusLocked(name string, enabled bool) {
 	ifs.mu.dhcp.enabled = enabled
 	ifs.mu.dhcp.cancel()
 	if ifs.mu.dhcp.enabled && ifs.mu.state == link.StateStarted {
-		ifs.runDHCPLocked()
+		ifs.runDHCPLocked(name)
 	}
 }
 
 // Runs the DHCP client with a fresh context and initializes ifs.mu.dhcp.cancel.
 // Call the old cancel function before calling this function.
-func (ifs *ifState) runDHCPLocked() {
+func (ifs *ifState) runDHCPLocked(name string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ifs.mu.dhcp.cancel = cancel
 	ifs.mu.dhcp.running = func() bool {
@@ -448,7 +434,7 @@ func (ifs *ifState) runDHCPLocked() {
 	if c := ifs.mu.dhcp.Client; c != nil {
 		c.Run(ctx)
 	} else {
-		panic(fmt.Sprintf("nil DHCP client on interface %s", ifs.mu.name))
+		panic(fmt.Sprintf("nil DHCP client on interface %s", name))
 	}
 }
 
@@ -460,14 +446,17 @@ func (ifs *ifState) dhcpEnabled() bool {
 
 func (ifs *ifState) stateChange(s link.State) {
 	ifs.ns.mu.Lock()
+
+	name := ifs.ns.nameLocked(ifs.nicid)
+
 	ifs.mu.Lock()
 	switch s {
 	case link.StateClosed:
-		syslog.Infof("NIC %s: link.StateClosed", ifs.mu.name)
+		syslog.Infof("NIC %s: link.StateClosed", name)
 		delete(ifs.ns.mu.ifStates, ifs.nicid)
 		fallthrough
 	case link.StateDown:
-		syslog.Infof("NIC %s: link.StateDown", ifs.mu.name)
+		syslog.Infof("NIC %s: link.StateDown", name)
 		ifs.mu.dhcp.cancel()
 
 		// TODO(crawshaw): more cleanup to be done here:
@@ -488,12 +477,12 @@ func (ifs *ifState) stateChange(s link.State) {
 		}
 
 	case link.StateStarted:
-		syslog.Infof("NIC %s: link.StateStarted", ifs.mu.name)
+		syslog.Infof("NIC %s: link.StateStarted", name)
 		// Re-enable static routes out this interface.
 		ifs.ns.UpdateRoutesByInterfaceLocked(ifs.nicid, routes.ActionEnableStatic)
 		if ifs.mu.dhcp.enabled {
 			ifs.mu.dhcp.cancel()
-			ifs.runDHCPLocked()
+			ifs.runDHCPLocked(name)
 		}
 		// TODO(ckuiper): Remove this, as we shouldn't create default routes w/o a
 		// gateway given. Before doing so make sure nothing is still relying on
@@ -551,41 +540,29 @@ func (ns *Netstack) getdnsServers() []tcpip.Address {
 	return out
 }
 
-var deviceSettingsErrorLogged uint32 = 0
+var nameProviderErrorLogged uint32 = 0
 
-func (ns *Netstack) getNodeName() string {
-	nodename, status, err := ns.deviceSettings.GetString(deviceSettingsManagerNodenameKey)
+func (ns *Netstack) getDeviceName() string {
+	result, err := ns.nameProvider.GetDeviceName()
 	if err != nil {
-		if atomic.CompareAndSwapUint32(&deviceSettingsErrorLogged, 0, 1) {
-			syslog.Warnf("getNodeName: error accessing device settings: %s", err)
+		if atomic.CompareAndSwapUint32(&nameProviderErrorLogged, 0, 1) {
+			syslog.Warnf("getDeviceName: error accessing device name provider: %s", err)
 		}
-		return defaultNodename
+		return device.DefaultDeviceName
 	}
 
-	if status != devicesettings.StatusOk {
-		var reportStatus string
-		switch status {
-		case devicesettings.StatusErrNotSet:
-			reportStatus = "key not set"
-		case devicesettings.StatusErrInvalidSetting:
-			reportStatus = "invalid setting"
-		case devicesettings.StatusErrRead:
-			reportStatus = "error reading key"
-		case devicesettings.StatusErrIncorrectType:
-			reportStatus = "value type was incorrect"
-		case devicesettings.StatusErrUnknown:
-			reportStatus = "unknown"
-		default:
-			reportStatus = fmt.Sprintf("unknown status code: %d", status)
+	switch tag := result.Which(); tag {
+	case device.NameProviderGetDeviceNameResultResponse:
+		atomic.StoreUint32(&nameProviderErrorLogged, 0)
+		return result.Response.Name
+	case device.NameProviderGetDeviceNameResultErr:
+		if atomic.CompareAndSwapUint32(&nameProviderErrorLogged, 0, 1) {
+			syslog.Warnf("getDeviceName: nameProvider.GetdeviceName() = %s", zx.Status(result.Err))
 		}
-		if atomic.CompareAndSwapUint32(&deviceSettingsErrorLogged, 0, 1) {
-			syslog.Warnf("getNodeName: device settings error: %s", reportStatus)
-		}
-		return defaultNodename
+		return device.DefaultDeviceName
+	default:
+		panic(fmt.Sprintf("unknown tag: GetDeviceName().Which() = %d", tag))
 	}
-
-	atomic.StoreUint32(&deviceSettingsErrorLogged, 0)
-	return nodename
 }
 
 // TODO(stijlist): figure out a way to make it impossible to accidentally
@@ -593,7 +570,7 @@ func (ns *Netstack) getNodeName() string {
 func (ns *Netstack) addLoopback() error {
 	ifs, err := ns.addEndpoint(func(tcpip.NICID) string {
 		return "lo"
-	}, stack.FindLinkEndpoint(loopback.New()), link.NewLoopbackController(), false, defaultInterfaceMetric, ethernet.InfoFeatureLoopback)
+	}, stack.FindLinkEndpoint(loopback.New()), link.NewLoopbackController(), false, defaultInterfaceMetric, ethernet.InfoFeatureLoopback, "[none]")
 	if err != nil {
 		return err
 	}
@@ -650,7 +627,7 @@ func (ns *Netstack) Bridge(nics []tcpip.NICID) (*ifState, error) {
 	b := bridge.New(links)
 	return ns.addEndpoint(func(nicid tcpip.NICID) string {
 		return fmt.Sprintf("br%d", nicid)
-	}, b, b, false, defaultInterfaceMetric, 0)
+	}, b, b, false, defaultInterfaceMetric, 0, "[none]")
 }
 
 func (ns *Netstack) addEth(topological_path string, config netstack.InterfaceConfig, device ethernet.Device) (*ifState, error) {
@@ -664,7 +641,7 @@ func (ns *Netstack) addEth(topological_path string, config netstack.InterfaceCon
 			return fmt.Sprintf("eth%d", nicid)
 		}
 		return config.Name
-	}, eth.NewLinkEndpoint(client), client, true, routes.Metric(config.Metric), client.Info.Features)
+	}, eth.NewLinkEndpoint(client), client, true, routes.Metric(config.Metric), client.Info.Features, config.Filepath)
 }
 
 func (ns *Netstack) addEndpoint(
@@ -674,12 +651,19 @@ func (ns *Netstack) addEndpoint(
 	doFilter bool,
 	metric routes.Metric,
 	features uint32,
+	filepath string,
 ) (*ifState, error) {
 	ifs := &ifState{
 		ns:       ns,
 		eth:      controller,
+		filepath: filepath,
 		features: features,
 	}
+	createFn := ns.mu.stack.CreateNamedNIC
+	if features&ethernet.InfoFeatureLoopback != 0 {
+		createFn = ns.mu.stack.CreateNamedLoopbackNIC
+	}
+
 	ifs.mu.state = link.StateUnknown
 	ifs.mu.metric = metric
 	ifs.mu.dhcp.running = func() bool { return false }
@@ -712,12 +696,12 @@ func (ns *Netstack) addEndpoint(
 
 	syslog.Infof("NIC %s added [sniff = %t]", name, ns.sniff)
 
-	if err := ns.mu.stack.CreateNIC(ifs.nicid, linkID); err != nil {
-		return nil, fmt.Errorf("NIC %s: could not create NIC: %v", ifs.mu.name, err)
+	if err := createFn(ifs.nicid, name, linkID); err != nil {
+		return nil, fmt.Errorf("NIC %s: could not create NIC: %s", name, err)
 	}
 	if ep.Capabilities()&stack.CapabilityResolutionRequired > 0 {
 		if err := ns.mu.stack.AddAddress(ifs.nicid, arp.ProtocolNumber, arp.ProtocolAddress); err != nil {
-			return nil, fmt.Errorf("NIC %s: adding arp address failed: %v", ifs.mu.name, err)
+			return nil, fmt.Errorf("NIC %s: adding arp address failed: %s", name, err)
 		}
 	}
 
@@ -727,19 +711,17 @@ func (ns *Netstack) addEndpoint(
 	if linkAddr := ep.LinkAddress(); len(linkAddr) > 0 {
 		lladdr := header.LinkLocalAddr(linkAddr)
 		if err := ns.mu.stack.AddAddress(ifs.nicid, ipv6.ProtocolNumber, lladdr); err != nil {
-			return nil, fmt.Errorf("NIC %s: adding link-local IPv6 %v failed: %v", ifs.mu.name, lladdr, err)
+			return nil, fmt.Errorf("NIC %s: adding link-local IPv6 %s failed: %s", name, lladdr, err)
 		}
 		snaddr := header.SolicitedNodeAddr(lladdr)
 		if err := ns.mu.stack.AddAddress(ifs.nicid, ipv6.ProtocolNumber, snaddr); err != nil {
-			return nil, fmt.Errorf("NIC %s: adding solicited-node IPv6 %v (link-local IPv6 %v) failed: %v", ifs.mu.name, snaddr, lladdr, err)
+			return nil, fmt.Errorf("NIC %s: adding solicited-node IPv6 %s (link-local IPv6 %s) failed: %s", name, snaddr, lladdr, err)
 		}
 
 		ifs.mu.dhcp.Client = dhcp.NewClient(ns.mu.stack, ifs.nicid, linkAddr, ifs.dhcpAcquired)
 
-		syslog.Infof("NIC %s: link-local IPv6: %v", name, lladdr)
+		syslog.Infof("NIC %s: link-local IPv6: %s", name, lladdr)
 	}
-
-	ifs.mu.name = name
 
 	return ifs, nil
 }
@@ -762,36 +744,23 @@ func (ns *Netstack) validateInterfaceAddress(address net.IpAddress, prefixLen ui
 	return protocol, addr, netstack.NetErr{Status: netstack.StatusOk}
 }
 
-func (ns *Netstack) getAddressesLocked(nic tcpip.NICID) ([]tcpip.ProtocolAddress, []tcpip.Subnet) {
+func (ns *Netstack) getAddressesLocked(nic tcpip.NICID) []tcpip.ProtocolAddress {
 	nicInfo := ns.mu.stack.NICInfo()
-	nicSubnets := ns.mu.stack.NICSubnets()
-
 	info, ok := nicInfo[nic]
 	if !ok {
 		panic(fmt.Sprintf("NIC [%d] not found in %+v", nic, nicInfo))
 	}
-	subnets, ok := nicSubnets[nic]
-	if !ok {
-		panic(fmt.Sprintf("NIC [%d] not found in %+v", nic, nicSubnets))
-	}
-
-	return info.ProtocolAddresses, subnets
+	return info.ProtocolAddresses
 }
 
-func containsAddress(addresses []tcpip.ProtocolAddress, protocol tcpip.NetworkProtocolNumber, addr tcpip.Address) bool {
+// findAddress finds the given address in the addresses currently assigned to
+// the NIC. Note that no duplicate addresses exist on a NIC.
+func (ns *Netstack) findAddress(nic tcpip.NICID, protocol tcpip.NetworkProtocolNumber, addr tcpip.Address) (tcpip.ProtocolAddress, bool) {
+	addresses := ns.getAddressesLocked(nic)
 	for _, a := range addresses {
-		if a.Protocol == protocol && a.Address == addr {
-			return true
+		if a.Protocol == protocol && a.AddressWithPrefix.Address == addr {
+			return a, true
 		}
 	}
-	return false
-}
-
-func containsSubnet(subnets []tcpip.Subnet, addr tcpip.Address, prefixLen uint8) bool {
-	for _, s := range subnets {
-		if s.ID() == util.ApplyMask(addr, util.CIDRMask(int(prefixLen), 8*len(addr))) && uint8(s.Prefix()) == prefixLen {
-			return true
-		}
-	}
-	return false
+	return tcpip.ProtocolAddress{}, false
 }

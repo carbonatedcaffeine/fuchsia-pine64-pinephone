@@ -23,8 +23,7 @@
 
 namespace {
 
-class DevStoryShellApp
-    : public modular::SingleServiceApp<fuchsia::modular::StoryShell> {
+class DevStoryShellApp : public modular::SingleServiceApp<fuchsia::modular::StoryShell> {
  public:
   DevStoryShellApp(sys::ComponentContext* const component_context)
       : SingleServiceApp(component_context) {
@@ -36,18 +35,16 @@ class DevStoryShellApp
   // |SingleServiceApp|
   void CreateView(
       zx::eventpair view_token,
-      fidl::InterfaceRequest<
-          fuchsia::sys::ServiceProvider> /*incoming_services*/,
-      fidl::InterfaceHandle<
-          fuchsia::sys::ServiceProvider> /*outgoing_services*/) override {
+      fidl::InterfaceRequest<fuchsia::sys::ServiceProvider> /*incoming_services*/,
+      fidl::InterfaceHandle<fuchsia::sys::ServiceProvider> /*outgoing_services*/) override {
     view_token_.value = std::move(view_token);
 
     Connect();
   }
 
   // |fuchsia::modular::StoryShell|
-  void Initialize(fidl::InterfaceHandle<fuchsia::modular::StoryShellContext>
-                      story_shell_context) override {
+  void Initialize(
+      fidl::InterfaceHandle<fuchsia::modular::StoryShellContext> story_shell_context) override {
     story_shell_context_.Bind(std::move(story_shell_context));
 
     Connect();
@@ -55,13 +52,17 @@ class DevStoryShellApp
 
   // |fuchsia::modular::StoryShell|
   void AddSurface(fuchsia::modular::ViewConnection view_connection,
-                  fuchsia::modular::SurfaceInfo /*surface_info*/) override {
-    if (view_) {
-      view_->ConnectView(std::move(view_connection.view_holder_token));
-    } else {
-      child_view_holder_tokens_.push_back(
-          std::move(view_connection.view_holder_token));
+                  fuchsia::modular::SurfaceInfo surface_info) override {
+    fuchsia::modular::SurfaceInfo2 surface_info2;
+    surface_info2.set_parent_id(surface_info.parent_id);
+    if (surface_info.surface_relation) {
+      surface_info2.set_surface_relation(*surface_info.surface_relation);
     }
+    if (surface_info.module_manifest) {
+      surface_info2.set_module_manifest(std::move(*surface_info.module_manifest));
+    }
+    surface_info2.set_module_source(surface_info.module_source);
+    AddSurface3(std::move(view_connection), std::move(surface_info2));
   }
 
   // |fuchsia::modular::StoryShell|
@@ -76,28 +77,35 @@ class DevStoryShellApp
   }
 
   // |fuchsia::modular::StoryShell|
+  void AddSurface3(fuchsia::modular::ViewConnection view_connection,
+                   fuchsia::modular::SurfaceInfo2 /*surface_info*/) override {
+    if (view_) {
+      view_->ConnectView(std::move(view_connection.view_holder_token));
+    } else {
+      child_view_holder_tokens_.push_back(std::move(view_connection.view_holder_token));
+    }
+  }
+
+  // |fuchsia::modular::StoryShell|
   void FocusSurface(std::string /*surface_id*/) override {}
 
   // |fuchsia::modular::StoryShell|
-  void DefocusSurface(std::string /*surface_id*/,
-                      DefocusSurfaceCallback callback) override {
+  void DefocusSurface(std::string /*surface_id*/, DefocusSurfaceCallback callback) override {
     callback();
   }
 
   // |fuchsia::modular::StoryShell|
-  void AddContainer(
-      std::string /*container_name*/, fidl::StringPtr /*parent_id*/,
-      fuchsia::modular::SurfaceRelation /* relation */,
-      std::vector<fuchsia::modular::ContainerLayout> /*layout*/,
-      std::vector<fuchsia::modular::ContainerRelationEntry> /* relationships */,
-      std::vector<fuchsia::modular::ContainerView> /* views */) override {}
+  void AddContainer(std::string /*container_name*/, fidl::StringPtr /*parent_id*/,
+                    fuchsia::modular::SurfaceRelation /* relation */,
+                    std::vector<fuchsia::modular::ContainerLayout> /*layout*/,
+                    std::vector<fuchsia::modular::ContainerRelationEntry> /* relationships */,
+                    std::vector<fuchsia::modular::ContainerView> /* views */) override {}
 
   // |fuchsia::modular::StoryShell|
   void RemoveSurface(std::string /*surface_id*/) override {}
 
   // |fuchsia::modular::StoryShell|
-  void ReconnectView(
-      fuchsia::modular::ViewConnection view_connection) override {}
+  void ReconnectView(fuchsia::modular::ViewConnection view_connection) override {}
 
   // |fuchsia::modular::StoryShell|
   void UpdateSurface(fuchsia::modular::ViewConnection view_connection,
@@ -105,8 +113,7 @@ class DevStoryShellApp
 
   void Connect() {
     if (story_shell_context_.is_bound() && view_token_.value) {
-      auto scenic =
-          component_context()->svc()->Connect<fuchsia::ui::scenic::Scenic>();
+      auto scenic = component_context()->svc()->Connect<fuchsia::ui::scenic::Scenic>();
       scenic::ViewContext view_context = {
           .session_and_listener_request =
               scenic::CreateScenicSessionPtrAndListenerRequest(scenic.get()),
@@ -140,9 +147,9 @@ int main(int /*argc*/, const char** /*argv*/) {
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
 
   auto context = sys::ComponentContext::Create();
-  modular::AppDriver<DevStoryShellApp> driver(
-      context->outgoing(), std::make_unique<DevStoryShellApp>(context.get()),
-      [&loop] { loop.Quit(); });
+  modular::AppDriver<DevStoryShellApp> driver(context->outgoing(),
+                                              std::make_unique<DevStoryShellApp>(context.get()),
+                                              [&loop] { loop.Quit(); });
 
   loop.Run();
   return 0;

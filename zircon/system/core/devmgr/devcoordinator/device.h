@@ -5,19 +5,21 @@
 #ifndef ZIRCON_SYSTEM_CORE_DEVMGR_DEVCOORDINATOR_DEVICE_H_
 #define ZIRCON_SYSTEM_CORE_DEVMGR_DEVCOORDINATOR_DEVICE_H_
 
-#include <ddk/device.h>
-#include <fbl/array.h>
-#include <fbl/auto_lock.h>
-#include <fbl/mutex.h>
-#include <fbl/ref_counted.h>
-#include <fbl/string.h>
 #include <fuchsia/device/manager/c/fidl.h>
+#include <fuchsia/device/manager/llcpp/fidl.h>
 #include <lib/async/cpp/task.h>
 #include <lib/async/cpp/wait.h>
 #include <lib/zx/channel.h>
 #include <lib/zx/event.h>
 
 #include <variant>
+
+#include <ddk/device.h>
+#include <fbl/array.h>
+#include <fbl/auto_lock.h>
+#include <fbl/mutex.h>
+#include <fbl/ref_counted.h>
+#include <fbl/string.h>
 
 #include "../shared/async-loop-ref-counted-rpc-handler.h"
 #include "composite-device.h"
@@ -29,9 +31,11 @@ namespace devmgr {
 class Coordinator;
 class Devhost;
 struct Devnode;
+class RemoveTask;
 class SuspendContext;
 class SuspendTask;
 class UnbindTask;
+struct UnbindTaskOpts;
 
 // clang-format off
 
@@ -75,7 +79,44 @@ constexpr zx::duration kDefaultTestTimeout = zx::sec(5);
 
 // clang-format on
 
-struct Device : public fbl::RefCounted<Device>, public AsyncLoopRefCountedRpcHandler<Device> {
+class Device : public fbl::RefCounted<Device>,
+               public llcpp::fuchsia::device::manager::Coordinator::Interface,
+               public AsyncLoopRefCountedRpcHandler<Device> {
+ public:
+  void AddDevice(::zx::channel rpc, ::fidl::VectorView<uint64_t> props, ::fidl::StringView name,
+                 uint32_t protocol_id, ::fidl::StringView driver_path, ::fidl::StringView args,
+                 llcpp::fuchsia::device::manager::AddDeviceConfig device_add_config,
+                 ::zx::channel client_remote, AddDeviceCompleter::Sync _completer) override;
+  void UnbindDone(UnbindDoneCompleter::Sync _completer) override;
+  void RemoveDone(RemoveDoneCompleter::Sync _completer) override;
+  void ScheduleRemove(bool unbind_self, ScheduleRemoveCompleter::Sync _completer) override;
+  void AddCompositeDevice(
+      ::fidl::StringView name, ::fidl::VectorView<uint64_t> props,
+      ::fidl::VectorView<llcpp::fuchsia::device::manager::DeviceComponent> components,
+      uint32_t coresident_device_index, AddCompositeDeviceCompleter::Sync _completer) override;
+  void PublishMetadata(::fidl::StringView device_path, uint32_t key,
+                       ::fidl::VectorView<uint8_t> data,
+                       PublishMetadataCompleter::Sync _completer) override;
+  void AddDeviceInvisible(::zx::channel rpc, ::fidl::VectorView<uint64_t> props,
+                          ::fidl::StringView name, uint32_t protocol_id,
+                          ::fidl::StringView driver_path, ::fidl::StringView args,
+                          ::zx::channel client_remote,
+                          AddDeviceInvisibleCompleter::Sync _completer) override;
+  void RemoveDevice(RemoveDeviceCompleter::Sync _completer) override;
+  void MakeVisible(MakeVisibleCompleter::Sync _completer) override;
+  void BindDevice(::fidl::StringView driver_path, BindDeviceCompleter::Sync _completer) override;
+  void GetTopologicalPath(GetTopologicalPathCompleter::Sync _completer) override;
+  void LoadFirmware(::fidl::StringView fw_path, LoadFirmwareCompleter::Sync _completer) override;
+  void GetMetadata(uint32_t key, GetMetadataCompleter::Sync _completer) override;
+  void GetMetadataSize(uint32_t key, GetMetadataSizeCompleter::Sync _completer) override;
+  void AddMetadata(uint32_t key, ::fidl::VectorView<uint8_t> data,
+                   AddMetadataCompleter::Sync _completer) override;
+  void ScheduleUnbindChildren(ScheduleUnbindChildrenCompleter::Sync _completer) override;
+  void RunCompatibilityTests(int64_t hook_wait_time,
+                             RunCompatibilityTestsCompleter::Sync _completer) override;
+  void DirectoryWatch(uint32_t mask, uint32_t options, ::zx::channel watcher,
+                      DirectoryWatchCompleter::Sync _completer) override;
+
   // Node for entry in device child list
   struct Node {
     static fbl::DoublyLinkedListNodeState<Device*>& node_state(Device& obj) { return obj.node_; }
@@ -126,7 +167,7 @@ struct Device : public fbl::RefCounted<Device>, public AsyncLoopRefCountedRpcHan
             if constexpr (std::is_same_v<T, IterType>) {
               ++arg;
             } else if constexpr (std::is_same_v<T, Composite>) {
-                cur_component_++;
+              cur_component_++;
             } else if constexpr (std::is_same_v<T, Done>) {
               state_ = Done{};
             }
@@ -191,8 +232,8 @@ struct Device : public fbl::RefCounted<Device>, public AsyncLoopRefCountedRpcHan
       }
     }
 
-    using Composite =
-        fbl::DoublyLinkedList<CompositeDeviceComponent*, CompositeDeviceComponent::DeviceNode>::iterator;
+    using Composite = fbl::DoublyLinkedList<CompositeDeviceComponent*,
+                                            CompositeDeviceComponent::DeviceNode>::iterator;
     struct Done {
       bool operator==(Done) const { return true; }
     };
@@ -266,13 +307,13 @@ struct Device : public fbl::RefCounted<Device>, public AsyncLoopRefCountedRpcHan
   zx_status_t SendSuspend(uint32_t flags, SuspendCompletion completion);
 
   using UnbindCompletion = fit::callback<void(zx_status_t)>;
-  // Issue an Unbind request to this device. This is equivalent to running the unbind hook
-  // of a device followed by a CompleteRemoval request
+  using RemoveCompletion = fit::callback<void(zx_status_t)>;
+  // Issue an Unbind request to this device, which will run the unbind hook.
   // When the response comes in, the given completion will be invoked.
   zx_status_t SendUnbind(UnbindCompletion completion);
-  // Issue a CompleteRemoval request to this device. When the response comes in, the
-  // given completion will be invoked.
-  zx_status_t SendCompleteRemoval(UnbindCompletion completion);
+  // Issue a CompleteRemoval request to this device.
+  // When the response comes in, the given completion will be invoked.
+  zx_status_t SendCompleteRemoval(RemoveCompletion completion);
 
   // Break the relationship between this device object and its parent
   void DetachFromParent();
@@ -342,16 +383,21 @@ struct Device : public fbl::RefCounted<Device>, public AsyncLoopRefCountedRpcHan
   // Device.
   void CompleteSuspend(zx_status_t status);
 
+  // Creates the unbind and remove tasks for the device if they do not already exist.
+  // |opts| is used to configure the unbind task.
+  void CreateUnbindRemoveTasks(UnbindTaskOpts opts);
+
   // Returns the in-progress unbind task if it exists, nullptr otherwise.
-  // Unbind tasks are used to facilitate |Unbind| as well as |CompleteRemoval| requests.
+  // Unbind tasks are used to facilitate |Unbind| requests.
   fbl::RefPtr<UnbindTask> GetActiveUnbind() { return active_unbind_; }
-  // Creates a new unbind task if necessary and returns a reference to it.
-  // If one is already in-progress, a reference to it is returned instead.
-  // If |do_unbind| is true, an |Unbind| request will be sent to the device,
-  // otherwise a |CompleteRemoval| request will be sent.
-  fbl::RefPtr<UnbindTask> RequestUnbindTask(bool do_unbind = true);
+  // Returns the in-progress remove task if it exists, nullptr otherwise.
+  // Remove tasks are used to facilitate |CompleteRemoval| requests.
+  fbl::RefPtr<RemoveTask> GetActiveRemove() { return active_remove_; }
+
   // Run the completion for the outstanding unbind, if any.
   zx_status_t CompleteUnbind();
+  // Run the completion for the outstanding remove, if any.
+  zx_status_t CompleteRemove();
 
   zx_status_t DriverCompatibiltyTest();
 
@@ -376,12 +422,15 @@ struct Device : public fbl::RefCounted<Device>, public AsyncLoopRefCountedRpcHan
     kActive,
     kSuspending,  // The devhost is in the process of suspending the device.
     kSuspended,
-    kUnbinding,   // The devhost is in the process of unbinding the device.
-    kDead,        // The device has been remove()'d
+    kUnbinding,  // The devhost is in the process of unbinding and removing the device.
+    kDead,       // The device has been remove()'d
   };
 
   void set_state(Device::State state) { state_ = state; }
   State state() const { return state_; }
+
+  void inc_num_removal_attempts() { num_removal_attempts_++; }
+  size_t num_removal_attempts() const { return num_removal_attempts_; }
 
   enum class TestStateMachine {
     kTestNotStarted = 1,
@@ -488,6 +537,13 @@ struct Device : public fbl::RefCounted<Device>, public AsyncLoopRefCountedRpcHan
   // it.
   UnbindCompletion unbind_completion_;
 
+  // If a remove is in-progress, this task represents it.
+  fbl::RefPtr<RemoveTask> active_remove_;
+  // If a remove is in-progress, this completion will be invoked when it is
+  // completed. It will likely mark |active_remove_| as completed and clear
+  // it.
+  RemoveCompletion remove_completion_;
+
   // For attaching as an open connection to the proxy device,
   // or once the device becomes visible.
   zx::channel client_remote_;
@@ -507,6 +563,9 @@ struct Device : public fbl::RefCounted<Device>, public AsyncLoopRefCountedRpcHan
   // closed by the driver, signalling the end of the tests. We don't print log messages until the
   // entire test is finished to avoid interleaving output from multiple drivers.
   async::WaitMethod<Device, &Device::HandleTestOutput> test_wait_{this};
+
+  // This lets us check for unexpected removals and is for testing use only.
+  size_t num_removal_attempts_ = 0;
 };
 
 }  // namespace devmgr

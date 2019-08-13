@@ -66,7 +66,24 @@ source_set("buffer") {
     deps = [
       "zircon:buffer",
     ]
+  } else {
+    deps = [
+      "linux:buffer",
+    ]
   }
+}
+
+source_set("bus_mapper_header") {
+  public_configs = [ ":platform_include_config" ]
+
+  public_deps = [
+    ":buffer_header",
+    ":handle",
+  ]
+
+  sources = [
+    "platform_bus_mapper.h",
+  ]
 }
 
 source_set("bus_mapper") {
@@ -74,19 +91,20 @@ source_set("bus_mapper") {
 
   public_deps = [
     ":buffer",
+    ":bus_mapper_header",
     ":handle",
     "$magma_build_root/src/magma_util:common",
   ]
 
-  sources = [
-    "platform_bus_mapper.h",
-  ]
-
-  deps = [
-    "zircon:bus_mapper",
-  ]
-
-  allow_circular_includes_from = [ "zircon:bus_mapper" ]
+  if (is_fuchsia) {
+    deps = [
+      "zircon:bus_mapper",
+    ]
+  } else {
+    deps = [
+      "linux:bus_mapper",
+    ]
+  }
 }
 
 source_set("handle_header") {
@@ -113,6 +131,31 @@ source_set("handle") {
   }
 }
 
+source_set("iommu_header") {
+  public_configs = [ ":platform_include_config" ]
+
+  public_deps = [
+    ":bus_mapper",
+    "$magma_build_root/src/magma_util:common",
+  ]
+
+  sources = [
+    "platform_iommu.h",
+  ]
+}
+
+source_set("iommu") {
+  public_deps = [
+    ":iommu_header",
+  ]
+
+  if (is_linux) {
+    deps = [
+      "linux:iommu",
+    ]
+  }
+}
+
 source_set("mmio_header") {
   public_configs = [ ":platform_include_config" ]
 
@@ -132,7 +175,7 @@ source_set("device_header") {
     ":buffer_header",
     ":handle_header",
     ":mmio_header",
-    "$magma_build_root/src/magma_util:common",
+    "$magma_build_root/src/magma_util",
   ]
 
   sources = [
@@ -157,32 +200,6 @@ source_set("device") {
       "linux:device",
     ]
   }
-}
-
-source_set("firmware_loader_header") {
-  public_configs = [ ":platform_include_config" ]
-
-  sources = [
-    "platform_firmware_loader.h",
-  ]
-  deps = [
-    ":buffer_header",
-  ]
-}
-
-source_set("firmware_loader") {
-  public_configs = [ ":platform_include_config" ]
-
-  public_deps = [
-    ":buffer",
-    ":firmware_loader_header",
-    ":handle",
-    "$magma_build_root/src/magma_util:common",
-  ]
-
-  deps = [
-    "zircon:firmware_loader",
-  ]
 }
 
 source_set("random_header") {

@@ -1,4 +1,4 @@
 {
-  "pkg/ddktl/include/ddktl/device-internal.h": "0a4d1e3864696179dc3f8f4967c36903",
-  "pkg/ddktl/include/ddktl/device.h": "a6c396af88404089b459d8a8dfcbb45b"
+  "pkg/ddktl/include/ddktl/device-internal.h": "4df4e5323f5db3277ea9004a09b19542",
+  "pkg/ddktl/include/ddktl/device.h": "cbf5a92cb9e5fa1bef41e5e46b0a8e54"
 }

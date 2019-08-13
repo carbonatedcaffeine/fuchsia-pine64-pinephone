@@ -5,12 +5,6 @@
 #ifndef ZIRCON_SYSTEM_CORE_DEVMGR_DEVCOORDINATOR_COORDINATOR_H_
 #define ZIRCON_SYSTEM_CORE_DEVMGR_DEVCOORDINATOR_COORDINATOR_H_
 
-#include <ddk/binding.h>
-#include <ddk/device.h>
-#include <fbl/intrusive_double_list.h>
-#include <fbl/string.h>
-#include <fbl/unique_ptr.h>
-#include <fbl/vector.h>
 #include <lib/async/cpp/wait.h>
 #include <lib/svc/outgoing.h>
 #include <lib/zx/channel.h>
@@ -20,6 +14,13 @@
 #include <lib/zx/vmo.h>
 
 #include <utility>
+
+#include <ddk/binding.h>
+#include <ddk/device.h>
+#include <fbl/intrusive_double_list.h>
+#include <fbl/string.h>
+#include <fbl/unique_ptr.h>
+#include <fbl/vector.h>
 
 #include "boot-args.h"
 #include "composite-device.h"
@@ -44,9 +45,7 @@ class SuspendContext {
 
   SuspendContext() = default;
 
-  SuspendContext(Flags flags, uint32_t sflags)
-      : flags_(flags),
-        sflags_(sflags) {}
+  SuspendContext(Flags flags, uint32_t sflags) : flags_(flags), sflags_(sflags) {}
 
   ~SuspendContext() {}
 
@@ -54,6 +53,8 @@ class SuspendContext {
   SuspendContext& operator=(SuspendContext&&) = default;
 
   void set_task(fbl::RefPtr<SuspendTask> task) { task_ = std::move(task); }
+
+  const SuspendTask& task() const { return *task_; }
 
   Flags flags() const { return flags_; }
   void set_flags(Flags flags) { flags_ = flags; }
@@ -111,8 +112,6 @@ struct CoordinatorConfig {
   bool asan_drivers;
   // Whether to reboot the device when suspend does not finish on time.
   bool suspend_fallback;
-  // Whether to print out debugging when suspend does not finish on time.
-  bool suspend_debug;
 };
 
 class Coordinator {
@@ -160,6 +159,11 @@ class Coordinator {
                         bool invisible, zx::channel client_remote, fbl::RefPtr<Device>* new_device);
   // Begin scheduling for removal of the device and unbinding of its children.
   void ScheduleRemove(const fbl::RefPtr<Device>& dev);
+  // This is for scheduling the initial unbind task as a result of a devhost's |ScheduleRemove|
+  // request.
+  // If |do_unbind| is true, unbinding is also requested for |dev|.
+  void ScheduleDevhostRequestedRemove(const fbl::RefPtr<Device>& dev, bool do_unbind = false);
+  void ScheduleDevhostRequestedUnbindChildren(const fbl::RefPtr<Device>& parent);
   zx_status_t RemoveDevice(const fbl::RefPtr<Device>& dev, bool forced);
   zx_status_t MakeVisible(const fbl::RefPtr<Device>& dev);
   zx_status_t BindDevice(const fbl::RefPtr<Device>& dev, fbl::StringPiece drvlibname,
@@ -177,10 +181,10 @@ class Coordinator {
                           uint32_t length);
   zx_status_t PublishMetadata(const fbl::RefPtr<Device>& dev, const char* path, uint32_t type,
                               const void* data, uint32_t length);
-  zx_status_t AddCompositeDevice(const fbl::RefPtr<Device>& dev, fbl::StringPiece name,
-                                 const zx_device_prop_t* props_data, size_t props_count,
-                                 const fuchsia_device_manager_DeviceComponent* components,
-                                 size_t components_count, uint32_t coresident_device_index);
+  zx_status_t AddCompositeDevice(
+      const fbl::RefPtr<Device>& dev, fbl::StringPiece name, ::fidl::VectorView<uint64_t> props,
+      ::fidl::VectorView<llcpp::fuchsia::device::manager::DeviceComponent> components,
+      uint32_t coresident_device_index);
 
   void DmMexec(zx::vmo kernel, zx::vmo bootdata);
 
@@ -196,7 +200,6 @@ class Coordinator {
   bool disable_netsvc() const { return config_.disable_netsvc; }
   bool require_system() const { return config_.require_system; }
   bool suspend_fallback() const { return config_.suspend_fallback; }
-  bool suspend_debug() const { return config_.suspend_debug; }
 
   void set_running(bool running) { running_ = running; }
   bool system_available() const { return system_available_; }

@@ -25,23 +25,31 @@ const SyncRequestCFlavor = `
 
 {{- define "SyncRequestCFlavorMethodSignature" -}}
   {{- if .Response -}}
-{{ .Name }}({{ template "Params" .Request }}{{ if .Request }}, {{ end }}{{ template "OutParams" .Response }})
+{{ .Name }}_Deprecated({{ template "Params" .Request }}{{ if .Request }}, {{ end }}{{ template "OutParams" .Response }})
   {{- else -}}
-{{ .Name }}({{ template "Params" .Request }})
+{{ .Name }}_Deprecated({{ template "Params" .Request }})
   {{- end -}}
 {{- end }}
 
 {{- define "StaticCallSyncRequestCFlavorMethodSignature" -}}
   {{- if .Response -}}
-{{ .Name }}(zx::unowned_channel _client_end, {{ template "Params" .Request }}{{ if .Request }}, {{ end }}{{ template "OutParams" .Response }})
+{{ .Name }}_Deprecated(zx::unowned_channel _client_end, {{ template "Params" .Request }}{{ if .Request }}, {{ end }}{{ template "OutParams" .Response }})
   {{- else -}}
-{{ .Name }}(zx::unowned_channel _client_end {{- if .Request }}, {{ end }}{{ template "Params" .Request }})
+{{ .Name }}_Deprecated(zx::unowned_channel _client_end {{- if .Request }}, {{ end }}{{ template "Params" .Request }})
   {{- end -}}
+{{- end }}
+
+{{- define "SyncRequestCFlavorMethodArgumentsNew" -}}
+{{ template "Params" .Request }}
+{{- end }}
+
+{{- define "StaticCallSyncRequestCFlavorMethodArgumentsNew" -}}
+zx::unowned_channel _client_end {{- if .Request }}, {{ end }}{{ template "Params" .Request }}
 {{- end }}
 
 {{- define "SyncRequestCFlavorMethodDefinition" }}
 zx_status_t {{ .LLProps.InterfaceName }}::SyncClient::{{ template "SyncRequestCFlavorMethodSignature" . }} {
-  return {{ .LLProps.InterfaceName }}::Call::{{ .Name }}(zx::unowned_channel(this->channel_)
+  return {{ .LLProps.InterfaceName }}::Call::{{ .Name }}_Deprecated(zx::unowned_channel(this->channel_)
     {{- if or .Request .Response }}, {{ end }}
     {{- template "SyncClientMoveParams" .Request }}
     {{- if and .Request .Response }}, {{ end }}
@@ -54,9 +62,9 @@ zx_status_t {{ .LLProps.InterfaceName }}::SyncClient::{{ template "SyncRequestCF
 
 {{- define "StaticCallSyncRequestCFlavorMethodDefinition" }}
 zx_status_t {{ .LLProps.InterfaceName }}::Call::{{ template "StaticCallSyncRequestCFlavorMethodSignature" . }} {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<{{ .Name }}Request>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<{{ .Name }}Request, ::fidl::MessageDirection::kSending>();
 
-  {{- if .LLProps.StackAllocRequest }}
+  {{- if .LLProps.ClientContext.StackAllocRequest }}
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] {{- if not .LLProps.LinearizeRequest }} = {} {{- end }};
   {{- else }}
   std::unique_ptr<uint8_t[]> _write_bytes_unique_ptr(new uint8_t[_kWriteAllocSize]);
@@ -68,7 +76,7 @@ zx_status_t {{ .LLProps.InterfaceName }}::Call::{{ template "StaticCallSyncReque
   {{- else }}
   auto& _request = *reinterpret_cast<{{ .Name }}Request*>(_write_bytes);
   {{- end }}
-  _request._hdr.ordinal = {{ .OrdinalName }};
+  _request._hdr.ordinal = {{ .Ordinals.Write.Name }};
   {{- template "FillRequestStructMembers" .Request -}}
 
   {{- if .LLProps.LinearizeRequest }}
@@ -90,8 +98,8 @@ zx_status_t {{ .LLProps.InterfaceName }}::Call::{{ template "StaticCallSyncReque
   {{- if .HasResponse }}
 
   {{- /* Has response */}}
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<{{ .Name }}Response>();
-  {{- if .LLProps.StackAllocResponse }}
+  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<{{ .Name }}Response, ::fidl::MessageDirection::kReceiving>();
+  {{- if .LLProps.ClientContext.StackAllocResponse }}
   FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
   {{- else }}
   std::unique_ptr<uint8_t[]> _read_bytes_unique_ptr(new uint8_t[_kReadAllocSize]);
@@ -118,6 +126,74 @@ zx_status_t {{ .LLProps.InterfaceName }}::Call::{{ template "StaticCallSyncReque
   {{- /* Does not have response */}}
   return ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
   {{- end }}
+}
+{{- end }}
+
+{{- define "SyncRequestCFlavorMethodDefinitionNew" }}
+{{ if .HasResponse -}} template <> {{- end }}
+{{ .LLProps.InterfaceName }}::ResultOf::{{ .Name }}_Impl {{- if .HasResponse -}} <{{ .LLProps.InterfaceName }}::{{ .Name }}Response> {{- end }}::{{ .Name }}_Impl(
+  {{- template "StaticCallSyncRequestCFlavorMethodArgumentsNew" . }}) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<{{ .Name }}Request, ::fidl::MessageDirection::kSending>();
+
+  {{- if .LLProps.ClientContext.StackAllocRequest }}
+  ::fidl::internal::AlignedBuffer<_kWriteAllocSize> _write_bytes_inlined;
+  auto& _write_bytes_array = _write_bytes_inlined;
+  {{- else }}
+  std::unique_ptr _write_bytes_boxed = std::make_unique<::fidl::internal::AlignedBuffer<_kWriteAllocSize>>();
+  auto& _write_bytes_array = *_write_bytes_boxed;
+  {{- end }}
+
+  {{- if .LLProps.LinearizeRequest }}
+  {{ .Name }}Request _request = {};
+  {{- else }}
+  uint8_t* _write_bytes = _write_bytes_array.view().data();
+  memset(_write_bytes, 0, {{ .Name }}Request::PrimarySize);
+    {{- if .Request }}
+  auto& _request = *reinterpret_cast<{{ .Name }}Request*>(_write_bytes);
+    {{- end }}
+  {{- end }}
+  {{- template "FillRequestStructMembers" .Request -}}
+
+  {{- if .LLProps.LinearizeRequest }}
+  auto _linearize_result = ::fidl::Linearize(&_request, _write_bytes_array.view());
+  if (_linearize_result.status != ZX_OK) {
+    Super::SetFailure(std::move(_linearize_result));
+    return;
+  }
+  ::fidl::DecodedMessage<{{ .Name }}Request> _decoded_request = std::move(_linearize_result.message);
+  {{- else }}
+  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof({{ .Name }}Request));
+  ::fidl::DecodedMessage<{{ .Name }}Request> _decoded_request(std::move(_request_bytes));
+  {{- end }}
+
+  {{- if .HasResponse }}
+  Super::SetResult(
+      {{ .LLProps.InterfaceName }}::InPlace::{{ .Name }}(std::move(_client_end)
+      {{- if .Request }}, std::move(_decoded_request){{ end -}}
+      , Super::response_buffer()));
+  {{- else }}
+  Super::operator=(
+      {{ .LLProps.InterfaceName }}::InPlace::{{ .Name }}(std::move(_client_end)
+      {{- if .Request }}, std::move(_decoded_request){{ end -}}
+  ));
+  {{- end }}
+}
+
+{{ .LLProps.InterfaceName }}::ResultOf::{{ .Name }} {{ .LLProps.InterfaceName }}::SyncClient::{{ .Name }}(
+  {{- template "SyncRequestCFlavorMethodArgumentsNew" . }}) {
+  return ResultOf::{{ .Name }}(zx::unowned_channel(this->channel_)
+    {{- if .Request }}, {{ end }}
+    {{- template "SyncClientMoveParams" .Request -}}
+  );
+}
+{{- end }}
+
+{{- define "StaticCallSyncRequestCFlavorMethodDefinitionNew" }}
+{{ .LLProps.InterfaceName }}::ResultOf::{{ .Name }} {{ .LLProps.InterfaceName }}::Call::{{ .Name }}(
+  {{- template "StaticCallSyncRequestCFlavorMethodArgumentsNew" . }}) {
+  return ResultOf::{{ .Name }}(std::move(_client_end)
+    {{- if .Request }}, {{ end }}
+    {{- template "SyncClientMoveParams" .Request }});
 }
 {{- end }}
 `

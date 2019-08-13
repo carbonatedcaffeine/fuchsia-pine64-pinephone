@@ -6,46 +6,48 @@
 #define LIB_FIDL_ASYNC_CPP_BIND_H_
 
 #include <lib/async/wait.h>
-#include <lib/fidl/llcpp/transaction.h>
 #include <lib/fidl-async/bind.h>
 #include <lib/fidl-async/cpp/channel_transaction.h>
+#include <lib/fidl/llcpp/transaction.h>
+#include <lib/fit/function.h>
 #include <lib/zx/channel.h>
 #include <zircon/fidl.h>
 
 namespace fidl {
 
+template <typename Interface>
+using OnChannelClosedFn = fit::callback<void(Interface*)>;
+
 namespace internal {
 
-using TypeErasedDispatchFn = bool (*) (void*, fidl_msg_t*, ::fidl::Transaction*);
+using TypeErasedDispatchFn = bool (*)(void*, fidl_msg_t*, ::fidl::Transaction*);
 
-zx_status_t TypeErasedBind(async_dispatcher_t* dispatcher,
-                           zx::channel channel,
-                           void* impl,
-                           TypeErasedDispatchFn dispatch_fn);
+using TypeErasedOnChannelClosedFn = fit::callback<void(void*)>;
+
+zx_status_t TypeErasedBind(async_dispatcher_t* dispatcher, zx::channel channel, void* impl,
+                           TypeErasedDispatchFn dispatch_fn,
+                           TypeErasedOnChannelClosedFn on_channel_closed_fn);
 
 class SimpleBinding : private async_wait_t {
-public:
-    SimpleBinding(async_dispatcher_t* dispatcher,
-                  zx::channel channel,
-                  void* impl,
-                  TypeErasedDispatchFn dispatch_fn);
+ public:
+  SimpleBinding(async_dispatcher_t* dispatcher, zx::channel channel, void* impl,
+                TypeErasedDispatchFn dispatch_fn, TypeErasedOnChannelClosedFn on_channel_closed_fn);
 
-    ~SimpleBinding();
+  ~SimpleBinding();
 
-    static void MessageHandler(async_dispatcher_t* dispatcher,
-                               async_wait_t* wait,
-                               zx_status_t status,
-                               const zx_packet_signal_t* signal);
+  static void MessageHandler(async_dispatcher_t* dispatcher, async_wait_t* wait, zx_status_t status,
+                             const zx_packet_signal_t* signal);
 
-private:
-    friend fidl::internal::ChannelTransaction;
-    friend zx_status_t BeginWait(std::unique_ptr<SimpleBinding>* unique_binding);
+ private:
+  friend fidl::internal::ChannelTransaction;
+  friend zx_status_t BeginWait(std::unique_ptr<SimpleBinding>* unique_binding);
 
-    zx::unowned_channel channel() const { return zx::unowned_channel(async_wait_t::object); }
+  zx::unowned_channel channel() const { return zx::unowned_channel(async_wait_t::object); }
 
-    async_dispatcher_t* dispatcher_;
-    void* interface_;
-    TypeErasedDispatchFn dispatch_fn_;
+  async_dispatcher_t* dispatcher_;
+  void* interface_;
+  TypeErasedDispatchFn dispatch_fn_;
+  TypeErasedOnChannelClosedFn on_channel_closed_fn_;
 };
 
 // Attempts to attach the binding onto the async dispatcher.
@@ -54,7 +56,7 @@ private:
 // Returns the status of |async_begin_wait|.
 zx_status_t BeginWait(std::unique_ptr<SimpleBinding>* unique_binding);
 
-} // namespace internal
+}  // namespace internal
 
 // Binds an implementation of a low-level C++ server interface to |channel| using |dispatcher|.
 //
@@ -82,15 +84,31 @@ zx_status_t BeginWait(std::unique_ptr<SimpleBinding>* unique_binding);
 // It is unsafe to destroy the dispatcher from within a dispatch function.
 // It is unsafe to destroy the dispatcher while any fidl::Transaction objects are alive.
 template <typename Interface>
-zx_status_t Bind(async_dispatcher_t* dispatcher,
-                 zx::channel channel,
-                 Interface* impl) {
-    return internal::TypeErasedBind(dispatcher,
-                                    std::move(channel),
-                                    impl,
-                                    &Interface::_Outer::TypeErasedDispatch);
+zx_status_t Bind(async_dispatcher_t* dispatcher, zx::channel channel, Interface* impl) {
+  return internal::TypeErasedBind(dispatcher, std::move(channel), impl,
+                                  &Interface::_Outer::TypeErasedDispatch, nullptr);
 }
 
-} // namespace fidl
+// As above, but will invoke |on_channel_close_fn| on |impl| when either end of the channel
+// is closed.
+template <typename Interface>
+zx_status_t Bind(async_dispatcher_t* dispatcher, zx::channel channel, Interface* impl,
+                 OnChannelClosedFn<Interface> on_channel_close_fn) {
+  return internal::TypeErasedBind(dispatcher, std::move(channel), impl,
+                                  &Interface::_Outer::TypeErasedDispatch,
+                                  [fn = std::move(on_channel_close_fn)](void* impl) mutable {
+                                    fn(static_cast<Interface*>(impl));
+                                  });
+}
 
-#endif // LIB_FIDL_ASYNC_CPP_BIND_H_
+// As above, but will destroy |impl| when either end of the channel is closed.
+template <typename Interface>
+zx_status_t Bind(async_dispatcher_t* dispatcher, zx::channel channel,
+                 std::unique_ptr<Interface> impl) {
+  OnChannelClosedFn<Interface> fn = [](Interface* impl) { delete impl; };
+  return Bind(dispatcher, std::move(channel), impl.release(), std::move(fn));
+}
+
+}  // namespace fidl
+
+#endif  // LIB_FIDL_ASYNC_CPP_BIND_H_

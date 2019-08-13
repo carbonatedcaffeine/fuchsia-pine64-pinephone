@@ -23,7 +23,7 @@ import scipy.stats
 #
 # Data is gathered from a 3-level sampling process:
 #
-#  1) Boot Fuchsia one or more times.  (Currently we only boot once.)
+#  1) Boot Fuchsia multiple times.
 #  2) For each boot, launch the perf test process one or more times.
 #  3) For each process launch, instantiate the performance test and
 #     run the body of the test some number of times.
@@ -31,20 +31,10 @@ import scipy.stats
 # This is intended to account for variation across boots and across process
 # launches.
 #
-# Currently we use t-test confidence intervals.  In future we could instead
-# use bootstrap confidence intervals.
-#
-#  * We apply the t-test confidence interval to the mean running times from
-#    each process instance (from level #3).  This means we treat the sample
-#    size as being the number of processes launches.  This is rather
-#    ad-hoc: it assumes that there is a lot of between-process variation
-#    and that we need to widen the confidence intervals to reflect that.
-#    Using bootstrapping with resampling across the 3 levels above should
-#    account for that variation without making ad-hoc assumptions.
-#
-#  * This assumes that the values we apply the t-test to are normally
-#    distributed, or approximately normally distributed.  Using
-#    bootstrapping instead would avoid this assumption.
+# Currently we use t-test confidence intervals.  This assumes that the
+# values we apply the t-test to are normally distributed, or approximately
+# normally distributed.  In future we could instead use bootstrap
+# confidence intervals, which would avoid that assumption.
 
 
 # ALPHA is a parameter for calculating confidence intervals.  It is
@@ -91,6 +81,11 @@ class Stats(object):
     def FormatConfidenceInterval(self):
         return '%d +/- %d' % (self._mean, self._offset)
 
+    # Returns the relative CI width, which is the width of the confidence
+    # interval divided by the mean.
+    def RelativeConfidenceIntervalWidth(self):
+        return self._offset * 2 / self._mean
+
 
 def ReadJsonFile(filename):
     with open(filename, 'r') as fh:
@@ -101,8 +96,9 @@ def IsResultsFilename(name):
     return name.endswith('.json') and name != 'summary.json'
 
 
-# Read the raw perf test results from a directory or a tar file.  Returns a
-# sequence (iterator) of JSON trees.
+# Read the raw perf test results from a directory or a tar file that
+# contains results from a single boot of Fuchsia.  Returns a sequence
+# (iterator) of JSON trees.
 #
 # Accepting tar files here is a convenience for when doing local testing of
 # the statistics.  The Swarming system used for the bots produces "out.tar"
@@ -135,49 +131,53 @@ def RawResultsFromDir(filename):
                 yield ReadJsonFile(os.path.join(filename, name))
 
 
-# This function accepts data in two possible formats:
+# Takes a list of filenames of perf test results, each representing the
+# results from one boot of Fuchsia, and each in the format accepted by
+# RawResultsFromDir().
 #
-#  #1 A directory (or tar file), in the format read by RawResultsFromDir(),
-#     containing perf test results from a single boot of Fuchsia.
-#
-#  #2 A directory representing perf test results from multiple boots of
-#     Fuchsia.  It contains a "by_boot" subdir, which contains directories
-#     (or tar files) of the format read by RawResultsFromDir().
-#
-# TODO(PT-202): Currently the fuchsia_perfcompare.py recipe invokes this
-# tool with data of format #1, but it will switch to using format #2.
+# Returns a dict mapping test names to Stats objects.
+def ResultsFromDirs(filenames):
+    results_map = {}
+    for boot_results_path in filenames:
+        results_for_boot = {}
+        for process_run_results in RawResultsFromDir(boot_results_path):
+            for test_case in process_run_results:
+                # Skip the running time from the test's initial run within
+                # the process; treat it as a warmup run.  The initial run
+                # is often slower than later runs, so it would skew the
+                # mean if we included it.  The RoundTrip_*_MultiProcess
+                # tests are an extreme case, because the first run waits
+                # for a subprocess to start up.  See PT-244.
+                new_value = Mean(test_case['values'][1:])
+                results_for_boot.setdefault(test_case['label'], []).append(
+                    new_value)
+        for label, values in results_for_boot.iteritems():
+            results_map.setdefault(label, []).append(Mean(values))
+    return {name: Stats(values) for name, values in results_map.iteritems()}
+
+
+# This takes a directory representing perf test results from multiple boots
+# of Fuchsia.  It contains a "by_boot" subdir, which contains directories
+# (or tar files) of the format read by RawResultsFromDir().
 #
 # This returns a dict mapping test names to Stats objects.
 def ResultsFromDir(filename):
     assert os.path.exists(filename)
     by_boot_dir = os.path.join(filename, 'by_boot')
-    if os.path.exists(by_boot_dir):
-        filenames = [os.path.join(by_boot_dir, name)
-                     for name in sorted(os.listdir(by_boot_dir))]
-    else:
-        filenames = [filename]
-
-    results_map = {}
-    # TODO(PT-202): Currently the processing we do here erases the
-    # distinction between cross-boot variation and cross-process variation,
-    # but we should distinguish between the two.
-    for boot_results_path in filenames:
-        for process_run_results in RawResultsFromDir(boot_results_path):
-            for test_case in process_run_results:
-                new_value = Mean(test_case['values'])
-                results_map.setdefault(test_case['label'], []).append(new_value)
-    return {name: Stats(values) for name, values in results_map.iteritems()}
+    assert os.path.exists(by_boot_dir), by_boot_dir
+    filenames = [os.path.join(by_boot_dir, name)
+                 for name in sorted(os.listdir(by_boot_dir))]
+    return ResultsFromDirs(filenames)
 
 
-def FormatTable(rows, out_fh):
-    assert len(rows) > 0
-    column_count = len(rows[0])
+def FormatTable(heading_row, rows, out_fh):
+    column_count = len(heading_row)
     for row in rows:
         assert len(row) == column_count
+    rows = [heading_row] + rows
     widths = [2 + max(len(row[col_number]) for row in rows)
               for col_number in xrange(column_count)]
-    # Underline the header row.  This assumes that the first row is a
-    # header row.
+    # Underline the heading row.
     rows.insert(1, ['-' * (width - 2) for width in widths])
     for row in rows:
         for col_number, value in enumerate(row):
@@ -195,8 +195,17 @@ def ComparePerf(args, out_fh):
     labels = set(results_maps[0].iterkeys())
     labels.update(results_maps[1].iterkeys())
 
-    rows = [['Test case', 'Improve/regress?', 'Factor change',
-             'Mean before', 'Mean after']]
+    counts = {
+        'added': 0,
+        'removed': 0,
+        'faster': 0,
+        'slower': 0,
+        'no_sig_diff': 0,
+    }
+    heading_row = ['Test case', 'Improve/regress?', 'Factor change',
+                   'Mean before', 'Mean after']
+    all_rows = []
+    diff_rows = []
     for label in sorted(labels):
         if label not in results_maps[0]:
             result = 'added'
@@ -223,13 +232,33 @@ def ComparePerf(args, out_fh):
             before_range = stats[0].FormatConfidenceInterval()
             after_range = stats[1].FormatConfidenceInterval()
             factor_range = '%.3f-%.3f' % (factor_min, factor_max)
-        rows.append([
-            label,
-            result,
-            factor_range,
-            before_range,
-            after_range])
-    FormatTable(rows, out_fh)
+        counts[result] += 1
+        row = [label, result, factor_range, before_range, after_range]
+        all_rows.append(row)
+        if result != 'no_sig_diff':
+            diff_rows.append(row)
+
+    def FormatCount(count, text):
+        noun = 'test case' if count == 1 else 'test cases'
+        out_fh.write('  %d %s %s\n' % (count, noun, text))
+
+    out_fh.write('Summary counts:\n')
+    FormatCount(len(labels), 'in total')
+    FormatCount(counts['no_sig_diff'],
+                'had no significant difference (no_sig_diff)')
+    FormatCount(counts['faster'], 'got faster')
+    FormatCount(counts['slower'], 'got slower')
+    FormatCount(counts['added'], 'added')
+    FormatCount(counts['removed'], 'removed')
+    out_fh.write('\n\n')
+
+    if len(diff_rows) != 0:
+        out_fh.write('Results from test cases with differences:\n\n')
+        FormatTable(heading_row, diff_rows, out_fh)
+        out_fh.write('\n\n')
+
+    out_fh.write('Results from all test cases:\n\n')
+    FormatTable(heading_row, all_rows, out_fh)
 
 
 def IntervalsIntersect(interval1, interval2):
@@ -248,7 +277,14 @@ def MismatchRate(intervals):
 
 
 def ValidatePerfCompare(args, out_fh):
-    results_maps = [ResultsFromDir(filename) for filename in args.results_dirs]
+    boot_count = len(args.results_dirs)
+    group_size = args.group_size
+    group_count = boot_count / group_size
+
+    results_maps = [
+        ResultsFromDirs(
+            args.results_dirs[i * group_size : (i + 1) * group_size])
+        for i in xrange(group_count)]
 
     # Group by test name (label).
     by_test = {}
@@ -264,11 +300,21 @@ def ValidatePerfCompare(args, out_fh):
         out_fh.write('%f %s\n' % (mismatch_rate, label))
         mismatch_rates.append(mismatch_rate)
 
+    mean_relative_ci_width = Mean([
+        stats.RelativeConfidenceIntervalWidth()
+        for results_map in results_maps
+        for stats in results_map.itervalues()])
+
     out_fh.write('\n')
     mean_val = Mean(mismatch_rates)
     out_fh.write('Mean mismatch rate: %f\n' % mean_val)
+    out_fh.write('Mean relative confidence interval width: %f\n'
+                 % mean_relative_ci_width)
     out_fh.write('Number of test cases: %d\n' % len(mismatch_rates))
-    out_fh.write('Number of result sets: %d\n' % len(results_maps))
+    out_fh.write('Number of result sets: %d groups of %d boots each'
+                 ' (ignoring %d leftover boots)\n'
+                 % (group_count, group_size,
+                    boot_count - group_size * group_count))
     out_fh.write('Expected number of test cases with mismatches: %f\n'
                  % (mean_val * len(mismatch_rates)))
 
@@ -308,6 +354,14 @@ def Main(argv, out_fh):
         ' statistics used by the perfcompare tool.  It can be used to check'
         ' the rate at which the tool will falsely indicate that performance'
         ' of a test case has regressed or improved.')
+    parser_validate_perfcompare.add_argument(
+        '-g', '--group_size', type=int, required=True,
+        help='Number of boots to put in each group.  To get realistic'
+        ' results that reflect how the perfcompare trybots would behave,'
+        ' this should match the boots_per_revision setting in the'
+        ' fuchsia_perfcompare.py recipe.  (Since that code is currently'
+        ' not part of the Fuchsia checkout, we cannot make the settings'
+        ' match automatically.)')
     parser_validate_perfcompare.add_argument('results_dirs', nargs='+')
     parser_validate_perfcompare.set_defaults(
         func=lambda args: ValidatePerfCompare(args, out_fh))

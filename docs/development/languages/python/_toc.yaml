@@ -1,0 +1,8 @@
+# Please, read https://fuchsia.dev/fuchsia-src/best-practices/documentation_navigation_toc
+# before making changes to this file, and add a member of the fuchsia.dev
+# team as reviewer.
+toc:
+- title: "Overview"
+  path: /docs/development/languages/python
+- title: "Python style guide"
+  path: /docs/development/languages/python/python_style.md

@@ -57,7 +57,7 @@ class SystemImpl final : public System,
   void DeleteBreakpoint(Breakpoint* breakpoint) override;
   Filter* CreateNewFilter() override;
   void DeleteFilter(Filter* filter) override;
-  void Pause(std::function<void()> on_paused) override;
+  void Pause(fit::callback<void()> on_paused) override;
   void Continue() override;
   bool HasDownload(const std::string& build_id) override;
   std::shared_ptr<Download> InjectDownloadForTesting(const std::string& build_id) override;
@@ -95,6 +95,18 @@ class SystemImpl final : public System,
   // Called when a symbol server under our control enters the Ready state.
   void OnSymbolServerBecomesReady(SymbolServer* server);
 
+  // Called every time a new download starts.
+  void DownloadStarted();
+
+  // Called every time a download ends.
+  void DownloadFinished();
+
+  // Called when we get a new server and it is still initializing.
+  void ServerStartedInitializing();
+
+  // Called when a new server is no longer initializing.
+  void ServerFinishedInitializing();
+
   // Create a new download obect for downloading a given build ID. If quiet is
   // set, don't report the status of this download.
   //
@@ -106,6 +118,23 @@ class SystemImpl final : public System,
 
   // Set up a symbol server after it has been added to symbol_servers_.
   void AddSymbolServer(SymbolServer* server);
+
+  // Number of symbol servers currently initializing.
+  size_t servers_initializing_ = 0;
+
+  // The number of downloads currently active.
+  size_t download_count_ = 0;
+
+  // The number of downloads that have succeeded. Every time download_count_ reaches 0, this number
+  // is reported via an event, and then cleared to zero.
+  size_t download_success_count_ = 0;
+
+  // The number of downloads that have failed. Semantics are the same as download_success_count_
+  size_t download_fail_count_ = 0;
+
+  // We hold pointers to downloads while we have servers initializing so that those servers have
+  // time to join the download.
+  std::vector<std::shared_ptr<Download>> suspended_downloads_;
 
   std::vector<std::unique_ptr<SymbolServer>> symbol_servers_;
   std::vector<std::unique_ptr<TargetImpl>> targets_;

@@ -5,7 +5,7 @@
 use {
     failure::Error,
     fidl::{encoding::OutOfLine, endpoints::RequestStream},
-    fidl_fuchsia_bluetooth_control::{ControlRequest, ControlRequestStream},
+    fidl_fuchsia_bluetooth_control::{self as control, ControlRequest, ControlRequestStream},
     fuchsia_bluetooth::bt_fidl_status,
     fuchsia_syslog::fx_log_warn,
     futures::prelude::*,
@@ -35,8 +35,8 @@ pub async fn start_control_service(
     hd.add_event_listener(Arc::downgrade(&event_listener));
     let mut session = ControlSession::new();
 
-    while let Some(event) = await!(stream.next()) {
-        await!(handler(hd.clone(), &mut session, event?))?;
+    while let Some(event) = stream.next().await {
+        handler(hd.clone(), &mut session, event?).await?;
     }
     // event_listener will now be dropped, closing the listener
     Ok(())
@@ -49,12 +49,12 @@ async fn handler(
 ) -> fidl::Result<()> {
     match event {
         ControlRequest::Connect { device_id, responder } => {
-            let result = await!(hd.connect(device_id));
+            let result = hd.connect(device_id).await;
             responder.send(&mut status_response(result))
         }
         ControlRequest::SetDiscoverable { discoverable, responder } => {
             let mut resp = if discoverable {
-                match await!(hd.set_discoverable()) {
+                match hd.set_discoverable().await {
                     Ok(token) => {
                         session.discoverable_token = Some(token);
                         bt_fidl_status!()
@@ -72,16 +72,16 @@ async fn handler(
             Ok(())
         }
         ControlRequest::Forget { device_id, responder } => {
-            let result = await!(hd.forget(device_id));
+            let result = hd.forget(device_id).await;
             responder.send(&mut status_response(result))
         }
         ControlRequest::Disconnect { device_id, responder } => {
-            // TODO work with classic as well
-            let result = await!(hd.disconnect(device_id));
+            let result = hd.disconnect(device_id).await;
             responder.send(&mut status_response(result))
         }
         ControlRequest::GetKnownRemoteDevices { responder } => {
-            let mut devices = hd.get_remote_devices();
+            let mut devices: Vec<_> =
+                hd.get_peers().into_iter().map(control::RemoteDevice::from).collect();
             responder.send(&mut devices.iter_mut())
         }
         ControlRequest::IsBluetoothAvailable { responder } => {
@@ -103,7 +103,8 @@ async fn handler(
             responder.send(status)
         }
         ControlRequest::GetAdapters { responder } => {
-            let mut adapters = await!(hd.get_adapters());
+            let mut adapters: Vec<_> =
+                hd.get_adapters().await.into_iter().map(control::AdapterInfo::from).collect();
             responder.send(Some(&mut adapters.iter_mut()))
         }
         ControlRequest::SetActiveAdapter { identifier, responder } => {
@@ -111,12 +112,12 @@ async fn handler(
             responder.send(&mut status_response(result))
         }
         ControlRequest::GetActiveAdapterInfo { responder } => {
-            let mut adap = hd.get_active_adapter_info();
-            responder.send(adap.as_mut().map(OutOfLine))
+            let adap = hd.get_active_adapter_info();
+            responder.send(adap.map(control::AdapterInfo::from).as_mut().map(OutOfLine))
         }
         ControlRequest::RequestDiscovery { discovery, responder } => {
             let mut resp = if discovery {
-                match await!(hd.start_discovery()) {
+                match hd.start_discovery().await {
                     Ok(token) => {
                         session.discovery_token = Some(token);
                         bt_fidl_status!()
@@ -130,11 +131,11 @@ async fn handler(
             responder.send(&mut resp)
         }
         ControlRequest::SetName { name, responder } => {
-            let result = await!(hd.set_name(name));
+            let result = hd.set_name(name).await;
             responder.send(&mut status_response(result))
         }
         ControlRequest::SetDeviceClass { device_class, responder } => {
-            let result = await!(hd.set_device_class(device_class));
+            let result = hd.set_device_class(device_class).await;
             responder.send(&mut status_response(result))
         }
     }

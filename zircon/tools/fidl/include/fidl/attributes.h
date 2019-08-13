@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_ATTRIBUTES_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_ATTRIBUTES_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_ATTRIBUTES_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_ATTRIBUTES_H_
 
 #include <set>
 #include <vector>
@@ -15,8 +15,7 @@ namespace fidl {
 
 class AttributesBuilder {
  public:
-  AttributesBuilder(ErrorReporter* error_reporter)
-      : error_reporter_(error_reporter) {}
+  AttributesBuilder(ErrorReporter* error_reporter) : error_reporter_(error_reporter) {}
 
   AttributesBuilder(ErrorReporter* error_reporter, std::vector<raw::Attribute> attributes)
       : error_reporter_(error_reporter), attributes_(std::move(attributes)) {
@@ -51,4 +50,4 @@ class AttributesBuilder {
 
 }  // namespace fidl
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_ATTRIBUTES_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_ATTRIBUTES_H_

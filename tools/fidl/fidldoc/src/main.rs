@@ -6,10 +6,12 @@ use failure::{format_err, Error, ResultExt};
 use log::{error, info, LevelFilter};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use clap::arg_enum;
+
+use rayon::prelude::*;
 
 use serde_json::{json, Value};
 
@@ -28,6 +30,7 @@ use templates::FidldocTemplate;
 
 static FIDLDOC_VERSION: &str = "0.0.4";
 static SUPPORTED_FIDLJSON: &str = "0.0.1";
+static FIDLDOC_CONFIG_PATH: &str = "fidldoc.config.json";
 
 arg_enum! {
     #[derive(Debug)]
@@ -41,8 +44,8 @@ arg_enum! {
 #[structopt(name = "fidldoc", about = "FIDL documentation generator", version = "0.1")]
 struct Opt {
     /// Path to a configuration file to provide additional options
-    #[structopt(short = "c", long = "config", default_value = "./fidldoc.config.json")]
-    config: String,
+    #[structopt(short = "c", long = "config")]
+    config: Option<PathBuf>,
     /// Current commit hash, useful to coordinate doc generation with a specific source code revision
     #[structopt(long = "tag", default_value = "master")]
     tag: String,
@@ -98,8 +101,15 @@ fn run(opt: Opt) -> Result<(), Error> {
     }
 
     // Read in fidldoc.config.json
-    let fidl_config = read_fidldoc_config(&opt.config)
-        .with_context(|e| format!("Error parsing {}: {}", &opt.config, e))?;
+    let fidl_config_file = match opt.config {
+        Some(filepath) => filepath,
+        None => get_fidldoc_config_default_path().with_context(|e|
+            format!("Unable to retrieve default config file location: {}", e)
+        )?
+    };
+    info!("Using config file from {}", fidl_config_file.display());
+    let fidl_config = read_fidldoc_config(&fidl_config_file)
+        .with_context(|e| format!("Error parsing {}: {}", &fidl_config_file.display(), e))?;
 
     create_output_dir(&output_path).with_context(|e| {
         format!("Unable to create output directory {}: {}", output_path.display(), e)
@@ -124,37 +134,67 @@ fn run(opt: Opt) -> Result<(), Error> {
     // Create main page
     template.render_main_page(&main_fidl_doc).expect("Unable to render main page");
 
-    for (package, package_fidl_json) in fidl_json_map {
-        // Modifications to the fidldoc object
-        let fidl_doc = json!({
-            "version": package_fidl_json.version,
-            "name": package_fidl_json.name,
-            "library_dependencies": package_fidl_json.library_dependencies,
-            "bits_declarations": package_fidl_json.bits_declarations,
-            "const_declarations": package_fidl_json.const_declarations,
-            "enum_declarations": package_fidl_json.enum_declarations,
-            "interface_declarations": package_fidl_json.interface_declarations,
-            "table_declarations": package_fidl_json.table_declarations,
-            "struct_declarations": package_fidl_json.struct_declarations,
-            "union_declarations": package_fidl_json.union_declarations,
-            "xunion_declarations": package_fidl_json.xunion_declarations,
-            "declaration_order": package_fidl_json.declaration_order,
-            "declarations": package_fidl_json.declarations,
-            "table_of_contents": table_of_contents,
-            "fidldoc_version": FIDLDOC_VERSION,
-            "config": fidl_config,
-            "tag": &opt.tag,
-            "search": declarations,
-            "url_path": url_path,
-        });
+    let tag = &opt.tag;
+    let output_path_string = &output_path.display();
+    fidl_json_map.par_iter().try_for_each(|(package, package_fidl_json)| {
+        render_fidl_interface(
+            package,
+            package_fidl_json,
+            &table_of_contents,
+            &fidl_config,
+            &tag,
+            &declarations,
+            &url_path,
+            &template_type,
+            &output_path,
+        )
+    }).expect("Unable to write FIDL reference files");
 
-        match template.render_interface(&package, &fidl_doc) {
-            Err(why) => error!("Unable to render interface {}: {:?}", &package, why),
-            Ok(()) => info!("Generated interface documentation for {}", &package),
-        }
+    println!("Generated documentation at {}", &output_path_string);
+    Ok(())
+}
+
+fn render_fidl_interface(
+    package: &String,
+    package_fidl_json: &FidlJson,
+    table_of_contents: &Vec<TableOfContentsItem>,
+    fidl_config: &Value,
+    tag: &String,
+    declarations: &Vec<String>,
+    url_path: &String,
+    template_type: &TemplateType,
+    output_path: &PathBuf,
+) -> Result<(), Error> {
+    // Modifications to the fidldoc object
+    let fidl_doc = json!({
+        "version": package_fidl_json.version,
+        "name": package_fidl_json.name,
+        "library_dependencies": package_fidl_json.library_dependencies,
+        "bits_declarations": package_fidl_json.bits_declarations,
+        "const_declarations": package_fidl_json.const_declarations,
+        "enum_declarations": package_fidl_json.enum_declarations,
+        "interface_declarations": package_fidl_json.interface_declarations,
+        "table_declarations": package_fidl_json.table_declarations,
+        "struct_declarations": package_fidl_json.struct_declarations,
+        "union_declarations": package_fidl_json.union_declarations,
+        "xunion_declarations": package_fidl_json.xunion_declarations,
+        "declaration_order": package_fidl_json.declaration_order,
+        "declarations": package_fidl_json.declarations,
+        "table_of_contents": table_of_contents,
+        "fidldoc_version": FIDLDOC_VERSION,
+        "config": fidl_config,
+        "tag": tag,
+        "search": declarations,
+        "url_path": url_path,
+    });
+
+    let template = select_template(&template_type, &output_path)
+        .with_context(|e| format!("Unable to instantiate template {}: {}", template_type, e));
+    match template?.render_interface(&package, &fidl_doc) {
+        Err(why) => error!("Unable to render interface {}: {:?}", &package, why),
+        Ok(()) => info!("Generated interface documentation for {}", &package),
     }
 
-    println!("Generated documentation at {}", output_path.display());
     Ok(())
 }
 
@@ -176,9 +216,19 @@ fn select_template(
     Ok(template)
 }
 
-fn read_fidldoc_config(config_path_str: &str) -> Result<Value, Error> {
-    let fidl_config_str = fs::read_to_string(config_path_str)
-        .with_context(|e| format!("Couldn't open file {}: {}", config_path_str, e))?;
+fn get_fidldoc_config_default_path() -> Result<PathBuf, Error> {
+    // If the fidldoc config file is not available, it should be found
+    // in the same directory as the executable.
+    // This needs to be calculated at runtime.
+    let fidldoc_executable = std::env::current_exe()?;
+    let fidldoc_execution_directory = fidldoc_executable.parent().unwrap();
+    let fidl_config_default_path = fidldoc_execution_directory.join(FIDLDOC_CONFIG_PATH);
+    Ok(fidl_config_default_path)
+}
+
+fn read_fidldoc_config(config_path: &Path) -> Result<Value, Error> {
+    let fidl_config_str = fs::read_to_string(config_path)
+        .with_context(|e| format!("Couldn't open file {}: {}", config_path.display(), e))?;
     Ok(serde_json::from_str(&fidl_config_str)?)
 }
 
@@ -243,7 +293,7 @@ fn process_fidl_json_files(input_files: Vec<PathBuf>) -> Result<FidlJsonPackageD
 fn create_toc(package_set: HashSet<String>) -> Vec<TableOfContentsItem> {
     // The table of contents lists all packages in alphabetical order.
     let mut table_of_contents: Vec<_> = package_set
-        .iter()
+        .par_iter()
         .map(|package_name| TableOfContentsItem {
             name: package_name.clone(),
             link: format!("{name}/index", name = package_name),
@@ -334,6 +384,16 @@ mod test {
     }
 
     #[test]
+    fn get_fidldoc_config_default_path_test() {
+        // Ensure that I get a valid filepath
+        let default = std::env::current_exe().unwrap()
+            .parent()
+            .unwrap()
+            .join(FIDLDOC_CONFIG_PATH);
+        assert_eq!(default, get_fidldoc_config_default_path().unwrap());
+    }
+
+    #[test]
     fn read_fidldoc_config_test() {
         // Generate a test config file
         let fidl_config_sample = json!({
@@ -346,7 +406,7 @@ mod test {
             .expect("Unable to write to temporary file");
 
         // Read in file
-        let fidl_config = read_fidldoc_config(&fidl_config_file.path().to_str().unwrap()).unwrap();
+        let fidl_config = read_fidldoc_config(&fidl_config_file.path()).unwrap();
         assert_eq!(fidl_config["title"], "Fuchsia FIDLs".to_string());
     }
 }

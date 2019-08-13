@@ -5,21 +5,24 @@
 use {
     crate::model::*,
     cm_rust::{
-        self, Capability, ExposeDecl, ExposeSource, OfferDecl, OfferDirectorySource,
-        OfferServiceSource, OfferStorageSource, UseDecl, UseSource,
+        self, CapabilityPath, ExposeDecl, ExposeSource, FrameworkCapabilityDecl, OfferDecl,
+        OfferDirectorySource, OfferServiceSource, OfferStorageSource, StorageDecl,
+        StorageDirectorySource, UseDecl,
     },
     failure::format_err,
     fidl::endpoints::{create_proxy, ServerEnd},
     fidl_fuchsia_io::{DirectoryMarker, OPEN_RIGHT_READABLE, OPEN_RIGHT_WRITABLE},
     fidl_fuchsia_sys2 as fsys, fuchsia_zircon as zx,
-    std::path::PathBuf,
-    std::sync::Arc,
+    std::{convert::TryFrom, path::PathBuf, sync::Arc},
 };
 const FLAGS: u32 = OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE;
 
 /// Describes the source of a capability, for any type of capability.
 enum OfferSource<'a> {
+    // TODO(CF-908): Enable this once unified services are implemented.
+    #[allow(dead_code)]
     Service(&'a OfferServiceSource),
+    LegacyService(&'a OfferServiceSource),
     Directory(&'a OfferDirectorySource),
     Storage(&'a OfferStorageSource),
 }
@@ -28,15 +31,15 @@ enum OfferSource<'a> {
 enum CapabilitySource {
     /// This capability originates from the component instance for the given Realm.
     /// point.
-    Component(Capability, Arc<Realm>),
+    Component(RoutedCapability, Arc<Realm>),
     /// This capability originates from component manager's namespace.
-    ComponentMgrNamespace(Capability),
+    ComponentManagerNamespace(CapabilityPath),
     /// This capability originates from component manager itself.
-    FrameworkCapability(Capability, Arc<Realm>),
-    /// This capability originates from a storage declaration in a component's decl. The capability
-    /// here is the backing directory capability offered to this realm, into which storage requests
-    /// should be fed.
-    StorageDecl(Capability, OfferDirectorySource, Arc<Realm>),
+    Framework(FrameworkCapabilityDecl, Arc<Realm>),
+    /// This capability originates from a storage declaration in a component's decl.  `StorageDecl`
+    /// describes the backing directory capability offered to this realm, into which storage
+    /// requests should be fed.
+    StorageDecl(StorageDecl, Arc<Realm>),
 }
 
 /// Finds the source of the `capability` used by `absolute_moniker`, and pass along the
@@ -44,22 +47,24 @@ enum CapabilitySource {
 /// applicable) using an open request with `open_mode`.
 pub async fn route_use_capability<'a>(
     model: &'a Model,
+    flags: u32,
     open_mode: u32,
+    relative_path: String,
     use_decl: &'a UseDecl,
     abs_moniker: AbsoluteMoniker,
     server_chan: zx::Channel,
 ) -> Result<(), ModelError> {
-    if let Capability::Storage(type_) = use_decl.clone().into() {
-        return await!(route_and_open_storage_capability(
+    if let UseDecl::Storage(_) = use_decl {
+        return route_and_open_storage_capability(
             model,
-            type_.clone(),
+            use_decl,
             open_mode,
             abs_moniker,
-            server_chan
-        ));
+            server_chan,
+        ).await;
     }
-    let source = await!(find_used_capability_source(model, use_decl, &abs_moniker))?;
-    await!(open_capability_at_source(model, open_mode, source, server_chan))
+    let source = find_used_capability_source(model, use_decl, &abs_moniker).await?;
+    open_capability_at_source(model, flags, open_mode, relative_path, source, server_chan).await
 }
 
 /// Finds the source of the expose capability used at `source_path` by
@@ -67,56 +72,59 @@ pub async fn route_use_capability<'a>(
 /// directory (or componentmgr's namespace, if applicable)
 pub async fn route_expose_capability<'a>(
     model: &'a Model,
+    flags: u32,
     open_mode: u32,
-    exposed_capability: &'a Capability,
+    expose_decl: &'a ExposeDecl,
     abs_moniker: AbsoluteMoniker,
     server_chan: zx::Channel,
 ) -> Result<(), ModelError> {
-    let mut pos = WalkPosition {
-        capability: exposed_capability.clone(),
-        last_child_moniker: None,
-        moniker: abs_moniker,
-    };
-    let source = await!(walk_expose_chain(model, &mut pos))?;
-    await!(open_capability_at_source(model, open_mode, source, server_chan))
+    let capability = RoutedCapability::Expose(expose_decl.clone());
+    let mut pos =
+        WalkPosition { capability, last_child_moniker: None, moniker: Some(abs_moniker.clone()) };
+    let source = walk_expose_chain(model, &mut pos).await?;
+    open_capability_at_source(model, flags, open_mode, String::new(), source, server_chan).await
 }
 
 /// Open the capability at the given source, binding to its component instance if necessary.
 async fn open_capability_at_source<'a>(
     model: &'a Model,
+    flags: u32,
     open_mode: u32,
+    relative_path: String,
     source: CapabilitySource,
     server_chan: zx::Channel,
 ) -> Result<(), ModelError> {
     match source {
-        CapabilitySource::ComponentMgrNamespace(source_capability) => {
-            if let Some(path) = source_capability.path() {
-                io_util::connect_in_namespace(&path.to_string(), server_chan, FLAGS)
-                    .map_err(|e| ModelError::capability_discovery_error(e))?;
-            } else {
-                return Err(ModelError::capability_discovery_error(format_err!(
-                    "invalid capability type to come from component manager's namespace"
-                )));
-            }
+        CapabilitySource::ComponentManagerNamespace(path) => {
+            io_util::connect_in_namespace(&path.to_string(), server_chan, FLAGS)
+                .map_err(|e| ModelError::capability_discovery_error(e))?;
         }
         CapabilitySource::Component(source_capability, realm) => {
-            if let Some(path) = source_capability.path() {
-                await!(Model::bind_instance_open_outgoing(
+            if let Some(path) = source_capability.source_path() {
+                Model::bind_instance_open_outgoing(
                     &model,
                     realm,
-                    FLAGS,
+                    flags,
                     open_mode,
                     path,
-                    server_chan
-                ))?;
+                    server_chan,
+                ).await?;
             } else {
                 return Err(ModelError::capability_discovery_error(format_err!(
                     "invalid capability type to come from a component"
                 )));
             }
         }
-        CapabilitySource::FrameworkCapability(capability, realm) => {
-            await!(open_framework_capability(model.clone(), realm, &capability, server_chan))?;
+        CapabilitySource::Framework(capability_decl, realm) => {
+            open_framework_capability(
+                model.clone(),
+                FLAGS,
+                open_mode,
+                relative_path,
+                realm,
+                &capability_decl,
+                server_chan,
+            ).await?;
         }
         CapabilitySource::StorageDecl(..) => {
             panic!("storage capabilities must be separately routed and opened");
@@ -125,26 +133,35 @@ async fn open_capability_at_source<'a>(
     Ok(())
 }
 
-async fn open_framework_capability(
+async fn open_framework_capability<'a>(
     model: Model,
+    flags: u32,
+    open_mode: u32,
+    relative_path: String,
     realm: Arc<Realm>,
-    capability: &Capability,
+    capability_decl: &'a FrameworkCapabilityDecl,
     server_chan: zx::Channel,
 ) -> Result<(), ModelError> {
-    match capability {
-        Capability::Service(path) => {
-            await!(FrameworkServiceHost::serve(model.clone(), realm, &path, server_chan))?;
-        }
-        _ => {
-            return Err(ModelError::unsupported("Non-service framework capability"));
-        }
+    let mut capability = None;
+
+    for hook in model.hooks.iter() {
+        capability = hook.on_route_framework_capability(
+            realm.clone(),
+            &capability_decl,
+            capability,
+        ).await?;
     }
+
+    if let Some(capability) = capability {
+        capability.open(flags, open_mode, relative_path, server_chan).await?;
+    }
+
     Ok(())
 }
 
-async fn route_and_open_storage_capability(
-    model: &Model,
-    type_: fsys::StorageType,
+pub async fn route_and_open_storage_capability<'a>(
+    model: &'a Model,
+    use_decl: &'a UseDecl,
     open_mode: u32,
     use_abs_moniker: AbsoluteMoniker,
     server_chan: zx::Channel,
@@ -159,15 +176,15 @@ async fn route_and_open_storage_capability(
         }
     };
     let mut pos = WalkPosition {
-        capability: Capability::Storage(type_.clone()),
+        capability: RoutedCapability::Use(use_decl.clone()),
         last_child_moniker: use_abs_moniker.path().last().map(|c| c.clone()),
-        moniker: parent_moniker,
+        moniker: Some(parent_moniker),
     };
 
-    let source = await!(walk_offer_chain(model, &mut pos))?;
+    let source = walk_offer_chain(model, &mut pos).await?;
 
-    let (dir_capability, dir_source, storage_decl_realm) = match source {
-        Some(CapabilitySource::StorageDecl(c, s, r)) => (c, s, r),
+    let (storage_decl, storage_decl_realm) = match source {
+        Some(CapabilitySource::StorageDecl(s, r)) => (s, r),
         _ => {
             return Err(ModelError::capability_discovery_error(format_err!(
                 "storage capabilities must come from a storage declaration"
@@ -175,71 +192,73 @@ async fn route_and_open_storage_capability(
         }
     };
 
-    // Find the path and source of the directory capability.
-    let (capability_path, dir_source_realm) = match dir_source {
-        OfferDirectorySource::Self_ => {
-            (dir_capability.path().unwrap().clone(), storage_decl_realm.clone())
-        }
-        OfferDirectorySource::Realm => {
-            let source = await!(find_offered_capability_source(
-                model,
-                &dir_capability,
-                &storage_decl_realm.abs_moniker
-            ))?;
-            match source {
-                CapabilitySource::Component(source_capability, realm) => {
-                    (source_capability.path().unwrap().clone(), realm)
-                }
-                _ => {
-                    return Err(ModelError::capability_discovery_error(format_err!(
+    // Find the path and source of the directory consumed by the storage capability.
+    let (source_path, dir_source_realm) =
+        match storage_decl.source {
+            StorageDirectorySource::Self_ => (storage_decl.source_path, storage_decl_realm.clone()),
+            StorageDirectorySource::Realm => {
+                let capability = RoutedCapability::Storage(storage_decl);
+                let source = find_offered_capability_source(
+                    model,
+                    capability,
+                    &storage_decl_realm.abs_moniker,
+                ).await?;
+                match source {
+                    CapabilitySource::Component(source_capability, realm) => {
+                        (source_capability.source_path().unwrap().clone(), realm)
+                    }
+                    _ => return Err(ModelError::capability_discovery_error(format_err!(
                         "storage capability backing directories must be provided by a component"
-                    )))
+                    ))),
                 }
             }
-        }
-        OfferDirectorySource::Child(n) => {
-            let mut pos = WalkPosition {
-                capability: dir_capability,
-                last_child_moniker: None,
-                moniker: storage_decl_realm.abs_moniker.child(ChildMoniker::new(n, None)),
-            };
-            match await!(walk_expose_chain(model, &mut pos))? {
-                CapabilitySource::Component(source_capability, realm) => {
-                    (source_capability.path().unwrap().clone(), realm)
-                }
-                _ => {
-                    return Err(ModelError::capability_discovery_error(format_err!(
+            StorageDirectorySource::Child(ref name) => {
+                let moniker = Some(
+                    storage_decl_realm.abs_moniker.child(ChildMoniker::new(name.to_string(), None)),
+                );
+                let capability = RoutedCapability::Storage(storage_decl);
+                let mut pos = WalkPosition { capability, last_child_moniker: None, moniker };
+                match walk_expose_chain(model, &mut pos).await? {
+                    CapabilitySource::Component(source_capability, realm) => {
+                        (source_capability.source_path().unwrap().clone(), realm)
+                    }
+                    _ => return Err(ModelError::capability_discovery_error(format_err!(
                         "storage capability backing directories must be provided by a component"
-                    )))
+                    ))),
                 }
             }
-        }
-    };
+        };
 
     // Bind with a local proxy, so we can create and open the relevant sub-directory for
     // this component.
     let (dir_proxy, local_server_end) =
         create_proxy::<DirectoryMarker>().expect("failed to create proxy");
-    await!(Model::bind_instance_open_outgoing(
+    Model::bind_instance_open_outgoing(
         &model,
         dir_source_realm,
         FLAGS,
         open_mode,
-        &capability_path,
-        local_server_end.into_channel()
-    ))?;
+        &source_path,
+        local_server_end.into_channel(),
+    ).await?;
 
     // Open each node individually, so it can be created if it doesn't exist
     let relative_moniker =
         RelativeMoniker::from_absolute(&storage_decl_realm.abs_moniker, &use_abs_moniker);
-    let sub_dir_proxy =
-        io_util::create_sub_directories(dir_proxy, &generate_storage_path(type_, relative_moniker))
-            .map_err(|e| {
-                ModelError::capability_discovery_error(format_err!(
-                    "failed to create new directories: {}",
-                    e
-                ))
-            })?;
+    let storage_type = match use_decl {
+        UseDecl::Storage(d) => d.type_(),
+        _ => panic!("non-storage capability"),
+    };
+    let sub_dir_proxy = io_util::create_sub_directories(
+        dir_proxy,
+        &generate_storage_path(storage_type, relative_moniker),
+    )
+    .map_err(|e| {
+        ModelError::capability_discovery_error(format_err!(
+            "failed to create new directories: {}",
+            e
+        ))
+    })?;
 
     // clone the final connection to connect the channel we're routing to its destination
     sub_dir_proxy
@@ -306,44 +325,32 @@ async fn find_framework_capability<'a>(
     use_decl: &'a UseDecl,
     abs_moniker: &'a AbsoluteMoniker,
 ) -> Result<Option<CapabilitySource>, ModelError> {
-    let source = match use_decl {
-        UseDecl::Service(ref s) => Some(&s.source),
-        UseDecl::Directory(ref d) => Some(&d.source),
-        UseDecl::Storage(_) => None,
-    };
-    match source {
-        Some(UseSource::Framework) => {
-            let used_capability = use_decl.clone().into();
-            let path = FRAMEWORK_SERVICES
-                .iter()
-                .find(|p| match &used_capability {
-                    Capability::Service(s) => **p == s,
-                    _ => false,
-                })
-                .ok_or_else(|| {
-                    ModelError::capability_discovery_error(format_err!(
-                        "Invalid framework capability {}",
-                        used_capability
-                    ))
-                })?;
-            let realm = await!(model.look_up_realm(abs_moniker))?;
-            Ok(Some(CapabilitySource::FrameworkCapability(
-                Capability::Service((*path).clone()),
-                realm,
-            )))
-        }
-        _ => Ok(None),
+    if let Ok(capability_decl) = FrameworkCapabilityDecl::try_from(use_decl) {
+        let realm = model.look_up_realm(abs_moniker).await?;
+        return Ok(Some(CapabilitySource::Framework(capability_decl, realm)));
     }
+    return Ok(None);
 }
 
 /// Holds state about the current position when walking the tree.
 struct WalkPosition {
-    /// The capability as it's represented in the current component.
-    capability: Capability,
+    /// The capability declaration as it's represented in the current component.
+    capability: RoutedCapability,
     /// The moniker of the child we came from.
     last_child_moniker: Option<ChildMoniker>,
-    /// The moniker of the component we are currently looking at.
-    moniker: AbsoluteMoniker,
+    /// The moniker of the component we are currently looking at. `None` for component manager's
+    /// realm.
+    moniker: Option<AbsoluteMoniker>,
+}
+
+impl WalkPosition {
+    fn moniker(&self) -> &AbsoluteMoniker {
+        self.moniker.as_ref().unwrap()
+    }
+
+    fn at_componentmgr_realm(&self) -> bool {
+        self.moniker.is_none()
+    }
 }
 
 async fn find_used_capability_source<'a>(
@@ -352,12 +359,12 @@ async fn find_used_capability_source<'a>(
     abs_moniker: &'a AbsoluteMoniker,
 ) -> Result<CapabilitySource, ModelError> {
     if let Some(framework_capability) =
-        await!(find_framework_capability(model, use_decl, abs_moniker))?
+        find_framework_capability(model, use_decl, abs_moniker).await?
     {
         return Ok(framework_capability);
     }
-    let capability = use_decl.clone().into();
-    await!(find_offered_capability_source(model, &capability, abs_moniker))
+    let capability = RoutedCapability::Use(use_decl.clone());
+    find_offered_capability_source(model, capability, abs_moniker).await
 }
 
 /// Walks the component tree to find the originating source of a capability, starting on the given
@@ -367,23 +374,18 @@ async fn find_used_capability_source<'a>(
 /// namespace.
 async fn find_offered_capability_source<'a>(
     model: &'a Model,
-    capability: &'a Capability,
+    capability: RoutedCapability,
     abs_moniker: &'a AbsoluteMoniker,
 ) -> Result<CapabilitySource, ModelError> {
-    let moniker = match abs_moniker.parent() {
-        Some(m) => m,
-        None => return Ok(CapabilitySource::ComponentMgrNamespace(capability.clone())),
-    };
     let mut pos = WalkPosition {
-        capability: capability.clone(),
+        capability,
         last_child_moniker: abs_moniker.path().last().map(|c| c.clone()),
-        moniker,
+        moniker: abs_moniker.parent(),
     };
-
-    if let Some(source) = await!(walk_offer_chain(model, &mut pos))? {
+    if let Some(source) = walk_offer_chain(model, &mut pos).await? {
         return Ok(source);
     }
-    await!(walk_expose_chain(model, &mut pos))
+    walk_expose_chain(model, &mut pos).await
 }
 
 /// Follows `offer` declarations up the component tree, starting at `pos`. The algorithm looks
@@ -396,58 +398,72 @@ async fn walk_offer_chain<'a>(
     pos: &'a mut WalkPosition,
 ) -> Result<Option<CapabilitySource>, ModelError> {
     'offerloop: loop {
-        let current_realm = await!(model.look_up_realm(&pos.moniker))?;
-        let realm_state = await!(current_realm.state.lock());
-        // This unwrap is safe because `look_up_realm` populates this field
-        let decl = realm_state.decl.as_ref().expect("missing offer decl");
+        if pos.at_componentmgr_realm() {
+            // We are at component manager's own realm, so pull the capability from its namespace.
+            if let Some(path) = pos.capability.source_path() {
+                return Ok(Some(CapabilitySource::ComponentManagerNamespace(path.clone())));
+            } else {
+                return Err(ModelError::capability_discovery_error(format_err!(
+                    "invalid capability type to come from component manager's namespace",
+                )));
+            }
+        }
+        let current_realm = model.look_up_realm(&pos.moniker()).await?;
+        let realm_state = current_realm.state.lock().await;
+        // This get_decl() is safe because `look_up_realm` populates this field
+        let decl = realm_state.get_decl();
         let last_child_moniker = pos.last_child_moniker.as_ref().unwrap();
-        if let Some(offer) = decl.find_offer_source(
-            &pos.capability,
-            last_child_moniker.name(),
-            last_child_moniker.collection(),
-        ) {
-            // source is a (Option<&OfferSource>,Option<&OfferStorageSource>), of which exactly one
-            // side will be Some and one side will be None. This is the source of offer, whose type
-            // varies depending on which variant of offer is present.
+        if let Some(offer) = pos.capability.find_offer_source(decl, last_child_moniker) {
             let source = match offer {
-                OfferDecl::Service(s) => OfferSource::Service(&s.source),
+                OfferDecl::Service(_) => return Err(ModelError::unsupported("Service capability")),
+                OfferDecl::LegacyService(s) => OfferSource::LegacyService(&s.source),
                 OfferDecl::Directory(d) => OfferSource::Directory(&d.source),
                 OfferDecl::Storage(s) => OfferSource::Storage(s.source()),
             };
             match source {
+                OfferSource::Directory(OfferDirectorySource::Framework) => {
+                    let capability_decl =
+                        FrameworkCapabilityDecl::try_from(offer).map_err(|_| {
+                            ModelError::capability_discovery_error(format_err!(
+                                "no matching offers found for capability {:?} from component {}",
+                                pos.capability,
+                                pos.moniker(),
+                            ))
+                        })?;
+                    return Ok(Some(CapabilitySource::Framework(
+                        capability_decl,
+                        current_realm.clone(),
+                    )));
+                }
                 OfferSource::Service(OfferServiceSource::Realm)
+                | OfferSource::LegacyService(OfferServiceSource::Realm)
                 | OfferSource::Directory(OfferDirectorySource::Realm)
                 | OfferSource::Storage(OfferStorageSource::Realm) => {
                     // The offered capability comes from the realm, so follow the
                     // parent
-                    pos.capability = offer.clone().into();
-                    pos.last_child_moniker = pos.moniker.path().last().map(|c| c.clone());
-                    pos.moniker = match pos.moniker.parent() {
-                        Some(m) => m,
-                        None => {
-                            return Ok(Some(CapabilitySource::ComponentMgrNamespace(
-                                pos.capability.clone().into(),
-                            )));
-                        }
-                    };
+                    pos.capability = RoutedCapability::Offer(offer.clone());
+                    pos.last_child_moniker = pos.moniker().path().last().map(|c| c.clone());
+                    pos.moniker = pos.moniker().parent();
                     continue 'offerloop;
                 }
                 OfferSource::Service(OfferServiceSource::Self_)
+                | OfferSource::LegacyService(OfferServiceSource::Self_)
                 | OfferSource::Directory(OfferDirectorySource::Self_) => {
                     // The offered capability comes from the current component,
                     // return our current location in the tree.
                     return Ok(Some(CapabilitySource::Component(
-                        offer.clone().into(),
+                        RoutedCapability::Offer(offer.clone()),
                         current_realm.clone(),
                     )));
                 }
                 OfferSource::Service(OfferServiceSource::Child(child_name))
+                | OfferSource::LegacyService(OfferServiceSource::Child(child_name))
                 | OfferSource::Directory(OfferDirectorySource::Child(child_name)) => {
                     // The offered capability comes from a child, break the loop
                     // and begin walking the expose chain.
-                    pos.capability = offer.clone().into();
+                    pos.capability = RoutedCapability::Offer(offer.clone());
                     pos.moniker =
-                        pos.moniker.child(ChildMoniker::new(child_name.to_string(), None));
+                        Some(pos.moniker().child(ChildMoniker::new(child_name.to_string(), None)));
                     return Ok(None);
                 }
                 OfferSource::Storage(OfferStorageSource::Storage(storage_name)) => {
@@ -455,17 +471,16 @@ async fn walk_offer_chain<'a>(
                         .find_storage_source(&storage_name)
                         .expect("storage offer references nonexistent section");
                     return Ok(Some(CapabilitySource::StorageDecl(
-                        Capability::Directory(storage.source_path.clone()),
-                        storage.source.clone(),
+                        storage.clone(),
                         current_realm.clone(),
                     )));
                 }
             }
         } else {
             return Err(ModelError::capability_discovery_error(format_err!(
-                "no matching offers found for capability {} from component {}",
+                "no matching offers found for capability {:?} from component {}",
                 pos.capability,
-                pos.moniker
+                pos.moniker(),
             )));
         }
     }
@@ -479,15 +494,30 @@ async fn walk_expose_chain<'a>(
     model: &'a Model,
     pos: &'a mut WalkPosition,
 ) -> Result<CapabilitySource, ModelError> {
+    // If the first capability is an Expose, assume it corresponds to an Expose declared by the
+    // first component.
+    let mut first_expose = {
+        match &pos.capability {
+            RoutedCapability::Expose(e) => Some(e.clone()),
+            _ => None,
+        }
+    };
     loop {
-        let current_realm = await!(model.look_up_realm(&pos.moniker))?;
-        let realm_state = await!(current_realm.state.lock());
-        // This unwrap is safe because look_up_realm populates this field
-        let decl = realm_state.decl.as_ref().expect("missing expose decl");
-
-        if let Some(expose) = decl.find_expose_source(&pos.capability) {
+        let current_realm = model.look_up_realm(&pos.moniker()).await?;
+        let realm_state = current_realm.state.lock().await;
+        // This get_decl() is safe because look_up_realm populates this field
+        let decl = realm_state.get_decl();
+        let first_expose = first_expose.take();
+        let expose = match first_expose {
+            Some(_) => first_expose.as_ref(),
+            None => pos.capability.find_expose_source(decl),
+        };
+        if let Some(expose) = expose {
             let source = match expose {
-                ExposeDecl::Service(d) => &d.source,
+                ExposeDecl::Service(_) => {
+                    return Err(ModelError::unsupported("Service capability"))
+                }
+                ExposeDecl::LegacyService(d) => &d.source,
                 ExposeDecl::Directory(d) => &d.source,
             };
             match source {
@@ -495,24 +525,35 @@ async fn walk_expose_chain<'a>(
                     // The offered capability comes from the current component, return our
                     // current location in the tree.
                     return Ok(CapabilitySource::Component(
-                        expose.clone().into(),
+                        RoutedCapability::Expose(expose.clone()),
                         current_realm.clone(),
                     ));
                 }
                 ExposeSource::Child(child_name) => {
                     // The offered capability comes from a child, so follow the child.
-                    pos.capability = expose.clone().into();
+                    pos.capability = RoutedCapability::Expose(expose.clone());
                     pos.moniker =
-                        pos.moniker.child(ChildMoniker::new(child_name.to_string(), None));
+                        Some(pos.moniker().child(ChildMoniker::new(child_name.to_string(), None)));
                     continue;
+                }
+                ExposeSource::Framework => {
+                    let capability_decl =
+                        FrameworkCapabilityDecl::try_from(expose).map_err(|_| {
+                            ModelError::capability_discovery_error(format_err!(
+                                "no matching offers found for capability {:?} from component {}",
+                                pos.capability,
+                                pos.moniker(),
+                            ))
+                        })?;
+                    return Ok(CapabilitySource::Framework(capability_decl, current_realm.clone()));
                 }
             }
         } else {
             // We didn't find any matching exposes! Oh no!
             return Err(ModelError::capability_discovery_error(format_err!(
-                "no matching exposes found for capability {} from component {}",
+                "no matching exposes found for capability {:?} from component {}",
                 pos.capability,
-                pos.moniker
+                pos.moniker()
             )));
         }
     }

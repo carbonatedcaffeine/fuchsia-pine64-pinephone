@@ -162,18 +162,22 @@ protocol Device {
     /// position will re-begin at 0, if the device is again Started.
     -> OnStop(zx.time stop_time, uint32 ring_position);
 
-    /// Return the current position (in bytes) within the ring buffer. This can
-    /// only be called after the ring buffer is established. If the device has
-    /// not yet Started streaming, then zero will always be returned.
-    GetPosition() -> (uint32 ring_position, zx.time clock_time);
+    /// Return the current position (in bytes) within the ring buffer, along
+    /// with the time (per MONOTONIC clock) that corresponds with that position.
+    /// This can only be called after the ring buffer is established. If the
+    /// device has not yet Started streaming, then zero will always be returned.
+    GetPosition() -> (zx.time monotonic_time, uint32 ring_position);
 
     /// Notify all subscribed listeners, when any `AUDIO_RB_POSITION_NOTIFY`
     /// position notification is issued by the driver. The frequency of these
     /// per-stream notifications is set by AudioCore, reported to VAD clients
     /// via `GetBuffer` or the `->OnBufferCreated` event. VirtualAudioDevice
     /// clients can enable an alternate notification frequency for a given
-    /// stream by calling `SetNotificationFrequency`.
-    -> OnPositionNotify(uint32 ring_position, zx.time clock_time);
+    /// stream by calling `SetNotificationFrequency`. As with a direct call to
+    /// `GetPosition`, the returned parameters are the current position (in
+    /// bytes) in the ring buffer, as well as the time (per MONOTONIC clock)
+    /// that corresponds with that ring buffer position.
+    -> OnPositionNotify(zx.time monotonic_time, uint32 ring_position);
 
     /// Hot-plug or hot-unplug an active virtual device, at the specified time.
     /// For devices marked as capable of asynchronously notifying the system of
@@ -239,7 +243,7 @@ protocol Configuration {
     /// activated, format ranges are returned by the driver in response to an
     /// `AUDIO_STREAM_CMD_GET_FORMATS` command. sample_format_flags is of type
     /// audio_sample_format_t, and rate_family_flags is a bit field of possible
-    /// constants beginning with ASF_RANGE_FLAG_FPS_. See audio.h for details.
+    /// constants beginning with `ASF_RANGE_FLAG_FPS_`. See audio.h for details.
     AddFormatRange(uint32 sample_format_flags, uint32 min_frame_rate,
                    uint32 max_frame_rate, uint8 min_channels,
                    uint8 max_channels, uint16 rate_family_flags);
@@ -288,7 +292,7 @@ protocol Configuration {
     /// Set plug properties for this virtual device. This must be called before
     /// calling `Add()`, or after `Remove()`. Once the device is activated, plug
     /// information is returned by the driver in response to an
-    /// `AUDIO_STREAM_CMD_PLUG_DETECT `command. This information is used by the
+    /// `AUDIO_STREAM_CMD_PLUG_DETECT` command. This information is used by the
     /// system when determining which device is default. This in turn is exposed
     /// to clients by the `fuchsia.media.AudioDeviceEnumerator` protocol: in
     /// `GetDevices()`, `GetDefaultInputDevice()`/`GetDefaultOutputDevice()` and

@@ -18,6 +18,7 @@ core_tests = [
   "fifo",
   "futex",
   "handle-close",
+  "handle-dup",
   "handle-info",
   "handle-transfer",
   "handle-wait",
@@ -46,6 +47,7 @@ core_tests = [
 # unified core-tests binary.
 unified_only = [
   "bti",
+  "debug:unified-only",
   "interrupt",
   "profile",
   "resource",

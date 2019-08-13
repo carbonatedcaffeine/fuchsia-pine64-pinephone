@@ -48,6 +48,8 @@ constexpr int kForceNumberSigned = 5;
 constexpr int kForceNumberUnsigned = 6;
 constexpr int kForceNumberHex = 7;
 constexpr int kMaxArraySize = 8;
+constexpr int kRawOutput = 9;
+constexpr int kForceUpdate = 10;
 
 // If the system has at least one running process, returns true. If not, returns false and sets the
 // err.
@@ -66,11 +68,22 @@ bool VerifySystemHasRunningProcess(System* system, Err* err) {
 
 // Populates the formatting options with the given command's switches.
 Err GetConsoleFormatOptions(const Command& cmd, ConsoleFormatOptions* options) {
-  // These defaults currently don't have exposed options. A pointer expand depth of two seems most
-  // useful because it will expand "this" and one member, but beyond two some things like doubly-
-  // linked lists get pretty insane.
-  options->pointer_expand_depth = 2;
+  // These defaults currently don't have exposed options. A pointer expand depth of one allows
+  // local variables and "this" to be expanded without expanding anything else. Often pointed-to
+  // classes are less useful and can be very large.
+  options->pointer_expand_depth = 1;
   options->max_depth = 16;
+
+  // All current users of this want the smart form.
+  //
+  // This keeps the default wrap columns at 80. We can consider querying the actual console width.
+  // But very long lines start putting many struct members on the same line which gets increasingly
+  // difficult to read. 80 columns feels reasonably close to how much you can take in at once.
+  //
+  // Note also that this doesn't stricly wrap the output to 80 columns. Long type names or values
+  // will still use the full width and will be wrapped by the console. This wrapping only affects
+  // the splitting of items across lines.
+  options->wrapping = ConsoleFormatOptions::Wrapping::kSmart;
 
   // Verbosity.
   if (cmd.HasSwitch(kForceAllTypes))
@@ -105,6 +118,10 @@ Err GetConsoleFormatOptions(const Command& cmd, ConsoleFormatOptions* options) {
     }
   }
 
+  // Disable pretty-printing.
+  if (cmd.HasSwitch(kRawOutput))
+    options->enable_pretty_printing = false;
+
   if (num_type_overrides > 1)
     return Err("More than one type override (-c, -d, -u, -x) specified.");
   return Err();
@@ -116,6 +133,10 @@ Err GetConsoleFormatOptions(const Command& cmd, ConsoleFormatOptions* options) {
   "      256. Specifying large values will slow things down and make the\n"   \
   "      output harder to read, but the default is sometimes insufficient.\n" \
   "      This also applies to strings.\n"                                     \
+  "\n"                                                                        \
+  "  -r\n"                                                                    \
+  "  --raw\n"                                                                 \
+  "      Bypass pretty-printers and show the raw type information.\n"         \
   "\n"                                                                        \
   "  -t\n"                                                                    \
   "  --types\n"                                                               \
@@ -148,6 +169,11 @@ const char kBacktraceHelp[] =
 
 Arguments
 
+  -f
+  --force
+      Force updates the stack, replacing and recomputing all addresses even if
+      the debugger thinks nothing has changed.
+
   -t
   --types
       Include all type information for function parameters.
@@ -164,6 +190,9 @@ Err DoBacktrace(ConsoleContext* context, const Command& cmd) {
 
   if (!cmd.thread())
     return Err("There is no thread to have frames.");
+
+  if (cmd.HasSwitch(kForceUpdate))
+    cmd.thread()->GetStack().ClearFrames();
 
   // TODO(brettw) this should share formatting options and parsing with the printing commands.
   bool show_params = cmd.HasSwitch(kForceAllTypes);
@@ -1309,11 +1338,13 @@ void AppendThreadVerbs(std::map<Verb, VerbRecord>* verbs) {
       SwitchRecord(kForceNumberSigned, false, "", 'd'),
       SwitchRecord(kForceNumberUnsigned, false, "", 'u'),
       SwitchRecord(kForceNumberHex, false, "", 'x'),
-      SwitchRecord(kMaxArraySize, true, "max-array")};
+      SwitchRecord(kMaxArraySize, true, "max-array"),
+      SwitchRecord(kRawOutput, false, "raw", 'r')};
 
+  // backtrace
   VerbRecord backtrace(&DoBacktrace, {"backtrace", "bt"}, kBacktraceShortHelp, kBacktraceHelp,
                        CommandGroup::kQuery);
-  backtrace.switches = {force_types};
+  backtrace.switches = {force_types, SwitchRecord(kForceUpdate, false, "force", 'f')};
   (*verbs)[Verb::kBacktrace] = std::move(backtrace);
 
   (*verbs)[Verb::kContinue] =

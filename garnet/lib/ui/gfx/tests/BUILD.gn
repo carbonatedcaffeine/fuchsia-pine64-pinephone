@@ -25,7 +25,7 @@ source_set("mocks") {
   public_deps = [
     ":util",
     "//garnet/lib/ui/gfx",
-    "//garnet/public/lib/inspect",
+    "//garnet/public/lib/inspect_deprecated",
   ]
 }
 
@@ -36,6 +36,7 @@ source_set("testing_deps") {
     "error_reporting_test.h",
     "frame_scheduler_test.cc",
     "frame_scheduler_test.h",
+    "gfx_test.cc",
     "gfx_test.h",
     "session_handler_test.cc",
     "session_handler_test.h",
@@ -53,9 +54,9 @@ source_set("testing_deps") {
     "//garnet/public/lib/async_promise",
     "//garnet/public/lib/fostr/fidl/fuchsia.ui.scenic",
     "//garnet/public/lib/gtest",
-    "//garnet/public/lib/inspect",
-    "//garnet/public/lib/inspect:reader",
-    "//garnet/public/lib/inspect/testing",
+    "//garnet/public/lib/inspect_deprecated",
+    "//garnet/public/lib/inspect_deprecated:reader",
+    "//garnet/public/lib/inspect_deprecated/testing",
     "//garnet/public/lib/ui/input/cpp",
     "//sdk/fidl/fuchsia.ui.gfx",
     "//sdk/fidl/fuchsia.ui.scenic",
@@ -93,7 +94,6 @@ executable("unittests") {
     "default_frame_scheduler_unittest.cc",
     "duration_predictor_unittest.cc",
     "escher_vulkan_smoke_test.cc",
-    "event_timestamper_unittest.cc",
     "frame_predictor_unittest.cc",
     "frame_stats_unittest.cc",
     "frame_timings_unittest.cc",

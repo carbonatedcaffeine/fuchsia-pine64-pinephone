@@ -43,22 +43,21 @@ void GenerateRandName(char* tp) {
 }
 
 // Creates a unique temporary file under |root_fd| from template |tp|.
-fxl::UniqueFD MksTempAt(int root_fd, char* tp, size_t tp_length) {
+fbl::unique_fd MksTempAt(int root_fd, char* tp, size_t tp_length) {
   FXL_DCHECK(strlen(tp) == tp_length);
   FXL_DCHECK(tp_length >= 6);
   FXL_DCHECK(memcmp(tp + tp_length - 6, "XXXXXX", 6) == 0);
   int retries = 100;
   do {
     GenerateRandName(tp + tp_length - 6);
-    fxl::UniqueFD result(
-        HANDLE_EINTR(openat(root_fd, tp, O_CREAT | O_EXCL, 0700)));
+    fbl::unique_fd result(HANDLE_EINTR(openat(root_fd, tp, O_CREAT | O_EXCL, 0700)));
     if (result.is_valid()) {
       return result;
     }
   } while (--retries && errno == EEXIST);
 
   memcpy(tp + tp_length - 6, "XXXXXX", 6);
-  return fxl::UniqueFD();
+  return fbl::unique_fd();
 }
 
 // Creates a unique temporary directory under |root_fd| from template |tp|.
@@ -81,8 +80,7 @@ char* MkdTempAt(int root_fd, char* tp, size_t tp_length) {
 
 ScopedTempDirAt::ScopedTempDirAt(int root_fd) : ScopedTempDirAt(root_fd, ".") {}
 
-ScopedTempDirAt::ScopedTempDirAt(int root_fd, fxl::StringView parent_path)
-    : root_fd_(root_fd) {
+ScopedTempDirAt::ScopedTempDirAt(int root_fd, fxl::StringView parent_path) : root_fd_(root_fd) {
   const std::string parent_path_str = parent_path.ToString();
   // MkdTempAt replaces "XXXXXX" so that the resulting directory path is unique.
   directory_path_ = parent_path_str + "/temp_dir_XXXXXX";
@@ -107,7 +105,7 @@ int ScopedTempDirAt::root_fd() { return root_fd_; }
 bool ScopedTempDirAt::NewTempFile(std::string* output) {
   // MksTempAt replaces "XXXXXX" so that the resulting file path is unique.
   std::string file_path = directory_path_ + "/XXXXXX";
-  fxl::UniqueFD fd = MksTempAt(root_fd_, &file_path[0], file_path.size());
+  fbl::unique_fd fd = MksTempAt(root_fd_, &file_path[0], file_path.size());
   if (!fd.is_valid()) {
     return false;
   }
@@ -115,8 +113,7 @@ bool ScopedTempDirAt::NewTempFile(std::string* output) {
   return true;
 }
 
-bool ScopedTempDirAt::NewTempFileWithData(const std::string& data,
-                                          std::string* output) {
+bool ScopedTempDirAt::NewTempFileWithData(const std::string& data, std::string* output) {
   if (!NewTempFile(output)) {
     return false;
   }
@@ -142,17 +139,12 @@ ScopedTempDir::~ScopedTempDir() {}
 
 const std::string& ScopedTempDir::path() { return base_.path(); }
 
-bool ScopedTempDir::NewTempFile(std::string* output) {
-  return base_.NewTempFile(output);
-}
+bool ScopedTempDir::NewTempFile(std::string* output) { return base_.NewTempFile(output); }
 
-bool ScopedTempDir::NewTempFileWithData(const std::string& data,
-                                        std::string* output) {
+bool ScopedTempDir::NewTempFileWithData(const std::string& data, std::string* output) {
   return base_.NewTempFileWithData(data, output);
 }
 
-bool ScopedTempDir::NewTempDir(std::string* path) {
-  return base_.NewTempDir(path);
-}
+bool ScopedTempDir::NewTempDir(std::string* path) { return base_.NewTempDir(path); }
 
 }  // namespace files

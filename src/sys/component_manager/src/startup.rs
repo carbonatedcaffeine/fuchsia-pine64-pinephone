@@ -19,6 +19,7 @@ use {
     fuchsia_vfs_pseudo_fs::directory::{self, entry::DirectoryEntry},
     fuchsia_zircon as zx,
     futures::prelude::*,
+    log::*,
     std::{iter, path::PathBuf, sync::Arc},
 };
 
@@ -94,10 +95,16 @@ impl Arguments {
 /// process.
 pub fn available_resolvers() -> Result<ResolverRegistry, Error> {
     let mut resolver_registry = ResolverRegistry::new();
-    resolver_registry
-        .register(fuchsia_boot_resolver::SCHEME.to_string(), Box::new(FuchsiaBootResolver::new()));
 
-    // Add the fuchsia-pkg resolver to the registry if it's available.
+    // Either the fuchsia-boot or fuchsia-pkg resolver may be unavailable in certain contexts.
+    let boot_resolver = FuchsiaBootResolver::new().context("Failed to create boot resolver")?;
+    match boot_resolver {
+        None => info!("No /boot directory in namespace, fuchsia-boot resolver unavailable"),
+        Some(r) => {
+            resolver_registry.register(fuchsia_boot_resolver::SCHEME.to_string(), Box::new(r));
+        }
+    };
+
     if let Some(pkg_resolver) = connect_pkg_resolver()? {
         resolver_registry.register(
             fuchsia_pkg_resolver::SCHEME.to_string(),
@@ -252,7 +259,7 @@ mod tests {
         let mut launch_info =
             LaunchInfo { name: "ab\0cd".into(), executable: zx::Vmo::create(1)?, job };
         let (status, process) =
-            await!(launcher.launch(&mut launch_info)).expect("FIDL call to launcher failed");
+            launcher.launch(&mut launch_info).await.expect("FIDL call to launcher failed");
         assert_eq!(zx::Status::from_raw(status), zx::Status::INVALID_ARGS);
         assert_eq!(process, None);
         Ok(())
@@ -267,7 +274,7 @@ mod tests {
         let proxy = builtin.connect_to_service::<EchoMarker>()?;
 
         // But calls to the service should fail, since it doesn't exist.
-        let res = await!(proxy.echo_string(Some("hippos")));
+        let res = proxy.echo_string(Some("hippos")).await;
         let err = res.expect_err("echo_string unexpected succeeded");
         match err {
             fidl::Error::ClientRead(zx::Status::PEER_CLOSED)

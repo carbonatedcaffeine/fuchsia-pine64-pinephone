@@ -2,8 +2,8 @@
 
 ## Modified BNF rules
 
-This is the grammar for FIDL source files. The grammar is expressed in
-a modified BNF format.
+This is the grammar for FIDL source files. The grammar is expressed in a
+modified BNF format.
 
 A nonterminal symbol matches a sequence of other symbols, delimited by
 commas.
@@ -76,10 +76,10 @@ declaration = bits-declaration | const-declaration | enum-declaration | protocol
 
 const-declaration = ( attribute-list ) , "const" , type-constructor , IDENTIFIER , "=" , constant ;
 
-enum-declaration = ( attribute-list ) , "enum" , IDENTIFIER , ( ":" , type-constructor ) ,
+enum-declaration = ( attribute-list ) , ( "strict" ) , "enum" , IDENTIFIER , ( ":" , type-constructor ) ,
                    "{" , ( bits-or-enum-member , ";" )+ , "}" ; [NOTE 1]
 
-bits-declaration = ( attribute-list ) , "bits" , IDENTIFIER , ( ":" , type-constructor ) ,
+bits-declaration = ( attribute-list ) , ( "strict" ) , "bits" , IDENTIFIER , ( ":" , type-constructor ) ,
                    "{" , ( bits-or-enum-member , ";" )+ , "}" ; [NOTE 2]
 
 bits-or-enum-member = ( attribute-list ) , IDENTIFIER , "=" , bits-or-enum-member-value ;
@@ -112,7 +112,7 @@ xunion-declaration = ( attribute-list ) , ( "strict" ) , "xunion" , IDENTIFIER ,
 
 union-field = ( attribute-list ) , type-constructor , IDENTIFIER ;
 
-table-declaration = ( attribute-list ) , "table" , IDENTIFIER , "{" , ( table-field , ";" )* , "}" ;
+table-declaration = ( attribute-list ) , ( "strict" ) , "table" , IDENTIFIER , "{" , ( table-field , ";" )* , "}" ;
 
 table-field = ( attribute-list ) , table-field-ordinal , table-field-declaration ; [NOTE 5]
 
@@ -134,9 +134,9 @@ type-constructor = compound-identifier ( "<" type-constructor ">" ) , (  type-co
 handle-type = "handle" , ( "<" , handle-subtype , ">" ) , ( "?" ) ;
 
 handle-subtype = "bti" | "channel" | "debuglog" | "event" | "eventpair" | "exception"
-               | "fifo" | "guest" | "interrupt" | "job" | "port" | "process"
-               | "profile" | "resource" | "socket" | "thread" | "timer"
-               | "vmar" | "vmo" ;
+               | "fifo" | "guest" | "interrupt" | "iommu" | "job" | "pager" | "pcidevice"
+               | "pmt" | "port" | "process" | "profile" | "resource" | "socket" | "suspendtoken"
+               | "thread" | "timer" | "vcpu" | "vmar" | "vmo" ;
 
 type-constraint = ":" , constant ;
 

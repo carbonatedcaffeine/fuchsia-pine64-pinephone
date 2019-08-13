@@ -33,6 +33,13 @@
 
 /* void arm64_context_switch(vaddr_t *old_sp, vaddr_t new_sp); */
 FUNCTION(arm64_context_switch)
+    /* The exclusive monitor is logically part of a thread's context.  Clear it to ensure the new
+       thread does not complete the store half of a load-exclusive/store-exclusive started by the
+       old thread.  If the context switch involves an exception return (eret) the monitor will be
+       cleared automatically.  However, if the thread has yielded, an eret may not occur and so we
+       must clear it here. */
+    clrex
+
     /* save old frame */
     /* This layout should match struct context_switch_frame */
     push_regs x29, x30

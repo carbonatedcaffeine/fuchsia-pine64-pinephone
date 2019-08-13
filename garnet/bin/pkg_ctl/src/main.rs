@@ -2,18 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
-#![deny(warnings)]
+#![feature(async_await)]
 
 use {
     crate::args::{Command, RepoCommand, RuleCommand, RuleConfigInputType},
-    failure::{self, Fail, ResultExt},
+    failure::{self, format_err, Fail, ResultExt},
     fidl_fuchsia_pkg::{
-        PackageCacheMarker, PackageResolverMarker, RepositoryManagerMarker, UpdatePolicy,
+        PackageCacheMarker, PackageResolverMarker, RepositoryManagerMarker, RepositoryManagerProxy,
+        UpdatePolicy,
     },
     fidl_fuchsia_pkg_ext::RepositoryConfig,
     fidl_fuchsia_pkg_rewrite::{EditTransactionProxy, EngineMarker, EngineProxy},
-    files_async, fuchsia_async as fasync,
+    fidl_fuchsia_update as fidl_update, files_async, fuchsia_async as fasync,
     fuchsia_component::client::connect_to_service,
     fuchsia_url_rewrite::{Rule as RewriteRule, RuleConfig},
     fuchsia_zircon as zx,
@@ -52,15 +52,17 @@ fn main() -> Result<(), failure::Error> {
 
                 let (dir, dir_server_end) = fidl::endpoints::create_proxy()?;
 
-                let res = await!(resolver.resolve(
-                    &pkg_url,
-                    &mut selectors.iter().map(|s| s.as_str()),
-                    &mut UpdatePolicy { fetch_if_absent: true, allow_old_versions: true },
-                    dir_server_end,
-                ))?;
+                let res = resolver
+                    .resolve(
+                        &pkg_url,
+                        &mut selectors.iter().map(|s| s.as_str()),
+                        &mut UpdatePolicy { fetch_if_absent: true, allow_old_versions: true },
+                        dir_server_end,
+                    )
+                    .await?;
                 zx::Status::ok(res)?;
 
-                let entries = await!(files_async::readdir_recursive(dir))?;
+                let entries = files_async::readdir_recursive(&dir).await?;
                 println!("package contents:");
                 for entry in entries {
                     println!("/{:?}", entry);
@@ -75,14 +77,16 @@ fn main() -> Result<(), failure::Error> {
 
                 let (dir, dir_server_end) = fidl::endpoints::create_proxy()?;
 
-                let res = await!(cache.open(
-                    &mut meta_far_blob_id.into(),
-                    &mut selectors.iter().map(|s| s.as_str()),
-                    dir_server_end,
-                ))?;
+                let res = cache
+                    .open(
+                        &mut meta_far_blob_id.into(),
+                        &mut selectors.iter().map(|s| s.as_str()),
+                        dir_server_end,
+                    )
+                    .await?;
                 zx::Status::ok(res)?;
 
-                let entries = await!(files_async::readdir_recursive(dir))?;
+                let entries = files_async::readdir_recursive(&dir).await?;
                 println!("package contents:");
                 for entry in entries {
                     println!("/{:?}", entry);
@@ -98,38 +102,32 @@ fn main() -> Result<(), failure::Error> {
                     RepoCommand::Add { file } => {
                         let repo: RepositoryConfig = serde_json::from_reader(File::open(file)?)?;
 
-                        let res = await!(repo_manager.add(repo.into()))?;
+                        let res = repo_manager.add(repo.into()).await?;
                         zx::Status::ok(res)?;
 
                         Ok(())
                     }
 
                     RepoCommand::Remove { repo_url } => {
-                        let res = await!(repo_manager.remove(&repo_url))?;
+                        let res = repo_manager.remove(&repo_url).await?;
                         zx::Status::ok(res)?;
 
                         Ok(())
                     }
 
                     RepoCommand::List => {
-                        let (iter, server_end) = fidl::endpoints::create_proxy()?;
-                        repo_manager.list(server_end)?;
-                        let mut repos = vec![];
+                        let repos = fetch_repos(repo_manager).await?;
 
-                        loop {
-                            let chunk = await!(iter.next())?;
-                            if chunk.is_empty() {
-                                break;
-                            }
-                            repos.extend(chunk);
-                        }
+                        let mut urls =
+                            repos.into_iter().map(|r| r.repo_url().to_string()).collect::<Vec<_>>();
+                        urls.sort_unstable();
+                        urls.into_iter().for_each(|url| println!("{}", url));
 
-                        let repos = repos
-                            .into_iter()
-                            .map(|repo| {
-                                RepositoryConfig::try_from(repo).expect("valid repo config")
-                            })
-                            .collect::<Vec<_>>();
+                        Ok(())
+                    }
+
+                    RepoCommand::ListVerbose => {
+                        let repos = fetch_repos(repo_manager).await?;
 
                         let s = serde_json::to_string_pretty(&repos).expect("valid json");
                         println!("{}", s);
@@ -149,7 +147,7 @@ fn main() -> Result<(), failure::Error> {
 
                         let mut rules = Vec::new();
                         loop {
-                            let more = await!(iter.next())?;
+                            let more = iter.next().await?;
                             if more.is_empty() {
                                 break;
                             }
@@ -165,10 +163,13 @@ fn main() -> Result<(), failure::Error> {
                         }
                     }
                     RuleCommand::Clear => {
-                        await!(do_transaction(engine, async move |transaction| {
-                            transaction.reset_all()?;
-                            Ok(transaction)
-                        }))?;
+                        do_transaction(engine, |transaction| {
+                            async move {
+                                transaction.reset_all()?;
+                                Ok(transaction)
+                            }
+                        })
+                        .await?;
                     }
                     RuleCommand::Replace { input_type } => {
                         let RuleConfig::Version1(ref rules) = match input_type {
@@ -178,19 +179,39 @@ fn main() -> Result<(), failure::Error> {
                             RuleConfigInputType::Json { config } => config,
                         };
 
-                        await!(do_transaction(engine, async move |transaction| {
-                            transaction.reset_all()?;
-                            // add() inserts rules as highest priority, so iterate over our
-                            // prioritized list of rules so they end up in the right order.
-                            for rule in rules.iter().rev() {
-                                await!(transaction.add(&mut rule.clone().into()))?;
+                        do_transaction(engine, |transaction| {
+                            async move {
+                                transaction.reset_all()?;
+                                // add() inserts rules as highest priority, so iterate over our
+                                // prioritized list of rules so they end up in the right order.
+                                for rule in rules.iter().rev() {
+                                    transaction.add(&mut rule.clone().into()).await?;
+                                }
+                                Ok(transaction)
                             }
-                            Ok(transaction)
-                        }))?;
+                        })
+                        .await?;
                     }
                 }
 
                 Ok(())
+            }
+            Command::Update => {
+                let update = connect_to_service::<fidl_update::ManagerMarker>()
+                    .context("Failed to connect to update manager service")?;
+                match update
+                    .check_now(
+                        fidl_update::Options { initiator: Some(fidl_update::Initiator::User) },
+                        None,
+                    )
+                    .await?
+                {
+                    fidl_update::CheckStartedResult::Throttled => {
+                        Err(format_err!("Update check was throttled."))
+                    }
+                    fidl_update::CheckStartedResult::Started
+                    | fidl_update::CheckStartedResult::InProgress => Ok(()),
+                }
             }
         }
     };
@@ -229,9 +250,9 @@ where
         let (transaction, transaction_server_end) = fidl::endpoints::create_proxy()?;
         engine.start_edit_transaction(transaction_server_end)?;
 
-        let transaction = await!(cb(transaction))?;
+        let transaction = cb(transaction).await?;
 
-        let status = await!(transaction.commit())?;
+        let status = transaction.commit().await?;
 
         // Retry edit transaction on concurrent edit
         return match zx::Status::from_raw(status) {
@@ -244,4 +265,25 @@ where
     }
 
     Err(EditTransactionError::CommitError(zx::Status::UNAVAILABLE))
+}
+
+async fn fetch_repos(
+    repo_manager: RepositoryManagerProxy,
+) -> Result<Vec<RepositoryConfig>, failure::Error> {
+    let (iter, server_end) = fidl::endpoints::create_proxy()?;
+    repo_manager.list(server_end)?;
+    let mut repos = vec![];
+
+    loop {
+        let chunk = iter.next().await?;
+        if chunk.is_empty() {
+            break;
+        }
+        repos.extend(chunk);
+    }
+
+    repos
+        .into_iter()
+        .map(|repo| RepositoryConfig::try_from(repo).map_err(|e| failure::Error::from(e)))
+        .collect()
 }

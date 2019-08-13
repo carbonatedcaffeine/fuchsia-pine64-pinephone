@@ -102,7 +102,6 @@ function metrics-maybe-log {
     fi
     if [[ -w "$filename" ]]; then
       TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-      shift     # remove the function name from $@
       echo "${TIMESTAMP}:" "$@" >> "$filename"
     fi
   fi
@@ -136,24 +135,96 @@ function track-command-execution {
     args=${args:0:100}
   fi
 
-  user_agent="Fuchsia-fx $(_os_data)"
-
   analytics_args=(
-    "v=1" \
-    "tid=${GA_PROPERTY_ID}" \
-    "an=fx" \
-    "cid=${METRICS_UUID}" \
     "t=event" \
     "ec=fx" \
-    "ea=${subcommand}"\
-    "el=${args}"\
+    "ea=${subcommand}" \
+    "el=${args}" \
+    )
+
+  send-analytics-event "event" "${analytics_args[@]}"
+  return 0
+}
+
+# Arguments:
+#   - time taken to complete (milliseconds)
+#   - exit status
+#   - the name of the fx subcommand
+#   - args of the subcommand
+function track-command-finished {
+  timing=$1
+  exit_status=$2
+  subcommand=$3
+  shift 3
+  args="$*"
+
+  metrics-read-config
+  if [[ $METRICS_ENABLED == 0 || $TRACK_RESULTS != *"$subcommand"* ]]; then
+    return 0
+  fi
+
+  # Only track arguments to the subcommands in $TRACK_ALL_ARGS
+  if [[ $TRACK_ALL_ARGS != *"$subcommand"* ]]; then
+    args=""
+  else
+    # Limit to the first 100 characters of arguments.
+    # The Analytics API supports up to 500 bytes, but it is likely that
+    # anything larger than 100 characters is an invalid execution and/or not
+    # what we want to track.
+    args=${args:0:100}
+  fi
+
+  if [[ $exit_status == 0 ]]; then
+    # Successes are logged as timing hits
+    hit_type="timing"
+    analytics_args=(
+      "t=timing" \
+      "utc=fx" \
+      "utv=${subcommand}" \
+      "utt=${timing}" \
+      "utl=${args}" \
+      )
+  else
+    # Failures are logged as event hits with a separate category
+    hit_type="event"
+    analytics_args=(
+      "t=event" \
+      "ec=fx_exception" \
+      "ea=${subcommand}" \
+      "el=${args}" \
+      "ev=${exit_status}" \
+      )
+  fi
+
+  send-analytics-event "${hit_type}" "${analytics_args[@]}"
+  return 0
+}
+
+# Arguments:
+#   - the event type to log
+#   - analytics arguments
+function send-analytics-event {
+  hit_type="$1"
+  shift
+  analytics_args=("$@")
+  local app_name="$(_app_name)"
+  local app_version="$(_app_version)"
+
+  analytics_args+=(
+    "v=1" \
+    "an=${app_name}" \
+    "av=${app_version}" \
+    "tid=${GA_PROPERTY_ID}" \
+    "cid=${METRICS_UUID}" \
     )
 
   curl_args=()
   for a in "${analytics_args[@]}"; do
     curl_args+=(--data-urlencode)
-    curl_args+=("$a")
+    curl_args+=("\"$a\"")
   done
+
+  local user_agent="Fuchsia-fx $(_os_data)"
   local url_path="/collect"
   local result=""
   if [[ $_METRICS_DEBUG == 1 && $_METRICS_USE_VALIDATION_SERVER == 1 ]]; then
@@ -167,30 +238,32 @@ function track-command-execution {
       -H "User-Agent: $user_agent" \
       "https://www.google-analytics.com/${url_path}")
   fi
-  metrics-maybe-log event_hit "${analytics_args[@]}" "RESULT=$result"
-
-  return 0
-}
-
-# TODO(mangini): NOOP at this moment
-# Arguments:
-#   - the name of the fx subcommand
-#   - args of the subcommand
-#   - time taken to complete (milliseconds)
-#   - exit status
-function track-command-finished {
-  subcommand=$1
-  args=$2
-  timing=$3
-  exit_status=$4
-  if [[ $METRICS_ENABLED == 0 || $TRACK_RESULTS != *"$subcommand"* ]]; then
-    return 0
-  fi
+  metrics-maybe-log "${hit_type}" "${analytics_args[@]}" "RESULT=${result}"
 }
 
 function _os_data {
   if command -v uname >/dev/null 2>&1 ; then
     uname -rs
+  else
+    echo "Unknown"
+  fi
+}
+
+function _app_name {
+  if [[ -n "${BASH_VERSION}" ]]; then
+    echo "bash"
+  elif [[ -n "${ZSH_VERSION}" ]]; then
+    echo "zsh"
+  else
+    echo "Unknown"
+  fi
+}
+
+function _app_version {
+  if [[ -n "${BASH_VERSION}" ]]; then
+    echo "${BASH_VERSION}"
+  elif [[ -n "${ZSH_VERSION}" ]]; then
+    echo "${ZSH_VERSION}"
   else
     echo "Unknown"
   fi

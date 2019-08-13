@@ -7,6 +7,7 @@
 #include <lib/fidl/cpp/string_view.h>
 #include <lib/fidl/llcpp/array.h>
 #include <lib/fidl/llcpp/coding.h>
+#include <lib/fidl/llcpp/sync_call.h>
 #include <lib/fidl/llcpp/traits.h>
 #include <lib/fidl/llcpp/transaction.h>
 #include <lib/fit/function.h>
@@ -20,10 +21,13 @@ namespace fuchsia {
 namespace device {
 
 class Controller;
+struct NameProvider_GetDeviceName_Response;
+struct NameProvider_GetDeviceName_Result;
+class NameProvider;
 
 extern "C" const fidl_type_t fuchsia_device_ControllerBindRequestTable;
 extern "C" const fidl_type_t fuchsia_device_ControllerBindResponseTable;
-extern "C" const fidl_type_t fuchsia_device_ControllerUnbindResponseTable;
+extern "C" const fidl_type_t fuchsia_device_ControllerScheduleUnbindResponseTable;
 extern "C" const fidl_type_t fuchsia_device_ControllerGetDriverNameResponseTable;
 extern "C" const fidl_type_t fuchsia_device_ControllerGetDeviceNameResponseTable;
 extern "C" const fidl_type_t fuchsia_device_ControllerGetTopologicalPathResponseTable;
@@ -35,6 +39,7 @@ extern "C" const fidl_type_t fuchsia_device_ControllerRunCompatibilityTestsRespo
 
 // Interface for manipulating a device in a devhost
 class Controller final {
+  Controller() = delete;
  public:
 
   struct BindResponse final {
@@ -46,6 +51,9 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   struct BindRequest final {
     FIDL_ALIGNDECL
@@ -56,20 +64,26 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 32;
     static constexpr uint32_t MaxOutOfLine = 1024;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
     using ResponseType = BindResponse;
   };
 
-  struct UnbindResponse final {
+  struct ScheduleUnbindResponse final {
     FIDL_ALIGNDECL
     fidl_message_header_t _hdr;
     int32_t status;
 
-    static constexpr const fidl_type_t* Type = &fuchsia_device_ControllerUnbindResponseTable;
+    static constexpr const fidl_type_t* Type = &fuchsia_device_ControllerScheduleUnbindResponseTable;
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
-  using UnbindRequest = ::fidl::AnyZeroArgMessage;
+  using ScheduleUnbindRequest = ::fidl::AnyZeroArgMessage;
 
   struct GetDriverNameResponse final {
     FIDL_ALIGNDECL
@@ -81,6 +95,9 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 40;
     static constexpr uint32_t MaxOutOfLine = 32;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   using GetDriverNameRequest = ::fidl::AnyZeroArgMessage;
 
@@ -93,6 +110,9 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 32;
     static constexpr uint32_t MaxOutOfLine = 32;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   using GetDeviceNameRequest = ::fidl::AnyZeroArgMessage;
 
@@ -106,6 +126,9 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 40;
     static constexpr uint32_t MaxOutOfLine = 1024;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   using GetTopologicalPathRequest = ::fidl::AnyZeroArgMessage;
 
@@ -119,6 +142,9 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 1;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   using GetEventHandleRequest = ::fidl::AnyZeroArgMessage;
 
@@ -132,6 +158,9 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   using GetDriverLogFlagsRequest = ::fidl::AnyZeroArgMessage;
 
@@ -144,6 +173,9 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   struct SetDriverLogFlagsRequest final {
     FIDL_ALIGNDECL
@@ -155,6 +187,9 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
     using ResponseType = SetDriverLogFlagsResponse;
   };
 
@@ -167,6 +202,9 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   using DebugSuspendRequest = ::fidl::AnyZeroArgMessage;
 
@@ -179,6 +217,9 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   using DebugResumeRequest = ::fidl::AnyZeroArgMessage;
 
@@ -191,6 +232,9 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   struct RunCompatibilityTestsRequest final {
     FIDL_ALIGNDECL
@@ -201,149 +245,600 @@ class Controller final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
     using ResponseType = RunCompatibilityTestsResponse;
   };
 
 
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class Bind_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      Bind_Impl(zx::unowned_channel _client_end, ::fidl::StringView driver);
+      ~Bind_Impl() = default;
+      Bind_Impl(Bind_Impl&& other) = default;
+      Bind_Impl& operator=(Bind_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class ScheduleUnbind_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      ScheduleUnbind_Impl(zx::unowned_channel _client_end);
+      ~ScheduleUnbind_Impl() = default;
+      ScheduleUnbind_Impl(ScheduleUnbind_Impl&& other) = default;
+      ScheduleUnbind_Impl& operator=(ScheduleUnbind_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetDriverName_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      GetDriverName_Impl(zx::unowned_channel _client_end);
+      ~GetDriverName_Impl() = default;
+      GetDriverName_Impl(GetDriverName_Impl&& other) = default;
+      GetDriverName_Impl& operator=(GetDriverName_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetDeviceName_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      GetDeviceName_Impl(zx::unowned_channel _client_end);
+      ~GetDeviceName_Impl() = default;
+      GetDeviceName_Impl(GetDeviceName_Impl&& other) = default;
+      GetDeviceName_Impl& operator=(GetDeviceName_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetTopologicalPath_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      GetTopologicalPath_Impl(zx::unowned_channel _client_end);
+      ~GetTopologicalPath_Impl() = default;
+      GetTopologicalPath_Impl(GetTopologicalPath_Impl&& other) = default;
+      GetTopologicalPath_Impl& operator=(GetTopologicalPath_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetEventHandle_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      GetEventHandle_Impl(zx::unowned_channel _client_end);
+      ~GetEventHandle_Impl() = default;
+      GetEventHandle_Impl(GetEventHandle_Impl&& other) = default;
+      GetEventHandle_Impl& operator=(GetEventHandle_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetDriverLogFlags_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      GetDriverLogFlags_Impl(zx::unowned_channel _client_end);
+      ~GetDriverLogFlags_Impl() = default;
+      GetDriverLogFlags_Impl(GetDriverLogFlags_Impl&& other) = default;
+      GetDriverLogFlags_Impl& operator=(GetDriverLogFlags_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class SetDriverLogFlags_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      SetDriverLogFlags_Impl(zx::unowned_channel _client_end, uint32_t clear_flags, uint32_t set_flags);
+      ~SetDriverLogFlags_Impl() = default;
+      SetDriverLogFlags_Impl(SetDriverLogFlags_Impl&& other) = default;
+      SetDriverLogFlags_Impl& operator=(SetDriverLogFlags_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class DebugSuspend_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      DebugSuspend_Impl(zx::unowned_channel _client_end);
+      ~DebugSuspend_Impl() = default;
+      DebugSuspend_Impl(DebugSuspend_Impl&& other) = default;
+      DebugSuspend_Impl& operator=(DebugSuspend_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class DebugResume_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      DebugResume_Impl(zx::unowned_channel _client_end);
+      ~DebugResume_Impl() = default;
+      DebugResume_Impl(DebugResume_Impl&& other) = default;
+      DebugResume_Impl& operator=(DebugResume_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class RunCompatibilityTests_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      RunCompatibilityTests_Impl(zx::unowned_channel _client_end, int64_t hook_wait_time);
+      ~RunCompatibilityTests_Impl() = default;
+      RunCompatibilityTests_Impl(RunCompatibilityTests_Impl&& other) = default;
+      RunCompatibilityTests_Impl& operator=(RunCompatibilityTests_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using Bind = Bind_Impl<BindResponse>;
+    using ScheduleUnbind = ScheduleUnbind_Impl<ScheduleUnbindResponse>;
+    using GetDriverName = GetDriverName_Impl<GetDriverNameResponse>;
+    using GetDeviceName = GetDeviceName_Impl<GetDeviceNameResponse>;
+    using GetTopologicalPath = GetTopologicalPath_Impl<GetTopologicalPathResponse>;
+    using GetEventHandle = GetEventHandle_Impl<GetEventHandleResponse>;
+    using GetDriverLogFlags = GetDriverLogFlags_Impl<GetDriverLogFlagsResponse>;
+    using SetDriverLogFlags = SetDriverLogFlags_Impl<SetDriverLogFlagsResponse>;
+    using DebugSuspend = DebugSuspend_Impl<DebugSuspendResponse>;
+    using DebugResume = DebugResume_Impl<DebugResumeResponse>;
+    using RunCompatibilityTests = RunCompatibilityTests_Impl<RunCompatibilityTestsResponse>;
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class Bind_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      Bind_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView driver, ::fidl::BytePart _response_buffer);
+      ~Bind_Impl() = default;
+      Bind_Impl(Bind_Impl&& other) = default;
+      Bind_Impl& operator=(Bind_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class ScheduleUnbind_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      ScheduleUnbind_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~ScheduleUnbind_Impl() = default;
+      ScheduleUnbind_Impl(ScheduleUnbind_Impl&& other) = default;
+      ScheduleUnbind_Impl& operator=(ScheduleUnbind_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetDriverName_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      GetDriverName_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~GetDriverName_Impl() = default;
+      GetDriverName_Impl(GetDriverName_Impl&& other) = default;
+      GetDriverName_Impl& operator=(GetDriverName_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetDeviceName_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      GetDeviceName_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~GetDeviceName_Impl() = default;
+      GetDeviceName_Impl(GetDeviceName_Impl&& other) = default;
+      GetDeviceName_Impl& operator=(GetDeviceName_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetTopologicalPath_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      GetTopologicalPath_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~GetTopologicalPath_Impl() = default;
+      GetTopologicalPath_Impl(GetTopologicalPath_Impl&& other) = default;
+      GetTopologicalPath_Impl& operator=(GetTopologicalPath_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetEventHandle_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      GetEventHandle_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~GetEventHandle_Impl() = default;
+      GetEventHandle_Impl(GetEventHandle_Impl&& other) = default;
+      GetEventHandle_Impl& operator=(GetEventHandle_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetDriverLogFlags_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      GetDriverLogFlags_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~GetDriverLogFlags_Impl() = default;
+      GetDriverLogFlags_Impl(GetDriverLogFlags_Impl&& other) = default;
+      GetDriverLogFlags_Impl& operator=(GetDriverLogFlags_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class SetDriverLogFlags_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      SetDriverLogFlags_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t clear_flags, uint32_t set_flags, ::fidl::BytePart _response_buffer);
+      ~SetDriverLogFlags_Impl() = default;
+      SetDriverLogFlags_Impl(SetDriverLogFlags_Impl&& other) = default;
+      SetDriverLogFlags_Impl& operator=(SetDriverLogFlags_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class DebugSuspend_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      DebugSuspend_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~DebugSuspend_Impl() = default;
+      DebugSuspend_Impl(DebugSuspend_Impl&& other) = default;
+      DebugSuspend_Impl& operator=(DebugSuspend_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class DebugResume_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      DebugResume_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~DebugResume_Impl() = default;
+      DebugResume_Impl(DebugResume_Impl&& other) = default;
+      DebugResume_Impl& operator=(DebugResume_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class RunCompatibilityTests_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      RunCompatibilityTests_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int64_t hook_wait_time, ::fidl::BytePart _response_buffer);
+      ~RunCompatibilityTests_Impl() = default;
+      RunCompatibilityTests_Impl(RunCompatibilityTests_Impl&& other) = default;
+      RunCompatibilityTests_Impl& operator=(RunCompatibilityTests_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using Bind = Bind_Impl<BindResponse>;
+    using ScheduleUnbind = ScheduleUnbind_Impl<ScheduleUnbindResponse>;
+    using GetDriverName = GetDriverName_Impl<GetDriverNameResponse>;
+    using GetDeviceName = GetDeviceName_Impl<GetDeviceNameResponse>;
+    using GetTopologicalPath = GetTopologicalPath_Impl<GetTopologicalPathResponse>;
+    using GetEventHandle = GetEventHandle_Impl<GetEventHandleResponse>;
+    using GetDriverLogFlags = GetDriverLogFlags_Impl<GetDriverLogFlagsResponse>;
+    using SetDriverLogFlags = SetDriverLogFlags_Impl<SetDriverLogFlagsResponse>;
+    using DebugSuspend = DebugSuspend_Impl<DebugSuspendResponse>;
+    using DebugResume = DebugResume_Impl<DebugResumeResponse>;
+    using RunCompatibilityTests = RunCompatibilityTests_Impl<RunCompatibilityTestsResponse>;
+  };
+
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
     ::zx::channel* mutable_channel() { return &channel_; }
 
     // Attempt to bind the requested driver to this device
-    zx_status_t Bind(::fidl::StringView driver, int32_t* out_status);
+    // Allocates 24 bytes of response buffer on the stack. Request is heap-allocated.
+    ResultOf::Bind Bind(::fidl::StringView driver);
+
+    // Attempt to bind the requested driver to this device
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::Bind Bind(::fidl::BytePart _request_buffer, ::fidl::StringView driver, ::fidl::BytePart _response_buffer);
+
+    // Attempt to bind the requested driver to this device
+    zx_status_t Bind_Deprecated(::fidl::StringView driver, int32_t* out_status);
 
     // Attempt to bind the requested driver to this device
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<BindResponse> Bind(::fidl::BytePart _request_buffer, ::fidl::StringView driver, ::fidl::BytePart _response_buffer, int32_t* out_status);
-
-    // Attempt to bind the requested driver to this device
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<BindResponse> Bind(::fidl::DecodedMessage<BindRequest> params, ::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<BindResponse> Bind_Deprecated(::fidl::BytePart _request_buffer, ::fidl::StringView driver, ::fidl::BytePart _response_buffer, int32_t* out_status);
 
     // Disconnect this device and allow its parent to be bound again.
-    zx_status_t Unbind(int32_t* out_status);
+    // This may not complete before it returns.
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::ScheduleUnbind ScheduleUnbind();
 
     // Disconnect this device and allow its parent to be bound again.
+    // This may not complete before it returns.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::ScheduleUnbind ScheduleUnbind(::fidl::BytePart _response_buffer);
+
+    // Disconnect this device and allow its parent to be bound again.
+    // This may not complete before it returns.
+    zx_status_t ScheduleUnbind_Deprecated(int32_t* out_status);
+
+    // Disconnect this device and allow its parent to be bound again.
+    // This may not complete before it returns.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<UnbindResponse> Unbind(::fidl::BytePart _response_buffer, int32_t* out_status);
+    ::fidl::DecodeResult<ScheduleUnbindResponse> ScheduleUnbind_Deprecated(::fidl::BytePart _response_buffer, int32_t* out_status);
 
-    // Disconnect this device and allow its parent to be bound again.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<UnbindResponse> Unbind(::fidl::BytePart response_buffer);
+    // Return the name of the driver managing this the device
+    // Allocates 88 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::GetDriverName GetDriverName();
+
+    // Return the name of the driver managing this the device
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::GetDriverName GetDriverName(::fidl::BytePart _response_buffer);
 
 
     // Return the name of the driver managing this the device
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetDriverNameResponse> GetDriverName(::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_name);
+    ::fidl::DecodeResult<GetDriverNameResponse> GetDriverName_Deprecated(::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_name);
 
-    // Return the name of the driver managing this the device
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetDriverNameResponse> GetDriverName(::fidl::BytePart response_buffer);
+    // Return the name of the device
+    // Allocates 80 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::GetDeviceName GetDeviceName();
+
+    // Return the name of the device
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::GetDeviceName GetDeviceName(::fidl::BytePart _response_buffer);
 
 
     // Return the name of the device
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetDeviceNameResponse> GetDeviceName(::fidl::BytePart _response_buffer, ::fidl::StringView* out_name);
+    ::fidl::DecodeResult<GetDeviceNameResponse> GetDeviceName_Deprecated(::fidl::BytePart _response_buffer, ::fidl::StringView* out_name);
 
-    // Return the name of the device
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetDeviceNameResponse> GetDeviceName(::fidl::BytePart response_buffer);
+    // Return the topological path for this device
+    // Allocates 16 bytes of request buffer on the stack. Response is heap-allocated.
+    ResultOf::GetTopologicalPath GetTopologicalPath();
+
+    // Return the topological path for this device
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::GetTopologicalPath GetTopologicalPath(::fidl::BytePart _response_buffer);
 
 
     // Return the topological path for this device
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetTopologicalPathResponse> GetTopologicalPath(::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_path);
+    ::fidl::DecodeResult<GetTopologicalPathResponse> GetTopologicalPath_Deprecated(::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_path);
 
-    // Return the topological path for this device
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetTopologicalPathResponse> GetTopologicalPath(::fidl::BytePart response_buffer);
+    // Get an event for monitoring device conditions (see `DEVICE_SIGNAL_*` constants)
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::GetEventHandle GetEventHandle();
 
-    // Get an event for monitoring device conditions (see DEVICE_SIGNAL_* constants)
-    zx_status_t GetEventHandle(int32_t* out_status, ::zx::event* out_event);
+    // Get an event for monitoring device conditions (see `DEVICE_SIGNAL_*` constants)
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::GetEventHandle GetEventHandle(::fidl::BytePart _response_buffer);
 
-    // Get an event for monitoring device conditions (see DEVICE_SIGNAL_* constants)
+    // Get an event for monitoring device conditions (see `DEVICE_SIGNAL_*` constants)
+    zx_status_t GetEventHandle_Deprecated(int32_t* out_status, ::zx::event* out_event);
+
+    // Get an event for monitoring device conditions (see `DEVICE_SIGNAL_*` constants)
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetEventHandleResponse> GetEventHandle(::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::event* out_event);
-
-    // Get an event for monitoring device conditions (see DEVICE_SIGNAL_* constants)
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetEventHandleResponse> GetEventHandle(::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<GetEventHandleResponse> GetEventHandle_Deprecated(::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::event* out_event);
 
     // Return the current logging flags for this device's driver
-    zx_status_t GetDriverLogFlags(int32_t* out_status, uint32_t* out_flags);
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::GetDriverLogFlags GetDriverLogFlags();
+
+    // Return the current logging flags for this device's driver
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::GetDriverLogFlags GetDriverLogFlags(::fidl::BytePart _response_buffer);
+
+    // Return the current logging flags for this device's driver
+    zx_status_t GetDriverLogFlags_Deprecated(int32_t* out_status, uint32_t* out_flags);
 
     // Return the current logging flags for this device's driver
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetDriverLogFlagsResponse> GetDriverLogFlags(::fidl::BytePart _response_buffer, int32_t* out_status, uint32_t* out_flags);
-
-    // Return the current logging flags for this device's driver
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetDriverLogFlagsResponse> GetDriverLogFlags(::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<GetDriverLogFlagsResponse> GetDriverLogFlags_Deprecated(::fidl::BytePart _response_buffer, int32_t* out_status, uint32_t* out_flags);
 
     // Set the logging flags for this device's driver.
     // Each set bit in `clear_flags` will be cleared in the log flags state.
     // Each set bit in `set_flags` will then be set in the log flags state.
-    zx_status_t SetDriverLogFlags(uint32_t clear_flags, uint32_t set_flags, int32_t* out_status);
+    // Allocates 48 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::SetDriverLogFlags SetDriverLogFlags(uint32_t clear_flags, uint32_t set_flags);
+
+    // Set the logging flags for this device's driver.
+    // Each set bit in `clear_flags` will be cleared in the log flags state.
+    // Each set bit in `set_flags` will then be set in the log flags state.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::SetDriverLogFlags SetDriverLogFlags(::fidl::BytePart _request_buffer, uint32_t clear_flags, uint32_t set_flags, ::fidl::BytePart _response_buffer);
+
+    // Set the logging flags for this device's driver.
+    // Each set bit in `clear_flags` will be cleared in the log flags state.
+    // Each set bit in `set_flags` will then be set in the log flags state.
+    zx_status_t SetDriverLogFlags_Deprecated(uint32_t clear_flags, uint32_t set_flags, int32_t* out_status);
 
     // Set the logging flags for this device's driver.
     // Each set bit in `clear_flags` will be cleared in the log flags state.
     // Each set bit in `set_flags` will then be set in the log flags state.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<SetDriverLogFlagsResponse> SetDriverLogFlags(::fidl::BytePart _request_buffer, uint32_t clear_flags, uint32_t set_flags, ::fidl::BytePart _response_buffer, int32_t* out_status);
-
-    // Set the logging flags for this device's driver.
-    // Each set bit in `clear_flags` will be cleared in the log flags state.
-    // Each set bit in `set_flags` will then be set in the log flags state.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<SetDriverLogFlagsResponse> SetDriverLogFlags(::fidl::DecodedMessage<SetDriverLogFlagsRequest> params, ::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<SetDriverLogFlagsResponse> SetDriverLogFlags_Deprecated(::fidl::BytePart _request_buffer, uint32_t clear_flags, uint32_t set_flags, ::fidl::BytePart _response_buffer, int32_t* out_status);
 
     // Debug command: execute the device's suspend hook
-    zx_status_t DebugSuspend(int32_t* out_status);
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::DebugSuspend DebugSuspend();
+
+    // Debug command: execute the device's suspend hook
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::DebugSuspend DebugSuspend(::fidl::BytePart _response_buffer);
+
+    // Debug command: execute the device's suspend hook
+    zx_status_t DebugSuspend_Deprecated(int32_t* out_status);
 
     // Debug command: execute the device's suspend hook
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<DebugSuspendResponse> DebugSuspend(::fidl::BytePart _response_buffer, int32_t* out_status);
-
-    // Debug command: execute the device's suspend hook
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<DebugSuspendResponse> DebugSuspend(::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<DebugSuspendResponse> DebugSuspend_Deprecated(::fidl::BytePart _response_buffer, int32_t* out_status);
 
     // Debug command: execute the device's resume hook
-    zx_status_t DebugResume(int32_t* out_status);
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::DebugResume DebugResume();
+
+    // Debug command: execute the device's resume hook
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::DebugResume DebugResume(::fidl::BytePart _response_buffer);
+
+    // Debug command: execute the device's resume hook
+    zx_status_t DebugResume_Deprecated(int32_t* out_status);
 
     // Debug command: execute the device's resume hook
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<DebugResumeResponse> DebugResume(::fidl::BytePart _response_buffer, int32_t* out_status);
-
-    // Debug command: execute the device's resume hook
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<DebugResumeResponse> DebugResume(::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<DebugResumeResponse> DebugResume_Deprecated(::fidl::BytePart _response_buffer, int32_t* out_status);
 
     // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
     // The |hook_wait_time| is the time that the driver expects to take for each device hook in
     // nanoseconds.
     // Returns whether the driver passed the compatibility check.
-    zx_status_t RunCompatibilityTests(int64_t hook_wait_time, uint32_t* out_status);
+    // Allocates 48 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::RunCompatibilityTests RunCompatibilityTests(int64_t hook_wait_time);
+
+    // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
+    // The |hook_wait_time| is the time that the driver expects to take for each device hook in
+    // nanoseconds.
+    // Returns whether the driver passed the compatibility check.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::RunCompatibilityTests RunCompatibilityTests(::fidl::BytePart _request_buffer, int64_t hook_wait_time, ::fidl::BytePart _response_buffer);
+
+    // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
+    // The |hook_wait_time| is the time that the driver expects to take for each device hook in
+    // nanoseconds.
+    // Returns whether the driver passed the compatibility check.
+    zx_status_t RunCompatibilityTests_Deprecated(int64_t hook_wait_time, uint32_t* out_status);
 
     // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
     // The |hook_wait_time| is the time that the driver expects to take for each device hook in
@@ -351,14 +846,7 @@ class Controller final {
     // Returns whether the driver passed the compatibility check.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<RunCompatibilityTestsResponse> RunCompatibilityTests(::fidl::BytePart _request_buffer, int64_t hook_wait_time, ::fidl::BytePart _response_buffer, uint32_t* out_status);
-
-    // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
-    // The |hook_wait_time| is the time that the driver expects to take for each device hook in
-    // nanoseconds.
-    // Returns whether the driver passed the compatibility check.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<RunCompatibilityTestsResponse> RunCompatibilityTests(::fidl::DecodedMessage<RunCompatibilityTestsRequest> params, ::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<RunCompatibilityTestsResponse> RunCompatibilityTests_Deprecated(::fidl::BytePart _request_buffer, int64_t hook_wait_time, ::fidl::BytePart _response_buffer, uint32_t* out_status);
 
    private:
     ::zx::channel channel_;
@@ -366,147 +854,248 @@ class Controller final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
    public:
 
     // Attempt to bind the requested driver to this device
-    static zx_status_t Bind(zx::unowned_channel _client_end, ::fidl::StringView driver, int32_t* out_status);
+    // Allocates 24 bytes of response buffer on the stack. Request is heap-allocated.
+    static ResultOf::Bind Bind(zx::unowned_channel _client_end, ::fidl::StringView driver);
+
+    // Attempt to bind the requested driver to this device
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::Bind Bind(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView driver, ::fidl::BytePart _response_buffer);
+
+    // Attempt to bind the requested driver to this device
+    static zx_status_t Bind_Deprecated(zx::unowned_channel _client_end, ::fidl::StringView driver, int32_t* out_status);
 
     // Attempt to bind the requested driver to this device
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<BindResponse> Bind(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView driver, ::fidl::BytePart _response_buffer, int32_t* out_status);
+    static ::fidl::DecodeResult<BindResponse> Bind_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView driver, ::fidl::BytePart _response_buffer, int32_t* out_status);
+
+    // Disconnect this device and allow its parent to be bound again.
+    // This may not complete before it returns.
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::ScheduleUnbind ScheduleUnbind(zx::unowned_channel _client_end);
+
+    // Disconnect this device and allow its parent to be bound again.
+    // This may not complete before it returns.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::ScheduleUnbind ScheduleUnbind(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+    // Disconnect this device and allow its parent to be bound again.
+    // This may not complete before it returns.
+    static zx_status_t ScheduleUnbind_Deprecated(zx::unowned_channel _client_end, int32_t* out_status);
+
+    // Disconnect this device and allow its parent to be bound again.
+    // This may not complete before it returns.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<ScheduleUnbindResponse> ScheduleUnbind_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status);
+
+    // Return the name of the driver managing this the device
+    // Allocates 88 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::GetDriverName GetDriverName(zx::unowned_channel _client_end);
+
+    // Return the name of the driver managing this the device
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::GetDriverName GetDriverName(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+
+    // Return the name of the driver managing this the device
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<GetDriverNameResponse> GetDriverName_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_name);
+
+    // Return the name of the device
+    // Allocates 80 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::GetDeviceName GetDeviceName(zx::unowned_channel _client_end);
+
+    // Return the name of the device
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::GetDeviceName GetDeviceName(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+
+    // Return the name of the device
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<GetDeviceNameResponse> GetDeviceName_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, ::fidl::StringView* out_name);
+
+    // Return the topological path for this device
+    // Allocates 16 bytes of request buffer on the stack. Response is heap-allocated.
+    static ResultOf::GetTopologicalPath GetTopologicalPath(zx::unowned_channel _client_end);
+
+    // Return the topological path for this device
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::GetTopologicalPath GetTopologicalPath(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+
+    // Return the topological path for this device
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<GetTopologicalPathResponse> GetTopologicalPath_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_path);
+
+    // Get an event for monitoring device conditions (see `DEVICE_SIGNAL_*` constants)
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::GetEventHandle GetEventHandle(zx::unowned_channel _client_end);
+
+    // Get an event for monitoring device conditions (see `DEVICE_SIGNAL_*` constants)
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::GetEventHandle GetEventHandle(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+    // Get an event for monitoring device conditions (see `DEVICE_SIGNAL_*` constants)
+    static zx_status_t GetEventHandle_Deprecated(zx::unowned_channel _client_end, int32_t* out_status, ::zx::event* out_event);
+
+    // Get an event for monitoring device conditions (see `DEVICE_SIGNAL_*` constants)
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<GetEventHandleResponse> GetEventHandle_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::event* out_event);
+
+    // Return the current logging flags for this device's driver
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::GetDriverLogFlags GetDriverLogFlags(zx::unowned_channel _client_end);
+
+    // Return the current logging flags for this device's driver
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::GetDriverLogFlags GetDriverLogFlags(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+    // Return the current logging flags for this device's driver
+    static zx_status_t GetDriverLogFlags_Deprecated(zx::unowned_channel _client_end, int32_t* out_status, uint32_t* out_flags);
+
+    // Return the current logging flags for this device's driver
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<GetDriverLogFlagsResponse> GetDriverLogFlags_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, uint32_t* out_flags);
+
+    // Set the logging flags for this device's driver.
+    // Each set bit in `clear_flags` will be cleared in the log flags state.
+    // Each set bit in `set_flags` will then be set in the log flags state.
+    // Allocates 48 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::SetDriverLogFlags SetDriverLogFlags(zx::unowned_channel _client_end, uint32_t clear_flags, uint32_t set_flags);
+
+    // Set the logging flags for this device's driver.
+    // Each set bit in `clear_flags` will be cleared in the log flags state.
+    // Each set bit in `set_flags` will then be set in the log flags state.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::SetDriverLogFlags SetDriverLogFlags(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t clear_flags, uint32_t set_flags, ::fidl::BytePart _response_buffer);
+
+    // Set the logging flags for this device's driver.
+    // Each set bit in `clear_flags` will be cleared in the log flags state.
+    // Each set bit in `set_flags` will then be set in the log flags state.
+    static zx_status_t SetDriverLogFlags_Deprecated(zx::unowned_channel _client_end, uint32_t clear_flags, uint32_t set_flags, int32_t* out_status);
+
+    // Set the logging flags for this device's driver.
+    // Each set bit in `clear_flags` will be cleared in the log flags state.
+    // Each set bit in `set_flags` will then be set in the log flags state.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<SetDriverLogFlagsResponse> SetDriverLogFlags_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t clear_flags, uint32_t set_flags, ::fidl::BytePart _response_buffer, int32_t* out_status);
+
+    // Debug command: execute the device's suspend hook
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::DebugSuspend DebugSuspend(zx::unowned_channel _client_end);
+
+    // Debug command: execute the device's suspend hook
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::DebugSuspend DebugSuspend(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+    // Debug command: execute the device's suspend hook
+    static zx_status_t DebugSuspend_Deprecated(zx::unowned_channel _client_end, int32_t* out_status);
+
+    // Debug command: execute the device's suspend hook
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<DebugSuspendResponse> DebugSuspend_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status);
+
+    // Debug command: execute the device's resume hook
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::DebugResume DebugResume(zx::unowned_channel _client_end);
+
+    // Debug command: execute the device's resume hook
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::DebugResume DebugResume(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+    // Debug command: execute the device's resume hook
+    static zx_status_t DebugResume_Deprecated(zx::unowned_channel _client_end, int32_t* out_status);
+
+    // Debug command: execute the device's resume hook
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<DebugResumeResponse> DebugResume_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status);
+
+    // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
+    // The |hook_wait_time| is the time that the driver expects to take for each device hook in
+    // nanoseconds.
+    // Returns whether the driver passed the compatibility check.
+    // Allocates 48 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::RunCompatibilityTests RunCompatibilityTests(zx::unowned_channel _client_end, int64_t hook_wait_time);
+
+    // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
+    // The |hook_wait_time| is the time that the driver expects to take for each device hook in
+    // nanoseconds.
+    // Returns whether the driver passed the compatibility check.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::RunCompatibilityTests RunCompatibilityTests(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int64_t hook_wait_time, ::fidl::BytePart _response_buffer);
+
+    // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
+    // The |hook_wait_time| is the time that the driver expects to take for each device hook in
+    // nanoseconds.
+    // Returns whether the driver passed the compatibility check.
+    static zx_status_t RunCompatibilityTests_Deprecated(zx::unowned_channel _client_end, int64_t hook_wait_time, uint32_t* out_status);
+
+    // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
+    // The |hook_wait_time| is the time that the driver expects to take for each device hook in
+    // nanoseconds.
+    // Returns whether the driver passed the compatibility check.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<RunCompatibilityTestsResponse> RunCompatibilityTests_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int64_t hook_wait_time, ::fidl::BytePart _response_buffer, uint32_t* out_status);
+
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
 
     // Attempt to bind the requested driver to this device
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<BindResponse> Bind(zx::unowned_channel _client_end, ::fidl::DecodedMessage<BindRequest> params, ::fidl::BytePart response_buffer);
 
     // Disconnect this device and allow its parent to be bound again.
-    static zx_status_t Unbind(zx::unowned_channel _client_end, int32_t* out_status);
-
-    // Disconnect this device and allow its parent to be bound again.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<UnbindResponse> Unbind(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status);
-
-    // Disconnect this device and allow its parent to be bound again.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<UnbindResponse> Unbind(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
-
+    // This may not complete before it returns.
+    static ::fidl::DecodeResult<ScheduleUnbindResponse> ScheduleUnbind(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Return the name of the driver managing this the device
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetDriverNameResponse> GetDriverName(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_name);
-
-    // Return the name of the driver managing this the device
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<GetDriverNameResponse> GetDriverName(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
-
     // Return the name of the device
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetDeviceNameResponse> GetDeviceName(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, ::fidl::StringView* out_name);
-
-    // Return the name of the device
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<GetDeviceNameResponse> GetDeviceName(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
-
     // Return the topological path for this device
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetTopologicalPathResponse> GetTopologicalPath(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_path);
-
-    // Return the topological path for this device
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<GetTopologicalPathResponse> GetTopologicalPath(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
-    // Get an event for monitoring device conditions (see DEVICE_SIGNAL_* constants)
-    static zx_status_t GetEventHandle(zx::unowned_channel _client_end, int32_t* out_status, ::zx::event* out_event);
-
-    // Get an event for monitoring device conditions (see DEVICE_SIGNAL_* constants)
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetEventHandleResponse> GetEventHandle(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::event* out_event);
-
-    // Get an event for monitoring device conditions (see DEVICE_SIGNAL_* constants)
-    // Messages are encoded and decoded in-place.
+    // Get an event for monitoring device conditions (see `DEVICE_SIGNAL_*` constants)
     static ::fidl::DecodeResult<GetEventHandleResponse> GetEventHandle(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Return the current logging flags for this device's driver
-    static zx_status_t GetDriverLogFlags(zx::unowned_channel _client_end, int32_t* out_status, uint32_t* out_flags);
-
-    // Return the current logging flags for this device's driver
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetDriverLogFlagsResponse> GetDriverLogFlags(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, uint32_t* out_flags);
-
-    // Return the current logging flags for this device's driver
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<GetDriverLogFlagsResponse> GetDriverLogFlags(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Set the logging flags for this device's driver.
     // Each set bit in `clear_flags` will be cleared in the log flags state.
     // Each set bit in `set_flags` will then be set in the log flags state.
-    static zx_status_t SetDriverLogFlags(zx::unowned_channel _client_end, uint32_t clear_flags, uint32_t set_flags, int32_t* out_status);
-
-    // Set the logging flags for this device's driver.
-    // Each set bit in `clear_flags` will be cleared in the log flags state.
-    // Each set bit in `set_flags` will then be set in the log flags state.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<SetDriverLogFlagsResponse> SetDriverLogFlags(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t clear_flags, uint32_t set_flags, ::fidl::BytePart _response_buffer, int32_t* out_status);
-
-    // Set the logging flags for this device's driver.
-    // Each set bit in `clear_flags` will be cleared in the log flags state.
-    // Each set bit in `set_flags` will then be set in the log flags state.
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<SetDriverLogFlagsResponse> SetDriverLogFlags(zx::unowned_channel _client_end, ::fidl::DecodedMessage<SetDriverLogFlagsRequest> params, ::fidl::BytePart response_buffer);
 
     // Debug command: execute the device's suspend hook
-    static zx_status_t DebugSuspend(zx::unowned_channel _client_end, int32_t* out_status);
-
-    // Debug command: execute the device's suspend hook
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<DebugSuspendResponse> DebugSuspend(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status);
-
-    // Debug command: execute the device's suspend hook
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<DebugSuspendResponse> DebugSuspend(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Debug command: execute the device's resume hook
-    static zx_status_t DebugResume(zx::unowned_channel _client_end, int32_t* out_status);
-
-    // Debug command: execute the device's resume hook
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<DebugResumeResponse> DebugResume(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status);
-
-    // Debug command: execute the device's resume hook
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<DebugResumeResponse> DebugResume(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
     // The |hook_wait_time| is the time that the driver expects to take for each device hook in
     // nanoseconds.
     // Returns whether the driver passed the compatibility check.
-    static zx_status_t RunCompatibilityTests(zx::unowned_channel _client_end, int64_t hook_wait_time, uint32_t* out_status);
-
-    // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
-    // The |hook_wait_time| is the time that the driver expects to take for each device hook in
-    // nanoseconds.
-    // Returns whether the driver passed the compatibility check.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<RunCompatibilityTestsResponse> RunCompatibilityTests(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int64_t hook_wait_time, ::fidl::BytePart _response_buffer, uint32_t* out_status);
-
-    // RunCompatibilityTests: Runs compatibility tests for the driver that binds to this device.
-    // The |hook_wait_time| is the time that the driver expects to take for each device hook in
-    // nanoseconds.
-    // Returns whether the driver passed the compatibility check.
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<RunCompatibilityTestsResponse> RunCompatibilityTests(zx::unowned_channel _client_end, ::fidl::DecodedMessage<RunCompatibilityTestsRequest> params, ::fidl::BytePart response_buffer);
 
   };
@@ -533,19 +1122,19 @@ class Controller final {
 
     virtual void Bind(::fidl::StringView driver, BindCompleter::Sync _completer) = 0;
 
-    class UnbindCompleterBase : public _Base {
+    class ScheduleUnbindCompleterBase : public _Base {
      public:
       void Reply(int32_t status);
       void Reply(::fidl::BytePart _buffer, int32_t status);
-      void Reply(::fidl::DecodedMessage<UnbindResponse> params);
+      void Reply(::fidl::DecodedMessage<ScheduleUnbindResponse> params);
 
      protected:
       using ::fidl::CompleterBase::CompleterBase;
     };
 
-    using UnbindCompleter = ::fidl::Completer<UnbindCompleterBase>;
+    using ScheduleUnbindCompleter = ::fidl::Completer<ScheduleUnbindCompleterBase>;
 
-    virtual void Unbind(UnbindCompleter::Sync _completer) = 0;
+    virtual void ScheduleUnbind(ScheduleUnbindCompleter::Sync _completer) = 0;
 
     class GetDriverNameCompleterBase : public _Base {
      public:
@@ -695,6 +1284,281 @@ class Controller final {
 
 };
 
+extern "C" const fidl_type_t fuchsia_device_NameProvider_GetDeviceName_ResponseTable;
+
+struct NameProvider_GetDeviceName_Response {
+  static constexpr const fidl_type_t* Type = &fuchsia_device_NameProvider_GetDeviceName_ResponseTable;
+  static constexpr uint32_t MaxNumHandles = 0;
+  static constexpr uint32_t PrimarySize = 16;
+  [[maybe_unused]]
+  static constexpr uint32_t MaxOutOfLine = 4294967295;
+
+  ::fidl::StringView name = {};
+};
+
+extern "C" const fidl_type_t fuchsia_device_NameProvider_GetDeviceName_ResultTable;
+
+struct NameProvider_GetDeviceName_Result {
+  enum class Tag : fidl_union_tag_t {
+    kResponse = 0,
+    kErr = 1,
+    Invalid = ::std::numeric_limits<::fidl_union_tag_t>::max(),
+  };
+
+  NameProvider_GetDeviceName_Result();
+  ~NameProvider_GetDeviceName_Result();
+
+  NameProvider_GetDeviceName_Result(NameProvider_GetDeviceName_Result&& other) {
+    tag_ = Tag::Invalid;
+    if (this != &other) {
+      MoveImpl_(std::move(other));
+    }
+  }
+
+  NameProvider_GetDeviceName_Result& operator=(NameProvider_GetDeviceName_Result&& other) {
+    if (this != &other) {
+      MoveImpl_(std::move(other));
+    }
+    return *this;
+  }
+
+  bool has_invalid_tag() const { return tag_ == Tag::Invalid; }
+
+  bool is_response() const { return tag_ == Tag::kResponse; }
+
+  NameProvider_GetDeviceName_Response& mutable_response();
+
+  template <typename T>
+  std::enable_if_t<std::is_convertible<T, NameProvider_GetDeviceName_Response>::value && std::is_copy_assignable<T>::value>
+  set_response(const T& v) {
+    mutable_response() = v;
+  }
+
+  template <typename T>
+  std::enable_if_t<std::is_convertible<T, NameProvider_GetDeviceName_Response>::value && std::is_move_assignable<T>::value>
+  set_response(T&& v) {
+    mutable_response() = std::move(v);
+  }
+
+  NameProvider_GetDeviceName_Response const & response() const { return response_; }
+
+  bool is_err() const { return tag_ == Tag::kErr; }
+
+  int32_t& mutable_err();
+
+  template <typename T>
+  std::enable_if_t<std::is_convertible<T, int32_t>::value && std::is_copy_assignable<T>::value>
+  set_err(const T& v) {
+    mutable_err() = v;
+  }
+
+  template <typename T>
+  std::enable_if_t<std::is_convertible<T, int32_t>::value && std::is_move_assignable<T>::value>
+  set_err(T&& v) {
+    mutable_err() = std::move(v);
+  }
+
+  int32_t const & err() const { return err_; }
+
+  Tag which() const { return tag_; }
+
+  static constexpr const fidl_type_t* Type = &fuchsia_device_NameProvider_GetDeviceName_ResultTable;
+  static constexpr uint32_t MaxNumHandles = 0;
+  static constexpr uint32_t PrimarySize = 24;
+  [[maybe_unused]]
+  static constexpr uint32_t MaxOutOfLine = 4294967295;
+
+ private:
+  void Destroy();
+  void MoveImpl_(NameProvider_GetDeviceName_Result&& other);
+  static void SizeAndOffsetAssertionHelper();
+  Tag tag_;
+  union {
+    NameProvider_GetDeviceName_Response response_;
+    int32_t err_;
+  };
+};
+
+extern "C" const fidl_type_t fuchsia_device_NameProviderGetDeviceNameResponseTable;
+
+// Interface for getting device names.
+class NameProvider final {
+  NameProvider() = delete;
+ public:
+  static constexpr char Name[] = "fuchsia.device.NameProvider";
+
+  struct GetDeviceNameResponse final {
+    FIDL_ALIGNDECL
+    fidl_message_header_t _hdr;
+    NameProvider_GetDeviceName_Result result;
+
+    static constexpr const fidl_type_t* Type = &fuchsia_device_NameProviderGetDeviceNameResponseTable;
+    static constexpr uint32_t MaxNumHandles = 0;
+    static constexpr uint32_t PrimarySize = 40;
+    static constexpr uint32_t MaxOutOfLine = 4294967295;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
+  };
+  using GetDeviceNameRequest = ::fidl::AnyZeroArgMessage;
+
+
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class GetDeviceName_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      GetDeviceName_Impl(zx::unowned_channel _client_end);
+      ~GetDeviceName_Impl() = default;
+      GetDeviceName_Impl(GetDeviceName_Impl&& other) = default;
+      GetDeviceName_Impl& operator=(GetDeviceName_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using GetDeviceName = GetDeviceName_Impl<GetDeviceNameResponse>;
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class GetDeviceName_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      GetDeviceName_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~GetDeviceName_Impl() = default;
+      GetDeviceName_Impl(GetDeviceName_Impl&& other) = default;
+      GetDeviceName_Impl& operator=(GetDeviceName_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using GetDeviceName = GetDeviceName_Impl<GetDeviceNameResponse>;
+  };
+
+  class SyncClient final {
+   public:
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
+    SyncClient(SyncClient&&) = default;
+    SyncClient& operator=(SyncClient&&) = default;
+
+    const ::zx::channel& channel() const { return channel_; }
+
+    ::zx::channel* mutable_channel() { return &channel_; }
+
+    // Return the name of this Fuchsia device.
+    // Allocates 16 bytes of request buffer on the stack. Response is heap-allocated.
+    ResultOf::GetDeviceName GetDeviceName();
+
+    // Return the name of this Fuchsia device.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::GetDeviceName GetDeviceName(::fidl::BytePart _response_buffer);
+
+
+    // Return the name of this Fuchsia device.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    ::fidl::DecodeResult<GetDeviceNameResponse> GetDeviceName_Deprecated(::fidl::BytePart _response_buffer, NameProvider_GetDeviceName_Result* out_result);
+
+   private:
+    ::zx::channel channel_;
+  };
+
+  // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
+  class Call final {
+    Call() = delete;
+   public:
+
+    // Return the name of this Fuchsia device.
+    // Allocates 16 bytes of request buffer on the stack. Response is heap-allocated.
+    static ResultOf::GetDeviceName GetDeviceName(zx::unowned_channel _client_end);
+
+    // Return the name of this Fuchsia device.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::GetDeviceName GetDeviceName(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+
+    // Return the name of this Fuchsia device.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<GetDeviceNameResponse> GetDeviceName_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, NameProvider_GetDeviceName_Result* out_result);
+
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
+
+    // Return the name of this Fuchsia device.
+    static ::fidl::DecodeResult<GetDeviceNameResponse> GetDeviceName(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
+
+  };
+
+  // Pure-virtual interface to be implemented by a server.
+  class Interface {
+   public:
+    Interface() = default;
+    virtual ~Interface() = default;
+    using _Outer = NameProvider;
+    using _Base = ::fidl::CompleterBase;
+
+    class GetDeviceNameCompleterBase : public _Base {
+     public:
+      void Reply(NameProvider_GetDeviceName_Result result);
+      void Reply(::fidl::BytePart _buffer, NameProvider_GetDeviceName_Result result);
+      void Reply(::fidl::DecodedMessage<GetDeviceNameResponse> params);
+
+     protected:
+      using ::fidl::CompleterBase::CompleterBase;
+    };
+
+    using GetDeviceNameCompleter = ::fidl::Completer<GetDeviceNameCompleterBase>;
+
+    virtual void GetDeviceName(GetDeviceNameCompleter::Sync _completer) = 0;
+
+  };
+
+  // Attempts to dispatch the incoming message to a handler function in the server implementation.
+  // If there is no matching handler, it returns false, leaving the message and transaction intact.
+  // In all other cases, it consumes the message and returns true.
+  // It is possible to chain multiple TryDispatch functions in this manner.
+  static bool TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* txn);
+
+  // Dispatches the incoming message to one of the handlers functions in the interface.
+  // If there is no matching handler, it closes all the handles in |msg| and closes the channel with
+  // a |ZX_ERR_NOT_SUPPORTED| epitaph, before returning false. The message should then be discarded.
+  static bool Dispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* txn);
+
+  // Same as |Dispatch|, but takes a |void*| instead of |Interface*|. Only used with |fidl::Bind|
+  // to reduce template expansion.
+  // Do not call this method manually. Use |Dispatch| instead.
+  static bool TypeErasedDispatch(void* impl, fidl_msg_t* msg, ::fidl::Transaction* txn) {
+    return Dispatch(static_cast<Interface*>(impl), msg, txn);
+  }
+
+};
+
 // Maximum length for a driver path
 constexpr uint64_t MAX_DRIVER_PATH_LEN = 1024u;
 
@@ -728,6 +1592,8 @@ constexpr uint32_t DEVICE_SIGNAL_HANGUP = 268435456u;
 // This is primarily used by the PTY support.
 constexpr uint32_t DEVICE_SIGNAL_ERROR = 134217728u;
 
+extern const char DEFAULT_DEVICE_NAME[];
+
 }  // namespace device
 }  // namespace fuchsia
 }  // namespace llcpp
@@ -751,12 +1617,12 @@ static_assert(sizeof(::llcpp::fuchsia::device::Controller::BindResponse)
 static_assert(offsetof(::llcpp::fuchsia::device::Controller::BindResponse, status) == 16);
 
 template <>
-struct IsFidlType<::llcpp::fuchsia::device::Controller::UnbindResponse> : public std::true_type {};
+struct IsFidlType<::llcpp::fuchsia::device::Controller::ScheduleUnbindResponse> : public std::true_type {};
 template <>
-struct IsFidlMessage<::llcpp::fuchsia::device::Controller::UnbindResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::device::Controller::UnbindResponse)
-    == ::llcpp::fuchsia::device::Controller::UnbindResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::device::Controller::UnbindResponse, status) == 16);
+struct IsFidlMessage<::llcpp::fuchsia::device::Controller::ScheduleUnbindResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::device::Controller::ScheduleUnbindResponse)
+    == ::llcpp::fuchsia::device::Controller::ScheduleUnbindResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::device::Controller::ScheduleUnbindResponse, status) == 16);
 
 template <>
 struct IsFidlType<::llcpp::fuchsia::device::Controller::GetDriverNameResponse> : public std::true_type {};
@@ -850,5 +1716,23 @@ struct IsFidlMessage<::llcpp::fuchsia::device::Controller::RunCompatibilityTests
 static_assert(sizeof(::llcpp::fuchsia::device::Controller::RunCompatibilityTestsResponse)
     == ::llcpp::fuchsia::device::Controller::RunCompatibilityTestsResponse::PrimarySize);
 static_assert(offsetof(::llcpp::fuchsia::device::Controller::RunCompatibilityTestsResponse, status) == 16);
+
+template <>
+struct IsFidlType<::llcpp::fuchsia::device::NameProvider_GetDeviceName_Response> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::device::NameProvider_GetDeviceName_Response>);
+static_assert(offsetof(::llcpp::fuchsia::device::NameProvider_GetDeviceName_Response, name) == 0);
+static_assert(sizeof(::llcpp::fuchsia::device::NameProvider_GetDeviceName_Response) == ::llcpp::fuchsia::device::NameProvider_GetDeviceName_Response::PrimarySize);
+
+template <>
+struct IsFidlType<::llcpp::fuchsia::device::NameProvider_GetDeviceName_Result> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::fuchsia::device::NameProvider_GetDeviceName_Result>);
+
+template <>
+struct IsFidlType<::llcpp::fuchsia::device::NameProvider::GetDeviceNameResponse> : public std::true_type {};
+template <>
+struct IsFidlMessage<::llcpp::fuchsia::device::NameProvider::GetDeviceNameResponse> : public std::true_type {};
+static_assert(sizeof(::llcpp::fuchsia::device::NameProvider::GetDeviceNameResponse)
+    == ::llcpp::fuchsia::device::NameProvider::GetDeviceNameResponse::PrimarySize);
+static_assert(offsetof(::llcpp::fuchsia::device::NameProvider::GetDeviceNameResponse, result) == 16);
 
 }  // namespace fidl

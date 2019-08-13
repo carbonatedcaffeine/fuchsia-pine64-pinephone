@@ -12,20 +12,18 @@
 namespace modular {
 namespace {
 
-class SetKindOfProtoStoryOptionCommandRunnerTest
-    : public testing::TestWithSessionStorage {
+class SetKindOfProtoStoryOptionCommandRunnerTest : public testing::TestWithSessionStorage {
  public:
   void SetUp() override {
     testing::TestWithSessionStorage::SetUp();
     session_storage_ = MakeSessionStorage("page");
     runner_ = MakeRunner();
-    story_id_ = CreateStory(session_storage_.get());
+    story_id_ = CreateStory(session_storage_.get()).value_or("");
   }
 
  protected:
   std::unique_ptr<SetKindOfProtoStoryOptionCommandRunner> MakeRunner() {
-    return std::make_unique<SetKindOfProtoStoryOptionCommandRunner>(
-        session_storage_.get());
+    return std::make_unique<SetKindOfProtoStoryOptionCommandRunner>(session_storage_.get());
   }
 
   std::unique_ptr<SessionStorage> session_storage_;
@@ -41,12 +39,10 @@ TEST_F(SetKindOfProtoStoryOptionCommandRunnerTest, Execute) {
   // Set a value.
   {
     set_kind_of_proto_story_option.value = true;
-    command.set_set_kind_of_proto_story_option(
-        std::move(set_kind_of_proto_story_option));
+    command.set_set_kind_of_proto_story_option(std::move(set_kind_of_proto_story_option));
     runner_->Execute(story_id_, nullptr /* story_storage */, std::move(command),
                      [&](fuchsia::modular::ExecuteResult result) {
-                       EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK,
-                                 result.status);
+                       EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK, result.status);
                        done = true;
                      });
     RunLoopUntil([&] { return done; });
@@ -64,13 +60,11 @@ TEST_F(SetKindOfProtoStoryOptionCommandRunnerTest, Execute) {
   // Update the value.
   {
     set_kind_of_proto_story_option.value = false;
-    command.set_set_kind_of_proto_story_option(
-        std::move(set_kind_of_proto_story_option));
+    command.set_set_kind_of_proto_story_option(std::move(set_kind_of_proto_story_option));
     done = false;
     runner_->Execute(story_id_, nullptr /* story_storage */, std::move(command),
                      [&](fuchsia::modular::ExecuteResult result) {
-                       EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK,
-                                 result.status);
+                       EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK, result.status);
                        done = true;
                      });
     RunLoopUntil([&] { return done; });

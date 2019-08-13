@@ -5,21 +5,20 @@
 #ifndef SRC_COBALT_BIN_SYSTEM_METRICS_TEMPERATURE_FETCHER_IMPL_H_
 #define SRC_COBALT_BIN_SYSTEM_METRICS_TEMPERATURE_FETCHER_IMPL_H_
 
-#include <lib/zx/channel.h>
-
 #include <chrono>
 #include <vector>
 
-#include "src/cobalt/bin/system-metrics/temperature_fetcher.h"
+#include <lib/zx/channel.h>
 
-using cobalt::TemperatureFetcher;
+#include "src/cobalt/bin/system-metrics/temperature_fetcher.h"
 
 namespace cobalt {
 
 class TemperatureFetcherImpl : public TemperatureFetcher {
  public:
   TemperatureFetcherImpl();
-  bool FetchTemperature(uint32_t *temperature) override;
+  // Returns temperature in degrees Celsius and rounded to an integer from a float.
+  TemperatureFetchStatus FetchTemperature(int32_t *temperature) override;
 
  private:
   zx_status_t GetDeviceHandle();

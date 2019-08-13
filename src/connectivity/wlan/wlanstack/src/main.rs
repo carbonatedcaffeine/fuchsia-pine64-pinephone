@@ -4,8 +4,7 @@
 
 //! System service for wireless networking
 
-#![feature(async_await, await_macro)]
-#![deny(warnings)]
+#![feature(async_await)]
 #![deny(missing_docs)]
 #![recursion_limit = "256"]
 
@@ -51,15 +50,18 @@ pub struct ServiceCfg {
     /// |true| if WEP should be supported by the service instance.
     #[structopt(long = "wep_supported")]
     pub wep_supported: bool,
+    /// |true| if legacy WPA1 should be supported by the service instance.
+    #[structopt(long = "wpa1_supported")]
+    pub wpa1_supported: bool,
+    /// |true| if devices are spawned in an isolated devmgr and device_watcher should watch devices
+    /// in the isolated devmgr (for wlan-hw-sim based tests)
+    #[structopt(long = "isolated_devmgr")]
+    pub isolated_devmgr: bool,
 }
 
 impl From<ServiceCfg> for wlan_sme::Config {
     fn from(cfg: ServiceCfg) -> Self {
-        if cfg.wep_supported {
-            Self::with_wep_support()
-        } else {
-            Self::default()
-        }
+        Self { wep_supported: cfg.wep_supported, wpa1_supported: cfg.wpa1_supported }
     }
 }
 
@@ -80,7 +82,7 @@ async fn main() -> Result<(), Error> {
     let phys = Arc::new(phys);
     let ifaces = Arc::new(ifaces);
 
-    let phy_server = device::serve_phys(phys.clone()).map_ok(|x| match x {});
+    let phy_server = device::serve_phys(phys.clone(), cfg.isolated_devmgr).map_ok(|x| match x {});
     let (cobalt_sender, cobalt_reporter) = CobaltConnector::default()
         .serve(ConnectionType::project_name(wlan_metrics_registry::PROJECT_NAME));
     let telemetry_server =
@@ -91,6 +93,7 @@ async fn main() -> Result<(), Error> {
         ifaces.clone(),
         cobalt_sender.clone(),
         inspect_tree.clone(),
+        cfg.isolated_devmgr,
     )
     .map_ok(|x| match x {});
     let (watcher_service, watcher_fut) =
@@ -99,13 +102,13 @@ async fn main() -> Result<(), Error> {
         serve_fidl(cfg, fs, phys, ifaces, watcher_service, inspect_tree, cobalt_sender);
     let services_server = try_join(serve_fidl_fut, watcher_fut);
 
-    await!(try_join5(
+    try_join5(
         services_server,
         phy_server,
         iface_server,
         cobalt_reporter.map(Ok),
         telemetry_server.map(Ok),
-    ))?;
+    ).await?;
     Ok(())
 }
 
@@ -133,7 +136,7 @@ async fn serve_fidl(
         let inspect_tree = inspect_tree.clone();
         async move {
             match s {
-                IncomingServices::Device(stream) => await!(service::serve_device_requests(
+                IncomingServices::Device(stream) => service::serve_device_requests(
                     service::IfaceCounter::new(),
                     cfg,
                     phys,
@@ -143,11 +146,11 @@ async fn serve_fidl(
                     inspect_tree,
                     cobalt_sender,
                 )
-                .unwrap_or_else(|e| println!("{:?}", e))),
+                .unwrap_or_else(|e| println!("{:?}", e)).await,
             }
         }
     });
-    await!(fdio_server);
+    fdio_server.await;
     Ok(())
 }
 

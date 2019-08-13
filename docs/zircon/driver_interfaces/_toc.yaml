@@ -1,0 +1,10 @@
+# Please, read https://fuchsia.dev/fuchsia-src/best-practices/documentation_navigation_toc
+# before making changes to this file, and add a member of the fuchsia.dev
+# team as reviewer.
+toc:
+- title: "Overview"
+  path:  /docs/zircon/driver_interfaces/audio_overview.md
+- title: "Audio codec"
+  path: /docs/zircon/driver_interfaces/audio_codec.md
+- title: "Audio streaming"
+  path: /docs/zircon/driver_interfaces/audio_streaming.md

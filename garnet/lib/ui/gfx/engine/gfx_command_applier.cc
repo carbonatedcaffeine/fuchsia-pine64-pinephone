@@ -4,9 +4,11 @@
 
 #include "garnet/lib/ui/gfx/engine/gfx_command_applier.h"
 
+#include <lib/async/cpp/task.h>
 #include <lib/async/default.h>
 #include <lib/fostr/fidl/fuchsia/ui/gfx/formatting.h>
 #include <lib/zx/eventpair.h>
+
 #include <trace/event.h>
 
 #include "garnet/lib/ui/gfx/engine/hit_tester.h"
@@ -103,7 +105,7 @@ bool GfxCommandApplier::AssertValueIsOfType(const fuchsia::ui::gfx::Value& value
 
 bool GfxCommandApplier::ApplyCommand(Session* session, CommandContext* command_context,
                                      fuchsia::ui::gfx::Command command) {
-  TRACE_DURATION("gfx", "GfxCommandApplier::ApplyCommand");
+  TRACE_DURATION("gfx.debug", "GfxCommandApplier::ApplyCommand");
 
   switch (command.Which()) {
     case fuchsia::ui::gfx::Command::Tag::kCreateResource:
@@ -216,6 +218,12 @@ bool GfxCommandApplier::ApplyCommand(Session* session, CommandContext* command_c
                                                std::move(command.set_display_color_conversion()));
     case fuchsia::ui::gfx::Command::Tag::kSetDisplayRotation:
       return ApplySetDisplayRotationCmd(session, std::move(command.set_display_rotation()));
+    case fuchsia::ui::gfx::Command::Tag::kSetEnableViewDebugBounds:
+      return ApplySetEnableViewDebugBounds(session,
+                                           std::move(command.set_enable_view_debug_bounds()));
+    case fuchsia::ui::gfx::Command::Tag::kSetViewHolderBoundsColor:
+      return ApplySetViewHolderBoundsColor(session,
+                                           std::move(command.set_view_holder_bounds_color()));
     case fuchsia::ui::gfx::Command::Tag::Invalid:
       // FIDL validation should make this impossible.
       FXL_CHECK(false);
@@ -365,11 +373,11 @@ bool GfxCommandApplier::ApplyAddChildCmd(Session* session, fuchsia::ui::gfx::Add
 
   if (auto parent = session->resources()->FindResource<Node>(
           command.node_id, ResourceMap::ErrorBehavior::kDontReportErrors)) {
-    return parent->AddChild(std::move(child));
+    return parent->AddChild(std::move(child), session->error_reporter());
   } else if (auto view = session->resources()->FindResource<View>(
                  command.node_id, ResourceMap::ErrorBehavior::kDontReportErrors)) {
     // Children are added to a View. Add them the corresponding ViewNode.
-    return view->GetViewNode()->AddChild(std::move(child));
+    return view->GetViewNode()->AddChild(std::move(child), session->error_reporter());
   }
   session->error_reporter()->ERROR() << "No View or Node found with id " << command.node_id;
   return false;
@@ -379,7 +387,7 @@ bool GfxCommandApplier::ApplyAddPartCmd(Session* session, fuchsia::ui::gfx::AddP
   // Find the parent and part nodes.
   if (auto parent_node = session->resources()->FindResource<Node>(command.node_id)) {
     if (auto part_node = session->resources()->FindResource<Node>(command.part_id)) {
-      return parent_node->AddPart(std::move(part_node));
+      return parent_node->AddPart(std::move(part_node), session->error_reporter());
     }
   }
   return false;
@@ -447,14 +455,37 @@ bool GfxCommandApplier::ApplySetDisplayColorConversionCmd(
 bool GfxCommandApplier::ApplySetDisplayRotationCmd(
     Session* session, fuchsia::ui::gfx::SetDisplayRotationCmdHACK command) {
   if (auto compositor = session->resources()->FindResource<Compositor>(command.compositor_id)) {
-    return compositor->SetLayoutRotation(command.rotation_degrees);
+    return compositor->SetLayoutRotation(command.rotation_degrees, session->error_reporter());
   }
   return false;
 }
 
+bool GfxCommandApplier::ApplySetEnableViewDebugBounds(
+    Session* session, fuchsia::ui::gfx::SetEnableDebugViewBoundsCmd command) {
+  if (auto view = session->resources()->FindResource<View>(command.view_id)) {
+    view->set_should_render_bounding_box(command.enable);
+    return true;
+  }
+  return false;
+}
+
+bool GfxCommandApplier::ApplySetViewHolderBoundsColor(
+    Session* session, fuchsia::ui::gfx::SetViewHolderBoundsColorCmd command) {
+  auto& color = command.color.value;
+  float red = static_cast<float>(color.red) / 255.f;
+  float green = static_cast<float>(color.green) / 255.f;
+  float blue = static_cast<float>(color.blue) / 255.f;
+
+  if (auto view_holder = session->resources()->FindResource<ViewHolder>(command.view_holder_id)) {
+    view_holder->set_bounds_color(glm::vec4(red, green, blue, 1));
+    return true;
+  }
+  return false;
+};
+
 bool GfxCommandApplier::ApplyDetachCmd(Session* session, fuchsia::ui::gfx::DetachCmd command) {
   if (auto resource = session->resources()->FindResource<Resource>(command.id)) {
-    return resource->Detach();
+    return resource->Detach(session->error_reporter());
   }
   return false;
 }
@@ -462,7 +493,7 @@ bool GfxCommandApplier::ApplyDetachCmd(Session* session, fuchsia::ui::gfx::Detac
 bool GfxCommandApplier::ApplyDetachChildrenCmd(Session* session,
                                                fuchsia::ui::gfx::DetachChildrenCmd command) {
   if (auto node = session->resources()->FindResource<Node>(command.node_id)) {
-    return node->DetachChildren();
+    return node->DetachChildren(session->error_reporter());
   }
   return false;
 }
@@ -480,10 +511,10 @@ bool GfxCommandApplier::ApplySetTranslationCmd(Session* session,
     if (IsVariable(command.value)) {
       if (auto variable = session->resources()->FindVariableResource<Vector3Variable>(
               command.value.variable_id)) {
-        return node->SetTranslation(variable);
+        return node->SetTranslation(variable, session->error_reporter());
       }
     } else {
-      return node->SetTranslation(UnwrapVector3(command.value));
+      return node->SetTranslation(UnwrapVector3(command.value), session->error_reporter());
     }
   }
   return false;
@@ -494,10 +525,10 @@ bool GfxCommandApplier::ApplySetScaleCmd(Session* session, fuchsia::ui::gfx::Set
     if (IsVariable(command.value)) {
       if (auto variable = session->resources()->FindVariableResource<Vector3Variable>(
               command.value.variable_id)) {
-        return node->SetScale(variable);
+        return node->SetScale(variable, session->error_reporter());
       }
     } else {
-      return node->SetScale(UnwrapVector3(command.value));
+      return node->SetScale(UnwrapVector3(command.value), session->error_reporter());
     }
   }
   return false;
@@ -509,10 +540,10 @@ bool GfxCommandApplier::ApplySetRotationCmd(Session* session,
     if (IsVariable(command.value)) {
       if (auto variable = session->resources()->FindVariableResource<QuaternionVariable>(
               command.value.variable_id)) {
-        return node->SetRotation(variable);
+        return node->SetRotation(variable, session->error_reporter());
       }
     } else {
-      return node->SetRotation(UnwrapQuaternion(command.value));
+      return node->SetRotation(UnwrapQuaternion(command.value), session->error_reporter());
     }
   }
   return false;
@@ -524,10 +555,10 @@ bool GfxCommandApplier::ApplySetAnchorCmd(Session* session,
     if (IsVariable(command.value)) {
       if (auto variable = session->resources()->FindVariableResource<Vector3Variable>(
               command.value.variable_id)) {
-        return node->SetAnchor(variable);
+        return node->SetAnchor(variable, session->error_reporter());
       }
     }
-    return node->SetAnchor(UnwrapVector3(command.value));
+    return node->SetAnchor(UnwrapVector3(command.value), session->error_reporter());
   }
   return false;
 }
@@ -535,12 +566,11 @@ bool GfxCommandApplier::ApplySetAnchorCmd(Session* session,
 bool GfxCommandApplier::ApplySetSizeCmd(Session* session, fuchsia::ui::gfx::SetSizeCmd command) {
   if (auto layer = session->resources()->FindResource<Layer>(command.id)) {
     if (IsVariable(command.value)) {
-      session->error_reporter()->ERROR()
-          << "scenic_impl::gfx::GfxCommandApplier::ApplySetSizeCmd(): "
-             "unimplemented for variable value.";
+      session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::ApplySetSizeCmd()"
+                                            ": unimplemented for variable value.";
       return false;
     }
-    return layer->SetSize(UnwrapVector2(command.value));
+    return layer->SetSize(UnwrapVector2(command.value), session->error_reporter());
   }
   return false;
 }
@@ -593,7 +623,7 @@ bool GfxCommandApplier::ApplySetClipCmd(Session* session, fuchsia::ui::gfx::SetC
   }
 
   if (auto node = session->resources()->FindResource<Node>(command.node_id)) {
-    return node->SetClipToSelf(command.clip_to_self);
+    return node->SetClipToSelf(command.clip_to_self, session->error_reporter());
   }
 
   return false;
@@ -607,7 +637,7 @@ bool GfxCommandApplier::ApplySetClipPlanesCmd(Session* session,
     for (auto& p : command.clip_planes) {
       clip_planes.emplace_back(Unwrap(p.dir), p.dist);
     }
-    return node->SetClipPlanes(std::move(clip_planes));
+    return node->SetClipPlanes(std::move(clip_planes), session->error_reporter());
   }
 
   return false;
@@ -625,7 +655,7 @@ bool GfxCommandApplier::ApplySetHitTestBehaviorCmd(
 bool GfxCommandApplier::ApplySetViewPropertiesCmd(Session* session,
                                                   fuchsia::ui::gfx::SetViewPropertiesCmd command) {
   if (auto view_holder = session->resources()->FindResource<ViewHolder>(command.view_holder_id)) {
-    view_holder->SetViewProperties(std::move(command.properties));
+    view_holder->SetViewProperties(std::move(command.properties), session->error_reporter());
     return true;
   }
   return false;
@@ -688,7 +718,7 @@ bool GfxCommandApplier::ApplyBindMeshBuffersCmd(Session* session,
     return mesh->BindBuffers(std::move(index_buffer), command.index_format, command.index_offset,
                              command.index_count, std::move(vertex_buffer), command.vertex_format,
                              command.vertex_offset, command.vertex_count,
-                             Unwrap(command.bounding_box));
+                             Unwrap(command.bounding_box), session->error_reporter());
   }
   return false;
 }
@@ -697,7 +727,7 @@ bool GfxCommandApplier::ApplyAddLayerCmd(Session* session, fuchsia::ui::gfx::Add
   auto layer_stack = session->resources()->FindResource<LayerStack>(command.layer_stack_id);
   auto layer = session->resources()->FindResource<Layer>(command.layer_id);
   if (layer_stack && layer) {
-    return layer_stack->AddLayer(std::move(layer));
+    return layer_stack->AddLayer(std::move(layer), session->error_reporter());
   }
   return false;
 }
@@ -707,7 +737,7 @@ bool GfxCommandApplier::ApplyRemoveLayerCmd(Session* session,
   auto layer_stack = session->resources()->FindResource<LayerStack>(command.layer_stack_id);
   auto layer = session->resources()->FindResource<Layer>(command.layer_id);
   if (layer_stack && layer) {
-    return layer_stack->RemoveLayer(std::move(layer));
+    return layer_stack->RemoveLayer(std::move(layer), session->error_reporter());
   }
   return false;
 }
@@ -780,9 +810,9 @@ bool GfxCommandApplier::ApplySetCameraTransformCmd(
   // TODO(SCN-123): support variables.
   if (IsVariable(command.eye_position) || IsVariable(command.eye_look_at) ||
       IsVariable(command.eye_up)) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                          "ApplySetCameraTransformCmd(): "
-                                          "unimplemented: variable properties.";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplySetCameraTransformCmd(): unimplemented: "
+           "variable properties.";
     return false;
   } else if (auto camera = session->resources()->FindResource<Camera>(command.camera_id)) {
     camera->SetTransform(UnwrapVector3(command.eye_position), UnwrapVector3(command.eye_look_at),
@@ -796,9 +826,9 @@ bool GfxCommandApplier::ApplySetCameraProjectionCmd(
     Session* session, fuchsia::ui::gfx::SetCameraProjectionCmd command) {
   // TODO(SCN-123): support variables.
   if (IsVariable(command.fovy)) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                          "ApplySetCameraProjectionCmd(): "
-                                          "unimplemented: variable properties.";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplySetCameraProjectionCmd(): unimplemented: "
+           "variable properties.";
     return false;
   } else if (auto camera = session->resources()->FindResource<Camera>(command.camera_id)) {
     camera->SetProjection(UnwrapFloat(command.fovy));
@@ -810,9 +840,9 @@ bool GfxCommandApplier::ApplySetCameraProjectionCmd(
 bool GfxCommandApplier::ApplySetStereoCameraProjectionCmd(
     Session* session, fuchsia::ui::gfx::SetStereoCameraProjectionCmd command) {
   if (IsVariable(command.left_projection) || IsVariable(command.right_projection)) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                          "ApplySetStereoCameraProjectionOp(): "
-                                          "unimplemented: variable properties.";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplySetStereoCameraProjectionOp(): "
+           "unimplemented: variable properties.";
     return false;
   } else if (auto stereo_camera =
                  session->resources()->FindResource<StereoCamera>(command.camera_id)) {
@@ -826,43 +856,42 @@ bool GfxCommandApplier::ApplySetStereoCameraProjectionCmd(
 bool GfxCommandApplier::ApplySetCameraPoseBufferCmd(
     Session* session, fuchsia::ui::gfx::SetCameraPoseBufferCmd command) {
   if (command.base_time > dispatcher_clock_now()) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                          "ApplySetCameraPoseBufferCmd(): "
-                                          "base time not in the past";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplySetCameraPoseBufferCmd(): base time not in "
+           "the past";
     return false;
   }
 
   auto buffer = session->resources()->FindResource<Buffer>(command.buffer_id);
   if (!buffer) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                          "ApplySetCameraPoseBufferCmd(S): "
-                                          "invalid buffer ID";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplySetCameraPoseBufferCmd(S): invalid buffer ID";
     return false;
   }
 
   if (command.num_entries < 1) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                          "ApplySetCameraPoseBufferCmd(): "
-                                          "must have at least one entry in the pose buffer";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplySetCameraPoseBufferCmd(): must have at least "
+           "one entry in the pose buffer";
     return false;
   }
 
   if (buffer->size() < command.num_entries * sizeof(escher::hmd::Pose)) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                          "ApplySetCameraPoseBufferCmd(): "
-                                          "buffer is not large enough";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplySetCameraPoseBufferCmd(): buffer is not "
+           "large enough";
     return false;
   }
 
   auto camera = session->resources()->FindResource<Camera>(command.camera_id);
   if (!camera) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                          "ApplySetCameraPoseBufferCmd(): "
-                                          "invalid camera ID";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplySetCameraPoseBufferCmd(): invalid camera ID";
     return false;
   }
 
-  camera->SetPoseBuffer(buffer, command.num_entries, command.base_time, command.time_interval);
+  camera->SetPoseBuffer(buffer, command.num_entries, zx::time(command.base_time),
+                        zx::duration(command.time_interval));
 
   return true;
 }
@@ -871,9 +900,8 @@ bool GfxCommandApplier::ApplySetLightColorCmd(Session* session,
                                               fuchsia::ui::gfx::SetLightColorCmd command) {
   // TODO(SCN-123): support variables.
   if (command.color.variable_id) {
-    session->error_reporter()->ERROR()
-        << "scenic_impl::gfx::GfxCommandApplier::ApplySetLightColorCmd(): "
-           "unimplemented: variable color.";
+    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
+                                          "ApplySetLightColorCmd(): unimplemented: variable color.";
     return false;
   } else if (auto light = session->resources()->FindResource<Light>(command.light_id)) {
     return light->SetColor(Unwrap(command.color.value));
@@ -885,12 +913,12 @@ bool GfxCommandApplier::ApplySetLightDirectionCmd(Session* session,
                                                   fuchsia::ui::gfx::SetLightDirectionCmd command) {
   // TODO(SCN-123): support variables.
   if (command.direction.variable_id) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                          "ApplySetLightDirectionCmd(): "
-                                          "unimplemented: variable direction.";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplySetLightDirectionCmd(): unimplemented: "
+           "variable direction.";
     return false;
   } else if (auto light = session->resources()->FindResource<DirectionalLight>(command.light_id)) {
-    return light->SetDirection(Unwrap(command.direction.value));
+    return light->SetDirection(Unwrap(command.direction.value), session->error_reporter());
   }
   return false;
 }
@@ -899,9 +927,9 @@ bool GfxCommandApplier::ApplySetPointLightPositionCmd(
     Session* session, fuchsia::ui::gfx::SetPointLightPositionCmd command) {
   // TODO(SCN-123): support variables.
   if (command.position.variable_id) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier:"
-                                          ":ApplySetPointLightPositionCmd(): "
-                                          "unimplemented: variable position.";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplySetPointLightPositionCmd(): unimplemented: "
+           "variable position.";
     return false;
   } else if (auto light = session->resources()->FindResource<PointLight>(command.light_id)) {
     return light->SetPosition(Unwrap(command.position.value));
@@ -913,9 +941,9 @@ bool GfxCommandApplier::ApplySetPointLightFalloffCmd(
     Session* session, fuchsia::ui::gfx::SetPointLightFalloffCmd command) {
   // TODO(SCN-123): support variables.
   if (command.falloff.variable_id) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier:"
-                                          ":ApplySetPointLightFalloffCmd(): "
-                                          "unimplemented: variable falloff.";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplySetPointLightFalloffCmd(): unimplemented: "
+           "variable falloff.";
     return false;
   } else if (auto light = session->resources()->FindResource<PointLight>(command.light_id)) {
     return light->SetFalloff(command.falloff.value);
@@ -926,12 +954,12 @@ bool GfxCommandApplier::ApplySetPointLightFalloffCmd(
 bool GfxCommandApplier::ApplyAddLightCmd(Session* session, fuchsia::ui::gfx::AddLightCmd command) {
   if (auto scene = session->resources()->FindResource<Scene>(command.scene_id)) {
     if (auto light = session->resources()->FindResource<Light>(command.light_id)) {
-      return scene->AddLight(std::move(light));
+      return scene->AddLight(std::move(light), session->error_reporter());
     }
   }
 
-  session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                        "ApplyAddLightCmd(): unimplemented.";
+  session->error_reporter()->ERROR()
+      << "scenic_impl::gfx::GfxCommandApplier::ApplyAddLightCmd(): unimplemented.";
   return false;
 }
 
@@ -943,8 +971,8 @@ bool GfxCommandApplier::ApplySceneAddAmbientLightCmd(
     }
   }
 
-  session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                        "ApplySceneAddAmbientLightCmd(): unimplemented.";
+  session->error_reporter()->ERROR()
+      << "scenic_impl::gfx::GfxCommandApplier::ApplySceneAddAmbientLightCmd(): unimplemented.";
   return false;
 }
 
@@ -956,8 +984,8 @@ bool GfxCommandApplier::ApplySceneAddDirectionalLightCmd(
     }
   }
 
-  session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                        "ApplySceneAddDirectionalLightCmd(): unimplemented.";
+  session->error_reporter()->ERROR()
+      << "scenic_impl::gfx::GfxCommandApplier::ApplySceneAddDirectionalLightCmd(): unimplemented.";
   return false;
 }
 
@@ -969,22 +997,22 @@ bool GfxCommandApplier::ApplySceneAddPointLightCmd(
     }
   }
 
-  session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                        "ApplySceneAddPointLightCmd(): unimplemented.";
+  session->error_reporter()->ERROR()
+      << "scenic_impl::gfx::GfxCommandApplier::ApplySceneAddPointLightCmd(): unimplemented.";
   return false;
 }
 
 bool GfxCommandApplier::ApplyDetachLightCmd(Session* session,
                                             fuchsia::ui::gfx::DetachLightCmd command) {
-  session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                        "ApplyDetachLightCmd(): unimplemented.";
+  session->error_reporter()->ERROR()
+      << "scenic_impl::gfx::GfxCommandApplier::ApplyDetachLightCmd(): unimplemented.";
   return false;
 }
 
 bool GfxCommandApplier::ApplyDetachLightsCmd(Session* session,
                                              fuchsia::ui::gfx::DetachLightsCmd command) {
-  session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                        "ApplyDetachLightsCmd(): unimplemented.";
+  session->error_reporter()->ERROR()
+      << "scenic_impl::gfx::GfxCommandApplier::ApplyDetachLightsCmd(): unimplemented.";
   return false;
 }
 
@@ -1024,7 +1052,8 @@ bool GfxCommandApplier::ApplyCreateImage(Session* session, ResourceId id,
 bool GfxCommandApplier::ApplyCreateImagePipe(Session* session, ResourceId id,
                                              fuchsia::ui::gfx::ImagePipeArgs args) {
   auto image_pipe = fxl::MakeRefCounted<ImagePipe>(session, id, std::move(args.image_pipe_request),
-                                                   session->session_context().frame_scheduler);
+                                                   session->image_pipe_updater(),
+                                                   session->shared_error_reporter());
   return session->resources()->AddResource(id, image_pipe);
 }
 
@@ -1098,8 +1127,8 @@ bool GfxCommandApplier::ApplyCreateRectangle(Session* session, ResourceId id,
   // TODO(SCN-123): support variables.
   if (IsVariable(args.width) || IsVariable(args.height)) {
     session->error_reporter()->ERROR()
-        << "scenic_impl::gfx::GfxCommandApplier::ApplyCreateRectangle(): "
-           "unimplemented: variable width/height.";
+        << "scenic_impl::gfx::GfxCommandApplier::ApplyCreateRectangle(): unimplemented: variable "
+           "width/height.";
     return false;
   }
 
@@ -1123,9 +1152,9 @@ bool GfxCommandApplier::ApplyCreateRoundedRectangle(Session* session,
   if (IsVariable(args.width) || IsVariable(args.height) || IsVariable(args.top_left_radius) ||
       IsVariable(args.top_right_radius) || IsVariable(args.bottom_left_radius) ||
       IsVariable(args.bottom_right_radius)) {
-    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                          "ApplyCreateRoundedRectangle(): "
-                                          "unimplemented: variable width/height/radii.";
+    session->error_reporter()->ERROR()
+        << "scenic_impl::gfx::GfxCommandApplier::ApplyCreateRoundedRectangle(): unimplemented: "
+           "variable width/height/radii.";
     return false;
   }
 
@@ -1150,10 +1179,16 @@ bool GfxCommandApplier::ApplyCreateCircle(Session* session, ResourceId id,
 
   // TODO(SCN-123): support variables.
   if (IsVariable(args.radius)) {
-    session->error_reporter()->ERROR()
-        << "scenic_impl::gfx::GfxCommandApplier::ApplyCreateCircle(): "
-           "unimplemented: variable radius.";
+    session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::ApplyCreateCircle()"
+                                          ": unimplemented: variable radius.";
     return false;
+  }
+
+  // Emit a warning that the radius is too small.
+  // TODO(FLK-467): Convert warning to error and kill the session if the
+  // code enters this path.
+  if (args.radius.vector1() <= escher::kEpsilon) {
+    session->error_reporter()->WARN() << "Circle radius is too small " << args.radius.vector1();
   }
 
   auto circle = CreateCircle(session, id, args.radius.vector1());
@@ -1176,13 +1211,12 @@ bool GfxCommandApplier::ApplyCreateView(Session* session, ResourceId id,
                                         fuchsia::ui::gfx::ViewArgs args) {
   // Sanity check.  We also rely on FIDL to enforce this for us, although it
   // does not at the moment.
-  FXL_DCHECK(args.token.value) << "scenic_impl::gfx::GfxCommandApplier::"
-                                  "ApplyCreateView(): no token provided.";
+  FXL_DCHECK(args.token.value)
+      << "scenic_impl::gfx::GfxCommandApplier::ApplyCreateView(): no token provided.";
   if (auto view = CreateView(session, id, std::move(args))) {
     if (!(session->SetRootView(view->As<View>()->GetWeakPtr()))) {
-      FXL_LOG(ERROR) << "Error: cannot set more than one root view in a"
-                     << " session. This will soon become a session-terminating "
-                     << "error. For more info, see [SCN-1249].";
+      FXL_LOG(ERROR) << "Error: cannot set more than one root view in a session. This will soon "
+                        "become a session-terminating error. For more info, see [SCN-1249].";
       // TODO(SCN-1249) Return false and report the error in this case, and
       // shut down any sessions that violate the one-view-per-session contract.
       // return false;
@@ -1198,13 +1232,12 @@ bool GfxCommandApplier::ApplyCreateView(Session* session, ResourceId id,
                                         fuchsia::ui::gfx::ViewArgs3 args) {
   // Sanity check.  We also rely on FIDL to enforce this for us, although it
   // does not at the moment.
-  FXL_DCHECK(args.token.value) << "scenic_impl::gfx::GfxCommandApplier::"
-                                  "ApplyCreateView(): no token provided.";
+  FXL_DCHECK(args.token.value)
+      << "scenic_impl::gfx::GfxCommandApplier::ApplyCreateView(): no token provided.";
   if (auto view = CreateView(session, id, std::move(args))) {
     if (!(session->SetRootView(view->As<View>()->GetWeakPtr()))) {
-      FXL_LOG(ERROR) << "Error: cannot set more than one root view in a"
-                     << " session. This will soon become a session-terminating "
-                     << "error. For more info, see [SCN-1249].";
+      FXL_LOG(ERROR) << "Error: cannot set more than one root view in a session. This will soon "
+                        "become a session-terminating error. For more info, see [SCN-1249].";
       // TODO(SCN-1249) Return false and report the error in this case, and
       // shut down any sessions that violate the one-view-per-session contract.
       // return false;
@@ -1220,8 +1253,8 @@ bool GfxCommandApplier::ApplyCreateViewHolder(Session* session, ResourceId id,
                                               fuchsia::ui::gfx::ViewHolderArgs args) {
   // Sanity check.  We also rely on FIDL to enforce this for us, although it
   // does not at the moment
-  FXL_DCHECK(args.token.value) << "scenic_impl::gfx::GfxCommandApplier::ApplyCreateViewHolder()"
-                                  ": no token provided.";
+  FXL_DCHECK(args.token.value)
+      << "scenic_impl::gfx::GfxCommandApplier::ApplyCreateViewHolder(): no token provided.";
 
   if (auto view_holder = CreateViewHolder(session, id, std::move(args))) {
     view_holder->As<ViewHolder>()->Connect();  // Initiate the ViewHolder link.
@@ -1305,17 +1338,17 @@ ResourcePtr GfxCommandApplier::CreateBuffer(Session* session, ResourceId id, Mem
                                             uint32_t memory_offset, uint32_t num_bytes) {
   if (memory_offset + num_bytes > memory->size()) {
     session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::CreateBuffer(): "
-                                          "buffer does not fit within memory (buffer "
-                                          "offset: "
+                                          "buffer does not fit within memory (buffer offset: "
                                        << memory_offset << ", buffer size: " << num_bytes
                                        << ", memory size: " << memory->size() << ")";
     return ResourcePtr();
   }
 
   // Make a pointer to a subregion of the memory, if necessary.
-  escher::GpuMemPtr gpu_mem = (memory_offset > 0 || num_bytes < memory->size())
-                                  ? memory->GetGpuMem()->Suballocate(num_bytes, memory_offset)
-                                  : memory->GetGpuMem();
+  escher::GpuMemPtr gpu_mem =
+      (memory_offset > 0 || num_bytes < memory->size())
+          ? memory->GetGpuMem(session->error_reporter())->Suballocate(num_bytes, memory_offset)
+          : memory->GetGpuMem(session->error_reporter());
 
   return fxl::MakeRefCounted<Buffer>(session, id, std::move(gpu_mem), std::move(memory));
 }
@@ -1383,7 +1416,8 @@ ResourcePtr GfxCommandApplier::CreateView(Session* session, ResourceId id,
 
   // Create a View: Link was successful, view ref is valid.
   return fxl::MakeRefCounted<View>(session, id, std::move(link), std::move(control_ref),
-                                   std::move(view_ref));
+                                   std::move(view_ref), session->shared_error_reporter(),
+                                   session->event_reporter());
 }
 
 ResourcePtr GfxCommandApplier::CreateView(Session* session, ResourceId id,
@@ -1402,7 +1436,8 @@ ResourcePtr GfxCommandApplier::CreateView(Session* session, ResourceId id,
 
   // Create a View: Link was successful, view ref is valid.
   return fxl::MakeRefCounted<View>(session, id, std::move(link), std::move(args.control_ref),
-                                   std::move(args.view_ref));
+                                   std::move(args.view_ref), session->shared_error_reporter(),
+                                   session->event_reporter());
 }
 
 ResourcePtr GfxCommandApplier::CreateViewHolder(Session* session, ResourceId id,
@@ -1447,6 +1482,7 @@ ResourcePtr GfxCommandApplier::CreateCompositor(Session* session, ResourceId id,
 
 ResourcePtr GfxCommandApplier::CreateDisplayCompositor(
     Session* session, ResourceId id, fuchsia::ui::gfx::DisplayCompositorArgs args) {
+  FXL_DCHECK(session->session_context().display_manager);
   Display* display = session->session_context().display_manager->default_display();
   if (!display) {
     session->error_reporter()->ERROR() << "There is no default display available.";
@@ -1454,24 +1490,23 @@ ResourcePtr GfxCommandApplier::CreateDisplayCompositor(
   }
 
   if (display->is_claimed()) {
-    session->error_reporter()->ERROR() << "The default display has already been claimed "
-                                          "by another compositor.";
+    session->error_reporter()->ERROR()
+        << "The default display has already been claimed by another compositor.";
     return nullptr;
   }
 
   return fxl::AdoptRef(new DisplayCompositor(
       session, id, session->session_context().scene_graph, display,
       SwapchainFactory::CreateDisplaySwapchain(display, session->session_context().display_manager,
-                                               session->session_context().event_timestamper,
                                                session->session_context().escher)));
 }
 
 ResourcePtr GfxCommandApplier::CreateImagePipeCompositor(
     Session* session, ResourceId id, fuchsia::ui::gfx::ImagePipeCompositorArgs args) {
   // TODO(SCN-179)
-  session->error_reporter()->ERROR() << "scenic_impl::gfx::GfxCommandApplier::"
-                                        "ApplyCreateImagePipeCompositor() "
-                                        "is unimplemented (SCN-179)";
+  session->error_reporter()->ERROR()
+      << "scenic_impl::gfx::GfxCommandApplier::ApplyCreateImagePipeCompositor() is unimplemented "
+         "(SCN-179)";
   return ResourcePtr();
 }
 

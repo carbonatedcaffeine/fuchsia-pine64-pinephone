@@ -2,7 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use fidl_fuchsia_bluetooth_control as control;
+use {
+    crate::inspect::{DebugExt, InspectData, Inspectable, IsInspectable, ToProperty},
+    fidl_fuchsia_bluetooth_control as control,
+    fuchsia_inspect::{self as inspect, Property},
+    std::fmt,
+};
 
 /// `AdapterState` is derived from deltas sent over the Control fidl protocol.
 /// Fields that are set to `None` indicate that the field is in an unknown state because the host
@@ -26,6 +31,17 @@ impl From<control::AdapterState> for AdapterState {
     }
 }
 
+impl From<&control::AdapterState> for AdapterState {
+    fn from(s: &control::AdapterState) -> AdapterState {
+        AdapterState {
+            local_name: s.local_name.clone(),
+            discoverable: s.discoverable.as_ref().map(|d| d.value),
+            discovering: s.discovering.as_ref().map(|d| d.value),
+            local_service_uuids: s.local_service_uuids.clone(),
+        }
+    }
+}
+
 impl From<AdapterState> for control::AdapterState {
     fn from(s: AdapterState) -> control::AdapterState {
         control::AdapterState {
@@ -36,6 +52,21 @@ impl From<AdapterState> for control::AdapterState {
             discovering: s.discovering.map(|d| Box::new(fidl_fuchsia_bluetooth::Bool { value: d })),
             local_service_uuids: s.local_service_uuids,
         }
+    }
+}
+
+impl fmt::Display for AdapterState {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(local_name) = &self.local_name {
+            writeln!(fmt, "Local Name:\t{}", local_name)?;
+        }
+        if let Some(discoverable) = &self.discoverable {
+            writeln!(fmt, "Discoverable:\t{}", discoverable)?;
+        }
+        if let Some(discovering) = &self.discovering {
+            writeln!(fmt, "Discovering:\t{}", discovering)?;
+        }
+        writeln!(fmt, "Local UUIDs:\t{:#?}", self.local_service_uuids)
     }
 }
 
@@ -69,13 +100,36 @@ impl From<AdapterInfo> for control::AdapterInfo {
     }
 }
 
+impl fmt::Display for AdapterInfo {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(fmt, "Adapter:")?;
+        writeln!(fmt, "\tIdentifier:\t{}", self.identifier)?;
+        writeln!(fmt, "\tAddress:\t{}", self.address)?;
+        writeln!(fmt, "\tTechnology:\t{:?}", self.technology)?;
+        if let Some(state) = &self.state {
+            for line in AdapterState::from(state.clone()).to_string().lines() {
+                writeln!(fmt, "\t{}", line)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl AdapterInfo {
-    pub fn update_state(&mut self, state: Option<control::AdapterState>) {
+    pub fn new(
+        identifier: String,
+        technology: control::TechnologyType,
+        address: String,
+        state: Option<AdapterState>,
+    ) -> AdapterInfo {
+        AdapterInfo { identifier, technology, address, state }
+    }
+    pub fn update_state(&mut self, state: Option<AdapterState>) {
         if let Some(current) = &mut self.state {
             if let Some(delta) = state {
                 update_if_specified(&mut current.local_name, delta.local_name);
-                update_if_specified(&mut current.discoverable, delta.discoverable.map(|b| b.value));
-                update_if_specified(&mut current.discovering, delta.discovering.map(|b| b.value));
+                update_if_specified(&mut current.discoverable, delta.discoverable);
+                update_if_specified(&mut current.discovering, delta.discovering);
                 update_if_specified(&mut current.local_service_uuids, delta.local_service_uuids);
             }
         } else {
@@ -88,6 +142,77 @@ impl AdapterInfo {
 fn update_if_specified<T>(dst: &mut Option<T>, src: Option<T>) {
     if let Some(value) = src {
         dst.replace(value);
+    }
+}
+
+impl Inspectable<AdapterInfo> {
+    pub fn update_state(&mut self, state: Option<AdapterState>) {
+        self.inspect.update_state(&state);
+        self.inner.update_state(state);
+    }
+}
+
+impl IsInspectable for AdapterInfo {
+    type I = AdapterInfoInspect;
+}
+
+impl InspectData<AdapterInfo> for AdapterInfoInspect {
+    fn new(a: &AdapterInfo, inspect: inspect::Node) -> AdapterInfoInspect {
+        let _discoverable = None;
+        let _discovering = None;
+        let _local_service_uuids = None;
+
+        let mut i = AdapterInfoInspect {
+            _identifier: inspect.create_string("identifier", &a.identifier),
+            _technology: inspect.create_string("technology", a.technology.debug()),
+            _discoverable,
+            _discovering,
+            _local_service_uuids,
+            _inspect: inspect,
+        };
+        i.update_state(&a.state);
+        i
+    }
+}
+
+pub struct AdapterInfoInspect {
+    _inspect: inspect::Node,
+    _identifier: inspect::StringProperty,
+    _technology: inspect::StringProperty,
+    _discoverable: Option<inspect::UintProperty>,
+    _discovering: Option<inspect::UintProperty>,
+    _local_service_uuids: Option<inspect::StringProperty>,
+}
+
+impl AdapterInfoInspect {
+    /// Update the inspect fields that provide visibility into `AdapterState`. Check if the
+    /// `AdapterState` is set, updating the appropriate fields to `Some` or `None` values.
+    fn update_state(&mut self, state: &Option<AdapterState>) {
+        if let Some(state) = &state {
+            if let Some(d) = &mut self._discoverable {
+                d.set(state.discoverable.to_property());
+            } else {
+                let value = state.discoverable.to_property();
+                self._discoverable = Some(self._inspect.create_uint("discoverable", value));
+            }
+            if let Some(d) = &mut self._discovering {
+                d.set(state.discovering.to_property());
+            } else {
+                let value = state.discovering.to_property();
+                self._discovering = Some(self._inspect.create_uint("discovering", value));
+            }
+            if let Some(s) = &mut self._local_service_uuids {
+                s.set(&state.local_service_uuids.to_property());
+            } else {
+                let value = state.local_service_uuids.to_property();
+                self._local_service_uuids =
+                    Some(self._inspect.create_string("local_services_uuids", value));
+            }
+        } else {
+            self._discoverable = None;
+            self._discovering = None;
+            self._local_service_uuids = None;
+        }
     }
 }
 

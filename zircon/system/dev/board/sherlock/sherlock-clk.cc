@@ -31,6 +31,9 @@ static const pbus_mmio_t clk_mmios[] = {
 static const clock_id_t clock_ids[] = {
     // For Camera Sensor.
     {G12B_CLK_CAM_INCK_24M},
+    // For thermal driver.
+    {G12B_CLK_SYS_PLL_DIV16},
+    {G12B_CLK_SYS_CPU_CLK_DIV16},
 };
 
 static const pbus_metadata_t clock_metadata[] = {
@@ -42,25 +45,25 @@ static const pbus_metadata_t clock_metadata[] = {
 };
 
 static pbus_dev_t clk_dev = []() {
-    pbus_dev_t dev = {};
-    dev.name = "sherlock-clk",
-    dev.vid = PDEV_VID_AMLOGIC;
-    dev.did = PDEV_DID_AMLOGIC_G12B_CLK;
-    dev.mmio_list = clk_mmios;
-    dev.mmio_count = countof(clk_mmios);
-    dev.metadata_list = clock_metadata;
-    dev.metadata_count = countof(clock_metadata);
-    return dev;
+  pbus_dev_t dev = {};
+  dev.name = "sherlock-clk",
+  dev.vid = PDEV_VID_AMLOGIC;
+  dev.did = PDEV_DID_AMLOGIC_G12B_CLK;
+  dev.mmio_list = clk_mmios;
+  dev.mmio_count = countof(clk_mmios);
+  dev.metadata_list = clock_metadata;
+  dev.metadata_count = countof(clock_metadata);
+  return dev;
 }();
 
 zx_status_t Sherlock::ClkInit() {
-    zx_status_t status = pbus_.ProtocolDeviceAdd(ZX_PROTOCOL_CLOCK_IMPL, &clk_dev);
-    if (status != ZX_OK) {
-        zxlogf(ERROR, "%s: ProtocolDeviceAdd failed %d\n", __func__, status);
-        return status;
-    }
+  zx_status_t status = pbus_.DeviceAdd(&clk_dev);
+  if (status != ZX_OK) {
+    zxlogf(ERROR, "%s: DeviceAdd failed %d\n", __func__, status);
+    return status;
+  }
 
-    return ZX_OK;
+  return ZX_OK;
 }
 
-} // namespace sherlock
+}  // namespace sherlock

@@ -5,8 +5,6 @@
 #ifndef TOOLS_FIDLCAT_LIB_MESSAGE_DECODER_H_
 #define TOOLS_FIDLCAT_LIB_MESSAGE_DECODER_H_
 
-#include <src/lib/fxl/logging.h>
-
 #include <cstdint>
 #include <memory>
 #include <ostream>
@@ -14,10 +12,13 @@
 #include <unordered_set>
 #include <vector>
 
+#include <src/lib/fxl/logging.h>
+
 #include "lib/fidl/cpp/message.h"
 #include "tools/fidlcat/lib/display_options.h"
 #include "tools/fidlcat/lib/library_loader.h"
 #include "tools/fidlcat/lib/memory_helpers.h"
+#include "tools/fidlcat/lib/type_decoder.h"
 
 namespace fidlcat {
 
@@ -29,22 +30,6 @@ class Type;
 enum class Direction { kUnknown, kClient, kServer };
 
 constexpr int kTabSize = 2;
-
-struct Colors {
-  Colors(const char* new_reset, const char* new_red, const char* new_green, const char* new_blue,
-         const char* new_white_on_magenta)
-      : reset(new_reset),
-        red(new_red),
-        green(new_green),
-        blue(new_blue),
-        white_on_magenta(new_white_on_magenta) {}
-
-  const char* const reset;
-  const char* const red;
-  const char* const green;
-  const char* const blue;
-  const char* const white_on_magenta;
-};
 
 extern const Colors WithoutColors;
 extern const Colors WithColors;
@@ -79,7 +64,7 @@ class MessageDecoderDispatcher {
   }
 
   bool DecodeMessage(uint64_t process_koid, zx_handle_t handle, const uint8_t* bytes,
-                     uint32_t num_bytes, const zx_handle_t* handles, uint32_t num_handles,
+                     uint32_t num_bytes, const zx_handle_info_t* handles, uint32_t num_handles,
                      SyscallFidlType type, std::ostream& os, std::string_view line_header = "",
                      int tabs = 0);
 
@@ -94,26 +79,18 @@ class MessageDecoderDispatcher {
 // Helper to decode a message (request or response). It generates an Object.
 class MessageDecoder {
  public:
-  MessageDecoder(const uint8_t* bytes, uint32_t num_bytes, const zx_handle_t* handles,
+  MessageDecoder(const uint8_t* bytes, uint32_t num_bytes, const zx_handle_info_t* handles,
                  uint32_t num_handles, bool output_errors = false);
-  MessageDecoder(const MessageDecoder* container, uint64_t num_bytes_remaining,
+  MessageDecoder(const MessageDecoder* container, uint64_t offset, uint64_t num_bytes_remaining,
                  uint64_t num_handles_remaining);
 
-  const uint8_t* byte_pos() const { return byte_pos_; }
+  const zx_handle_info_t* handle_pos() const { return handle_pos_; }
 
-  const zx_handle_t* handle_pos() const { return handle_pos_; }
-
-  size_t current_offset() const { return byte_pos_ - start_byte_pos_; }
+  uint64_t next_object_offset() const { return next_object_offset_; }
 
   bool output_errors() const { return output_errors_; }
 
   bool HasError() const { return error_count_ > 0; }
-
-  // Adds a secondary object. That is data which can't be inlined within an
-  // object and which is decoded later.
-  void AddSecondaryObject(Field* secondary_object) {
-    secondary_objects_.push_back(secondary_object);
-  }
 
   // Used by numeric types to retrieve a numeric value. If there is not enough
   // data, returns false and value is not modified.
@@ -123,54 +100,45 @@ class MessageDecoder {
   // Gets the address of some data of |size| at |offset|. If there is not enough
   // data, returns null.
   const uint8_t* GetAddress(uint64_t offset, uint64_t size) {
-    if (byte_pos_ + offset + size > end_byte_pos_) {
-      if (output_errors_) {
-        FXL_LOG(ERROR) << "not enough data to decode (needs " << size << " at offset "
-                       << ((byte_pos_ - start_byte_pos_) + offset) << ", remains "
-                       << (end_byte_pos_ - byte_pos_ - offset) << ")";
+    if (offset + size > num_bytes_) {
+      if (output_errors_ && (offset <= num_bytes_)) {
+        FXL_LOG(ERROR) << "not enough data to decode (needs " << size << " at offset " << offset
+                       << ", remains " << (num_bytes_ - offset) << ")";
       }
       ++error_count_;
       return nullptr;
     }
-    return byte_pos_ + offset;
+    return start_byte_pos_ + offset;
   }
 
-  // Sets the offset to the next object offset. The current object may or may
-  // not have been decoded. The offset of the next object is the current
-  // object's offset + the current object's size. The new offset is 8 byte
-  // aligned.
-  void GotoNextObjectOffset(uint64_t size) {
-    byte_pos_ += size;
-    size_t offset = byte_pos_ - start_byte_pos_;
-    byte_pos_ += (8 - (offset & 7)) & 7;
-    if (byte_pos_ > end_byte_pos_) {
-      if (output_errors_) {
-        FXL_LOG(ERROR) << "not enough data at the end of object";
+  // Sets the next object offset. The current object (which is at the previous value of next object
+  // offset) is not decoded yet. It will be decoded just after this call.
+  // The new offset is 8 byte aligned.
+  void SkipObject(uint64_t size) {
+    uint64_t new_offset = (next_object_offset_ + size + 7) & ~7;
+    if (new_offset > num_bytes_) {
+      if (output_errors_ && (next_object_offset_ <= num_bytes_)) {
+        FXL_LOG(ERROR) << "not enough data to decode (needs " << size << " at offset "
+                       << next_object_offset_ << ", remains " << (num_bytes_ - next_object_offset_);
       }
       ++error_count_;
     }
-  }
-
-  // Skips the handles we just decoded (used by envelopes).
-  void SkipHandles(uint64_t size) {
-    handle_pos_ += size;
-    if (handle_pos_ > end_handle_pos_) {
-      if (output_errors_) {
-        FXL_LOG(ERROR) << "not enough handles";
-      }
-      ++error_count_;
-    }
+    next_object_offset_ = new_offset;
   }
 
   // Consumes a handle. Returns FIDL_HANDLE_ABSENT if there is no handle
   // available.
-  zx_handle_t GetNextHandle() {
+  zx_handle_info_t GetNextHandle() {
     if (handle_pos_ == end_handle_pos_) {
       if (output_errors_) {
         FXL_LOG(ERROR) << "not enough handles";
       }
       ++error_count_;
-      return FIDL_HANDLE_ABSENT;
+      zx_handle_info_t result;
+      result.handle = FIDL_HANDLE_ABSENT;
+      result.type = ZX_OBJ_TYPE_NONE;
+      result.rights = 0;
+      return result;
     }
     return *handle_pos_++;
   }
@@ -182,23 +150,20 @@ class MessageDecoder {
   std::unique_ptr<Field> DecodeField(std::string_view name, const Type* type);
 
  private:
-  // Iterates over the secondary objects and decodes them.
-  void ProcessSecondaryObjects();
+  // The size of the message bytes.
+  uint32_t num_bytes_;
 
   // The start of the message.
   const uint8_t* const start_byte_pos_;
 
   // The end of the message.
-  const uint8_t* const end_byte_pos_;
-  const zx_handle_t* const end_handle_pos_;
+  const zx_handle_info_t* const end_handle_pos_;
 
-  // The current decoding position in the message.
-  const uint8_t* byte_pos_;
-  const zx_handle_t* handle_pos_;
+  // The current handle decoding position in the message.
+  const zx_handle_info_t* handle_pos_;
 
-  // All the values which are not defined within the object they belong to.
-  // It is the case, for example, of string, nullable structs, ...
-  std::vector<Field*> secondary_objects_;
+  // Location of the next out of line object.
+  uint64_t next_object_offset_ = 0;
 
   // True if we display the errors we find.
   bool output_errors_;
@@ -211,16 +176,15 @@ class MessageDecoder {
 // data, returns false and value is not modified.
 template <typename T>
 bool MessageDecoder::GetValueAt(uint64_t offset, T* value) {
-  if (byte_pos_ + offset + sizeof(T) > end_byte_pos_) {
-    if (output_errors_) {
-      FXL_LOG(ERROR) << "not enough data to decode (needs " << sizeof(T) << " at offset "
-                     << ((byte_pos_ - start_byte_pos_) + offset) << ", remains "
-                     << (end_byte_pos_ - byte_pos_ - offset) << ")";
+  if (offset + sizeof(T) > num_bytes_) {
+    if (output_errors_ && (offset <= num_bytes_)) {
+      FXL_LOG(ERROR) << "not enough data to decode (needs " << sizeof(T) << " at offset " << offset
+                     << ", remains " << (num_bytes_ - offset) << ")";
     }
     ++error_count_;
     return false;
   }
-  *value = internal::MemoryFrom<T>(byte_pos_ + offset);
+  *value = internal::MemoryFrom<T>(start_byte_pos_ + offset);
   return true;
 }
 

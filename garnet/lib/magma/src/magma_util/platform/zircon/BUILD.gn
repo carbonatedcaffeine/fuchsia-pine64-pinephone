@@ -49,6 +49,7 @@ source_set("bus_mapper") {
 
   public_deps = [
     ":buffer",
+    "//garnet/lib/magma/src/magma_util/platform:bus_mapper_header",
   ]
 
   deps = [
@@ -90,27 +91,11 @@ source_set("device") {
     "$zircon_build_root/public/lib/driver",
     "$zircon_build_root/public/lib/zx",
     "..:device_header",
+    "//zircon/public/banjo/ddk.protocol.composite",
     "//zircon/public/banjo/ddk.protocol.pci",
     "//zircon/public/banjo/ddk.protocol.platform.device",
     "//zircon/public/lib/device-protocol-pci",
     "//zircon/public/lib/device-protocol-platform-device",
-  ]
-}
-
-source_set("firmware_loader") {
-  configs += [ "..:platform_include_config" ]
-
-  sources = [
-    "zircon_platform_firmware_loader.cc",
-  ]
-
-  deps = [
-    ":buffer",
-    "$magma_build_root/src/magma_util",
-    "$zircon_build_root/public/lib/ddk",
-    "$zircon_build_root/public/lib/driver",
-    "$zircon_build_root/public/lib/zx",
-    "..:firmware_loader_header",
   ]
 }
 

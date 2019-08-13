@@ -31,6 +31,19 @@ nullptr
   {{- end -}}
 {{- end }}
 
+{{- define "ClientAllocationComment" -}}
+{{- $context := .LLProps.ClientContext }}
+{{- if $context.StackUse }} Allocates {{ $context.StackUse }} bytes of {{ "" }}
+{{- if not $context.StackAllocRequest -}} response {{- else -}}
+  {{- if not $context.StackAllocResponse -}} request {{- else -}} message {{- end -}}
+{{- end }} buffer on the stack. {{- end }}
+{{- if and $context.StackAllocRequest $context.StackAllocResponse }} No heap allocation necessary.
+{{- else }}
+  {{- if not $context.StackAllocRequest }} Request is heap-allocated. {{- end }}
+  {{- if not $context.StackAllocResponse }} Response is heap-allocated. {{- end }}
+{{- end }}
+{{- end }}
+
 {{- define "InterfaceDeclaration" }}
 {{- $interface := . }}
 {{ "" }}
@@ -53,9 +66,10 @@ extern "C" const fidl_type_t {{ .ResponseTypeName }};
 //{{ . }}
 {{- end }}
 class {{ .Name }} final {
+  {{ .Name }}() = delete;
  public:
 {{- if .ServiceName }}
-  static constexpr char Name_[] = {{ .ServiceName }};
+  static constexpr char Name[] = {{ .ServiceName }};
 {{- end }}
 {{ "" }}
   {{- range .Methods }}
@@ -74,6 +88,9 @@ class {{ .Name }} final {
     static constexpr uint32_t MaxNumHandles = {{ .ResponseMaxHandles }};
     static constexpr uint32_t PrimarySize = {{ .ResponseSize }};
     static constexpr uint32_t MaxOutOfLine = {{ .ResponseMaxOutOfLine }};
+    static constexpr bool HasFlexibleEnvelope = {{ .ResponseFlexible }};
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
       {{- else }}
   using {{ .Name }}Response = ::fidl::AnyZeroArgMessage;
@@ -94,6 +111,9 @@ class {{ .Name }} final {
     static constexpr uint32_t MaxNumHandles = {{ .RequestMaxHandles }};
     static constexpr uint32_t PrimarySize = {{ .RequestSize }};
     static constexpr uint32_t MaxOutOfLine = {{ .RequestMaxOutOfLine }};
+    static constexpr bool HasFlexibleEnvelope = {{ .RequestFlexible }};
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
 
         {{- if and .HasResponse .Response }}
     using ResponseType = {{ .Name }}Response;
@@ -115,24 +135,98 @@ class {{ .Name }} final {
       {{- range .DocComments }}
     //{{ . }}
       {{- end }}
-    fit::function<zx_status_t {{- template "SyncEventHandlerIndividualMethodSignature" . }}> {{ .NameInLowerSnakeCase }};
+    fit::callback<zx_status_t {{- template "SyncEventHandlerIndividualMethodSignature" . }}> {{ .NameInLowerSnakeCase }};
 {{ "" }}
     {{- end }}
     // Fallback handler when an unknown ordinal is received.
     // Caller may put custom error handling logic here.
-    fit::function<zx_status_t()> unknown;
+    fit::callback<zx_status_t()> unknown;
   };
   {{- end }}
 
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+    {{- range FilterMethodsWithoutReqs .Methods -}}
+    {{- if .HasResponse -}}
+{{ "" }}
+    template <typename ResponseType>
+    {{- end }}
+    class {{ .Name }}_Impl final : private ::fidl::internal::{{ if .HasResponse -}} OwnedSyncCallBase<ResponseType> {{- else -}} StatusAndError {{- end }} {
+      using Super = ::fidl::internal::{{ if .HasResponse -}} OwnedSyncCallBase<ResponseType> {{- else -}} StatusAndError {{- end }};
+     public:
+      {{ .Name }}_Impl({{ template "StaticCallSyncRequestCFlavorMethodArgumentsNew" . }});
+      ~{{ .Name }}_Impl() = default;
+      {{ .Name }}_Impl({{ .Name }}_Impl&& other) = default;
+      {{ .Name }}_Impl& operator=({{ .Name }}_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      {{- if .HasResponse }}
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+      {{- end }}
+    };
+    {{- end }}
+
+   public:
+    {{- range FilterMethodsWithoutReqs .Methods -}}
+      {{- if .HasResponse }}
+    using {{ .Name }} = {{ .Name }}_Impl<{{ .Name }}Response>;
+      {{- else }}
+    using {{ .Name }} = {{ .Name }}_Impl;
+      {{- end }}
+    {{- end }}
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+    {{- range FilterMethodsWithoutReqs .Methods -}}
+    {{- if .HasResponse -}}
+{{ "" }}
+    template <typename ResponseType>
+    {{- end }}
+    class {{ .Name }}_Impl final : private ::fidl::internal::{{ if .HasResponse -}} UnownedSyncCallBase<ResponseType> {{- else -}} StatusAndError {{- end }} {
+      using Super = ::fidl::internal::{{ if .HasResponse -}} UnownedSyncCallBase<ResponseType> {{- else -}} StatusAndError {{- end }};
+     public:
+      {{ .Name }}_Impl({{ template "StaticCallSyncRequestCallerAllocateMethodArgumentsNew" . }});
+      ~{{ .Name }}_Impl() = default;
+      {{ .Name }}_Impl({{ .Name }}_Impl&& other) = default;
+      {{ .Name }}_Impl& operator=({{ .Name }}_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      {{- if .HasResponse }}
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+      {{- end }}
+    };
+    {{- end }}
+
+   public:
+    {{- range FilterMethodsWithoutReqs .Methods -}}
+      {{- if .HasResponse }}
+    using {{ .Name }} = {{ .Name }}_Impl<{{ .Name }}Response>;
+      {{- else }}
+    using {{ .Name }} = {{ .Name }}_Impl;
+      {{- end }}
+    {{- end }}
+  };
+
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
@@ -140,6 +234,20 @@ class {{ .Name }} final {
 {{ "" }}
     {{- /* Client-calling functions do not apply to events. */}}
     {{- range FilterMethodsWithoutReqs .Methods -}}
+      {{- range .DocComments }}
+    //{{ . }}
+      {{- end }}
+    //{{ template "ClientAllocationComment" . }}
+    ResultOf::{{ .Name }} {{ .Name }}({{ template "SyncRequestCFlavorMethodArgumentsNew" . }});
+{{ "" }}
+      {{- if or .Request .Response }}
+        {{- range .DocComments }}
+    //{{ . }}
+        {{- end }}
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::{{ .Name }} {{ .Name }}({{ template "SyncRequestCallerAllocateMethodArgumentsNew" . }});
+      {{- end }}
+{{ "" }}
       {{- if .LLProps.CBindingCompatible }}
         {{- range .DocComments }}
     //{{ . }}
@@ -162,14 +270,6 @@ class {{ .Name }} final {
     {{- end }} {{ template "SyncRequestCallerAllocateMethodSignature" . }};
 {{ "" }}
       {{- end }}
-      {{- if or .Request .Response }}
-        {{- range .DocComments }}
-    //{{ . }}
-        {{- end }}
-    // Messages are encoded and decoded in-place.
-    {{ if .Response }}::fidl::DecodeResult<{{ .Name }}Response>{{ else }}zx_status_t{{ end }} {{ template "SyncRequestInPlaceMethodSignature" . }};
-{{ "" }}
-      {{- end }}
     {{- end }}
     {{- if .HasEvents }}
     // Handle all possible events defined in this protocol.
@@ -184,10 +284,25 @@ class {{ .Name }} final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
    public:
 {{ "" }}
     {{- /* Client-calling functions do not apply to events. */}}
     {{- range FilterMethodsWithoutReqs .Methods -}}
+      {{- range .DocComments }}
+    //{{ . }}
+      {{- end }}
+    //{{ template "ClientAllocationComment" . }}
+    static ResultOf::{{ .Name }} {{ .Name }}({{ template "StaticCallSyncRequestCFlavorMethodArgumentsNew" . }});
+{{ "" }}
+      {{- if or .Request .Response }}
+        {{- range .DocComments }}
+    //{{ . }}
+        {{- end }}
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::{{ .Name }} {{ .Name }}({{ template "StaticCallSyncRequestCallerAllocateMethodArgumentsNew" . }});
+      {{- end }}
+{{ "" }}
       {{- if .LLProps.CBindingCompatible }}
         {{- range .DocComments }}
     //{{ . }}
@@ -210,14 +325,6 @@ class {{ .Name }} final {
     {{- end }} {{ template "StaticCallSyncRequestCallerAllocateMethodSignature" . }};
 {{ "" }}
       {{- end }}
-      {{- if or .Request .Response }}
-        {{- range .DocComments }}
-    //{{ . }}
-        {{- end }}
-    // Messages are encoded and decoded in-place.
-    static {{ if .Response }}::fidl::DecodeResult<{{ .Name }}Response>{{ else }}zx_status_t{{ end }} {{ template "StaticCallSyncRequestInPlaceMethodSignature" . }};
-{{ "" }}
-      {{- end }}
     {{- end }}
     {{- if .HasEvents }}
     // Handle all possible events defined in this protocol.
@@ -225,6 +332,25 @@ class {{ .Name }} final {
     // defined in |EventHandlers|. The return status of the handler function is folded with any
     // transport-level errors and returned.
     static zx_status_t HandleEvents(zx::unowned_channel client_end, EventHandlers handlers);
+    {{- end }}
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
+{{ "" }}
+    {{- range FilterMethodsWithoutReqs .Methods -}}
+      {{- range .DocComments }}
+    //{{ . }}
+      {{- end }}
+    static {{ if .HasResponse -}}
+    ::fidl::DecodeResult<{{ .Name }}Response>
+    {{- else -}}
+    ::fidl::internal::StatusAndError
+    {{- end }} {{ template "StaticCallSyncRequestInPlaceMethodSignature" . }};
+{{ "" }}
     {{- end }}
   };
 
@@ -372,8 +498,10 @@ namespace {
 {{ $interface := . -}}
 
 {{- range .Methods }}
+  {{- range .Ordinals.Reads }}
 [[maybe_unused]]
-constexpr uint64_t {{ .OrdinalName }} = {{ .Ordinal }}lu << 32;
+constexpr uint64_t {{ .Name }} = {{ .Ordinal }}lu;
+  {{- end }}
   {{- if .LLProps.EncodeRequest }}
 extern "C" const fidl_type_t {{ .RequestTypeName }};
   {{- end }}
@@ -386,6 +514,16 @@ extern "C" const fidl_type_t {{ .ResponseTypeName }};
 
 {{- /* Client-calling functions do not apply to events. */}}
 {{- range FilterMethodsWithoutReqs .Methods -}}
+{{ "" }}
+    {{- template "SyncRequestCFlavorMethodDefinitionNew" . }}
+{{ "" }}
+  {{- template "StaticCallSyncRequestCFlavorMethodDefinitionNew" . }}
+  {{- if or .Request .Response }}
+{{ "" }}
+    {{- template "SyncRequestCallerAllocateMethodDefinitionNew" . }}
+{{ "" }}
+    {{- template "StaticCallSyncRequestCallerAllocateMethodDefinitionNew" . }}
+  {{- end }}
   {{- if .LLProps.CBindingCompatible }}
 {{ "" }}
     {{- template "SyncRequestCFlavorMethodDefinition" . }}
@@ -398,12 +536,8 @@ extern "C" const fidl_type_t {{ .ResponseTypeName }};
 {{ "" }}
     {{- template "StaticCallSyncRequestCallerAllocateMethodDefinition" . }}
   {{- end }}
-  {{- if or .Request .Response }}
 {{ "" }}
-    {{- template "SyncRequestInPlaceMethodDefinition" . }}
-{{ "" }}
-    {{- template "StaticCallSyncRequestInPlaceMethodDefinition" . }}
-  {{- end }}
+  {{- template "StaticCallSyncRequestInPlaceMethodDefinition" . }}
 {{ "" }}
 {{- end }}
 

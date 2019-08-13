@@ -14,10 +14,9 @@ namespace {
 
 // Define a "no-op" event reporter so that we may always assume
 // Session::event_reporter_ is never null.
-class IdleEventReporter : public EventReporter {
+class DefaultEventReporter : public EventReporter {
  public:
-  constexpr IdleEventReporter() = default;
-  ~IdleEventReporter() = default;  // Trivially destructible.
+  DefaultEventReporter() : weak_factory_(this) {}
 
   void EnqueueEvent(fuchsia::ui::gfx::Event event) override {
     FXL_LOG(WARNING) << "EventReporter not set up, dropped event: " << event;
@@ -30,13 +29,11 @@ class IdleEventReporter : public EventReporter {
   void EnqueueEvent(fuchsia::ui::scenic::Command unhandled) override {
     FXL_LOG(WARNING) << "EventReporter not set up, dropped event: " << unhandled;
   }
-};
 
-IdleEventReporter* GetIdleEventReporter() {
-  // Global but safe.
-  static IdleEventReporter idle_event_reporter;
-  return &idle_event_reporter;
-}
+  EventReporterWeakPtr GetWeakPtr() override { return weak_factory_.GetWeakPtr(); }
+
+  fxl::WeakPtrFactory<DefaultEventReporter> weak_factory_;  // must be last
+};
 
 }  // namespace
 
@@ -55,6 +52,9 @@ void EventReporter::EnqueueEvent(fuchsia::ui::scenic::Event event) {
   }
 }
 
-EventReporter* EventReporter::Default() { return GetIdleEventReporter(); }
+const std::shared_ptr<EventReporter>& EventReporter::Default() {
+  static const std::shared_ptr<EventReporter> kReporter = std::make_shared<DefaultEventReporter>();
+  return kReporter;
+}
 
 }  // namespace scenic_impl

@@ -4,12 +4,12 @@
 
 #include "peridot/lib/modular_config/modular_config_xdr.h"
 
+#include <algorithm>
+#include <cctype>
+
 #include <fuchsia/modular/internal/cpp/fidl.h>
 #include <fuchsia/modular/session/cpp/fidl.h>
 #include <fuchsia/sys/cpp/fidl.h>
-
-#include <algorithm>
-#include <cctype>
 
 #include "gtest/gtest.h"
 #include "src/lib/files/file.h"
@@ -48,9 +48,8 @@ TEST(ModularConfigXdr, BasemgrDefaultValues) {
     "story_shell_url":"fuchsia-pkg://fuchsia.com/mondrian#meta/mondrian.cmx"})";
 
   // Remove whitespace for string comparison
-  expected_json.erase(
-      std::remove_if(expected_json.begin(), expected_json.end(), ::isspace),
-      expected_json.end());
+  expected_json.erase(std::remove_if(expected_json.begin(), expected_json.end(), ::isspace),
+                      expected_json.end());
   EXPECT_EQ(expected_json, write_json);
 
   std::string read_json = "\"\"";
@@ -106,9 +105,8 @@ TEST(ModularConfigXdr, SessionmgrDefaultValues) {
       "agent_service_index":null})";
 
   // Remove whitespace for string comparison
-  expected_json.erase(
-      std::remove_if(expected_json.begin(), expected_json.end(), ::isspace),
-      expected_json.end());
+  expected_json.erase(std::remove_if(expected_json.begin(), expected_json.end(), ::isspace),
+                      expected_json.end());
   EXPECT_EQ(expected_json, write_json);
 
   std::string read_json = "\"\"";
@@ -123,6 +121,23 @@ TEST(ModularConfigXdr, SessionmgrDefaultValues) {
 
   EXPECT_EQ(0u, read_config.startup_agents().size());
   EXPECT_EQ(0u, read_config.session_agents().size());
+}
+
+// Tests that the cloud provider field is read and written correctly when it's not set to the
+// default field.
+TEST(ModularConfigXdr, CloudProvider) {
+  std::string config_str = R"({"cloud_provider":"NONE"})";
+
+  fuchsia::modular::session::SessionmgrConfig read_config;
+  EXPECT_TRUE(XdrRead(config_str, &read_config, XdrSessionmgrConfig));
+  EXPECT_EQ(fuchsia::modular::session::CloudProvider::NONE, read_config.cloud_provider());
+
+  std::string write_json;
+  XdrWrite(&write_json, &read_config, XdrSessionmgrConfig);
+
+  fuchsia::modular::session::SessionmgrConfig read_config_again;
+  EXPECT_TRUE(XdrRead(write_json, &read_config_again, XdrSessionmgrConfig));
+  EXPECT_EQ(fuchsia::modular::session::CloudProvider::NONE, read_config_again.cloud_provider());
 }
 
 }  // namespace modular

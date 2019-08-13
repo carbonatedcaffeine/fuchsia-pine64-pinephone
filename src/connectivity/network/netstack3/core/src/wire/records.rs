@@ -11,6 +11,7 @@
 //!
 //! [`options`]: crate::wire::records::options
 
+use crate::wire::{FromRaw, MaybeParsed};
 use packet::{BufferView, BufferViewMut, InnerPacketBuilder};
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -19,11 +20,138 @@ use zerocopy::ByteSlice;
 /// A parsed set of arbitrary sequential records.
 ///
 /// `Records` represents a pre-parsed set of records whose structure is enforced
-/// by the impl in `O`.
+/// by the impl in `R`.
 #[derive(Debug)]
 pub(crate) struct Records<B, R: RecordsImplLayout> {
     bytes: B,
     context: R::Context,
+}
+
+/// An unchecked set of arbitrary sequential records.
+///
+/// `RecordsRaw` represents a yet unparsed and not-validated set of
+/// records, whose structure is enforced by the impl in `R`.
+///
+/// [`Records`] provides an implementation of [`FromRaw`] that can be used
+/// to validate a `RecordsRaw`.
+pub(crate) struct RecordsRaw<B, R: RecordsImplLayout> {
+    bytes: B,
+    context: R::Context,
+}
+
+impl<B, R: RecordsImplLayout> RecordsRaw<B, R> {
+    /// Creates a new `RecordsRaw` with the data in `bytes` and a
+    /// `context`.
+    pub(crate) fn new_with_context(bytes: B, context: R::Context) -> Self {
+        Self { bytes, context }
+    }
+}
+
+impl<B, R> RecordsRaw<B, R>
+where
+    R: RecordsImplLayout<Context = ()>,
+{
+    /// Creates a new `RecordsRaw` with the data in `bytes`.
+    pub(crate) fn new(bytes: B) -> Self {
+        Self { bytes, context: () }
+    }
+}
+
+impl<B, R> RecordsRaw<B, R>
+where
+    R: for<'a> RecordsRawImpl<'a>,
+    B: ByteSlice,
+{
+    /// Raw parse a set of records with a context.
+    ///
+    /// See [`RecordsRaw::parse_raw_with_mut_context`] for details on `bytes`,
+    /// `context`, and return value. `parse_raw_with_context` just calls
+    /// `parse_raw_with_mut_context` with a mutable reference to the `context`
+    /// (which is owned).
+    pub(crate) fn parse_raw_with_context<BV: BufferView<B>>(
+        bytes: &mut BV,
+        mut context: R::Context,
+    ) -> MaybeParsed<Self, (B, R::Error)> {
+        Self::parse_raw_with_mut_context(bytes, &mut context)
+    }
+
+    /// Raw parse a set of records with a mutable context.
+    ///
+    /// `parse_raw_with_mut_context` shallowly parses `bytes` as a sequence of
+    /// records. `context` may be used by implementers to maintain state.
+    ///
+    /// `parse_raw_with_mut_context` performs a single pass over all of the
+    /// records to be able to find the end of the records list and update
+    /// `bytes` accordingly. Upon return, `bytes` is moved to the first byte
+    /// after the records list (If the return is a [`MaybeParsed::Complete`],
+    /// otherwise `bytes` will be at the point where raw parsing error was
+    /// found.
+    pub(crate) fn parse_raw_with_mut_context<BV: BufferView<B>>(
+        bytes: &mut BV,
+        context: &mut R::Context,
+    ) -> MaybeParsed<Self, (B, R::Error)> {
+        let mut c = context.clone();
+        let mut b = LongLivedBuff::new(bytes.as_ref());
+        let r = loop {
+            match R::parse_raw_with_context(&mut b, context) {
+                Ok(true) => {} // continue consuming from data
+                Ok(false) => {
+                    break None;
+                }
+                Err(e) => {
+                    break Some(e);
+                }
+            }
+        };
+
+        // When we get here, we know that whatever is left in `b` is not needed
+        // so we only take the amount of bytes we actually need from `bytes`,
+        // leaving the rest alone for the caller to continue parsing with.
+        let bytes_len = bytes.len();
+        let b_len = b.len();
+        let taken = bytes.take_front(bytes_len - b_len).unwrap();
+
+        match r {
+            Some(error) => MaybeParsed::Incomplete((taken, error)),
+            None => MaybeParsed::Complete(RecordsRaw { bytes: taken, context: c }),
+        }
+    }
+
+    /// Raw parses a set of records.
+    ///
+    /// Equivalent to calling [`RecordsRaw::parse_raw_with_context`] with
+    /// `context = ()`.
+    pub(crate) fn parse_raw<BV: BufferView<B>>(bytes: &mut BV) -> MaybeParsed<Self, (B, R::Error)>
+    where
+        R: RecordsImplLayout<Context = ()>,
+    {
+        Self::parse_raw_with_context(bytes, ())
+    }
+}
+
+impl<B, R> Deref for RecordsRaw<B, R>
+where
+    B: ByteSlice,
+    R: RecordsImplLayout,
+{
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        self.bytes.deref()
+    }
+}
+
+impl<B, R> RecordsRaw<B, R>
+where
+    B: ByteSlice,
+    R: RecordsImplLayout,
+{
+    /// Get the underlying bytes.
+    ///
+    /// `bytes` returns a reference to the byte slice backing this `RecordsRaw`.
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 /// An iterator over the records contained inside a `Records` instance.
@@ -43,7 +171,7 @@ pub(crate) trait RecordsContext: Sized + Clone {
     /// `clone_for_iter` is useful for cloning a context to be
     /// used by `RecordsIter`. Since `Records::parse_with_context`
     /// will do a full pass over all the records to check for errors,
-    /// a `RecordsIter` should never error. Thereforce, instead of doing
+    /// a `RecordsIter` should never error. Therefore, instead of doing
     /// checks when iterating (if a context was used for checks), a
     /// clone of a context can be made specifically for iterator purposes
     /// that does not do checks (which may be expensive).
@@ -87,7 +215,7 @@ pub(crate) trait RecordsImpl<'a>: RecordsImplLayout {
     /// Parse a record with some context.
     ///
     /// `parse_with_context` takes a variable-length `data` and a `context` to
-    /// maintain state, and returns `Ok(Some(Some(o)))` if the the record is
+    /// maintain state, and returns `Ok(Some(Some(o)))` if the record is
     /// successfully parsed as `o`, `Ok(Some(None))` if data is not malformed
     /// but the implementer can't extract a concrete object (e.g. record is an
     /// unimplemented enumeration, but we can still safely "skip" it), Ok(None)
@@ -108,6 +236,34 @@ pub(crate) trait RecordsImpl<'a>: RecordsImplLayout {
         data: &mut BV,
         context: &mut Self::Context,
     ) -> Result<Option<Option<Self::Record>>, Self::Error>;
+}
+
+/// An implementation of a raw records parser.
+///
+/// `RecordsRawImpl` provides functions to raw-parse sequential records. It is
+/// required to construct a partially parsed [`RecordsRaw`].
+///
+/// `RecordsRawImpl` is meant to perform very little to no validation on each
+/// record it consumes. It is primarily used to be able to walk record sets with
+/// unknown lengths.
+pub(crate) trait RecordsRawImpl<'a>: RecordsImplLayout {
+    /// Raw parses a single record with some context.
+    ///
+    /// `parse_raw_with_context` takes a variable length `data` and a `context`
+    /// to maintain state, and returns `Ok(true)` if a record is
+    /// successfully consumed, `Ok(false)` when it is unable to parse more
+    /// records, and `Err(err)` if the `data` was malformed in any way and the
+    /// parsing stopped short.
+    ///
+    /// `data` MAY be empty. It is up to the implementer to handle an exhausted
+    /// `data`.
+    ///
+    /// It's the implementer's responsibility to move the `BufferView` forward
+    /// whenever returning `Ok(_)`.
+    fn parse_raw_with_context<BV: BufferView<&'a [u8]>>(
+        data: &mut BV,
+        context: &mut Self::Context,
+    ) -> Result<bool, Self::Error>;
 }
 
 /// A limited parsed set of records.
@@ -234,6 +390,18 @@ pub(crate) trait RecordsSerializerImpl<'a> {
     fn serialize(data: &mut [u8], record: &Self::Record);
 }
 
+/// An implementation of a serializer for records with alignment requirements.
+pub(crate) trait AlignedRecordsSerializerImpl<'a>: RecordsSerializerImpl<'a> {
+    /// Returned (x, y) is interpreted as the record must be aligned at
+    /// x * n + y bytes from the beginning.
+    ///
+    /// `x` must be non-zero and `y` must be smaller than `x`.
+    fn get_alignment_requirement(record: &Self::Record) -> (usize, usize);
+
+    /// Padding between the aligned records.
+    fn padding(buf: &mut [u8], length: usize);
+}
+
 /// An instance of records serialization.
 ///
 /// `RecordsSerializer` is instantiated with an `Iterator` that provides
@@ -267,7 +435,7 @@ where
 
     /// Returns the total length, in bytes, of the serialized records contained
     /// within the `RecordsSerializer`.
-    fn records_bytes_len(&self) -> usize {
+    pub(crate) fn records_bytes_len(&self) -> usize {
         self.records.clone().map(|r| S::record_length(r)).sum()
     }
 
@@ -279,14 +447,99 @@ where
     /// `serialize_records` expects that `buffer` has enough bytes to serialize
     /// the contained records (as obtained from `records_bytes_len`, otherwise
     /// it's considered a violation of the API contract and the call will panic.
-    fn serialize_records(self, buffer: &mut [u8]) {
+    pub(crate) fn serialize_records(&self, buffer: &mut [u8]) {
         let mut b = &mut &mut buffer[..];
-        for r in self.records {
+        for r in self.records.clone() {
             // SECURITY: Take a zeroed buffer from b to prevent leaking
             // information from packets previously stored in this buffer.
             S::serialize(b.take_front_zero(S::record_length(r)).unwrap(), r);
         }
     }
+}
+
+/// An instance of aligned records serialization.
+///
+/// `AlignedRecordsSerializer` is instantiated with an `Iterator` that provides
+/// items to be serialized by a `AlignedRecordsSerializerImpl`.
+#[derive(Debug)]
+pub(crate) struct AlignedRecordsSerializer<'a, S, R: 'a, I>
+where
+    S: AlignedRecordsSerializerImpl<'a, Record = R>,
+    I: Iterator<Item = &'a R> + Clone,
+{
+    start_pos: usize,
+    records: I,
+    _marker: PhantomData<S>,
+}
+
+impl<'a, S, R: 'a, I> AlignedRecordsSerializer<'a, S, R, I>
+where
+    S: AlignedRecordsSerializerImpl<'a, Record = R>,
+    I: Iterator<Item = &'a R> + Clone,
+{
+    /// Creates a new `AlignedRecordsSerializer` with given `records` and `start_pos`.
+    ///
+    /// `records` must produce the same sequence of values from every iterator,
+    /// even if cloned. See `RecordsSerializer` for more details. `start_pos` is
+    /// the place where the records serialization starts. For example, for HopByHop
+    /// Options, you will want it to be 2 because The HopByHop Extension Header has
+    /// 2 bytes at the very beginning and alignment requirements documented in RFCs include
+    /// these 2 bytes. If not needed, just pass 0.
+    pub(crate) fn new(start_pos: usize, records: I) -> Self {
+        Self { start_pos, records, _marker: PhantomData }
+    }
+
+    /// Returns the total length, in bytes, of the serialized records contained
+    /// within the `AlignedRecordsSerializer`. And with that length, all records
+    /// can be put at the places that meet their alignment requirements.
+    pub(crate) fn records_bytes_len(&self) -> usize {
+        let mut pos = self.start_pos;
+        self.records
+            .clone()
+            .map(|r| {
+                let (x, y) = S::get_alignment_requirement(r);
+                let new_pos = align_up_to(pos, x, y) + S::record_length(r);
+                let result = new_pos - pos;
+                pos = new_pos;
+                result
+            })
+            .sum()
+    }
+
+    /// `serialize_records` serializes all the records contained within the
+    /// `AlignedRecordsSerializer`.
+    ///
+    /// # Panics
+    ///
+    /// `serialize_records` expects that `buffer` has enough bytes to serialize
+    /// the contained records (as obtained from `records_bytes_len`, otherwise
+    /// it's considered a violation of the API contract and the call will panic.
+    pub(crate) fn serialize_records(&self, buffer: &mut [u8]) {
+        let mut b = &mut &mut buffer[..];
+        let mut pos = self.start_pos;
+        for r in self.records.clone() {
+            let (x, y) = S::get_alignment_requirement(r);
+            let aligned = align_up_to(pos, x, y);
+            let pad_len = aligned - pos;
+            let pad = b.take_front_zero(pad_len).unwrap();
+            S::padding(pad, pad_len);
+            pos = aligned;
+            // SECURITY: Take a zeroed buffer from b to prevent leaking
+            // information from packets previously stored in this buffer.
+            S::serialize(b.take_front_zero(S::record_length(r)).unwrap(), r);
+            pos += S::record_length(r);
+        }
+        // we have to pad the containing header to 8-octet boundary.
+        let padding = b.take_rest_front_zero();
+        S::padding(padding, padding.len());
+    }
+}
+
+/// Return the aligned offset which is at `x * n + y`.
+fn align_up_to(offset: usize, x: usize, y: usize) -> usize {
+    assert!(x != 0 && y < x);
+    // first add `x` to prevent overflow.
+    (offset + x - 1 - y) / x * x + y
 }
 
 impl<'a, S, R: 'a, I> InnerPacketBuilder for RecordsSerializer<'a, S, R, I>
@@ -298,7 +551,7 @@ where
         self.records_bytes_len()
     }
 
-    fn serialize(self, buffer: &mut [u8]) {
+    fn serialize(&self, buffer: &mut [u8]) {
         self.serialize_records(buffer)
     }
 }
@@ -398,6 +651,18 @@ where
     /// Equivalent to calling `parse_with_context` with `context = ()`.
     pub(crate) fn parse(bytes: B) -> Result<Records<B, R>, R::Error> {
         Self::parse_with_context(bytes, ())
+    }
+}
+
+impl<B, R> FromRaw<RecordsRaw<B, R>, ()> for Records<B, R>
+where
+    for<'a> R: RecordsImpl<'a>,
+    B: ByteSlice,
+{
+    type Error = R::Error;
+
+    fn try_from_raw_with(raw: RecordsRaw<B, R>, _args: ()) -> Result<Self, R::Error> {
+        Records::<B, R>::parse_with_context(raw.bytes, raw.context)
     }
 }
 
@@ -752,6 +1017,15 @@ mod test {
         }
     }
 
+    impl<'a> RecordsRawImpl<'a> for StatefulContextRecordImpl {
+        fn parse_raw_with_context<BV: BufferView<&'a [u8]>>(
+            data: &mut BV,
+            context: &mut Self::Context,
+        ) -> Result<bool, Self::Error> {
+            Self::parse_with_context(data, context).map(|p| p.is_some())
+        }
+    }
+
     fn parse_dummy_rec_with_context<'a, BV>(
         data: &mut BV,
         context: &mut StatefulContext,
@@ -953,6 +1227,32 @@ mod test {
         assert_eq!(bv.len(), 0);
         validate_parsed_stateful_context_records(parsed, context);
     }
+
+    #[test]
+    fn raw_parse_success() {
+        let mut context = StatefulContext::new();
+        let mut bv = &mut &DUMMY_BYTES[..];
+        let result = RecordsRaw::<_, StatefulContextRecordImpl>::parse_raw_with_mut_context(
+            &mut bv,
+            &mut context,
+        )
+        .unwrap();
+        assert_eq!(result.bytes.len(), DUMMY_BYTES.len());
+        let parsed = Records::try_from_raw(result).unwrap();
+        validate_parsed_stateful_context_records(parsed, context);
+    }
+
+    #[test]
+    fn raw_parse_failure() {
+        let mut context = StatefulContext::new();
+        let mut bv = &mut &DUMMY_BYTES[0..15];
+        let (result, _) = RecordsRaw::<_, StatefulContextRecordImpl>::parse_raw_with_mut_context(
+            &mut bv,
+            &mut context,
+        )
+        .unwrap_incomplete();
+        assert_eq!(result, &DUMMY_BYTES[0..12]);
+    }
 }
 
 /// Header options for IPv4 and TCP, and NDP.
@@ -971,6 +1271,13 @@ pub(crate) mod options {
     ///
     /// [`Records`]: crate::wire::records::Records
     pub(crate) type Options<B, O> = Records<B, OptionsImplBridge<O>>;
+
+    /// A yet unparset set of header options.
+    ///
+    /// `OptionsRaw` represents a yet unparsed and not validated set of
+    /// options from an IPv4 or TCP header or an NDP packet. `OptionsRaw`
+    /// uses [`RecordsRaw`] below the surface.
+    pub(crate) type OptionsRaw<B, O> = RecordsRaw<B, OptionsImplBridge<O>>;
 
     /// An instance of options serialization.
     ///
@@ -1034,13 +1341,28 @@ pub(crate) mod options {
             // option length not fitting in u8 is a contract violation. Without
             // debug assertions on, this will cause the packet to be malformed.
             debug_assert!(length <= std::u8::MAX.into());
-            data[1] = length as u8;
+            data[1] = (length - O::LENGTH_OFFSET) as u8;
             // because padding may have occurred, we zero-fill data before
             // passing it along
             for b in data[2..].iter_mut() {
                 *b = 0;
             }
             O::serialize(&mut data[2..], record)
+        }
+    }
+
+    impl<'a, O> AlignedRecordsSerializerImpl<'a> for O
+    where
+        O: AlignedOptionsSerializerImpl<'a>,
+    {
+        fn get_alignment_requirement(record: &Self::Record) -> (usize, usize) {
+            // Use the underlying option's alignment requirement as the alignment
+            // requirement for the record.
+            O::get_alignment_requirement(record)
+        }
+
+        fn padding(buf: &mut [u8], length: usize) {
+            O::padding(buf, length);
         }
     }
 
@@ -1082,6 +1404,12 @@ pub(crate) mod options {
 
         /// The No-op type (if one exists).
         const NOP: Option<u8> = Some(NOP);
+
+        /// The offset need to be considered when serializing length information
+        ///
+        /// For example, an IPv4 Option's length field is the length of the whole option;
+        /// an IPv6 Option's length field is the length of its data.
+        const LENGTH_OFFSET: usize = 0;
     }
 
     /// An implementation of an options parser.
@@ -1145,6 +1473,22 @@ pub(crate) mod options {
         /// `data` is guaranteed to be long enough to fit `option` based on the
         /// value returned by `get_option_length`.
         fn serialize(data: &mut [u8], option: &Self::Option);
+    }
+
+    pub(crate) trait AlignedOptionsSerializerImpl<'a>: OptionsSerializerImpl<'a> {
+        /// Get the associated alignment requirement.
+        ///
+        /// The return value (x, y) is interpreted as: the option must
+        /// only appear at `x * n + y` bytes from the beginning of the
+        /// _header_. For example, Router Alert for Ipv6 HBH options
+        /// have alignment (2, 0), and Jumbo Payload has (4, 2).
+        /// (1, 0) means there is no alignment Requirement.
+        ///
+        /// `x` must be non-zero and `y` must be smaller than `x`.
+        fn get_alignment_requirement(option: &Self::Option) -> (usize, usize);
+
+        /// Padding between the aligned options.
+        fn padding(buf: &mut [u8], length: usize);
     }
 
     fn next<'a, BV, O>(
@@ -1224,6 +1568,31 @@ pub(crate) mod options {
 
             fn serialize(data: &mut [u8], option: &Self::Option) {
                 data.copy_from_slice(&option.1);
+            }
+        }
+
+        impl<'a> AlignedOptionsSerializerImpl<'a> for DummyOptionsImpl {
+            // for our `DummyOption`, we simply regard (length, kind) as their
+            // alignment requirement.
+            fn get_alignment_requirement(option: &Self::Option) -> (usize, usize) {
+                (option.1.len(), option.0 as usize)
+            }
+
+            fn padding(buf: &mut [u8], length: usize) {
+                assert!(length <= buf.len());
+                assert!(length <= (std::u8::MAX as usize) + 2);
+
+                if length == 1 {
+                    // Use Pad1
+                    buf[0] = 0
+                } else if length > 1 {
+                    // Use PadN
+                    buf[0] = 1;
+                    buf[1] = (length - 2) as u8;
+                    for i in 2..length {
+                        buf[i] = 0
+                    }
+                }
             }
         }
 
@@ -1424,7 +1793,7 @@ pub(crate) mod options {
                 .collect::<Vec<<DummyOptionsImpl as OptionsSerializerImpl>::Option>>();
             let ser = OptionsSerializer::<DummyOptionsImpl, _, _>::new(collected.iter());
 
-            let serialized = ser.serialize_outer().unwrap().as_ref().to_vec();
+            let serialized = ser.into_serializer().serialize_vec_outer().unwrap().as_ref().to_vec();
 
             assert_eq!(serialized, bytes);
         }
@@ -1447,9 +1816,72 @@ pub(crate) mod options {
                 .collect::<Vec<<DummyNdpOptionsImpl as OptionsSerializerImpl>::Option>>();
             let ser = OptionsSerializer::<DummyNdpOptionsImpl, _, _>::new(collected.iter());
 
-            let serialized = ser.serialize_outer().unwrap().as_ref().to_vec();
+            let serialized = ser.into_serializer().serialize_vec_outer().unwrap().as_ref().to_vec();
 
             assert_eq!(serialized, bytes);
+        }
+
+        #[test]
+        fn test_align_up_to() {
+            // We are doing some sort of property testing here:
+            // We generate a random alignment requirement (x, y) and a random offset `pos`.
+            // The resulting `new_pos` must:
+            //   - 1. be at least as large as the original `pos`.
+            //   - 2. be in form of x * n + y for some integer n.
+            //   - 3. for any number in between, they shouldn't be in form of x * n + y.
+            use rand::{thread_rng, Rng};
+            let mut rng = thread_rng();
+            for _ in 0..100_000 {
+                let x = rng.gen_range(1usize, 256);
+                let y = rng.gen_range(0, x);
+                let pos = rng.gen_range(0usize, 65536);
+                let new_pos = align_up_to(pos, x, y);
+                // 1)
+                assert!(new_pos >= pos);
+                // 2)
+                assert_eq!((new_pos - y) % x, 0);
+                // 3) Note: `p` is not guaranteed to be bigger than `y`, plus `x` to avoid overflow.
+                assert!((pos..new_pos).all(|p| (p + x - y) % x != 0))
+            }
+        }
+
+        #[test]
+        #[rustfmt::skip]
+        fn test_aligned_dummy_options_serializer() {
+            // testing for cases: 2n+{0,1}, 3n+{1,2}, 1n+0, 4n+2
+            let dummy_options = [
+                // alignment requirement: 2 * n + 1,
+                //
+                (1, vec![42, 42]),
+                (0, vec![42, 42]),
+                (1, vec![1, 2, 3]),
+                (2, vec![3, 2, 1]),
+                (0, vec![42]),
+                (2, vec![9, 9, 9, 9]),
+            ];
+            let ser = AlignedRecordsSerializer::<'_, DummyOptionsImpl, (u8, Vec<u8>), _>::new(
+                0,
+                dummy_options.iter(),
+            );
+            assert_eq!(ser.records_bytes_len(), 32);
+            let mut buf = [0u8; 32];
+            ser.serialize_records(&mut buf[..]);
+            assert_eq!(
+                &buf[..],
+                &[
+                    0, // Pad1 padding
+                    1, 4, 42, 42, // (1, [42, 42]) starting at 2 * 0 + 1 = 3
+                    0,  // Pad1 padding
+                    0, 4, 42, 42, // (0, [42, 42]) starting at 2 * 3 + 0 = 6
+                    1, 5, 1, 2, 3, // (1, [1, 2, 3]) starting at 3 * 2 + 1 = 7
+                    1, 0, // PadN padding
+                    2, 5, 3, 2, 1, // (2, [3, 2, 1]) starting at 3 * 4 + 2 = 14
+                    0, 3, 42, // (0, [42]) starting at 1 * 19 + 0 = 19
+                    0,  // PAD1 padding
+                    2, 6, 9, 9, 9, 9 // (2, [9, 9, 9, 9]) starting at 4 * 6 + 2 = 26
+                    // total length: 32
+                ]
+            );
         }
     }
 }

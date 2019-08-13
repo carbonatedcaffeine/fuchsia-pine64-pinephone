@@ -42,13 +42,17 @@ class CodecClient {
   // we want to be very sure that we'll be posting to the correct loop to send
   // messages using that loop's single thread, as ProxyController doesn't have
   // a lock_ in it.
-  CodecClient(async::Loop* loop, fidl::InterfaceHandle<fuchsia::sysmem::Allocator> sysmem);
+  CodecClient(async::Loop* loop, thrd_t loop_thread, fidl::InterfaceHandle<fuchsia::sysmem::Allocator> sysmem);
   ~CodecClient();
 
   // Separate from Start() because we don't wan this class to handle the Codec
   // creation, so the caller needs a server endpoint to send off to a Codec
   // server (via the CodecFactory).
   fidl::InterfaceRequest<fuchsia::media::StreamProcessor> GetTheRequestOnce();
+
+  // Can optionally be called before Start(), to set the min buffer size that'll
+  // be requested via sysmem.
+  void SetMinOutputBufferSize(uint64_t min_output_buffer_size);
 
   // Get the Codec into a state where it's ready to process input data.
   void Start();
@@ -71,9 +75,8 @@ class CodecClient {
   const CodecBuffer& GetInputBufferByIndex(uint32_t packet_index);
   const CodecBuffer& GetOutputBufferByIndex(uint32_t packet_index);
 
-  void QueueInputFormatDetails(
-      uint64_t stream_lifetime_ordinal,
-      fuchsia::media::FormatDetails input_format_details);
+  void QueueInputFormatDetails(uint64_t stream_lifetime_ordinal,
+                               fuchsia::media::FormatDetails input_format_details);
 
   // Queue an input packet to the codec.
   void QueueInputPacket(std::unique_ptr<fuchsia::media::Packet> packet);
@@ -113,17 +116,15 @@ class CodecClient {
  private:
   friend class CodecStream;
 
-  void PostToFidlThread(fit::closure to_run);
+  void PostToFidlThread(fit::closure to_run, bool enforce_no_re_posting = true);
 
   void CallSyncAndWaitForResponse();
 
-  void TrackOutputStreamLifetimeOrdinal(
-      uint64_t output_stream_lifetime_ordinal);
+  void TrackOutputStreamLifetimeOrdinal(uint64_t output_stream_lifetime_ordinal);
 
   bool CreateAndSyncBufferCollection(
       fuchsia::sysmem::BufferCollectionSyncPtr* out_buffer_collection,
-      fidl::InterfaceHandle<fuchsia::sysmem::BufferCollectionToken>*
-          out_codec_sysmem_token);
+      fidl::InterfaceHandle<fuchsia::sysmem::BufferCollectionToken>* out_codec_sysmem_token);
 
   bool WaitForSysmemBuffersAllocated(
       fuchsia::sysmem::BufferCollectionSyncPtr* buffer_collection_param,
@@ -131,9 +132,8 @@ class CodecClient {
 
   bool ConfigurePortBufferCollection(
       bool is_output, uint64_t new_buffer_lifetime_ordinal,
-      uint64_t buffer_constraints_version_ordinal,
-      uint32_t packet_count_for_server, uint32_t packet_count_for_client,
-      uint32_t* out_packet_count,
+      uint64_t buffer_constraints_version_ordinal, uint32_t packet_count_for_server,
+      uint32_t packet_count_for_client, uint32_t* out_packet_count,
       fuchsia::sysmem::BufferCollectionPtr* out_buffer_collection,
       fuchsia::sysmem::BufferCollectionInfo_2* out_buffer_collection_info);
 
@@ -141,10 +141,9 @@ class CodecClient {
   // Events:
   //
 
-  void OnStreamFailed(uint64_t stream_lifetime_ordinal);
+  void OnStreamFailed(uint64_t stream_lifetime_ordinal, fuchsia::media::StreamError error);
 
-  void OnInputConstraints(
-      fuchsia::media::StreamBufferConstraints input_constraints);
+  void OnInputConstraints(fuchsia::media::StreamBufferConstraints input_constraints);
   void OnFreeInputPacket(fuchsia::media::PacketHeader free_input_packet);
 
   // This example ignores any buffer constraints with
@@ -159,8 +158,7 @@ class CodecClient {
   // more than one of this message per Codec instance (though not quite to the
   // degree needed to fully cover client handling of true mid-stream format
   // changes).
-  void OnOutputConstraints(
-      fuchsia::media::StreamOutputConstraints output_config);
+  void OnOutputConstraints(fuchsia::media::StreamOutputConstraints output_config);
 
   // Ever output format is stream-specific with stream_lifetime_ordinal set, and
   // the server is required to elide any unnecessary OnOutputFormat messages
@@ -168,19 +166,20 @@ class CodecClient {
   // applies.  The format continues to apply to all subsequent output packets of
   // the same stream until the stream ends or a new OnOutputFormat message is
   // sent by the server.
-  void OnOutputFormat(
-      fuchsia::media::StreamOutputFormat output_format);
+  void OnOutputFormat(fuchsia::media::StreamOutputFormat output_format);
 
   // Every output packet is stream-specific with stream_lifetime_ordinal set.
-  void OnOutputPacket(fuchsia::media::Packet output_packet,
-                      bool error_detected_before, bool error_detected_during);
+  void OnOutputPacket(fuchsia::media::Packet output_packet, bool error_detected_before,
+                      bool error_detected_during);
 
-  void OnOutputEndOfStream(uint64_t stream_lifetime_ordinal,
-                           bool error_detected_before);
+  void OnOutputEndOfStream(uint64_t stream_lifetime_ordinal, bool error_detected_before);
   std::mutex lock_;
   async::Loop* loop_ = nullptr;               // must override
   async_dispatcher_t* dispatcher_ = nullptr;  // must override
+  thrd_t loop_thread_{};
+  bool is_start_called_ = false;
   fuchsia::media::StreamProcessorPtr codec_;
+  uint64_t min_output_buffer_size_ = 0;
   // This only temporarily holds the Codec request that was created during the
   // constructor.  If the caller asks for this more than once, the subsequent
   // requests give back a !is_valid() request.
@@ -266,8 +265,7 @@ class CodecClient {
   // config applies.  The only interaction is that sometimes a new stream will
   // happen to have a different format so will cause format_details to update.
   std::shared_ptr<const fuchsia::media::StreamOutputConstraints> last_output_constraints_;
-  std::shared_ptr<const fuchsia::media::StreamOutputConstraints>
-      last_required_output_constraints_;
+  std::shared_ptr<const fuchsia::media::StreamOutputConstraints> last_required_output_constraints_;
   // Most non-test clients will want to track this per-stream, since a
   // StreamOutputFormat from an old stream_lifetime_ordinal() isn't relevant to
   // the current stream_lifetime_ordinal.  A server is not allowed to send
@@ -297,6 +295,11 @@ class CodecClient {
   }
   bool output_pending_ = false;
   std::condition_variable output_pending_condition_;
+
+  CodecClient(const CodecClient&) = delete;
+  CodecClient(CodecClient&&) = delete;
+  CodecClient& operator=(const CodecClient&) = delete;
+  CodecClient& operator=(CodecClient&&) = delete;
 };
 
 #endif  // GARNET_LIB_MEDIA_TEST_INCLUDE_LIB_MEDIA_TEST_CODEC_CLIENT_H_

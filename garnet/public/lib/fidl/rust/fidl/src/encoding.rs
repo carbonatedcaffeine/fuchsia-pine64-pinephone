@@ -5,18 +5,18 @@
 //! Encoding2 contains functions and traits for FIDL2 encoding and decoding.
 
 use {
+    crate::handle::{Handle, HandleBased, MessageBuf},
     crate::{Error, Result},
     byteorder::{ByteOrder, LittleEndian},
-    fuchsia_zircon::{self as zx, HandleBased},
     std::{cell::RefCell, mem, ptr, str, u32, u64},
 };
 
-thread_local!(static CODING_BUF: RefCell<zx::MessageBuf> = RefCell::new(zx::MessageBuf::new()));
+thread_local!(static CODING_BUF: RefCell<MessageBuf> = RefCell::new(MessageBuf::new()));
 
 /// Acquire a mutable reference to the thread-local encoding buffers.
 ///
 /// This function may not be called recursively.
-pub fn with_tls_coding_bufs<R>(f: impl FnOnce(&mut Vec<u8>, &mut Vec<zx::Handle>) -> R) -> R {
+pub fn with_tls_coding_bufs<R>(f: impl FnOnce(&mut Vec<u8>, &mut Vec<Handle>) -> R) -> R {
     CODING_BUF.with(|buf| {
         let mut buf = buf.borrow_mut();
         let (bytes, handles) = buf.split_mut();
@@ -31,7 +31,7 @@ pub fn with_tls_coding_bufs<R>(f: impl FnOnce(&mut Vec<u8>, &mut Vec<zx::Handle>
 /// This function may not be called recursively.
 pub fn with_tls_encoded<T, E: From<Error>>(
     val: &mut (impl Encodable + ?Sized),
-    f: impl FnOnce(&mut Vec<u8>, &mut Vec<zx::Handle>) -> std::result::Result<T, E>,
+    f: impl FnOnce(&mut Vec<u8>, &mut Vec<Handle>) -> std::result::Result<T, E>,
 ) -> std::result::Result<T, E> {
     with_tls_coding_bufs(|bytes, handles| {
         Encoder::encode(bytes, handles, val)?;
@@ -91,8 +91,8 @@ fn take_slice_mut<'a, T>(x: &mut &'a mut [T]) -> &'a mut [T] {
 }
 
 #[doc(hidden)] // only exported for macro use
-pub fn take_handle<T: HandleBased>(handle: &mut T) -> zx::Handle {
-    let invalid = T::from_handle(zx::Handle::invalid());
+pub fn take_handle<T: HandleBased>(handle: &mut T) -> Handle {
+    let invalid = T::from_handle(Handle::invalid());
     mem::replace(handle, invalid).into_handle()
 }
 
@@ -127,7 +127,7 @@ pub struct Encoder<'a> {
     buf: &'a mut Vec<u8>,
 
     /// Buffer to write output handles into.
-    handles: &'a mut Vec<zx::Handle>,
+    handles: &'a mut Vec<Handle>,
 }
 
 /// Decoding state
@@ -152,19 +152,19 @@ pub struct Decoder<'a> {
     initial_out_of_line_buf_len: usize,
 
     /// Buffer from which to read handles.
-    handles: &'a mut [zx::Handle],
+    handles: &'a mut [Handle],
 }
 
 impl<'a> Encoder<'a> {
     /// FIDL2-encodes `x` into the provided data and handle buffers.
     pub fn encode<T: Encodable + ?Sized>(
         buf: &'a mut Vec<u8>,
-        handles: &'a mut Vec<zx::Handle>,
+        handles: &'a mut Vec<Handle>,
         x: &mut T,
     ) -> Result<()> {
         fn prepare_for_encoding<'a>(
             buf: &'a mut Vec<u8>,
-            handles: &'a mut Vec<zx::Handle>,
+            handles: &'a mut Vec<Handle>,
             ty_inline_size: usize,
         ) -> Encoder<'a> {
             let inline_size = round_up_to_align(ty_inline_size, 8);
@@ -216,16 +216,12 @@ impl<'a> Encoder<'a> {
     /// the encoding started.  See `Encoder::offset`.
     pub fn tail_padding<Target>(&mut self, target: &Target, start_pos: usize) -> Result<()>
     where
-        Target: Encodable
+        Target: Encodable,
     {
         self.tail_padding_inner(target.inline_size(), start_pos)
     }
 
-    fn tail_padding_inner(
-        &mut self,
-        target_inline_size: usize,
-        start_pos: usize,
-    ) -> Result<()> {
+    fn tail_padding_inner(&mut self, target_inline_size: usize, start_pos: usize) -> Result<()> {
         debug_assert!(start_pos <= self.offset);
         self.padding(target_inline_size - (self.offset - start_pos))
     }
@@ -260,7 +256,7 @@ impl<'a> Encoder<'a> {
     }
 
     /// Append handles to the buffer.
-    pub fn append_handles(&mut self, handles: &mut [zx::Handle]) {
+    pub fn append_handles(&mut self, handles: &mut [Handle]) {
         self.handles.reserve(handles.len());
         for handle in handles {
             self.handles.push(take_handle(handle));
@@ -272,7 +268,7 @@ impl<'a> Decoder<'a> {
     /// FIDL2-decodes a value of type `T` from the provided data and handle buffers.
     pub fn decode_into<T: Decodable>(
         buf: &'a [u8],
-        handles: &'a mut [zx::Handle],
+        handles: &'a mut [Handle],
         value: &mut T,
     ) -> Result<()> {
         let out_of_line_offset = round_up_to_align(T::inline_size(), 8);
@@ -412,7 +408,7 @@ impl<'a> Decoder<'a> {
     }
 
     /// Take the next handle from the `handles` list and shift the list down by one element.
-    pub fn take_handle(&mut self) -> Result<zx::Handle> {
+    pub fn take_handle(&mut self) -> Result<Handle> {
         split_off_first_mut(&mut self.handles).map(take_handle)
     }
 
@@ -453,7 +449,7 @@ pub trait Encodable {
     fn inline_size(&self) -> usize;
 
     /// Encode the object into the buffer.
-    /// Any handles stored in the object are swapped for `zx::Handle::INVALID`.
+    /// Any handles stored in the object are swapped for `Handle::INVALID`.
     /// Calls to this function should ensure that `encoder.offset` is a multiple of `inline_size`.
     /// Successful calls to this function should increase `encoder.offset` by `inline_size`.
     fn encode(&mut self, encoder: &mut Encoder) -> Result<()>;
@@ -887,7 +883,7 @@ impl Decodable for Option<String> {
     }
 }
 
-impl<'a, 'b: 'a, T: Encodable> Encodable for &'a mut ExactSizeIterator<Item = T> {
+impl<'a, 'b: 'a, T: Encodable> Encodable for &'a mut dyn ExactSizeIterator<Item = T> {
     fn inline_align(&self) -> usize {
         8
     }
@@ -951,7 +947,7 @@ impl<T: Decodable> Decodable for Vec<T> {
     }
 }
 
-impl<'a, 'b: 'a, T: Encodable> Encodable for Option<&'a mut ExactSizeIterator<Item = T>> {
+impl<'a, 'b: 'a, T: Encodable> Encodable for Option<&'a mut dyn ExactSizeIterator<Item = T>> {
     fn inline_align(&self) -> usize {
         8
     }
@@ -1231,39 +1227,7 @@ macro_rules! fidl_enum {
     }
 }
 
-impl Encodable for zx::Status {
-    fn inline_align(&self) -> usize {
-        mem::size_of::<zx::sys::zx_status_t>()
-    }
-    fn inline_size(&self) -> usize {
-        mem::size_of::<zx::sys::zx_status_t>()
-    }
-    fn encode(&mut self, encoder: &mut Encoder) -> Result<()> {
-        let slot = encoder.next_slice(mem::size_of::<zx::sys::zx_status_t>())?;
-        LittleEndian::write_i32(slot, self.into_raw());
-        Ok(())
-    }
-}
-
-impl Decodable for zx::Status {
-    fn new_empty() -> Self {
-        Self::from_raw(0)
-    }
-    fn inline_size() -> usize {
-        mem::size_of::<zx::sys::zx_status_t>()
-    }
-    fn inline_align() -> usize {
-        mem::size_of::<zx::sys::zx_status_t>()
-    }
-    fn decode(&mut self, decoder: &mut Decoder) -> Result<()> {
-        let end = mem::size_of::<zx::sys::zx_status_t>();
-        let range = split_off_front(&mut decoder.buf, end)?;
-        *self = Self::from_raw(LittleEndian::read_i32(range));
-        Ok(())
-    }
-}
-
-impl Encodable for zx::Handle {
+impl Encodable for Handle {
     fn inline_align(&self) -> usize {
         4
     }
@@ -1278,9 +1242,9 @@ impl Encodable for zx::Handle {
     }
 }
 
-impl Decodable for zx::Handle {
+impl Decodable for Handle {
     fn new_empty() -> Self {
-        zx::Handle::invalid()
+        Handle::invalid()
     }
     fn inline_align() -> usize {
         4
@@ -1301,7 +1265,7 @@ impl Decodable for zx::Handle {
     }
 }
 
-impl Encodable for Option<zx::Handle> {
+impl Encodable for Option<Handle> {
     fn inline_align(&self) -> usize {
         4
     }
@@ -1316,7 +1280,7 @@ impl Encodable for Option<zx::Handle> {
     }
 }
 
-impl Decodable for Option<zx::Handle> {
+impl Decodable for Option<Handle> {
     fn new_empty() -> Self {
         None
     }
@@ -1362,16 +1326,16 @@ macro_rules! handle_based_codable {
 
         impl<$($($generic,)*)*> $crate::encoding::Decodable for $ty<$($($generic,)*)*> {
             fn new_empty() -> Self {
-                <$ty<$($($generic,)*)*> as zx::HandleBased>::from_handle(zx::Handle::invalid())
+                <$ty<$($($generic,)*)*> as $crate::handle::HandleBased>::from_handle($crate::handle::Handle::invalid())
             }
             fn inline_align() -> usize { 4 }
             fn inline_size() -> usize { 4 }
             fn decode(&mut self, decoder: &mut $crate::encoding::Decoder)
                 -> $crate::Result<()>
             {
-                let mut handle = zx::Handle::invalid();
+                let mut handle = $crate::handle::Handle::invalid();
                 $crate::fidl_decode!(&mut handle, decoder)?;
-                *self = <$ty<$($($generic,)*)*> as zx::HandleBased>::from_handle(handle);
+                *self = <$ty<$($($generic,)*)*> as $crate::handle::HandleBased>::from_handle(handle);
                 Ok(())
             }
         }
@@ -1394,7 +1358,7 @@ macro_rules! handle_based_codable {
             fn inline_align() -> usize { 4 }
             fn inline_size() -> usize { 4 }
             fn decode(&mut self, decoder: &mut $crate::encoding::Decoder) -> $crate::Result<()> {
-                let mut handle: Option<zx::Handle> = None;
+                let mut handle: Option<$crate::handle::Handle> = None;
                 $crate::fidl_decode!(&mut handle, decoder)?;
                 *self = handle.map(Into::into);
                 Ok(())
@@ -1403,40 +1367,87 @@ macro_rules! handle_based_codable {
     )* }
 }
 
-type ZxChannel = zx::Channel;
-type ZxEvent = zx::Event;
-type ZxEventPair = zx::EventPair;
-type ZxFifo = zx::Fifo;
-type ZxGuest = zx::Guest;
-type ZxInterrupt = zx::Interrupt;
-type ZxJob = zx::Job;
-type ZxLog = zx::Log;
-type ZxProcess = zx::Process;
-type ZxResource = zx::Resource;
-type ZxSocket = zx::Socket;
-type ZxThread = zx::Thread;
-type ZxTimer = zx::Timer;
-type ZxPort = zx::Port;
-type ZxVmar = zx::Vmar;
-type ZxVmo = zx::Vmo;
-handle_based_codable![
-    ZxChannel,
-    ZxEvent,
-    ZxEventPair,
-    ZxFifo,
-    ZxGuest,
-    ZxInterrupt,
-    ZxJob,
-    ZxLog,
-    ZxProcess,
-    ZxResource,
-    ZxSocket,
-    ZxThread,
-    ZxTimer,
-    ZxPort,
-    ZxVmar,
-    ZxVmo,
-];
+#[cfg(target_os = "fuchsia")]
+mod zx_encoding {
+
+    use {
+        super::{split_off_front, Decodable, Decoder, Encodable, Encoder, Result},
+        byteorder::{ByteOrder, LittleEndian},
+        fuchsia_zircon as zx,
+        std::mem,
+    };
+
+    impl Encodable for zx::Status {
+        fn inline_align(&self) -> usize {
+            mem::size_of::<zx::sys::zx_status_t>()
+        }
+        fn inline_size(&self) -> usize {
+            mem::size_of::<zx::sys::zx_status_t>()
+        }
+        fn encode(&mut self, encoder: &mut Encoder) -> Result<()> {
+            let slot = encoder.next_slice(mem::size_of::<zx::sys::zx_status_t>())?;
+            LittleEndian::write_i32(slot, self.into_raw());
+            Ok(())
+        }
+    }
+
+    impl Decodable for zx::Status {
+        fn new_empty() -> Self {
+            Self::from_raw(0)
+        }
+        fn inline_size() -> usize {
+            mem::size_of::<zx::sys::zx_status_t>()
+        }
+        fn inline_align() -> usize {
+            mem::size_of::<zx::sys::zx_status_t>()
+        }
+        fn decode(&mut self, decoder: &mut Decoder) -> Result<()> {
+            let end = mem::size_of::<zx::sys::zx_status_t>();
+            let range = split_off_front(&mut decoder.buf, end)?;
+            *self = Self::from_raw(LittleEndian::read_i32(range));
+            Ok(())
+        }
+    }
+
+    type ZxChannel = zx::Channel;
+    type ZxEvent = zx::Event;
+    type ZxEventPair = zx::EventPair;
+    type ZxFifo = zx::Fifo;
+    type ZxGuest = zx::Guest;
+    type ZxInterrupt = zx::Interrupt;
+    type ZxJob = zx::Job;
+    type ZxLog = zx::Log;
+    type ZxProcess = zx::Process;
+    type ZxResource = zx::Resource;
+    type ZxSocket = zx::Socket;
+    type ZxThread = zx::Thread;
+    type ZxTimer = zx::Timer;
+    type ZxPort = zx::Port;
+    type ZxVmar = zx::Vmar;
+    type ZxVmo = zx::Vmo;
+    handle_based_codable![
+        ZxChannel,
+        ZxEvent,
+        ZxEventPair,
+        ZxFifo,
+        ZxGuest,
+        ZxInterrupt,
+        ZxJob,
+        ZxLog,
+        ZxProcess,
+        ZxResource,
+        ZxSocket,
+        ZxThread,
+        ZxTimer,
+        ZxPort,
+        ZxVmar,
+        ZxVmo,
+    ];
+
+}
+
+#[cfg(target_os = "fuchsia")]
+pub use zx_encoding::*;
 
 /// A trait that provides automatic `Encodable` and `Decodable`
 /// implementations for a container that has inline data to decode,
@@ -1491,13 +1502,8 @@ impl<T: AutonullContainer + Encodable> Encodable for Option<T> {
 
 // Presence indicators always include at least one non-zero byte,
 // while absence indicators should always be entirely zeros.
-fn check_for_presence(
-    decoder: &mut Decoder<'_>,
-    inline_size: usize,
-) -> Result<bool> {
-    Ok(decoder.peek_slice(inline_size)?
-        .iter()
-        .any(|byte| *byte != 0))
+fn check_for_presence(decoder: &mut Decoder<'_>, inline_size: usize) -> Result<bool> {
+    Ok(decoder.peek_slice(inline_size)?.iter().any(|byte| *byte != 0))
 }
 
 impl<T: AutonullContainer + Decodable> Decodable for Option<T> {
@@ -1711,7 +1717,10 @@ macro_rules! fidl_empty_struct {
 }
 
 /// Encode the provided value behind a FIDL "envelope".
-pub fn encode_in_envelope(val: &mut Option<&mut dyn Encodable>, encoder: &mut Encoder) -> Result<()> {
+pub fn encode_in_envelope(
+    val: &mut Option<&mut dyn Encodable>,
+    encoder: &mut Encoder,
+) -> Result<()> {
     // u32 num_bytes
     // u32 num_handles
     // 64-bit presence indicator
@@ -1759,7 +1768,8 @@ macro_rules! fidl_table {
         )*},
     ) => {
         impl $name {
-            fn empty() -> Self {
+            /// Generates an empty table, with every field set to `None`.
+            pub fn empty() -> Self {
                 Self {$(
                         $member_name: None,
                 )*}
@@ -1771,8 +1781,8 @@ macro_rules! fidl_table {
             fn inline_size(&self) -> usize { 16 }
 
             fn encode(&mut self, encoder: &mut $crate::encoding::Encoder) -> $crate::Result<()> {
-                let members: &mut [(u64, Option<&mut $crate::encoding::Encodable>)] = &mut [$(
-                    ($ordinal, self.$member_name.as_mut().map(|x| x as &mut $crate::encoding::Encodable)),
+                let members: &mut [(u64, Option<&mut dyn $crate::encoding::Encodable>)] = &mut [$(
+                    ($ordinal, self.$member_name.as_mut().map(|x| x as &mut dyn $crate::encoding::Encodable)),
                 )*];
 
                 // Cut off the `None` elements at the tail of the table
@@ -2190,7 +2200,7 @@ macro_rules! fidl_xunion {
             __UnknownVariant {
                 ordinal: u32,
                 bytes: Vec<u8>,
-                handles: Vec<zx::Handle>,
+                handles: Vec<$crate::handle::Handle>,
             },
         }
 
@@ -2326,10 +2336,8 @@ macro_rules! fidl_xunion {
 pub struct TransactionHeader {
     /// Transaction ID which identifies a request-response pair
     pub tx_id: u32,
-    /// Flags (always zero for now)
-    pub flags: u32,
     /// Ordinal which identifies the FIDL method
-    pub ordinal: u32,
+    pub ordinal: u64,
 }
 
 fidl_struct! {
@@ -2339,17 +2347,13 @@ fidl_struct! {
             ty: u32,
             offset: 0,
         },
-        flags {
-            ty: u32,
-            offset: 8, // Save 64 bits for id, even though it's only 32 bits
-        },
         ordinal {
-            ty: u32,
-            offset: 12,
+            ty: u64,
+            offset: 8, // Save 64 bits for id, even though it's only 32 bits
         },
     ],
     size: 16,
-    align: 0,
+    align: 8,
 }
 
 /// Transactional FIDL message
@@ -2596,10 +2600,9 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use fuchsia_zircon::AsHandleRef;
     use std::{f32, f64, fmt, i64, u64};
 
-    fn encode_decode<T: Encodable + Decodable>(start: &mut T) -> T {
+    pub fn encode_decode<T: Encodable + Decodable>(start: &mut T) -> T {
         let buf = &mut Vec::new();
         let handle_buf = &mut Vec::new();
         Encoder::encode(buf, handle_buf, start).expect("Encoding failed");
@@ -2669,23 +2672,6 @@ mod test {
             Some(vec![None, Some("foo".to_string())]),
             vec!["foo".to_string(), "bar".to_string()],
         ];
-    }
-
-    #[test]
-    fn encode_handle() {
-        let mut handle = zx::Handle::from(zx::Port::create().expect("Port creation failed"));
-        let raw_handle = handle.raw_handle();
-
-        let buf = &mut Vec::new();
-        let handle_buf = &mut Vec::new();
-        Encoder::encode(buf, handle_buf, &mut handle).expect("Encoding failed");
-
-        assert!(handle.is_invalid());
-
-        let mut handle_out = zx::Handle::new_empty();
-        Decoder::decode_into(buf, handle_buf, &mut handle_out).expect("Decoding failed");
-
-        assert_eq!(raw_handle, handle_out.raw_handle());
     }
 
     #[test]
@@ -3059,11 +3045,11 @@ mod test {
         assert_eq!(body_start.1, &mut body_out.1);
     }
 
-    struct MyTable {
-        num: Option<i32>,
-        num_none: Option<i32>,
-        string: Option<String>,
-        handle: Option<zx::Handle>,
+    pub struct MyTable {
+        pub num: Option<i32>,
+        pub num_none: Option<i32>,
+        pub string: Option<String>,
+        pub handle: Option<Handle>,
     }
 
     fidl_table! {
@@ -3082,7 +3068,7 @@ mod test {
                 ordinal: 3,
             },
             handle {
-                ty: zx::Handle,
+                ty: Handle,
                 ordinal: 4,
             },
         },
@@ -3121,43 +3107,6 @@ mod test {
         table = MyTable { num: Some(32), ..MyTable::empty() };
         assert_eq!(Some(32), table.num);
         assert_eq!(None, table.string);
-    }
-
-    #[test]
-    fn encode_decode_table() {
-        // create a random handle to encode and then decode.
-        let handle = zx::Vmo::create(1024).expect("vmo creation failed");
-        let raw_handle = handle.raw_handle();
-        let mut starting_table = MyTable {
-            num: Some(5),
-            num_none: None,
-            string: Some("foo".to_string()),
-            handle: Some(handle.into_handle()),
-        };
-        let table_out = encode_decode(&mut starting_table);
-        assert_eq!(table_out.num, Some(5));
-        assert_eq!(table_out.num_none, None);
-        assert_eq!(table_out.string, Some("foo".to_string()));
-        assert_eq!(table_out.handle.unwrap().raw_handle(), raw_handle);
-    }
-
-    #[test]
-    fn encode_decode_table_some() {
-        // create a random handle to encode and then decode.
-        let handle = zx::Vmo::create(1024).expect("vmo creation failed");
-        let raw_handle = handle.raw_handle();
-        let mut starting_table = Some(MyTable {
-            num: Some(5),
-            num_none: None,
-            string: Some("foo".to_string()),
-            handle: Some(handle.into_handle()),
-        });
-        let table_out = encode_decode(&mut starting_table);
-        let table_out = table_out.expect("table was None");
-        assert_eq!(table_out.num, Some(5));
-        assert_eq!(table_out.num_none, None);
-        assert_eq!(table_out.string, Some("foo".to_string()));
-        assert_eq!(table_out.handle.unwrap().raw_handle(), raw_handle);
     }
 
     #[test]
@@ -3405,7 +3354,7 @@ mod test {
         name: TestSampleXUnionExpanded,
         members: [
             SomethinElse {
-                ty: zx::Handle,
+                ty: Handle,
                 ordinal: 55,
             },
         ],
@@ -3444,46 +3393,8 @@ mod test {
     }
 
     #[test]
-    fn xunion_unknown_variant_transparent_passthrough() {
-        let handle = zx::Handle::from(zx::Port::create().expect("Port creation failed"));
-        let raw_handle = handle.raw_handle();
-
-        let mut input = TestSampleXUnionExpanded::SomethinElse(handle);
-        // encode expanded and decode as xunion w/ missing variant
-        let buf = &mut Vec::new();
-        let handle_buf = &mut Vec::new();
-        Encoder::encode(buf, handle_buf, &mut input)
-            .expect("Encoding TestSampleXUnionExpanded failed");
-
-        let mut intermediate_missing_variant = TestSampleXUnion::new_empty();
-        Decoder::decode_into(buf, handle_buf, &mut intermediate_missing_variant)
-            .expect("Decoding TestSampleXUnion failed");
-
-        // Ensure we've recorded the unknown variant
-        if let TestSampleXUnion::__UnknownVariant { .. } = intermediate_missing_variant {
-            // ok
-        } else {
-            panic!("unexpected variant")
-        }
-
-        let buf = &mut Vec::new();
-        let handle_buf = &mut Vec::new();
-        Encoder::encode(buf, handle_buf, &mut intermediate_missing_variant)
-            .expect("encoding unknown variant failed");
-
-        let mut out = TestSampleXUnionExpanded::new_empty();
-        Decoder::decode_into(buf, handle_buf, &mut out).expect("Decoding final output failed");
-
-        if let TestSampleXUnionExpanded::SomethinElse(handle_out) = out {
-            assert_eq!(raw_handle, handle_out.raw_handle());
-        } else {
-            panic!("wrong final variant")
-        }
-    }
-
-    #[test]
     fn encode_decode_transaction_msg() {
-        let header = TransactionHeader { tx_id: 4, flags: 5, ordinal: 6 };
+        let header = TransactionHeader { tx_id: 4, ordinal: 6 };
         let body = "hello".to_string();
 
         let start = &mut TransactionMessage { header, body: &mut body.clone() };
@@ -3542,11 +3453,112 @@ mod test {
             Error::ExtraBytes => {}
             e => panic!("expected ExtraBytes, found {:?}", e),
         }
-        match Decoder::decode_into(&[], &mut [zx::Handle::invalid()], &mut output)
-            .expect_err("handles")
+        match Decoder::decode_into(&[], &mut [Handle::invalid()], &mut output).expect_err("handles")
         {
             Error::ExtraHandles => {}
             e => panic!("expected ExtraHandles, found {:?}", e),
+        }
+    }
+}
+
+#[cfg(target_os = "fuchsia")]
+#[cfg(test)]
+mod zx_test {
+    use super::test::*;
+    use super::*;
+    use crate::handle::AsHandleRef;
+    //use std::{f32, f64, fmt, i64, u64};
+    use fuchsia_zircon as zx;
+
+    #[test]
+    fn encode_handle() {
+        let mut handle = Handle::from(zx::Port::create().expect("Port creation failed"));
+        let raw_handle = handle.raw_handle();
+
+        let buf = &mut Vec::new();
+        let handle_buf = &mut Vec::new();
+        Encoder::encode(buf, handle_buf, &mut handle).expect("Encoding failed");
+
+        assert!(handle.is_invalid());
+
+        let mut handle_out = Handle::new_empty();
+        Decoder::decode_into(buf, handle_buf, &mut handle_out).expect("Decoding failed");
+
+        assert_eq!(raw_handle, handle_out.raw_handle());
+    }
+
+    #[test]
+    fn encode_decode_table() {
+        // create a random handle to encode and then decode.
+        let handle = zx::Vmo::create(1024).expect("vmo creation failed");
+        let raw_handle = handle.raw_handle();
+        let mut starting_table = MyTable {
+            num: Some(5),
+            num_none: None,
+            string: Some("foo".to_string()),
+            handle: Some(handle.into_handle()),
+        };
+        let table_out = encode_decode(&mut starting_table);
+        assert_eq!(table_out.num, Some(5));
+        assert_eq!(table_out.num_none, None);
+        assert_eq!(table_out.string, Some("foo".to_string()));
+        assert_eq!(table_out.handle.unwrap().raw_handle(), raw_handle);
+    }
+
+    #[test]
+    fn encode_decode_table_some() {
+        // create a random handle to encode and then decode.
+        let handle = zx::Vmo::create(1024).expect("vmo creation failed");
+        let raw_handle = handle.raw_handle();
+        let mut starting_table = Some(MyTable {
+            num: Some(5),
+            num_none: None,
+            string: Some("foo".to_string()),
+            handle: Some(handle.into_handle()),
+        });
+        let table_out = encode_decode(&mut starting_table);
+        let table_out = table_out.expect("table was None");
+        assert_eq!(table_out.num, Some(5));
+        assert_eq!(table_out.num_none, None);
+        assert_eq!(table_out.string, Some("foo".to_string()));
+        assert_eq!(table_out.handle.unwrap().raw_handle(), raw_handle);
+    }
+
+    #[test]
+    fn xunion_unknown_variant_transparent_passthrough() {
+        let handle = Handle::from(zx::Port::create().expect("Port creation failed"));
+        let raw_handle = handle.raw_handle();
+
+        let mut input = TestSampleXUnionExpanded::SomethinElse(handle);
+        // encode expanded and decode as xunion w/ missing variant
+        let buf = &mut Vec::new();
+        let handle_buf = &mut Vec::new();
+        Encoder::encode(buf, handle_buf, &mut input)
+            .expect("Encoding TestSampleXUnionExpanded failed");
+
+        let mut intermediate_missing_variant = TestSampleXUnion::new_empty();
+        Decoder::decode_into(buf, handle_buf, &mut intermediate_missing_variant)
+            .expect("Decoding TestSampleXUnion failed");
+
+        // Ensure we've recorded the unknown variant
+        if let TestSampleXUnion::__UnknownVariant { .. } = intermediate_missing_variant {
+            // ok
+        } else {
+            panic!("unexpected variant")
+        }
+
+        let buf = &mut Vec::new();
+        let handle_buf = &mut Vec::new();
+        Encoder::encode(buf, handle_buf, &mut intermediate_missing_variant)
+            .expect("encoding unknown variant failed");
+
+        let mut out = TestSampleXUnionExpanded::new_empty();
+        Decoder::decode_into(buf, handle_buf, &mut out).expect("Decoding final output failed");
+
+        if let TestSampleXUnionExpanded::SomethinElse(handle_out) = out {
+            assert_eq!(raw_handle, handle_out.raw_handle());
+        } else {
+            panic!("wrong final variant")
         }
     }
 }

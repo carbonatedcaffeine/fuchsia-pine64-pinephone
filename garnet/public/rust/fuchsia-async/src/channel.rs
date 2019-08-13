@@ -7,7 +7,7 @@ use std::io;
 use std::pin::Pin;
 
 use fuchsia_zircon::{self as zx, AsHandleRef, MessageBuf};
-use futures::{task::Context, try_ready, Future, Poll};
+use futures::{task::Context, ready, Future, Poll};
 
 use crate::RWHandle;
 
@@ -54,7 +54,7 @@ impl Channel {
         bytes: &mut Vec<u8>,
         handles: &mut Vec<zx::Handle>,
     ) -> Poll<Result<(), zx::Status>> {
-        let clear_closed = try_ready!(self.0.poll_read(cx));
+        let clear_closed = ready!(self.0.poll_read(cx))?;
 
         let res = self.0.get_ref().read_split(bytes, handles);
         if res == Err(zx::Status::SHOULD_WAIT) {
@@ -133,7 +133,7 @@ mod tests {
 
         let receiver = async move {
             let mut buffer = MessageBuf::new();
-            await!(f_rx.recv_msg(&mut buffer)).expect("failed to receive message");
+            f_rx.recv_msg(&mut buffer).await.expect("failed to receive message");
             assert_eq!(bytes, buffer.bytes());
         };
         pin_mut!(receiver);
@@ -159,7 +159,7 @@ mod tests {
         // f_rx0 and f_rx1 use the same key.
         let receiver = async move {
             let mut buffer = MessageBuf::new();
-            await!(f_rx1.recv_msg(&mut buffer)).expect("failed to receive message");
+            f_rx1.recv_msg(&mut buffer).await.expect("failed to receive message");
         };
         pin_mut!(receiver);
 

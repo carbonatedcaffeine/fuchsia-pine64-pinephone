@@ -1,0 +1,26 @@
+# Please, read https://fuchsia.dev/fuchsia-src/best-practices/documentation_navigation_toc
+# before making changes to this file, and add a member of the fuchsia.dev
+# team as reviewer.
+toc:
+- title: "Build and pave quickstart"
+  path: /docs/development/workflows/build_and_pave_quickstart.md
+- title: "Cross translation unit static analysis in Zircon"
+  path: /docs/development/workflows/ctu_analysis.md
+- title: "Debugging"
+  path: /docs/development/workflows/debugging.md
+- title: "fx workflows"
+  path: /docs/development/workflows/fx.md
+- title: "LibFuzzer in Fuchsia"
+  path: /docs/development/workflows/libfuzzer.md
+- title: "Multi device setup"
+  path: /docs/development/workflows/multi_device.md
+- title: "Working on multiple projects"
+  path: /docs/development/workflows/multilayer_changes.md
+- title: "Developing with Fuchsia packages"
+  path: /docs/development/workflows/package_update.md
+- title: "Putting Fuchsia on a device"
+  path: /docs/development/workflows/paving.md
+- title: "Testing: questions and answers"
+  path: /docs/development/workflows/testing_faq.md
+- title: "Workflow: tips"
+  path: /docs/development/workflows/workflow_tips_and_faq.md

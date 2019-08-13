@@ -4,14 +4,15 @@
 
 #include "wire_object.h"
 
-#include <src/lib/fxl/logging.h>
-
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <vector>
 
+#include <src/lib/fxl/logging.h>
+
 #include "tools/fidlcat/lib/library_loader.h"
+#include "tools/fidlcat/lib/type_decoder.h"
 #include "tools/fidlcat/lib/wire_types.h"
 
 namespace fidlcat {
@@ -28,7 +29,7 @@ void Field::ExtractJson(rapidjson::Document::AllocatorType& allocator,
   result.SetString(ss.str(), allocator);
 }
 
-bool NullableField::DecodeNullable(MessageDecoder* decoder, uint64_t offset) {
+bool NullableField::DecodeNullable(MessageDecoder* decoder, uint64_t offset, uint64_t size) {
   uintptr_t data;
   if (!decoder->GetValueAt(offset, &data)) {
     return false;
@@ -39,14 +40,20 @@ bool NullableField::DecodeNullable(MessageDecoder* decoder, uint64_t offset) {
     return true;
   }
   if (data != FIDL_ALLOC_PRESENT) {
-    FXL_LOG(ERROR) << "invalid value <" << std::hex << data << std::dec << "> for nullable";
+    if (decoder->output_errors()) {
+      FXL_LOG(ERROR) << "invalid value <" << std::hex << data << std::dec << "> for nullable";
+    }
     return false;
   }
-  decoder->AddSecondaryObject(this);
+  uint64_t nullable_offset = decoder->next_object_offset();
+  // Set the offset for the next object (just after this one).
+  decoder->SkipObject(size);
+  // Decode the object.
+  DecodeContent(decoder, nullable_offset);
   return true;
 }
 
-void InlineField::DecodeContent(MessageDecoder* decoder) {
+void InlineField::DecodeContent(MessageDecoder* decoder, uint64_t offset) {
   FXL_LOG(FATAL) << "Field is defined inline";
 }
 
@@ -78,9 +85,8 @@ int StringField::DisplaySize(int remaining_size) const {
   return string_length_ + 2;  // The two quotes.
 }
 
-void StringField::DecodeContent(MessageDecoder* decoder) {
-  data_ = decoder->GetAddress(0, string_length_);
-  decoder->GotoNextObjectOffset(string_length_);
+void StringField::DecodeContent(MessageDecoder* decoder, uint64_t offset) {
+  data_ = decoder->GetAddress(offset, string_length_);
 }
 
 void StringField::ExtractJson(rapidjson::Document::AllocatorType& allocator,
@@ -141,10 +147,7 @@ int Object::DisplaySize(int remaining_size) const {
   return size;
 }
 
-void Object::DecodeContent(MessageDecoder* decoder) {
-  DecodeAt(decoder, 0);
-  decoder->GotoNextObjectOffset(struct_definition_.size());
-}
+void Object::DecodeContent(MessageDecoder* decoder, uint64_t offset) { DecodeAt(decoder, offset); }
 
 void Object::DecodeAt(MessageDecoder* decoder, uint64_t base_offset) {
   for (const auto& member : struct_definition_.members()) {
@@ -216,11 +219,9 @@ int EnvelopeField::DisplaySize(int remaining_size) const {
   return field_->DisplaySize(remaining_size);
 }
 
-void EnvelopeField::DecodeContent(MessageDecoder* decoder) {
-  MessageDecoder envelope_decoder(decoder, num_bytes_, num_handles_);
+void EnvelopeField::DecodeContent(MessageDecoder* decoder, uint64_t offset) {
+  MessageDecoder envelope_decoder(decoder, offset, num_bytes_, num_handles_);
   field_ = envelope_decoder.DecodeField(name(), type());
-  decoder->GotoNextObjectOffset(num_bytes_);
-  decoder->SkipHandles(num_handles_);
 }
 
 void EnvelopeField::DecodeAt(MessageDecoder* decoder, uint64_t base_offset) {
@@ -229,7 +230,7 @@ void EnvelopeField::DecodeAt(MessageDecoder* decoder, uint64_t base_offset) {
   decoder->GetValueAt(base_offset, &num_handles_);
   base_offset += sizeof(num_handles_);
 
-  if (DecodeNullable(decoder, base_offset)) {
+  if (DecodeNullable(decoder, base_offset, num_bytes_)) {
     if (type() == nullptr) {
       FXL_DCHECK(is_null());
     }
@@ -279,8 +280,7 @@ int TableField::DisplaySize(int remaining_size) const {
   return size;
 }
 
-void TableField::DecodeContent(MessageDecoder* decoder) {
-  uint64_t offset = 0;
+void TableField::DecodeContent(MessageDecoder* decoder, uint64_t offset) {
   for (uint64_t envelope_id = 0; envelope_id < envelope_count_; ++envelope_id) {
     const TableMember* member = (envelope_id < table_definition_.members().size() - 1)
                                     ? table_definition_.members()[envelope_id + 1]
@@ -296,7 +296,6 @@ void TableField::DecodeContent(MessageDecoder* decoder) {
     envelopes_.push_back(std::move(envelope));
     offset += 2 * sizeof(uint64_t);
   }
-  decoder->GotoNextObjectOffset(offset);
 }
 
 void TableField::ExtractJson(rapidjson::Document::AllocatorType& allocator,
@@ -368,9 +367,8 @@ int UnionField::DisplaySize(int remaining_size) const {
   return size;
 }
 
-void UnionField::DecodeContent(MessageDecoder* decoder) {
-  DecodeAt(decoder, 0);
-  decoder->GotoNextObjectOffset(union_definition_.size());
+void UnionField::DecodeContent(MessageDecoder* decoder, uint64_t offset) {
+  DecodeAt(decoder, offset);
 }
 
 void UnionField::DecodeAt(MessageDecoder* decoder, uint64_t base_offset) {
@@ -446,7 +444,7 @@ int ArrayField::DisplaySize(int remaining_size) const {
   return size;
 }
 
-void ArrayField::DecodeContent(MessageDecoder* decoder) {
+void ArrayField::DecodeContent(MessageDecoder* decoder, uint64_t offset) {
   FXL_LOG(FATAL) << "Field is defined inline";
 }
 
@@ -488,6 +486,9 @@ int VectorField::DisplaySize(int remaining_size) const {
   if (is_null()) {
     return 4;
   }
+  if (is_string_) {
+    return size_ + 2;  // The string and the two quotes.
+  }
   int size = 0;
   for (const auto& field : fields_) {
     // Two characters for the separator ("[ " or ", ").
@@ -501,16 +502,26 @@ int VectorField::DisplaySize(int remaining_size) const {
   return size;
 }
 
-void VectorField::DecodeContent(MessageDecoder* decoder) {
-  uint64_t offset = 0;
+void VectorField::DecodeContent(MessageDecoder* decoder, uint64_t offset) {
+  if (size_ == 0) {
+    return;
+  }
+  is_string_ = true;
   for (uint64_t i = 0; i < size_; ++i) {
     std::unique_ptr<Field> field = component_type_->Decode(decoder, "", offset);
     if (field != nullptr) {
+      uint8_t value = field->GetUint8Value();
+      if (value < 0x20) {
+        if ((value == '\r') || (value == '\n')) {
+          has_new_line_ = true;
+        } else {
+          is_string_ = false;
+        }
+      }
       fields_.push_back(std::move(field));
     }
     offset += component_type_->InlineSize();
   }
-  decoder->GotoNextObjectOffset(offset);
 }
 
 void VectorField::ExtractJson(rapidjson::Document::AllocatorType& allocator,
@@ -533,6 +544,32 @@ void VectorField::PrettyPrint(std::ostream& os, const Colors& colors, std::strin
     os << colors.blue << "null" << colors.reset;
   } else if (fields_.empty()) {
     os << "[]";
+  } else if (is_string_) {
+    if (has_new_line_) {
+      os << "[\n";
+      bool needs_header = true;
+      for (const auto& field : fields_) {
+        if (needs_header) {
+          os << line_header << std::string((tabs + 1) * kTabSize, ' ');
+          needs_header = false;
+        }
+        uint8_t value = field->GetUint8Value();
+        os << value;
+        if (value == '\n') {
+          needs_header = true;
+        }
+      }
+      if (!needs_header) {
+        os << '\n';
+      }
+      os << line_header << std::string(tabs * kTabSize, ' ') << ']';
+    } else {
+      os << '"';
+      for (const auto& field : fields_) {
+        os << field->GetUint8Value();
+      }
+      os << '"';
+    }
   } else if (DisplaySize(remaining_size) + static_cast<int>(line_header.size()) <= remaining_size) {
     const char* separator = "[ ";
     for (const auto& field : fields_) {
@@ -543,12 +580,24 @@ void VectorField::PrettyPrint(std::ostream& os, const Colors& colors, std::strin
     os << " ]";
   } else {
     os << "[\n";
+    int size = 0;
     for (const auto& field : fields_) {
-      int size = (tabs + 1) * kTabSize;
-      os << line_header << std::string((tabs + 1) * kTabSize, ' ');
+      int field_size = field->DisplaySize(max_line_size - size);
+      if (size == 0) {
+        os << line_header << std::string((tabs + 1) * kTabSize, ' ');
+        size = (tabs + 1) * kTabSize;
+      } else if (field_size + 3 > max_line_size - size) {
+        os << ",\n";
+        os << line_header << std::string((tabs + 1) * kTabSize, ' ');
+        size = (tabs + 1) * kTabSize;
+      } else {
+        os << ", ";
+        size += 2;
+      }
       field->PrettyPrint(os, colors, line_header, tabs + 1, max_line_size - size, max_line_size);
-      os << "\n";
+      size += field_size;
     }
+    os << '\n';
     os << line_header << std::string(tabs * kTabSize, ' ') << ']';
   }
 }
@@ -579,15 +628,17 @@ void EnumField::PrettyPrint(std::ostream& os, const Colors& colors, std::string_
   }
 }
 
-int HandleField::DisplaySize(int remaining_size) const { return std::to_string(handle_).size(); }
+int HandleField::DisplaySize(int remaining_size) const {
+  return std::to_string(handle_.handle).size();
+}
 
-void HandleField::DecodeContent(MessageDecoder* decoder) {
+void HandleField::DecodeContent(MessageDecoder* decoder, uint64_t offset) {
   FXL_LOG(FATAL) << "Handle field is defined inline";
 }
 
 void HandleField::PrettyPrint(std::ostream& os, const Colors& colors, std::string_view line_header,
                               int tabs, int remaining_size, int max_line_size) const {
-  os << colors.red << handle_ << colors.reset;
+  DisplayHandle(colors, handle_, os);
 }
 
 }  // namespace fidlcat

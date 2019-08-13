@@ -32,8 +32,11 @@ func TestParseValue(t *testing.T) {
 		},
 		`SomeObject { the_field: 5, }`: ir.Object{
 			Name: "SomeObject",
-			Fields: map[string]ir.Value{
-				"the_field": uint64(5),
+			Fields: []ir.Field{
+				{
+					Name:  "the_field",
+					Value: uint64(5),
+				},
 			},
 		},
 		`SomeObject {
@@ -43,12 +46,21 @@ func TestParseValue(t *testing.T) {
 			},
 		}`: ir.Object{
 			Name: "SomeObject",
-			Fields: map[string]ir.Value{
-				"the_field": ir.Object{
-					Name: "SomeNestedObject",
-					Fields: map[string]ir.Value{
-						"foo": uint64(5),
-						"bar": uint64(7),
+			Fields: []ir.Field{
+				{
+					Name: "the_field",
+					Value: ir.Object{
+						Name: "SomeNestedObject",
+						Fields: []ir.Field{
+							{
+								Name:  "foo",
+								Value: uint64(5),
+							},
+							{
+								Name:  "bar",
+								Value: uint64(7),
+							},
+						},
 					},
 				},
 			},
@@ -115,8 +127,11 @@ func TestParseSuccessCase(t *testing.T) {
 			Name: "OneStringOfMaxLengthFive-empty",
 			Value: ir.Object{
 				Name: "OneStringOfMaxLengthFive",
-				Fields: map[string]ir.Value{
-					"first": "four",
+				Fields: []ir.Field{
+					{
+						Name:  "first",
+						Value: "four",
+					},
 				},
 			},
 			Bytes: []byte{
@@ -145,16 +160,19 @@ func TestParseFailsToEncodeCase(t *testing.T) {
 			value = OneStringOfMaxLengthFive {
 				the_string: "bonjour", // 6 characters
 			}
-			err = FIDL_STRING_TOO_LONG
+			err = STRING_TOO_LONG
 		}`: ir.FailsToEncode{
 			Name: "OneStringOfMaxLengthFive-too-long",
 			Value: ir.Object{
 				Name: "OneStringOfMaxLengthFive",
-				Fields: map[string]ir.Value{
-					"the_string": "bonjour",
+				Fields: []ir.Field{
+					{
+						Name:  "the_string",
+						Value: "bonjour",
+					},
 				},
 			},
-			Err: "FIDL_STRING_TOO_LONG",
+			Err: "STRING_TOO_LONG",
 		},
 	})
 }
@@ -174,22 +192,130 @@ func TestParseFailsToDecodeCase(t *testing.T) {
 	}.checkSuccess(map[string]interface{}{
 		`
 		fails_to_decode("OneStringOfMaxLengthFive-wrong-length") {
+			type = TypeName
 			bytes = {
 				1, 0, 0, 0, 0, 0, 0, 0, // length
 				255, 255, 255, 255, 255, 255, 255, 255, // alloc present
 				// one character missing
 			}
-			err = FIDL_STRING_TOO_LONG
+			err = STRING_TOO_LONG
 		}`: ir.FailsToDecode{
 			Name: "OneStringOfMaxLengthFive-wrong-length",
+			Type: "TypeName",
 			Bytes: []byte{
 				1, 0, 0, 0, 0, 0, 0, 0, // length
 				255, 255, 255, 255, 255, 255, 255, 255, // alloc present
 				// one character missing
 			},
-			Err: "FIDL_STRING_TOO_LONG",
+			Err: "STRING_TOO_LONG",
 		},
 	})
+}
+
+func TestParseSucceedsBindingsAllowlist(t *testing.T) {
+	parsingToCheck{
+		t: t,
+		fn: func(p *Parser) (interface{}, error) {
+			var all ir.All
+			if err := p.parseSection(&all); err != nil {
+				return nil, err
+			} else if len(all.Success) != 1 {
+				return nil, fmt.Errorf("did not parse success section")
+			}
+			return all.Success[0], nil
+		},
+	}.checkSuccess(map[string]interface{}{
+		`
+		success("OneStringOfMaxLengthFive-empty") {
+			value = OneStringOfMaxLengthFive {
+				first: "four",
+			}
+			bytes = {
+				0, 0, 0, 0, 0, 0, 0, 0, // length
+				255, 255, 255, 255, 255, 255, 255, 255, // alloc present
+			}
+			bindings_allowlist = [go, rust,]
+		}`: ir.Success{
+			Name: "OneStringOfMaxLengthFive-empty",
+			Value: ir.Object{
+				Name: "OneStringOfMaxLengthFive",
+				Fields: []ir.Field{
+					{
+						Name:  "first",
+						Value: "four",
+					},
+				},
+			},
+			Bytes: []byte{
+				0, 0, 0, 0, 0, 0, 0, 0, // length
+				255, 255, 255, 255, 255, 255, 255, 255, // alloc present
+			},
+			BindingsAllowlist: []string{"go", "rust"},
+		},
+	})
+}
+
+func TestParseFailsExtraKind(t *testing.T) {
+	parsingToCheck{
+		t: t,
+		fn: func(p *Parser) (interface{}, error) {
+			var all ir.All
+			if err := p.parseSection(&all); err != nil {
+				return nil, err
+			} else if len(all.Success) != 1 {
+				return nil, fmt.Errorf("did not parse success section")
+			}
+			return all.Success[0], nil
+		},
+	}.checkFailure(map[string]string{
+		`
+		success("OneStringOfMaxLengthFive-empty") {
+			type = Type
+			value = OneStringOfMaxLengthFive {
+				first: "four",
+			}
+			bytes = {
+				0, 0, 0, 0, 0, 0, 0, 0, // length
+				255, 255, 255, 255, 255, 255, 255, 255, // alloc present
+			}
+		}`: "'type' does not apply",
+	})
+}
+
+func TestParseFailsMissingKind(t *testing.T) {
+	parsingToCheck{
+		t: t,
+		fn: func(p *Parser) (interface{}, error) {
+			var all ir.All
+			if err := p.parseSection(&all); err != nil {
+				return nil, err
+			} else if len(all.Success) != 1 {
+				return nil, fmt.Errorf("did not parse success section")
+			}
+			return all.Success[0], nil
+		},
+	}.checkFailure(map[string]string{
+		`
+		success("OneStringOfMaxLengthFive-empty") {
+			value = OneStringOfMaxLengthFive {
+				first: "four",
+			}
+		}`: "missing required parameter 'bytes'"})
+}
+
+func TestParseFailsUnknownErrorCode(t *testing.T) {
+	input := `
+	fails_to_encode("OneStringOfMaxLengthFive-too-long") {
+		value = OneStringOfMaxLengthFive {
+			the_string: "bonjour",
+		}
+		err = UNKNOWN_ERROR_CODE
+	}`
+	p := NewParser("", strings.NewReader(input))
+	var all ir.All
+	if err := p.parseSection(&all); err == nil || !strings.Contains(err.Error(), "unknown error code") {
+		t.Errorf("expected 'unknown error code' error, but got %v", err)
+	}
 }
 
 type parsingToCheck struct {
@@ -204,12 +330,29 @@ func (c parsingToCheck) checkSuccess(cases map[string]interface{}) {
 			actual, err := c.fn(p)
 			if err != nil {
 				t.Fatal(err)
+				return
 			}
 
 			t.Logf("expected: %T %v", expected, expected)
 			t.Logf("actual: %T %v", actual, actual)
 			if diff := cmp.Diff(expected, actual); diff != "" {
-				t.Fatalf("expected != actual (-want +got)\n%s", diff)
+				t.Errorf("expected != actual (-want +got)\n%s", diff)
+			}
+		})
+	}
+}
+
+func (c parsingToCheck) checkFailure(cases map[string]string) {
+	for input, errorSubstr := range cases {
+		c.t.Run(input, func(t *testing.T) {
+			p := NewParser("", strings.NewReader(input))
+			_, err := c.fn(p)
+			if err == nil {
+				t.Errorf("expected error: %s", errorSubstr)
+				return
+			}
+			if !strings.Contains(err.Error(), errorSubstr) {
+				t.Errorf("expected error containing %s, instead got %s", errorSubstr, err.Error())
 			}
 		})
 	}

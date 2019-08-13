@@ -50,20 +50,20 @@ class GlobalSymbolDataProvider : public SymbolDataProvider {
   debug_ipc::Arch GetArch() override { return debug_ipc::Arch::kUnknown; }
   void GetRegisterAsync(debug_ipc::RegisterID, GetRegisterCallback callback) override {
     debug_ipc::MessageLoop::Current()->PostTask(
-        FROM_HERE, [cb = std::move(callback)]() { cb(GetContextError(), 0); });
+        FROM_HERE, [cb = std::move(callback)]() mutable { cb(GetContextError(), 0); });
   }
   void GetFrameBaseAsync(GetRegisterCallback callback) override {
     debug_ipc::MessageLoop::Current()->PostTask(
-        FROM_HERE, [cb = std::move(callback)]() { cb(GetContextError(), 0); });
+        FROM_HERE, [cb = std::move(callback)]() mutable { cb(GetContextError(), 0); });
   }
   void GetMemoryAsync(uint64_t address, uint32_t size, GetMemoryCallback callback) override {
-    debug_ipc::MessageLoop::Current()->PostTask(
-        FROM_HERE, [cb = std::move(callback)]() { cb(GetContextError(), std::vector<uint8_t>()); });
+    debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE, [cb = std::move(callback)]() mutable {
+      cb(GetContextError(), std::vector<uint8_t>());
+    });
   }
-  void WriteMemory(uint64_t address, std::vector<uint8_t> data,
-                   std::function<void(const Err&)> cb) override {
-    debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE,
-                                                [cb = std::move(cb)]() { cb(GetContextError()); });
+  void WriteMemory(uint64_t address, std::vector<uint8_t> data, WriteMemoryCallback cb) override {
+    debug_ipc::MessageLoop::Current()->PostTask(
+        FROM_HERE, [cb = std::move(cb)]() mutable { cb(GetContextError()); });
   }
 };
 
@@ -118,8 +118,10 @@ ModuleSymbolStatus ModuleSymbolsImpl::GetStatus() const {
 
 Err ModuleSymbolsImpl::Load() {
   TIME_BLOCK() << "Loading " << binary_name_ << " (" << name_ << ").";
-  if (auto elf = elflib::ElfLib::Create(binary_name_)) {
-    if (auto debug = elflib::ElfLib::Create(name_)) {
+  if (auto debug = elflib::ElfLib::Create(name_)) {
+    if (debug->ProbeHasProgramBits()) {
+      plt_locations_ = debug->GetPLTOffsets();
+    } else if (auto elf = elflib::ElfLib::Create(binary_name_)) {
       if (elf->SetDebugData(std::move(debug))) {
         plt_locations_ = elf->GetPLTOffsets();
       }
@@ -206,13 +208,12 @@ LineDetails ModuleSymbolsImpl::LineDetailsForAddress(const SymbolContext& symbol
   }
 
   // Resolve the file name.
-  const char* compilation_dir = unit->getCompilationDir();
   std::string file_name;
-  line_table->getFileNameByIndex(rows[first_row_index].File, compilation_dir,
+  line_table->getFileNameByIndex(rows[first_row_index].File, "",
                                  llvm::DILineInfoSpecifier::FileLineInfoKind::AbsoluteFilePath,
                                  file_name);
 
-  LineDetails result(FileLine(file_name, rows[first_row_index].Line));
+  LineDetails result(FileLine(file_name, unit->getCompilationDir(), rows[first_row_index].Line));
 
   // Add entries for each row. The last row doesn't count because it should be
   // an end_sequence marker to provide the ending size of the previous entry.
@@ -374,11 +375,13 @@ Location ModuleSymbolsImpl::LocationForAddress(const SymbolContext& symbol_conte
   if (line_table) {
     llvm::DILineInfo line_info;
     if (line_table->getFileLineInfoForAddress(
-            relative_address, unit->getCompilationDir(),
-            llvm::DILineInfoSpecifier::FileLineInfoKind::AbsoluteFilePath, line_info)) {
+            relative_address, "", llvm::DILineInfoSpecifier::FileLineInfoKind::AbsoluteFilePath,
+            line_info)) {
       // Line info present.
-      return Location(absolute_address, FileLine(std::move(line_info.FileName), line_info.Line),
-                      line_info.Column, symbol_context, std::move(lazy_function));
+      return Location(
+          absolute_address,
+          FileLine(std::move(line_info.FileName), unit->getCompilationDir(), line_info.Line),
+          line_info.Column, symbol_context, std::move(lazy_function));
     }
   }
 
@@ -395,7 +398,7 @@ Location ModuleSymbolsImpl::LocationForVariable(const SymbolContext& symbol_cont
 
   // Need one unique location.
   if (variable->location().locations().size() != 1)
-    return Location(symbol_context, LazySymbol(std::move(variable)));
+    return Location(symbol_context, std::move(variable));
 
   auto global_data_provider = fxl::MakeRefCounted<GlobalSymbolDataProvider>();
   DwarfExprEval eval;
@@ -405,12 +408,12 @@ Location ModuleSymbolsImpl::LocationForVariable(const SymbolContext& symbol_cont
   // Only evaluate synchronous outputs that result in a pointer.
   if (!eval.is_complete() || !eval.is_success() ||
       eval.GetResultType() != DwarfExprEval::ResultType::kPointer)
-    return Location(symbol_context, LazySymbol(std::move(variable)));
+    return Location(symbol_context, std::move(variable));
 
   // TODO(brettw) in all of the return cases we could in the future fill in the file/line of the
   // definition of the variable. Currently Variables don't provide that (even though it's usually in
   // the DWARF symbols).
-  return Location(eval.GetResult(), FileLine(), 0, symbol_context, LazySymbol(std::move(variable)));
+  return Location(eval.GetResult(), FileLine(), 0, symbol_context, std::move(variable));
 }
 
 // To a first approximation we just look up the line in the line table for each compilation unit
@@ -467,6 +470,16 @@ void ModuleSymbolsImpl::ResolveLineInputLocationForFile(const SymbolContext& sym
   }
 }
 
-bool ModuleSymbolsImpl::HasBinary() const { return !binary_name_.empty(); }
+bool ModuleSymbolsImpl::HasBinary() const {
+  if (!binary_name_.empty()) {
+    return true;
+  }
+
+  if (auto debug = elflib::ElfLib::Create(name_)) {
+    return debug->ProbeHasProgramBits();
+  }
+
+  return false;
+}
 
 }  // namespace zxdb

@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zircon/compiler.h>
+#include <zircon/listnode.h>
 #include <zircon/types.h>
 
 #include "src/connectivity/wlan/drivers/third_party/intel/iwlwifi/ieee80211.h"
@@ -46,6 +47,7 @@ typedef char* acpi_string;
 #define le32_to_cpu(x) (x)
 #define le32_to_cpup(x) (*x)
 #define le16_to_cpu(x) (x)
+#define cpu_to_le64(x) (x)
 #define cpu_to_le32(x) (x)
 #define cpu_to_le16(x) (x)
 
@@ -63,12 +65,8 @@ typedef char* acpi_string;
 #define lockdep_assert_held(x) \
   do {                         \
   } while (0)
-#define pr_err(fmt, args...) zxlogf(ERROR, fmt, args)
 #define __aligned(x) __attribute__((aligned(x)))
-#define __bitwise
-#define __exit
 #define __force
-#define __init
 #define __must_check __attribute__((warn_unused_result))
 #define __packed __PACKED
 #define __rcu                         // NEEDS_PORTING
@@ -78,12 +76,12 @@ typedef char* acpi_string;
 #define ARRAY_SIZE(x) (countof(x))
 
 // NEEDS_PORTING
-#define WARN(x, y, z) \
-  do {                \
+#define WARN(x, y, z...) \
+  do {                   \
   } while (0)
-#define WARN_ON(x) (false)
-#define WARN_ON_ONCE(x) (false)
-#define BUILD_BUG_ON(x) (false)
+#define WARN_ON(x) (!!(x))
+#define WARN_ON_ONCE(x) (!!(x))
+#define BUILD_BUG_ON(x) (!!(x))
 
 #define offsetofend(type, member) (offsetof(type, member) + sizeof(((type*)NULL)->member))
 
@@ -100,6 +98,9 @@ typedef char* acpi_string;
    x >= 0x002 ? 0x004 :        \
    x >= 0x001 ? 0x002 : 1)
 // clang-format on
+#define __round_mask(x, y) ((__typeof__(x))((y)-1))
+#define ROUND_UP(x, y) ((((x)-1) | __round_mask(x, y)) + 1)
+#define ROUND_DOWN(x, y) ((x) & ~__round_mask(x, y))
 
 // NEEDS_PORTING: need protection while accessing the variable.
 #define rcu_dereference(p) (p)
@@ -115,6 +116,8 @@ typedef char* acpi_string;
 #define rcu_read_unlock() \
   do {                    \
   } while (0);
+
+#define DMA_BIT_MASK(n) (((n) >= 64) ? ~0ULL : ((1ULL << (n)) - 1))
 
 // NEEDS_PORTING: Below structures are only referenced in function prototype.
 //                Doesn't need a dummy byte.
@@ -184,21 +187,63 @@ struct wireless_dev {
 typedef struct wait_queue wait_queue_t;
 typedef struct wait_queue_head wait_queue_head_t;
 
-////
-// Inlines functions
-////
+typedef struct {
+  int value;
+} atomic_t;
 
+////
+// Inline functions
+////
 static inline int test_bit(int nbits, const volatile unsigned long* addr) {
   return 1UL & (addr[nbits / BITS_PER_LONG] >> (nbits % BITS_PER_LONG));
 }
 
-static inline void set_bit(int nbits, unsigned long* addr) {
-  addr[nbits / BITS_PER_LONG] |= 1UL << (nbits % BITS_PER_LONG);
+static inline bool test_and_set_bit(long bit, volatile unsigned long* addr) {
+  unsigned long mask = 1ul << bit;
+  return mask & __atomic_fetch_or(addr, mask, __ATOMIC_SEQ_CST);
 }
-#define __set_bit set_bit
 
-static inline void clear_bit(int nbits, volatile unsigned long* addr) {
-  addr[nbits / BITS_PER_LONG] &= ~(1UL << (nbits % BITS_PER_LONG));
+static inline bool test_and_clear_bit(long bit, volatile unsigned long* addr) {
+  unsigned long mask = 1ul << bit;
+  return mask & __atomic_fetch_and(addr, ~mask, __ATOMIC_SEQ_CST);
+}
+
+static inline void set_bit(long bit, unsigned long* addr) { test_and_set_bit(bit, addr); }
+
+static inline void clear_bit(long bit, volatile unsigned long* addr) {
+  test_and_clear_bit(bit, addr);
+}
+
+// This is the non-atomic version of set_bit.
+static inline void __set_bit(long bit, unsigned long* addr) { *addr |= 1ul << bit; }
+
+static inline int atomic_read(const atomic_t* atomic) {
+  return __atomic_load_n(&atomic->value, __ATOMIC_RELAXED);
+}
+
+static inline void atomic_set(atomic_t* atomic, int value) {
+  __atomic_store_n(&atomic->value, value, __ATOMIC_RELAXED);
+}
+
+static inline int atomic_xchg(atomic_t* atomic, int value) {
+  return __atomic_exchange_n(&atomic->value, value, __ATOMIC_SEQ_CST);
+}
+
+static inline int atomic_inc(atomic_t* atomic) {
+  return __atomic_fetch_add(&atomic->value, 1, __ATOMIC_SEQ_CST);
+}
+
+static inline int atomic_dec_if_positive(atomic_t* atomic) {
+  int current = atomic_read(atomic);
+  while (1) {
+    if (current <= 0) {
+      return current;
+    }
+    if (__atomic_compare_exchange_n(&atomic->value, &current, current - 1, false /* weak */,
+                                    __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+      return current - 1;
+    }
+  }
 }
 
 static inline void* vmalloc(unsigned long size) { return malloc(size); }
@@ -218,5 +263,17 @@ static inline bool IS_ERR_OR_NULL(const void* ptr) {
 }
 
 static inline void* page_address(const struct page* page) { return page->virtual_addr; }
+
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define min_t(type, a, b) MIN((type)(a), (type)(b))
+
+static inline void list_splice_after_tail(list_node_t* splice_from, list_node_t* pos) {
+  if (list_is_empty(pos)) {
+    list_move(splice_from, pos);
+  } else {
+    list_splice_after(splice_from, list_peek_tail(pos));
+  }
+}
 
 #endif  // SRC_CONNECTIVITY_WLAN_DRIVERS_THIRD_PARTY_INTEL_IWLWIFI_FUCHSIA_PORTING_H_

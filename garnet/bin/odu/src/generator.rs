@@ -10,9 +10,9 @@ use {
     crate::io_packet::IoPacketType,
     crate::issuer::{run_issuer, IssuerArgs},
     crate::log::Stats,
-    crate::operations::{OperationType, PipelineStages, TargetOps},
+    crate::operations::{OperationType, PipelineStages},
     crate::sequential_io_generator::SequentialIoGenerator,
-    crate::target::AvailableTargets,
+    crate::target::{AvailableTargets, TargetOps},
     crate::verifier::{run_verifier, VerifierArgs},
     failure::Error,
     log::debug,
@@ -250,7 +250,7 @@ fn pick_operation_type(args: &GeneratorArgs) -> Vec<OperationType> {
 
 /// Based on the input args this returns a generator that can generate requested
 /// IO load.For now we only allow sequential io.
-fn pick_generator_type(args: &GeneratorArgs, target_id: u64) -> Box<Generator> {
+fn pick_generator_type(args: &GeneratorArgs, target_id: u64) -> Box<dyn Generator> {
     if !args.sequential {
         panic!("Only sequential io generator is implemented at the moment");
     }

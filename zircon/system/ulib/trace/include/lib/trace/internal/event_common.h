@@ -22,7 +22,7 @@
 #define TRACE_ENABLED() (trace_is_enabled())
 #else
 #define TRACE_ENABLED() (false)
-#endif // NTRACE
+#endif  // NTRACE
 
 // Returns true if tracing of the specified category has been enabled (which
 // implies that |TRACE_ENABLED()| is also true).
@@ -36,11 +36,10 @@
 //     }
 //
 #ifndef NTRACE
-#define TRACE_CATEGORY_ENABLED(category_literal) \
-    (trace_is_category_enabled(category_literal))
+#define TRACE_CATEGORY_ENABLED(category_literal) (trace_is_category_enabled(category_literal))
 #else
 #define TRACE_CATEGORY_ENABLED(category_literal) ((void)(category_literal), false)
-#endif // NTRACE
+#endif  // NTRACE
 
 // Returns a new unique 64-bit unsigned integer (within this process).
 // Each invocation returns a different non-zero value.
@@ -69,7 +68,7 @@
 //     TRACE_INSTANT("category", "name", TRACE_SCOPE_PROCESS, "x", TA_INT32(42));
 //
 #define TRACE_INSTANT(category_literal, name_literal, scope, args...) \
-    TRACE_INTERNAL_INSTANT((category_literal), (name_literal), (scope), args)
+  TRACE_INTERNAL_INSTANT((category_literal), (name_literal), (scope), args)
 
 // Writes a counter event with the specified id.
 //
@@ -92,7 +91,7 @@
 //     TRACE_COUNTER("category", "name", counter_id, "x", TA_INT32(42), "y", TA_DOUBLE(2.0))
 //
 #define TRACE_COUNTER(category_literal, name_literal, counter_id, arg1, args...) \
-    TRACE_INTERNAL_COUNTER((category_literal), (name_literal), (counter_id), arg1, ##args)
+  TRACE_INTERNAL_COUNTER((category_literal), (name_literal), (counter_id), arg1, ##args)
 
 // Writes a duration event which ends when the current scope exits.
 //
@@ -113,7 +112,7 @@
 //     }
 //
 #define TRACE_DURATION(category_literal, name_literal, args...) \
-    TRACE_INTERNAL_DURATION((category_literal), (name_literal), args)
+  TRACE_INTERNAL_DURATION((category_literal), (name_literal), args)
 
 // Writes a duration begin event only.
 // This event must be matched by a duration end event with the same category and name.
@@ -134,7 +133,7 @@
 //     TRACE_DURATION_BEGIN("category", "name", "x", TA_INT32(42));
 //
 #define TRACE_DURATION_BEGIN(category_literal, name_literal, args...) \
-    TRACE_INTERNAL_DURATION_BEGIN((category_literal), (name_literal), args)
+  TRACE_INTERNAL_DURATION_BEGIN((category_literal), (name_literal), args)
 
 // Writes a duration end event only.
 //
@@ -154,7 +153,7 @@
 //     TRACE_DURATION_END("category", "name", "x", TA_INT32(42));
 //
 #define TRACE_DURATION_END(category_literal, name_literal, args...) \
-    TRACE_INTERNAL_DURATION_END((category_literal), (name_literal), args)
+  TRACE_INTERNAL_DURATION_END((category_literal), (name_literal), args)
 
 // Writes an asynchronous begin event with the specified id.
 // This event may be followed by async instant events and must be matched by
@@ -181,7 +180,7 @@
 //     TRACE_ASYNC_BEGIN("category", "name", async_id, "x", TA_INT32(42));
 //
 #define TRACE_ASYNC_BEGIN(category_literal, name_literal, async_id, args...) \
-    TRACE_INTERNAL_ASYNC_BEGIN((category_literal), (name_literal), (async_id), args)
+  TRACE_INTERNAL_ASYNC_BEGIN((category_literal), (name_literal), (async_id), args)
 
 // Writes an asynchronous instant event with the specified id.
 //
@@ -206,7 +205,7 @@
 //     TRACE_ASYNC_INSTANT("category", "name", async_id, "x", TA_INT32(42));
 //
 #define TRACE_ASYNC_INSTANT(category_literal, name_literal, async_id, args...) \
-    TRACE_INTERNAL_ASYNC_INSTANT((category_literal), (name_literal), (async_id), args)
+  TRACE_INTERNAL_ASYNC_INSTANT((category_literal), (name_literal), (async_id), args)
 
 // Writes an asynchronous end event with the specified id.
 //
@@ -231,7 +230,7 @@
 //     TRACE_ASYNC_END("category", "name", async_id, "x", TA_INT32(42));
 //
 #define TRACE_ASYNC_END(category_literal, name_literal, async_id, args...) \
-    TRACE_INTERNAL_ASYNC_END((category_literal), (name_literal), (async_id), args)
+  TRACE_INTERNAL_ASYNC_END((category_literal), (name_literal), (async_id), args)
 
 // Writes a flow begin event with the specified id.
 // This event may be followed by flow steps events and must be matched by
@@ -263,7 +262,7 @@
 //     TRACE_FLOW_BEGIN("category", "name", flow_id, "x", TA_INT32(42));
 //
 #define TRACE_FLOW_BEGIN(category_literal, name_literal, flow_id, args...) \
-    TRACE_INTERNAL_FLOW_BEGIN((category_literal), (name_literal), (flow_id), args)
+  TRACE_INTERNAL_FLOW_BEGIN((category_literal), (name_literal), (flow_id), args)
 
 // Writes a flow step event with the specified id.
 //
@@ -293,7 +292,7 @@
 //     TRACE_FLOW_STEP("category", "name", flow_id, "x", TA_INT32(42));
 //
 #define TRACE_FLOW_STEP(category_literal, name_literal, flow_id, args...) \
-    TRACE_INTERNAL_FLOW_STEP((category_literal), (name_literal), (flow_id), args)
+  TRACE_INTERNAL_FLOW_STEP((category_literal), (name_literal), (flow_id), args)
 
 // Writes a flow end event with the specified id.
 //
@@ -323,7 +322,37 @@
 //     TRACE_FLOW_END("category", "name", flow_id, "x", TA_INT32(42));
 //
 #define TRACE_FLOW_END(category_literal, name_literal, flow_id, args...) \
-    TRACE_INTERNAL_FLOW_END((category_literal), (name_literal), (flow_id), args)
+  TRACE_INTERNAL_FLOW_END((category_literal), (name_literal), (flow_id), args)
+
+// Writes a large blob record with the given blob data and metadata.
+// Here metadata includes timestamp, thread and process information, and arguments,
+// which is what most event records contain.
+//
+// Blobs which exceed |TRACE_ENCODED_RECORD_MAX_TOTAL_LENGTH| will be silently
+// ignored, as will blobs which cannot fit within the remaining space in the
+// trace buffer.
+//
+// |category_literal| and |name_literal| must be null-terminated static string constants.
+// |blob| is a pointer to the data.
+// |blob_size| is the size, in bytes, of the data.
+// |args| is the list of argument key/value pairs.
+#define TRACE_BLOB_EVENT(category_literal, name_literal, blob, blob_size, args...) \
+    TRACE_INTERNAL_BLOB_EVENT(category_literal, name_literal, blob, blob_size, args)
+
+// Writes a large blob record with the given blob data, with only a
+// category and name associated with the blob. This will not contain much
+// additional metadata. This means timestamp, thread and process information,
+// and arguments are not included with the record.
+//
+// Blobs which exceed |TRACE_ENCODED_RECORD_MAX_TOTAL_LENGTH| will be silently
+// ignored, as will blobs which cannot fit within the remaining space in the
+// trace buffer.
+//
+// |category_literal| and |name_literal| must be null-terminated static string constants.
+// |blob| is a pointer to the data.
+// |blob_size| is the size, in bytes, of the data.
+#define TRACE_BLOB_ATTACHMENT(category_literal, name_literal, blob, blob_size) \
+    TRACE_INTERNAL_BLOB_ATTACHMENT(category_literal, name_literal, blob, blob_size) \
 
 // Writes a description of a kernel object indicated by |handle|,
 // including its koid, name, and the supplied arguments.
@@ -339,9 +368,10 @@
 //     zx_handle_t handle = ...;
 //     TRACE_KERNEL_OBJECT(handle, "description", TA_STRING("some object"));
 //
-#define TRACE_KERNEL_OBJECT(handle, args...) \
-    TRACE_INTERNAL_KERNEL_OBJECT((handle), args)
+#define TRACE_KERNEL_OBJECT(handle, args...) TRACE_INTERNAL_KERNEL_OBJECT((handle), args)
 
+// WARNING! |TRACE_BLOB| is deprecated in favor of the |TRACE_BLOB_*| macros.
+//
 // Writes a blob of binary data to the trace buffer.
 //
 // |type| is the type of the blob, and must be one of the enums in type
@@ -364,6 +394,6 @@
 //     TRACE_BLOB(TRACE_BLOB_TYPE_DATA, "my-blob", blob, blob_size);
 //
 #define TRACE_BLOB(type, name, blob, blob_size) \
-    TRACE_INTERNAL_BLOB((type), (name), (blob), (blob_size))
+  TRACE_INTERNAL_BLOB((type), (name), (blob), (blob_size))
 
-#endif // ZIRCON_SYSTEM_ULIB_LIB_TRACE_INTERNAL_EVENT_COMMON_H_
+#endif  // ZIRCON_SYSTEM_ULIB_LIB_TRACE_INTERNAL_EVENT_COMMON_H_

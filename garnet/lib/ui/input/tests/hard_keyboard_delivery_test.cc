@@ -4,6 +4,7 @@
 
 #include <fuchsia/ui/scenic/cpp/fidl.h>
 #include <lib/async/cpp/time.h>
+#include <lib/zx/clock.h>
 #include <lib/zx/eventpair.h>
 
 #include <memory>
@@ -49,7 +50,6 @@ using fuchsia::ui::scenic::SessionListener;
 using scenic_impl::Scenic;
 using scenic_impl::gfx::Display;
 using scenic_impl::gfx::DisplayManager;
-using scenic_impl::gfx::test::GfxSystemForTest;
 using scenic_impl::input::InputSystem;
 using scenic_impl::test::ScenicTest;
 
@@ -122,7 +122,7 @@ TEST_F(HardKeyboardDeliveryTest, Test) {
 
     scenic::ShapeNode shape(session);
     shape.SetTranslation(2, 2, 0);  // Center the shape within the View.
-    root_node->AddPart(shape);
+    root_node->AddChild(shape);
 
     scenic::Rectangle rec(session, 5, 5);  // Simple; no real GPU work.
     shape.SetShape(rec);

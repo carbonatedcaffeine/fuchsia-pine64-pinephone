@@ -7,6 +7,7 @@
 #include <lib/fidl/cpp/string_view.h>
 #include <lib/fidl/llcpp/array.h>
 #include <lib/fidl/llcpp/coding.h>
+#include <lib/fidl/llcpp/sync_call.h>
 #include <lib/fidl/llcpp/traits.h>
 #include <lib/fidl/llcpp/transaction.h>
 #include <lib/fit/function.h>
@@ -65,21 +66,22 @@ struct Config {
   [[maybe_unused]]
   static constexpr uint32_t MaxOutOfLine = 0;
 
-  CharacterWidth character_width{};
+  CharacterWidth character_width = {};
 
-  StopWidth stop_width{};
+  StopWidth stop_width = {};
 
-  Parity parity{};
+  Parity parity = {};
 
-  FlowControl control_flow{};
+  FlowControl control_flow = {};
 
-  uint32_t baud_rate{};
+  uint32_t baud_rate = {};
 };
 
 extern "C" const fidl_type_t fuchsia_hardware_serial_DeviceGetClassResponseTable;
 extern "C" const fidl_type_t fuchsia_hardware_serial_DeviceSetConfigResponseTable;
 
 class Device final {
+  Device() = delete;
  public:
 
   struct GetClassResponse final {
@@ -91,6 +93,9 @@ class Device final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   using GetClassRequest = ::fidl::AnyZeroArgMessage;
 
@@ -103,6 +108,9 @@ class Device final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   struct SetConfigRequest final {
     FIDL_ALIGNDECL
@@ -113,47 +121,140 @@ class Device final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
     using ResponseType = SetConfigResponse;
   };
 
 
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class GetClass_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      GetClass_Impl(zx::unowned_channel _client_end);
+      ~GetClass_Impl() = default;
+      GetClass_Impl(GetClass_Impl&& other) = default;
+      GetClass_Impl& operator=(GetClass_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class SetConfig_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      SetConfig_Impl(zx::unowned_channel _client_end, Config config);
+      ~SetConfig_Impl() = default;
+      SetConfig_Impl(SetConfig_Impl&& other) = default;
+      SetConfig_Impl& operator=(SetConfig_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using GetClass = GetClass_Impl<GetClassResponse>;
+    using SetConfig = SetConfig_Impl<SetConfigResponse>;
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class GetClass_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      GetClass_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~GetClass_Impl() = default;
+      GetClass_Impl(GetClass_Impl&& other) = default;
+      GetClass_Impl& operator=(GetClass_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class SetConfig_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      SetConfig_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, Config config, ::fidl::BytePart _response_buffer);
+      ~SetConfig_Impl() = default;
+      SetConfig_Impl(SetConfig_Impl&& other) = default;
+      SetConfig_Impl& operator=(SetConfig_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using GetClass = GetClass_Impl<GetClassResponse>;
+    using SetConfig = SetConfig_Impl<SetConfigResponse>;
+  };
+
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
     ::zx::channel* mutable_channel() { return &channel_; }
 
     // Lookup what type of serial device this is.
-    zx_status_t GetClass(Class* out_device_class);
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::GetClass GetClass();
+
+    // Lookup what type of serial device this is.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::GetClass GetClass(::fidl::BytePart _response_buffer);
+
+    // Lookup what type of serial device this is.
+    zx_status_t GetClass_Deprecated(Class* out_device_class);
 
     // Lookup what type of serial device this is.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetClassResponse> GetClass(::fidl::BytePart _response_buffer, Class* out_device_class);
-
-    // Lookup what type of serial device this is.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetClassResponse> GetClass(::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<GetClassResponse> GetClass_Deprecated(::fidl::BytePart _response_buffer, Class* out_device_class);
 
     // Set the configuration of this serial device.
-    zx_status_t SetConfig(Config config, int32_t* out_s);
+    // Allocates 48 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::SetConfig SetConfig(Config config);
+
+    // Set the configuration of this serial device.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::SetConfig SetConfig(::fidl::BytePart _request_buffer, Config config, ::fidl::BytePart _response_buffer);
+
+    // Set the configuration of this serial device.
+    zx_status_t SetConfig_Deprecated(Config config, int32_t* out_s);
 
     // Set the configuration of this serial device.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<SetConfigResponse> SetConfig(::fidl::BytePart _request_buffer, Config config, ::fidl::BytePart _response_buffer, int32_t* out_s);
-
-    // Set the configuration of this serial device.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<SetConfigResponse> SetConfig(::fidl::DecodedMessage<SetConfigRequest> params, ::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<SetConfigResponse> SetConfig_Deprecated(::fidl::BytePart _request_buffer, Config config, ::fidl::BytePart _response_buffer, int32_t* out_s);
 
    private:
     ::zx::channel channel_;
@@ -161,30 +262,53 @@ class Device final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
    public:
 
     // Lookup what type of serial device this is.
-    static zx_status_t GetClass(zx::unowned_channel _client_end, Class* out_device_class);
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::GetClass GetClass(zx::unowned_channel _client_end);
+
+    // Lookup what type of serial device this is.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::GetClass GetClass(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+    // Lookup what type of serial device this is.
+    static zx_status_t GetClass_Deprecated(zx::unowned_channel _client_end, Class* out_device_class);
 
     // Lookup what type of serial device this is.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetClassResponse> GetClass(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, Class* out_device_class);
+    static ::fidl::DecodeResult<GetClassResponse> GetClass_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, Class* out_device_class);
+
+    // Set the configuration of this serial device.
+    // Allocates 48 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::SetConfig SetConfig(zx::unowned_channel _client_end, Config config);
+
+    // Set the configuration of this serial device.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::SetConfig SetConfig(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, Config config, ::fidl::BytePart _response_buffer);
+
+    // Set the configuration of this serial device.
+    static zx_status_t SetConfig_Deprecated(zx::unowned_channel _client_end, Config config, int32_t* out_s);
+
+    // Set the configuration of this serial device.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<SetConfigResponse> SetConfig_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, Config config, ::fidl::BytePart _response_buffer, int32_t* out_s);
+
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
 
     // Lookup what type of serial device this is.
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<GetClassResponse> GetClass(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
     // Set the configuration of this serial device.
-    static zx_status_t SetConfig(zx::unowned_channel _client_end, Config config, int32_t* out_s);
-
-    // Set the configuration of this serial device.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<SetConfigResponse> SetConfig(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, Config config, ::fidl::BytePart _response_buffer, int32_t* out_s);
-
-    // Set the configuration of this serial device.
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<SetConfigResponse> SetConfig(zx::unowned_channel _client_end, ::fidl::DecodedMessage<SetConfigRequest> params, ::fidl::BytePart response_buffer);
 
   };

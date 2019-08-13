@@ -3,12 +3,14 @@
 // found in the LICENSE file.
 
 //! System service for managing cellular modems
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 use {
     failure::{Error, Fail, ResultExt},
     fidl_fuchsia_telephony_manager::{ManagerRequest, ManagerRequestStream},
-    fidl_fuchsia_telephony_ril::{SetupMarker, RadioInterfaceLayerMarker, RadioInterfaceLayerProxy},
+    fidl_fuchsia_telephony_ril::{
+        RadioInterfaceLayerMarker, RadioInterfaceLayerProxy, SetupMarker,
+    },
     fuchsia_async as fasync,
     fuchsia_component::{
         client::{launch, launcher, App},
@@ -18,7 +20,10 @@ use {
     fuchsia_syslog::{self as syslog, macros::*},
     fuchsia_vfs_watcher::{WatchEvent, Watcher},
     fuchsia_zircon as zx,
-    futures::{future::{self, join}, Future, StreamExt, TryFutureExt, TryStreamExt},
+    futures::{
+        future::{self, join},
+        Future, StreamExt, TryFutureExt, TryStreamExt,
+    },
     parking_lot::RwLock,
     qmi::connect_transport_device,
     std::fs::File,
@@ -48,7 +53,7 @@ pub enum TelError {
 
 pub async fn connect_qmi_transport(path: PathBuf) -> Result<fasync::Channel, Error> {
     let file = File::open(&path)?;
-    let chan = await!(connect_transport_device(&file))?;
+    let chan = connect_transport_device(&file).await?;
     Ok(fasync::Channel::from_channel(chan)?)
 }
 
@@ -59,7 +64,7 @@ pub async fn start_modem(ty: ModemType, chan: zx::Channel) -> Result<Radio, Erro
     let setup_ril = app.connect_to_service::<SetupMarker>()?;
     let ril = app.connect_to_service::<RadioInterfaceLayerMarker>()?;
     match ty {
-        ModemType::Qmi => match await!(setup_ril.connect_transport(chan.into()))? {
+        ModemType::Qmi => match setup_ril.connect_transport(chan.into()).await? {
             Ok(_) => Ok(Radio::new(app, ril)),
             Err(e) => Err(TelError::RilError(e).into()),
         },
@@ -124,15 +129,15 @@ impl Manager {
         // TODO(bwb): make more generic to support non-qmi devices
         let path: &Path = Path::new(QMI_TRANSPORT);
         let dir = File::open(QMI_TRANSPORT).unwrap();
-        let mut watcher = Watcher::new(&dir).unwrap();
-        while let Some(msg) = await!(watcher.try_next())? {
+        let mut watcher = Watcher::new(&dir).await.unwrap();
+        while let Some(msg) = watcher.try_next().await? {
             match msg.event {
                 WatchEvent::EXISTING | WatchEvent::ADD_FILE => {
                     let qmi_path = path.join(msg.filename);
                     fx_log_info!("Connecting to {}", qmi_path.display());
                     let file = File::open(&qmi_path)?;
-                    let channel = await!(qmi::connect_transport_device(&file))?;
-                    let svc = await!(start_modem(ModemType::Qmi, channel))?;
+                    let channel = qmi::connect_transport_device(&file).await?;
+                    let svc = start_modem(ModemType::Qmi, channel).await?;
                     self.radios.write().push(svc);
                 }
                 _ => (),
@@ -165,4 +170,12 @@ fn main() -> Result<(), Error> {
 
     let ((), ()) = executor.run_singlethreaded(join(device_watcher, fs.collect::<()>()));
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn pass() -> () {
+        ();
+    }
 }

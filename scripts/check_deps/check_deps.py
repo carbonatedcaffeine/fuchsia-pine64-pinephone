@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 
 # Copyright 2019 The Fuchsia Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -26,6 +26,8 @@ allowed_deps = [
     # The follow entries are temporarily allowed universally, but should be
     # moved to //sdk or //src/lib:
     # Code libraries
+    '//garnet/lib/rust',
+    '//garnet/public/go/third_party',
     '//garnet/public/lib',
     '//garnet/public/rust',
     '//zircon/public/lib',
@@ -34,17 +36,22 @@ allowed_deps = [
     '//zircon/system/public',
 
     # Tools
-    '//garnet/go/src/pm:pm_bin(//build/toolchain:host_x64)',
-    '//garnet/bin/cmc:cmc(//build/toolchain:host_x64)',
-    '//zircon/public/tool',
+    '//tools',
+    # Will move to //tools or //sdk:
     '//garnet/go/src/fidl:fidlgen(//build/toolchain:host_x64)',
     '//garnet/go/src/fidl:fidlgen_llcpp(//build/toolchain:host_x64)',
     '//garnet/go/src/fidlmerge:fidlmerge(//build/toolchain:host_x64)',
+    '//garnet/go/src/pm:pm_bin(//build/toolchain:host_x64)',
+    '//topaz/bin/fidlgen_dart:fidlgen_dart(//build/toolchain:host_x64)',
+    '//zircon/public/tool',
+    # Will move to //tools (CF-895):
+    '//src/sys/cmc:cmc(//build/toolchain:host_x64)',
 
     # This is currently implicitly generated as a dependency on any C++
     # generation of a FIDL target.
     # TODO(ctiller): File an issue for cleaning this up.
     '//src/connectivity/overnet/lib/protocol:fidl_stream',
+    '//src/connectivity/overnet/lib/embedded:runtime',
 ]
 
 target_types_to_check = [
@@ -87,7 +94,7 @@ def area_for_label(source_dir, label):
 
 # Checks dependency rules as described in
 # docs/development/source_code/layout.md#dependency-structure
-def dep_allowed(label, label_area, dep, dep_area, ignore_exceptions):
+def dep_allowed(label, label_area, dep, dep_area, testonly, ignore_exceptions):
     # Targets can depend on globally allowed targets
     for a in allowed_deps:
         if dep.startswith(a):
@@ -95,9 +102,12 @@ def dep_allowed(label, label_area, dep, dep_area, ignore_exceptions):
     # Targets within an area can depend on other targets in the same area
     if label_area == dep_area:
         return True
-    # Targets can depend on '//(../*)lib'
+    # Targets can depend on '//(../*)lib/'
+    # Targets marked testonly can depend on '//(../*)testing/'
     while label != '//':
         if dep.startswith(label + '/lib/'):
+            return True
+        if testonly and dep.startswith(label + '/testing'):
             return True
         label = os.path.dirname(label)
     if ignore_exceptions:
@@ -143,10 +153,12 @@ def main():
         if target['type'] not in target_types_to_check:
             continue
         label_area = area_for_label(fuchsia_root, label)
+        testonly = target['testonly']
         for dep in target['deps']:
             dep_area = area_for_label(fuchsia_root, dep)
             if not dep_allowed(label, label_area, dep,
-                               dep_area, args.ignore_exceptions):
+                               dep_area, testonly,
+                               args.ignore_exceptions):
                 record_bad_dep(disallowed_dependencies, label_area, label, dep)
 
     total_count = 0

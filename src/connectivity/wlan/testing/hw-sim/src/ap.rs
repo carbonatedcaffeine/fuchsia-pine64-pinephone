@@ -9,14 +9,15 @@ pub mod tests {
         fidl, fidl_fuchsia_wlan_common as fidl_common, fidl_fuchsia_wlan_device as wlan_device,
         fidl_fuchsia_wlan_device_service as fidl_wlan_service, fidl_fuchsia_wlan_sme as fidl_sme,
         fidl_fuchsia_wlan_tap as wlantap,
-        fuchsia_async::{self as fasync, temp::TempStreamExt, DurationExt, TimeoutExt},
+        fuchsia_async::{self as fasync, DurationExt, TimeoutExt},
         fuchsia_component as app,
         fuchsia_zircon::{self as zx, prelude::*},
-        futures::channel::mpsc,
+        futures::channel::oneshot,
         futures::prelude::*,
         hex,
         std::panic,
         wlan_common::{
+            assert_variant,
             channel::{Cbw, Phy},
             mac, RadioConfig,
         },
@@ -94,21 +95,21 @@ pub mod tests {
     }
 
     fn verify_auth_resp(helper: &mut test_utils::TestHelper, exec: &mut fasync::Executor) {
-        let (mut sender, receiver) = mpsc::channel::<()>(1);
+        let (sender, receiver) = oneshot::channel::<()>();
+        let mut sender = Some(sender);
         let event_handler = move |event| match event {
             wlantap::WlantapPhyEvent::Tx { args } => {
                 if let Some(mac::MacFrame::Mgmt { mgmt_hdr, body, .. }) =
                     mac::MacFrame::parse(&args.packet.data[..], false)
                 {
-                    match mac::MgmtBody::parse({ mgmt_hdr.frame_ctrl }.mgmt_subtype(), body) {
+                    assert_variant!(
+                        mac::MgmtBody::parse({ mgmt_hdr.frame_ctrl }.mgmt_subtype(), body),
                         Some(mac::MgmtBody::Authentication { auth_hdr, .. }) => {
                             assert_eq!({ auth_hdr.status_code }, mac::StatusCode::SUCCESS);
-                            sender.try_send(()).unwrap();
-                        }
-                        other => {
-                            panic!("expected authentication frame, got {:?}", other);
-                        }
-                    }
+                            sender.take().map(|s| s.send(()));
+                        },
+                        "expected authentication frame"
+                    );
                 }
             }
             _ => {}
@@ -119,13 +120,14 @@ pub mod tests {
                 5.seconds(),
                 "waiting for authentication response",
                 event_handler,
-                receiver.map(Ok).try_into_future(),
+                receiver,
             )
-            .unwrap_or_else(|()| unreachable!());
+            .unwrap_or_else(|oneshot::Canceled| panic!());
     }
 
     fn verify_assoc_resp(helper: &mut test_utils::TestHelper, exec: &mut fasync::Executor) {
-        let (mut sender, receiver) = mpsc::channel::<()>(1);
+        let (sender, receiver) = oneshot::channel::<()>();
+        let mut sender = Some(sender);
         let event_handler = move |event| match event {
             wlantap::WlantapPhyEvent::Tx { args } => {
                 if let Some(mac::MacFrame::Mgmt { mgmt_hdr, body, .. }) =
@@ -134,7 +136,7 @@ pub mod tests {
                     match mac::MgmtBody::parse({ mgmt_hdr.frame_ctrl }.mgmt_subtype(), body) {
                         Some(mac::MgmtBody::AssociationResp { assoc_resp_hdr, .. }) => {
                             assert_eq!({ assoc_resp_hdr.status_code }, mac::StatusCode::SUCCESS);
-                            sender.try_send(()).unwrap();
+                            sender.take().map(|s| s.send(()));
                         }
                         Some(mac::MgmtBody::Unsupported { subtype })
                             if subtype == mac::MgmtSubtype::ACTION => {}
@@ -152,24 +154,24 @@ pub mod tests {
                 5.seconds(),
                 "waiting for association response",
                 event_handler,
-                receiver.map(Ok).try_into_future(),
+                receiver,
             )
-            .unwrap_or_else(|()| unreachable!());
+            .unwrap_or_else(|oneshot::Canceled| panic!());
     }
 
     async fn get_new_added_iface(
         device_watch_stream: &mut fidl_wlan_service::DeviceWatcherEventStream,
     ) -> u16 {
         loop {
-            match await!(device_watch_stream.next()) {
+            assert_variant!(
+                device_watch_stream.next().await,
                 Some(Ok(event)) => match event {
                     fidl_wlan_service::DeviceWatcherEvent::OnIfaceAdded { iface_id } => {
                         return iface_id;
                     }
                     _ => (),
-                },
-                _ => panic!("failed to get watch stream event"),
-            }
+                }
+            );
         }
     }
 
@@ -179,7 +181,7 @@ pub mod tests {
     ) -> fidl_sme::ApSmeProxy {
         let (proxy, remote) =
             fidl::endpoints::create_proxy().expect("fail to create fidl endpoints");
-        let status = await!(wlan_service.get_ap_sme(iface_id, remote)).expect("fail get_ap_sme");
+        let status = wlan_service.get_ap_sme(iface_id, remote).await.expect("fail get_ap_sme");
         if status != zx::sys::ZX_OK {
             panic!("fail getting ap sme; status: {}", status);
         }

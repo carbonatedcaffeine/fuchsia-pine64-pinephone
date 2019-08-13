@@ -310,6 +310,10 @@ void ViewHolder::SetViewProperties(const fuchsia::ui::gfx::ViewProperties& props
   session()->Enqueue(NewSetViewPropertiesCmd(id(), props));
 }
 
+void ViewHolder::SetDebugBoundsColor(uint8_t red, uint8_t green, uint8_t blue) {
+  session()->Enqueue(NewSetViewHolderBoundsColorCmd(id(), red, green, blue));
+}
+
 View::View(Session* session, zx::eventpair token, const std::string& debug_name)
     : Resource(session) {
   session->Enqueue(NewCreateViewCmd(id(), scenic::ToViewToken(std::move(token)), debug_name));
@@ -340,6 +344,10 @@ void View::AddChild(const Node& child) const {
 void View::DetachChild(const Node& child) const {
   ZX_DEBUG_ASSERT(session() == child.session());
   session()->Enqueue(NewDetachCmd(child.id()));
+}
+
+void View::enableDebugBounds(bool enable) {
+  session()->Enqueue(NewSetEnableDebugViewBoundsCmd(id(), enable));
 }
 
 ClipNode::ClipNode(Session* session) : ContainerNode(session) {
@@ -404,6 +412,11 @@ void CameraBase::SetPoseBuffer(const Buffer& buffer, uint32_t num_entries, int64
                                uint64_t time_interval) {
   session()->Enqueue(
       NewSetCameraPoseBufferCmd(id(), buffer.id(), num_entries, base_time, time_interval));
+}
+
+void CameraBase::SetPoseBuffer(const Buffer& buffer, uint32_t num_entries, zx::time base_time,
+                               zx::duration time_interval) {
+  SetPoseBuffer(buffer, num_entries, base_time.get(), time_interval.get());
 }
 
 Camera::Camera(const Scene& scene) : Camera(scene.session(), scene.id()) {}

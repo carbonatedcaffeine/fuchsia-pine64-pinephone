@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <fstream>
+
 #include <fidl/flat_ast.h>
 #include <fidl/lexer.h>
 #include <fidl/parser.h>
 #include <fidl/source_file.h>
 #include <unittest/unittest.h>
-
-#include <fstream>
 
 #include "examples.h"
 #include "test_library.h"
@@ -82,6 +82,7 @@ struct Simple {
   "const_declarations": [],
   "enum_declarations": [],
   "interface_declarations": [],
+  "service_declarations": [],
   "struct_declarations": [
     {
       "name": "fidl.test.json/Simple",
@@ -186,7 +187,7 @@ protocol EmptyProtocol {
       "methods": [
         {
           "ordinal": 285845058,
-          "generated_ordinal": 285845058,
+          "generated_ordinal": 1227695175833223168,
           "name": "Send",
           "location": {
             "filename": "json.fidl",
@@ -217,12 +218,13 @@ protocol EmptyProtocol {
           "maybe_request_size": 24,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": true,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": false,
           "is_composed": false
         },
         {
           "ordinal": 388770671,
-          "generated_ordinal": 388770671,
+          "generated_ordinal": 1669757317588975616,
           "name": "Receive",
           "location": {
             "filename": "json.fidl",
@@ -254,11 +256,12 @@ protocol EmptyProtocol {
           "maybe_response_size": 24,
           "maybe_response_alignment": 8,
           "maybe_response_has_padding": true,
+          "experimental_maybe_response_has_flexible_envelope": false,
           "is_composed": false
         },
         {
           "ordinal": 2071775804,
-          "generated_ordinal": 2071775804,
+          "generated_ordinal": 8898209322824105984,
           "name": "SendAndReceive",
           "location": {
             "filename": "json.fidl",
@@ -289,6 +292,7 @@ protocol EmptyProtocol {
           "maybe_request_size": 24,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": true,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": true,
           "maybe_response": [
             {
@@ -313,11 +317,13 @@ protocol EmptyProtocol {
           "maybe_response_size": 24,
           "maybe_response_alignment": 8,
           "maybe_response_has_padding": true,
+          "experimental_maybe_response_has_flexible_envelope": false,
           "is_composed": false
         }
       ]
     }
   ],
+  "service_declarations": [],
   "struct_declarations": [
     {
       "name": "fidl.test.json/Empty",
@@ -354,6 +360,112 @@ protocol EmptyProtocol {
   END_TEST;
 }
 
+// This targets a specific issue with identifier naming where the identifier
+// library is incorrectly the current library name rather than the name of the
+// identifiers own library.
+bool json_generator_test_struct_default_value_enum_library_reference() {
+  BEGIN_TEST;
+
+  for (int i = 0; i < kRepeatTestCount; i++) {
+    SharedAmongstLibraries shared;
+    TestLibrary dependency("dependent.fidl", R"FIDL(
+  library dependent;
+
+  enum MyEnum : int32 {
+    A = 1;
+  };
+
+  )FIDL",
+                           &shared);
+    ASSERT_TRUE(dependency.Compile());
+
+    TestLibrary library("example.fidl", R"FIDL(
+  library example;
+
+  using dependent;
+
+  struct Foo {
+      dependent.MyEnum field = dependent.MyEnum.A;
+  };
+
+  )FIDL",
+                        &shared);
+    ASSERT_TRUE(library.AddDependentLibrary(std::move(dependency)));
+
+    EXPECT_TRUE(checkJSONGenerator(std::move(library),
+                                   R"JSON({
+  "version": "0.0.1",
+  "name": "example",
+  "library_dependencies": [
+    {
+      "name": "dependent",
+      "declarations": {
+        "dependent/MyEnum": "enum"
+      }
+    }
+  ],
+  "bits_declarations": [],
+  "const_declarations": [],
+  "enum_declarations": [],
+  "interface_declarations": [],
+  "service_declarations": [],
+  "struct_declarations": [
+    {
+      "name": "example/Foo",
+      "location": {
+        "filename": "example.fidl",
+        "line": 6,
+        "column": 10
+      },
+      "anonymous": false,
+      "members": [
+        {
+          "type": {
+            "kind": "identifier",
+            "identifier": "dependent/MyEnum",
+            "nullable": false
+          },
+          "name": "field",
+          "location": {
+            "filename": "example.fidl",
+            "line": 7,
+            "column": 24
+          },
+          "maybe_default_value": {
+            "kind": "identifier",
+            "identifier": "dependent/MyEnum.A"
+          },
+          "size": 4,
+          "max_out_of_line": 0,
+          "alignment": 4,
+          "offset": 0,
+          "max_handles": 0
+        }
+      ],
+      "size": 4,
+      "max_out_of_line": 0,
+      "alignment": 4,
+      "max_handles": 0,
+      "has_padding": false
+    }
+  ],
+  "table_declarations": [],
+  "union_declarations": [],
+  "xunion_declarations": [],
+  "type_alias_declarations": [],
+  "declaration_order": [
+    "example/Foo"
+  ],
+  "declarations": {
+    "example/Foo": "struct"
+  }
+}
+)JSON"));
+  }
+
+  END_TEST;
+}
+
 bool json_generator_test_table() {
   BEGIN_TEST;
 
@@ -377,6 +489,7 @@ table Simple {
   "const_declarations": [],
   "enum_declarations": [],
   "interface_declarations": [],
+  "service_declarations": [],
   "struct_declarations": [],
   "table_declarations": [
     {
@@ -436,7 +549,8 @@ table Simple {
       "size": 16,
       "max_out_of_line": 48,
       "alignment": 8,
-      "max_handles": 0
+      "max_handles": 0,
+      "strict": false
     }
   ],
   "union_declarations": [],
@@ -485,6 +599,7 @@ union PizzaOrPasta {
   "const_declarations": [],
   "enum_declarations": [],
   "interface_declarations": [],
+  "service_declarations": [],
   "struct_declarations": [
     {
       "name": "fidl.test.json/Pizza",
@@ -522,7 +637,7 @@ union PizzaOrPasta {
       "max_out_of_line": 4294967295,
       "alignment": 8,
       "max_handles": 0,
-      "has_padding": false
+      "has_padding": true
     },
     {
       "name": "fidl.test.json/Pasta",
@@ -556,7 +671,7 @@ union PizzaOrPasta {
       "max_out_of_line": 16,
       "alignment": 8,
       "max_handles": 0,
-      "has_padding": false
+      "has_padding": true
     }
   ],
   "table_declarations": [],
@@ -656,6 +771,7 @@ strict xunion StrictFoo {
   "const_declarations": [],
   "enum_declarations": [],
   "interface_declarations": [],
+  "service_declarations": [],
   "struct_declarations": [],
   "table_declarations": [],
   "union_declarations": [],
@@ -775,6 +891,293 @@ strict xunion StrictFoo {
   END_TEST;
 }
 
+bool json_generator_test_request_flexible_envelope() {
+  BEGIN_TEST;
+
+  for (int i = 0; i < kRepeatTestCount; i++) {
+    EXPECT_TRUE(checkJSONGenerator(R"FIDL(
+library fidl.test.json;
+
+xunion FlexibleFoo {
+  string s;
+  int32 i;
+};
+
+strict xunion StrictFoo {
+  string s;
+  int32 i;
+};
+
+protocol Protocol {
+  RequestStrictResponseFlexible(StrictFoo s) -> (FlexibleFoo f);
+  RequestFlexibleResponseStrict(FlexibleFoo s) -> (StrictFoo f);
+};
+
+)FIDL",
+                                   R"JSON(
+{
+  "version": "0.0.1",
+  "name": "fidl.test.json",
+  "library_dependencies": [],
+  "bits_declarations": [],
+  "const_declarations": [],
+  "enum_declarations": [],
+  "interface_declarations": [
+    {
+      "name": "fidl.test.json/Protocol",
+      "location": {
+        "filename": "json.fidl",
+        "line": 14,
+        "column": 10
+      },
+      "methods": [
+        {
+          "ordinal": 289661890,
+          "generated_ordinal": 1244088344447549440,
+          "name": "RequestStrictResponseFlexible",
+          "location": {
+            "filename": "json.fidl",
+            "line": 15,
+            "column": 3
+          },
+          "has_request": true,
+          "maybe_request": [
+            {
+              "type": {
+                "kind": "identifier",
+                "identifier": "fidl.test.json/StrictFoo",
+                "nullable": false
+              },
+              "name": "s",
+              "location": {
+                "filename": "json.fidl",
+                "line": 15,
+                "column": 43
+              },
+              "size": 24,
+              "max_out_of_line": 4294967295,
+              "alignment": 8,
+              "offset": 16,
+              "max_handles": 0
+            }
+          ],
+          "maybe_request_size": 40,
+          "maybe_request_alignment": 8,
+          "maybe_request_has_padding": true,
+          "experimental_maybe_request_has_flexible_envelope": false,
+          "has_response": true,
+          "maybe_response": [
+            {
+              "type": {
+                "kind": "identifier",
+                "identifier": "fidl.test.json/FlexibleFoo",
+                "nullable": false
+              },
+              "name": "f",
+              "location": {
+                "filename": "json.fidl",
+                "line": 15,
+                "column": 62
+              },
+              "size": 24,
+              "max_out_of_line": 4294967295,
+              "alignment": 8,
+              "offset": 16,
+              "max_handles": 0
+            }
+          ],
+          "maybe_response_size": 40,
+          "maybe_response_alignment": 8,
+          "maybe_response_has_padding": true,
+          "experimental_maybe_response_has_flexible_envelope": true,
+          "is_composed": false
+        },
+        {
+          "ordinal": 825667327,
+          "generated_ordinal": 3546214166840737792,
+          "name": "RequestFlexibleResponseStrict",
+          "location": {
+            "filename": "json.fidl",
+            "line": 16,
+            "column": 3
+          },
+          "has_request": true,
+          "maybe_request": [
+            {
+              "type": {
+                "kind": "identifier",
+                "identifier": "fidl.test.json/FlexibleFoo",
+                "nullable": false
+              },
+              "name": "s",
+              "location": {
+                "filename": "json.fidl",
+                "line": 16,
+                "column": 45
+              },
+              "size": 24,
+              "max_out_of_line": 4294967295,
+              "alignment": 8,
+              "offset": 16,
+              "max_handles": 0
+            }
+          ],
+          "maybe_request_size": 40,
+          "maybe_request_alignment": 8,
+          "maybe_request_has_padding": true,
+          "experimental_maybe_request_has_flexible_envelope": true,
+          "has_response": true,
+          "maybe_response": [
+            {
+              "type": {
+                "kind": "identifier",
+                "identifier": "fidl.test.json/StrictFoo",
+                "nullable": false
+              },
+              "name": "f",
+              "location": {
+                "filename": "json.fidl",
+                "line": 16,
+                "column": 62
+              },
+              "size": 24,
+              "max_out_of_line": 4294967295,
+              "alignment": 8,
+              "offset": 16,
+              "max_handles": 0
+            }
+          ],
+          "maybe_response_size": 40,
+          "maybe_response_alignment": 8,
+          "maybe_response_has_padding": true,
+          "experimental_maybe_response_has_flexible_envelope": false,
+          "is_composed": false
+        }
+      ]
+    }
+  ],
+  "service_declarations": [],
+  "struct_declarations": [],
+  "table_declarations": [],
+  "union_declarations": [],
+  "xunion_declarations": [
+    {
+      "name": "fidl.test.json/FlexibleFoo",
+      "location": {
+        "filename": "json.fidl",
+        "line": 4,
+        "column": 8
+      },
+      "members": [
+        {
+          "ordinal": 1056421836,
+          "type": {
+            "kind": "string",
+            "nullable": false
+          },
+          "name": "s",
+          "location": {
+            "filename": "json.fidl",
+            "line": 5,
+            "column": 10
+          },
+          "size": 16,
+          "max_out_of_line": 4294967295,
+          "alignment": 8,
+          "offset": 0
+        },
+        {
+          "ordinal": 1911600824,
+          "type": {
+            "kind": "primitive",
+            "subtype": "int32"
+          },
+          "name": "i",
+          "location": {
+            "filename": "json.fidl",
+            "line": 6,
+            "column": 9
+          },
+          "size": 4,
+          "max_out_of_line": 0,
+          "alignment": 4,
+          "offset": 0
+        }
+      ],
+      "size": 24,
+      "max_out_of_line": 4294967295,
+      "alignment": 8,
+      "max_handles": 0,
+      "strict": false
+    },
+    {
+      "name": "fidl.test.json/StrictFoo",
+      "location": {
+        "filename": "json.fidl",
+        "line": 9,
+        "column": 15
+      },
+      "members": [
+        {
+          "ordinal": 215696753,
+          "type": {
+            "kind": "string",
+            "nullable": false
+          },
+          "name": "s",
+          "location": {
+            "filename": "json.fidl",
+            "line": 10,
+            "column": 10
+          },
+          "size": 16,
+          "max_out_of_line": 4294967295,
+          "alignment": 8,
+          "offset": 0
+        },
+        {
+          "ordinal": 2063855467,
+          "type": {
+            "kind": "primitive",
+            "subtype": "int32"
+          },
+          "name": "i",
+          "location": {
+            "filename": "json.fidl",
+            "line": 11,
+            "column": 9
+          },
+          "size": 4,
+          "max_out_of_line": 0,
+          "alignment": 4,
+          "offset": 0
+        }
+      ],
+      "size": 24,
+      "max_out_of_line": 4294967295,
+      "alignment": 8,
+      "max_handles": 0,
+      "strict": true
+    }
+  ],
+  "type_alias_declarations": [],
+  "declaration_order": [
+    "fidl.test.json/StrictFoo",
+    "fidl.test.json/FlexibleFoo",
+    "fidl.test.json/Protocol"
+  ],
+  "declarations": {
+    "fidl.test.json/Protocol": "interface",
+    "fidl.test.json/FlexibleFoo": "xunion",
+    "fidl.test.json/StrictFoo": "xunion"
+  }
+}
+)JSON"));
+  }
+
+  END_TEST;
+}
+
 // This test ensures that inherited methods have the same ordinal / signature /
 // etc as the method from which they are inheriting.
 bool json_generator_test_inheritance() {
@@ -818,7 +1221,7 @@ protocol sub {
       "methods": [
         {
           "ordinal": 790020540,
-          "generated_ordinal": 790020540,
+          "generated_ordinal": 3393112382468259840,
           "name": "foo",
           "location": {
             "filename": "json.fidl",
@@ -847,7 +1250,8 @@ protocol sub {
           ],
           "maybe_request_size": 32,
           "maybe_request_alignment": 8,
-          "maybe_request_has_padding": false,
+          "maybe_request_has_padding": true,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": true,
           "maybe_response": [
             {
@@ -871,6 +1275,7 @@ protocol sub {
           "maybe_response_size": 24,
           "maybe_response_alignment": 8,
           "maybe_response_has_padding": false,
+          "experimental_maybe_response_has_flexible_envelope": false,
           "is_composed": false
         }
       ]
@@ -885,7 +1290,7 @@ protocol sub {
       "methods": [
         {
           "ordinal": 790020540,
-          "generated_ordinal": 790020540,
+          "generated_ordinal": 3393112382468259840,
           "name": "foo",
           "location": {
             "filename": "json.fidl",
@@ -914,7 +1319,8 @@ protocol sub {
           ],
           "maybe_request_size": 32,
           "maybe_request_alignment": 8,
-          "maybe_request_has_padding": false,
+          "maybe_request_has_padding": true,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": true,
           "maybe_response": [
             {
@@ -938,11 +1344,13 @@ protocol sub {
           "maybe_response_size": 24,
           "maybe_response_alignment": 8,
           "maybe_response_has_padding": false,
+          "experimental_maybe_response_has_flexible_envelope": false,
           "is_composed": true
         }
       ]
     }
   ],
+  "service_declarations": [],
   "struct_declarations": [],
   "table_declarations": [],
   "union_declarations": [],
@@ -1004,7 +1412,7 @@ protocol Child {
       "methods": [
         {
           "ordinal": 1722375644,
-          "generated_ordinal": 1722375644,
+          "generated_ordinal": 7397547062406938624,
           "name": "First",
           "location": {
             "filename": "json.fidl",
@@ -1035,6 +1443,7 @@ protocol Child {
           "maybe_request_size": 24,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": true,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": false,
           "is_composed": false
         }
@@ -1050,7 +1459,7 @@ protocol Child {
       "methods": [
         {
           "ordinal": 1722375644,
-          "generated_ordinal": 1722375644,
+          "generated_ordinal": 7397547062406938624,
           "name": "First",
           "location": {
             "filename": "json.fidl",
@@ -1081,12 +1490,13 @@ protocol Child {
           "maybe_request_size": 24,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": true,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": false,
           "is_composed": true
         },
         {
           "ordinal": 19139766,
-          "generated_ordinal": 19139766,
+          "generated_ordinal": 82204669023092736,
           "name": "Second",
           "location": {
             "filename": "json.fidl",
@@ -1117,12 +1527,14 @@ protocol Child {
           "maybe_request_size": 24,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": true,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": false,
           "is_composed": false
         }
       ]
     }
   ],
+  "service_declarations": [],
   "struct_declarations": [],
   "table_declarations": [],
   "union_declarations": [],
@@ -1172,7 +1584,7 @@ protocol Example {
       "methods": [
         {
           "ordinal": 1369693400,
-          "generated_ordinal": 1369693400,
+          "generated_ordinal": 5882788358547046400,
           "name": "foo",
           "location": {
             "filename": "json.fidl",
@@ -1201,7 +1613,8 @@ protocol Example {
           ],
           "maybe_request_size": 32,
           "maybe_request_alignment": 8,
-          "maybe_request_has_padding": false,
+          "maybe_request_has_padding": true,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": true,
           "maybe_response": [
             {
@@ -1226,11 +1639,13 @@ protocol Example {
           "maybe_response_size": 32,
           "maybe_response_alignment": 8,
           "maybe_response_has_padding": true,
+          "experimental_maybe_response_has_flexible_envelope": false,
           "is_composed": false
         }
       ]
     }
   ],
+  "service_declarations": [],
   "struct_declarations": [
     {
       "name": "fidl.test.json/Example_foo_Response",
@@ -1363,6 +1778,7 @@ struct ByteAndBytes {
   "const_declarations": [],
   "enum_declarations": [],
   "interface_declarations": [],
+  "service_declarations": [],
   "struct_declarations": [
     {
       "name": "example/ByteAndBytes",
@@ -1486,7 +1902,12 @@ bool json_generator_test_bits() {
     EXPECT_TRUE(checkJSONGenerator(R"FIDL(
 library fidl.test.json;
 
-bits Bits : uint64 {
+bits FlexibleBits : uint64 {
+    SMALLEST = 1;
+    BIGGEST = 0x8000000000000000;
+};
+
+strict bits StrictBits: uint64 {
     SMALLEST = 1;
     BIGGEST = 0x8000000000000000;
 };
@@ -1499,7 +1920,12 @@ bits Bits : uint64 {
   "library_dependencies": [],
   "bits_declarations": [
     {
-      "name": "fidl.test.json/Bits",
+      "name": "fidl.test.json/FlexibleBits",
+      "location": {
+        "filename": "json.fidl",
+        "line": 4,
+        "column": 6
+      },
       "type": {
         "kind": "primitive",
         "subtype": "uint64"
@@ -1508,6 +1934,11 @@ bits Bits : uint64 {
       "members": [
         {
           "name": "SMALLEST",
+          "location": {
+            "filename": "json.fidl",
+            "line": 5,
+            "column": 5
+          },
           "value": {
             "kind": "literal",
             "literal": {
@@ -1519,6 +1950,11 @@ bits Bits : uint64 {
         },
         {
           "name": "BIGGEST",
+          "location": {
+            "filename": "json.fidl",
+            "line": 6,
+            "column": 5
+          },
           "value": {
             "kind": "literal",
             "literal": {
@@ -1528,22 +1964,74 @@ bits Bits : uint64 {
             }
           }
         }
-      ]
+      ],
+      "strict": false
+    },
+    {
+      "name": "fidl.test.json/StrictBits",
+      "location": {
+        "filename": "json.fidl",
+        "line": 9,
+        "column": 13
+      },
+      "type": {
+        "kind": "primitive",
+        "subtype": "uint64"
+      },
+      "mask": "9223372036854775809",
+      "members": [
+        {
+          "name": "SMALLEST",
+          "location": {
+            "filename": "json.fidl",
+            "line": 10,
+            "column": 5
+          },
+          "value": {
+            "kind": "literal",
+            "literal": {
+              "kind": "numeric",
+              "value": "1",
+              "expression": "1"
+            }
+          }
+        },
+        {
+          "name": "BIGGEST",
+          "location": {
+            "filename": "json.fidl",
+            "line": 11,
+            "column": 5
+          },
+          "value": {
+            "kind": "literal",
+            "literal": {
+              "kind": "numeric",
+              "value": "9223372036854775808",
+              "expression": "0x8000000000000000"
+            }
+          }
+        }
+      ],
+      "strict": true
     }
   ],
   "const_declarations": [],
   "enum_declarations": [],
   "interface_declarations": [],
+  "service_declarations": [],
   "struct_declarations": [],
   "table_declarations": [],
   "union_declarations": [],
   "xunion_declarations": [],
   "type_alias_declarations": [],
   "declaration_order": [
-    "fidl.test.json/Bits"
+    "fidl.test.json/StrictBits",
+    "fidl.test.json/FlexibleBits"
   ],
   "declarations": {
-    "fidl.test.json/Bits": "bits"
+    "fidl.test.json/FlexibleBits": "bits",
+    "fidl.test.json/StrictBits": "bits"
   }
 }
 )JSON"));
@@ -1588,6 +2076,19 @@ const float64 FLOAT64 = 3.14159;
 const bool BOOL = true;
 const string STRING = "string";
 
+enum EnumType : int32 {
+    VALUE = 1;
+};
+const EnumType enumVal = EnumType.VALUE;
+const int32 enumPrimitiveVal = EnumType.VALUE;
+
+
+enum BitsType : int32 {
+    VALUE = 0x00000001;
+};
+const BitsType bitsVal = BitsType.VALUE;
+const int32 bitsPrimitiveVal = BitsType.VALUE;
+
 enum Enum {
   E = 0b10101010;
 };
@@ -1600,6 +2101,8 @@ struct Struct {
   int64 int64_with_default = 007;
   string string_with_default = "stuff";
   bool bool_with_default = true;
+  Enum enum_with_default = Enum.E;
+  Bits bits_with_default = Bits.B;
 };
 
 )FIDL",
@@ -1611,6 +2114,11 @@ struct Struct {
   "bits_declarations": [
     {
       "name": "values/Bits",
+      "location": {
+        "filename": "json.fidl",
+        "line": 34,
+        "column": 6
+      },
       "type": {
         "kind": "primitive",
         "subtype": "uint32"
@@ -1619,6 +2127,11 @@ struct Struct {
       "members": [
         {
           "name": "B",
+          "location": {
+            "filename": "json.fidl",
+            "line": 35,
+            "column": 3
+          },
           "value": {
             "kind": "literal",
             "literal": {
@@ -1628,7 +2141,8 @@ struct Struct {
             }
           }
         }
-      ]
+      ],
+      "strict": false
     }
   ],
   "const_declarations": [
@@ -1871,14 +2385,136 @@ struct Struct {
           "expression": "\"string\""
         }
       }
+    },
+    {
+      "name": "values/enumVal",
+      "location": {
+        "filename": "json.fidl",
+        "line": 20,
+        "column": 16
+      },
+      "type": {
+        "kind": "identifier",
+        "identifier": "values/EnumType",
+        "nullable": false
+      },
+      "value": {
+        "kind": "identifier",
+        "identifier": "values/EnumType.VALUE"
+      }
+    },
+    {
+      "name": "values/enumPrimitiveVal",
+      "location": {
+        "filename": "json.fidl",
+        "line": 21,
+        "column": 13
+      },
+      "type": {
+        "kind": "primitive",
+        "subtype": "int32"
+      },
+      "value": {
+        "kind": "identifier",
+        "identifier": "values/EnumType.VALUE"
+      }
+    },
+    {
+      "name": "values/bitsVal",
+      "location": {
+        "filename": "json.fidl",
+        "line": 27,
+        "column": 16
+      },
+      "type": {
+        "kind": "identifier",
+        "identifier": "values/BitsType",
+        "nullable": false
+      },
+      "value": {
+        "kind": "identifier",
+        "identifier": "values/BitsType.VALUE"
+      }
+    },
+    {
+      "name": "values/bitsPrimitiveVal",
+      "location": {
+        "filename": "json.fidl",
+        "line": 28,
+        "column": 13
+      },
+      "type": {
+        "kind": "primitive",
+        "subtype": "int32"
+      },
+      "value": {
+        "kind": "identifier",
+        "identifier": "values/BitsType.VALUE"
+      }
     }
   ],
   "enum_declarations": [
     {
-      "name": "values/Enum",
+      "name": "values/EnumType",
       "location": {
         "filename": "json.fidl",
         "line": 17,
+        "column": 6
+      },
+      "type": "int32",
+      "members": [
+        {
+          "name": "VALUE",
+          "location": {
+            "filename": "json.fidl",
+            "line": 18,
+            "column": 5
+          },
+          "value": {
+            "kind": "literal",
+            "literal": {
+              "kind": "numeric",
+              "value": "1",
+              "expression": "1"
+            }
+          }
+        }
+      ],
+      "strict": false
+    },
+    {
+      "name": "values/BitsType",
+      "location": {
+        "filename": "json.fidl",
+        "line": 24,
+        "column": 6
+      },
+      "type": "int32",
+      "members": [
+        {
+          "name": "VALUE",
+          "location": {
+            "filename": "json.fidl",
+            "line": 25,
+            "column": 5
+          },
+          "value": {
+            "kind": "literal",
+            "literal": {
+              "kind": "numeric",
+              "value": "1",
+              "expression": "0x00000001"
+            }
+          }
+        }
+      ],
+      "strict": false
+    },
+    {
+      "name": "values/Enum",
+      "location": {
+        "filename": "json.fidl",
+        "line": 30,
         "column": 6
       },
       "type": "uint32",
@@ -1887,7 +2523,7 @@ struct Struct {
           "name": "E",
           "location": {
             "filename": "json.fidl",
-            "line": 18,
+            "line": 31,
             "column": 3
           },
           "value": {
@@ -1899,16 +2535,18 @@ struct Struct {
             }
           }
         }
-      ]
+      ],
+      "strict": false
     }
   ],
   "interface_declarations": [],
+  "service_declarations": [],
   "struct_declarations": [
     {
       "name": "values/Struct",
       "location": {
         "filename": "json.fidl",
-        "line": 25,
+        "line": 38,
         "column": 8
       },
       "anonymous": false,
@@ -1921,14 +2559,14 @@ struct Struct {
           "name": "int64_with_default",
           "location": {
             "filename": "json.fidl",
-            "line": 26,
+            "line": 39,
             "column": 9
           },
           "maybe_default_value": {
             "kind": "literal",
             "literal": {
               "kind": "numeric",
-              "value": "007",
+              "value": "7",
               "expression": "007"
             }
           },
@@ -1946,7 +2584,7 @@ struct Struct {
           "name": "string_with_default",
           "location": {
             "filename": "json.fidl",
-            "line": 27,
+            "line": 40,
             "column": 10
           },
           "maybe_default_value": {
@@ -1971,7 +2609,7 @@ struct Struct {
           "name": "bool_with_default",
           "location": {
             "filename": "json.fidl",
-            "line": 28,
+            "line": 41,
             "column": 8
           },
           "maybe_default_value": {
@@ -1987,9 +2625,53 @@ struct Struct {
           "alignment": 1,
           "offset": 24,
           "max_handles": 0
+        },
+        {
+          "type": {
+            "kind": "identifier",
+            "identifier": "values/Enum",
+            "nullable": false
+          },
+          "name": "enum_with_default",
+          "location": {
+            "filename": "json.fidl",
+            "line": 42,
+            "column": 8
+          },
+          "maybe_default_value": {
+            "kind": "identifier",
+            "identifier": "values/Enum.E"
+          },
+          "size": 4,
+          "max_out_of_line": 0,
+          "alignment": 4,
+          "offset": 28,
+          "max_handles": 0
+        },
+        {
+          "type": {
+            "kind": "identifier",
+            "identifier": "values/Bits",
+            "nullable": false
+          },
+          "name": "bits_with_default",
+          "location": {
+            "filename": "json.fidl",
+            "line": 43,
+            "column": 8
+          },
+          "maybe_default_value": {
+            "kind": "identifier",
+            "identifier": "values/Bits.B"
+          },
+          "size": 4,
+          "max_out_of_line": 0,
+          "alignment": 4,
+          "offset": 32,
+          "max_handles": 0
         }
       ],
-      "size": 32,
+      "size": 40,
       "max_out_of_line": 4294967295,
       "alignment": 8,
       "max_handles": 0,
@@ -2005,7 +2687,6 @@ struct Struct {
     "values/UINT64",
     "values/UINT32",
     "values/UINT16",
-    "values/Struct",
     "values/STRING",
     "values/INT8",
     "values/INT64",
@@ -2013,8 +2694,15 @@ struct Struct {
     "values/INT16",
     "values/FLOAT64",
     "values/FLOAT32",
+    "values/EnumType",
+    "values/enumVal",
+    "values/enumPrimitiveVal",
     "values/Enum",
+    "values/BitsType",
+    "values/bitsVal",
+    "values/bitsPrimitiveVal",
     "values/Bits",
+    "values/Struct",
     "values/BOOL"
   ],
   "declarations": {
@@ -2031,6 +2719,12 @@ struct Struct {
     "values/FLOAT64": "const",
     "values/BOOL": "const",
     "values/STRING": "const",
+    "values/enumVal": "const",
+    "values/enumPrimitiveVal": "const",
+    "values/bitsVal": "const",
+    "values/bitsPrimitiveVal": "const",
+    "values/EnumType": "enum",
+    "values/BitsType": "enum",
     "values/Enum": "enum",
     "values/Struct": "struct"
   }
@@ -2099,6 +2793,7 @@ struct Baz {
   "const_declarations": [],
   "enum_declarations": [],
   "interface_declarations": [],
+  "service_declarations": [],
   "struct_declarations": [
     {
       "name": "top/Baz",
@@ -2233,7 +2928,7 @@ protocol Top {
       "methods": [
         {
           "ordinal": 961142572,
-          "generated_ordinal": 961142572,
+          "generated_ordinal": 4128075913533325312,
           "name": "GetFoo",
           "location": {
             "filename": "bottom.fidl",
@@ -2245,6 +2940,7 @@ protocol Top {
           "maybe_request_size": 16,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": false,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": true,
           "maybe_response": [
             {
@@ -2269,11 +2965,150 @@ protocol Top {
           "maybe_response_size": 24,
           "maybe_response_alignment": 8,
           "maybe_response_has_padding": true,
+          "experimental_maybe_response_has_flexible_envelope": false,
           "is_composed": true
         }
       ]
     }
   ],
+  "service_declarations": [],
+  "struct_declarations": [],
+  "table_declarations": [],
+  "union_declarations": [],
+  "xunion_declarations": [],
+  "type_alias_declarations": [],
+  "declaration_order": [
+    "top/Top"
+  ],
+  "declarations": {
+    "top/Top": "interface"
+  }
+}
+)JSON"));
+  }
+
+  END_TEST;
+}
+
+bool json_generator_foreign_type_in_response_used_through_compose() {
+  BEGIN_TEST;
+
+  for (int i = 0; i < kRepeatTestCount; i++) {
+    SharedAmongstLibraries shared;
+    TestLibrary bottom_dep("bottom.fidl", R"FIDL(
+library bottom;
+
+struct Foo {
+  int32 a;
+};
+
+)FIDL",
+                           &shared);
+    ASSERT_TRUE(bottom_dep.Compile());
+    TestLibrary middle_dep("middle.fidl", R"FIDL(
+library middle;
+
+using bottom;
+
+[FragileBase]
+protocol Middle {
+  GetFoo() -> (bottom.Foo foo);
+};
+
+)FIDL",
+                           &shared);
+    ASSERT_TRUE(middle_dep.AddDependentLibrary(std::move(bottom_dep)));
+    ASSERT_TRUE(middle_dep.Compile());
+
+    TestLibrary library("top.fidl", R"FIDL(
+library top;
+
+using middle;
+
+protocol Top {
+  compose middle.Middle;
+};
+
+)FIDL",
+                        &shared);
+    ASSERT_TRUE(library.AddDependentLibrary(std::move(middle_dep)));
+    EXPECT_TRUE(checkJSONGenerator(std::move(library),
+                                   R"JSON(
+{
+  "version": "0.0.1",
+  "name": "top",
+  "library_dependencies": [
+    {
+      "name": "bottom",
+      "declarations": {
+        "bottom/Foo": "struct"
+      }
+    },
+    {
+      "name": "middle",
+      "declarations": {
+        "middle/Middle": "interface"
+      }
+    }
+  ],
+  "bits_declarations": [],
+  "const_declarations": [],
+  "enum_declarations": [],
+  "interface_declarations": [
+    {
+      "name": "top/Top",
+      "location": {
+        "filename": "top.fidl",
+        "line": 6,
+        "column": 10
+      },
+      "methods": [
+        {
+          "ordinal": 187925920,
+          "generated_ordinal": 807135680470712320,
+          "name": "GetFoo",
+          "location": {
+            "filename": "middle.fidl",
+            "line": 8,
+            "column": 3
+          },
+          "has_request": true,
+          "maybe_request": [],
+          "maybe_request_size": 16,
+          "maybe_request_alignment": 8,
+          "maybe_request_has_padding": false,
+          "experimental_maybe_request_has_flexible_envelope": false,
+          "has_response": true,
+          "maybe_response": [
+            {
+              "type": {
+                "kind": "identifier",
+                "identifier": "bottom/Foo",
+                "nullable": false
+              },
+              "name": "foo",
+              "location": {
+                "filename": "middle.fidl",
+                "line": 8,
+                "column": 27
+              },
+              "size": 4,
+              "max_out_of_line": 0,
+              "alignment": 4,
+              "offset": 16,
+              "max_handles": 0
+            }
+          ],
+          "maybe_response_size": 24,
+          "maybe_response_alignment": 8,
+          "maybe_response_has_padding": true,
+          "experimental_maybe_response_has_flexible_envelope": false,
+          "is_composed": true
+        }
+      ]
+    }
+  ],
+  "service_declarations": [],
   "struct_declarations": [],
   "table_declarations": [],
   "union_declarations": [],
@@ -2307,7 +3142,7 @@ struct Empty {};
     ASSERT_TRUE(dependency.Compile());
 
     TestLibrary library("example.fidl", R"FIDL(
-[OnLibrary]
+[OnLibrary, OnLibraryWithValue = "AValue"]
 library example;
 
 // TODO: Support placement of an attribute on using.
@@ -2368,6 +3203,16 @@ xunion ExampleXUnion {
                                    R"JSON({
   "version": "0.0.1",
   "name": "example",
+  "maybe_attributes": [
+    {
+      "name": "OnLibrary",
+      "value": ""
+    },
+    {
+      "name": "OnLibraryWithValue",
+      "value": "AValue"
+    }
+  ],
   "library_dependencies": [
     {
       "name": "exampleusing",
@@ -2379,6 +3224,11 @@ xunion ExampleXUnion {
   "bits_declarations": [
     {
       "name": "example/ExampleBits",
+      "location": {
+        "filename": "example.fidl",
+        "line": 9,
+        "column": 6
+      },
       "maybe_attributes": [
         {
           "name": "OnBits",
@@ -2393,6 +3243,11 @@ xunion ExampleXUnion {
       "members": [
         {
           "name": "MEMBER",
+          "location": {
+            "filename": "example.fidl",
+            "line": 11,
+            "column": 5
+          },
           "value": {
             "kind": "literal",
             "literal": {
@@ -2408,7 +3263,8 @@ xunion ExampleXUnion {
             }
           ]
         }
-      ]
+      ],
+      "strict": false
     }
   ],
   "const_declarations": [
@@ -2477,7 +3333,8 @@ xunion ExampleXUnion {
             }
           ]
         }
-      ]
+      ],
+      "strict": false
     }
   ],
   "interface_declarations": [
@@ -2497,7 +3354,7 @@ xunion ExampleXUnion {
       "methods": [
         {
           "ordinal": 1123904027,
-          "generated_ordinal": 1123904027,
+          "generated_ordinal": 4827131039807700992,
           "name": "Method",
           "location": {
             "filename": "example.fidl",
@@ -2534,12 +3391,14 @@ xunion ExampleXUnion {
           "maybe_request_size": 24,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": true,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": false,
           "is_composed": false
         }
       ]
     }
   ],
+  "service_declarations": [],
   "struct_declarations": [
     {
       "name": "example/ExampleStruct",
@@ -2630,7 +3489,8 @@ xunion ExampleXUnion {
       "size": 16,
       "max_out_of_line": 24,
       "alignment": 8,
-      "max_handles": 0
+      "max_handles": 0,
+      "strict": false
     }
   ],
   "union_declarations": [
@@ -2795,6 +3655,7 @@ using channel = handle<channel>;
   "const_declarations": [],
   "enum_declarations": [],
   "interface_declarations": [],
+  "service_declarations": [],
   "struct_declarations": [],
   "table_declarations": [],
   "union_declarations": [],
@@ -2916,14 +3777,121 @@ using channel = handle<channel>;
   END_TEST;
 }
 
+bool json_generator_service() {
+  BEGIN_TEST;
+
+  for (int i = 0; i < kRepeatTestCount; i++) {
+    EXPECT_TRUE(checkJSONGenerator(R"FIDL(
+library example;
+
+protocol SomeProtocol {};
+
+service AnEmptyService {};
+
+service SomeService {
+    SomeProtocol member1;
+    SomeProtocol member2;
+};
+
+)FIDL",
+                                   R"JSON(
+{
+  "version": "0.0.1",
+  "name": "example",
+  "library_dependencies": [],
+  "bits_declarations": [],
+  "const_declarations": [],
+  "enum_declarations": [],
+  "interface_declarations": [
+    {
+      "name": "example/SomeProtocol",
+      "location": {
+        "filename": "json.fidl",
+        "line": 4,
+        "column": 10
+      },
+      "methods": []
+    }
+  ],
+  "service_declarations": [
+    {
+      "name": "example/AnEmptyService",
+      "location": {
+        "filename": "json.fidl",
+        "line": 6,
+        "column": 9
+      },
+      "members": []
+    },
+    {
+      "name": "example/SomeService",
+      "location": {
+        "filename": "json.fidl",
+        "line": 8,
+        "column": 9
+      },
+      "members": [
+        {
+          "type": {
+            "kind": "identifier",
+            "identifier": "example/SomeProtocol",
+            "nullable": false
+          },
+          "name": "member1",
+          "location": {
+            "filename": "json.fidl",
+            "line": 9,
+            "column": 18
+          }
+        },
+        {
+          "type": {
+            "kind": "identifier",
+            "identifier": "example/SomeProtocol",
+            "nullable": false
+          },
+          "name": "member2",
+          "location": {
+            "filename": "json.fidl",
+            "line": 10,
+            "column": 18
+          }
+        }
+      ]
+    }
+  ],
+  "struct_declarations": [],
+  "table_declarations": [],
+  "union_declarations": [],
+  "xunion_declarations": [],
+  "type_alias_declarations": [],
+  "declaration_order": [
+    "example/SomeService",
+    "example/SomeProtocol",
+    "example/AnEmptyService"
+  ],
+  "declarations": {
+    "example/SomeProtocol": "interface",
+    "example/AnEmptyService": "service",
+    "example/SomeService": "service"
+  }
+}
+)JSON"));
+  }
+
+  END_TEST;
+}
+
 }  // namespace
 
 BEGIN_TEST_CASE(json_generator_tests)
 RUN_TEST(json_generator_test_empty_struct)
+RUN_TEST(json_generator_test_struct_default_value_enum_library_reference)
 RUN_TEST(json_generator_test_struct)
 RUN_TEST(json_generator_test_table)
 RUN_TEST(json_generator_test_union)
 RUN_TEST(json_generator_test_xunion)
+RUN_TEST(json_generator_test_request_flexible_envelope)
 RUN_TEST(json_generator_test_inheritance)
 RUN_TEST(json_generator_test_inheritance_with_recursive_decl)
 RUN_TEST(json_generator_test_error)
@@ -2933,6 +3901,8 @@ RUN_TEST(json_generator_check_escaping)
 RUN_TEST(json_generator_constants)
 RUN_TEST(json_generator_transitive_dependencies)
 RUN_TEST(json_generator_transitive_dependencies_compose)
+RUN_TEST(json_generator_foreign_type_in_response_used_through_compose)
 RUN_TEST(json_generator_placement_of_attributes)
 RUN_TEST(json_generator_type_aliases)
+RUN_TEST(json_generator_service)
 END_TEST_CASE(json_generator_tests)

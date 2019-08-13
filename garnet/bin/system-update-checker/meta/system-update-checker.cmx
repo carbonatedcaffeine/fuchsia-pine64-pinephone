@@ -4,15 +4,21 @@
     },
     "sandbox": {
         "features": [
-            "deprecated-misc-storage"
+            "config-data",
+            "deprecated-misc-storage",
+            "isolated-persistent-storage"
         ],
         "pkgfs": [
             "ctl"
         ],
         "services": [
+            "fuchsia.cobalt.SystemDataUpdater",
             "fuchsia.logger.LogSink",
             "fuchsia.pkg.PackageResolver",
-            "fuchsia.sys.Launcher"
+            "fuchsia.pkg.rewrite.Engine",
+            "fuchsia.recovery.FactoryReset",
+            "fuchsia.sys.Launcher",
+            "fuchsia.update.Info"
         ],
         "system": [
             "meta"

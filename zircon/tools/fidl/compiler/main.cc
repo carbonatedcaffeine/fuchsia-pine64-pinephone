@@ -3,16 +3,6 @@
 // found in the LICENSE file.
 
 #include <errno.h>
-#include <fidl/c_generator.h>
-#include <fidl/flat_ast.h>
-#include <fidl/json_generator.h>
-#include <fidl/json_schema.h>
-#include <fidl/lexer.h>
-#include <fidl/library_zx.h>
-#include <fidl/names.h>
-#include <fidl/parser.h>
-#include <fidl/source_manager.h>
-#include <fidl/tables_generator.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -25,6 +15,17 @@
 #include <utility>
 #include <vector>
 
+#include <fidl/c_generator.h>
+#include <fidl/flat_ast.h>
+#include <fidl/json_generator.h>
+#include <fidl/json_schema.h>
+#include <fidl/lexer.h>
+#include <fidl/library_zx.h>
+#include <fidl/names.h>
+#include <fidl/parser.h>
+#include <fidl/source_manager.h>
+#include <fidl/tables_generator.h>
+
 namespace {
 
 void Usage() {
@@ -36,6 +37,7 @@ void Usage() {
          "             [--json JSON_PATH]\n"
          "             [--name LIBRARY_NAME]\n"
          "             [--werror]\n"
+         "             [--json-schema]\n"
          "             [--files [FIDL_FILE...]...]\n"
          "             [--help]\n"
          "\n"
@@ -80,7 +82,7 @@ void Usage() {
          "as a whitespace-delimited list of arguments. Response files cannot be nested,\n"
          "and must be the only argument.\n"
          "\n"
-         "See <https://fuchsia.googlesource.com/fuchsia/+/master/zircon/docs/fidl/compiler.md>\n"
+         "See <https://fuchsia.googlesource.com/fuchsia/+/master/docs/zircon/fidl/compiler.md>\n"
          "for more information.\n";
   std::cout.flush();
 }
@@ -293,7 +295,6 @@ int main(int argc, char* argv[]) {
   while (args->Remaining()) {
     // Try to parse an output type.
     std::string behavior_argument = args->Claim();
-    std::fstream output_file;
     if (behavior_argument == "--help") {
       Usage();
       exit(0);

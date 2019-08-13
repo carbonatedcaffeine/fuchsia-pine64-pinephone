@@ -5,21 +5,19 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:mockito/mockito.dart';
+import 'package:quiver/testing/async.dart';
 import 'package:sl4f/sl4f.dart';
 import 'package:test/test.dart';
 
 const _iqueryFindCommand = 'iquery --find /hub';
 const _iqueryRecursiveInspectCommandPrefix = 'iquery --format=json --recursive';
 
-class MockProcess extends Mock implements Process {}
-
 void main(List<String> args) {
   test('inspectComponentRoot returns json decoded stdout', () async {
     const componentName = 'foo';
     const contentsRoot = {'faz': 'bear'};
 
-    final inspect = Inspect(_createSshProcessFactory(
+    final inspect = Inspect(FakeSsh(
         findCommandStdOut: 'one\n$componentName\nthree\n',
         inspectCommandContentsRoot: [
           {
@@ -38,7 +36,7 @@ void main(List<String> args) {
     const componentName = 'foo';
     const contentsRoot = {'faz': 'bear'};
 
-    final inspect = Inspect(_createSshProcessFactory(
+    final inspect = Inspect(FakeSsh(
         findCommandStdOut: 'one\n$componentName\n$componentName\n',
         inspectCommandContentsRoot: [
           {
@@ -100,7 +98,7 @@ void main(List<String> args) {
       shouldFailDueToInspect: true,
       inspectCommandExitCode: [-1, -1, -1, -1]);
 
-  _testRetry('inspectComponentRoot should succeed dispite multiple failures',
+  _testRetry('inspectComponentRoot should succeed despite multiple failures',
       shouldFailDueToFind: false,
       shouldFailDueToInspect: false,
       findCommandExitCode: [-1, -1, -1, 0],
@@ -118,102 +116,77 @@ void _testRetry(
     const componentName = 'foo';
     const contentsRoot = {'faz': 'bear'};
 
-    // Pass in a fake sleep generator, that records the sleep durations.
-    final sleepDurations = <Duration>[];
-    Future<dynamic> autoCompleteSleep(Duration delay) {
-      sleepDurations.add(delay);
-      return Future.value();
-    }
+    final fakeSsh = FakeSsh(
+        findCommandStdOut: 'one\n$componentName\n',
+        inspectCommandContentsRoot: [
+          {
+            'contents': {'root': contentsRoot}
+          }
+        ],
+        expectedInspectSuffix: '$componentName',
+        findCommandExitCode: findCommandExitCode,
+        inspectCommandExitCode: inspectCommandExitCode);
 
-    final inspect = Inspect(
-      _createSshProcessFactory(
-          findCommandStdOut: 'one\n$componentName\n',
-          inspectCommandContentsRoot: [
-            {
-              'contents': {'root': contentsRoot}
-            }
-          ],
-          expectedInspectSuffix: '$componentName',
-          findCommandExitCode: findCommandExitCode,
-          inspectCommandExitCode: inspectCommandExitCode),
-      sleep: autoCompleteSleep,
-    );
+    final inspect = Inspect(fakeSsh);
 
-    // Failing due to find causes an exception.
-    if (shouldFailDueToFind) {
-      try {
-        await inspect.inspectComponentRoot(componentName);
+    FakeAsync().run((fakeAsync) {
+      final result = inspect.inspectComponentRoot(componentName);
+      fakeAsync.flushTimers();
 
-        fail('inspectComponentRoot didn\'t throw exception as was expected');
-        // ignore: avoid_catching_errors
-      } on Error {
-        // Pass through for expected exception.
-      }
-    } else {
-      final result = await inspect.inspectComponentRoot(componentName);
-
-      // Failing due to inspect returns null.
-      if (shouldFailDueToInspect) {
-        expect(result, isNull);
+      if (shouldFailDueToFind || shouldFailDueToInspect) {
+        expect(result, completion(isNull));
       } else {
-        expect(result, equals(contentsRoot));
+        expect(result, completion(equals(contentsRoot)));
       }
-    }
 
-    // Verify all sleep durations are multiples of two of each other.
-    // Find sleeps happen before inspect sleeps.
+      // Needed so that 'completion' above evaluates.
+      fakeAsync.flushMicrotasks();
+    });
+
+    expect(fakeSsh.findCommandCount, equals(findCommandExitCode.length));
     expect(
-        sleepDurations.length,
-        equals(findCommandExitCode.length -
-            1 +
-            inspectCommandExitCode.length -
-            1));
-    for (int i = 0; i < findCommandExitCode.length - 2; i++) {
-      expect(sleepDurations[i + 1], equals(sleepDurations[i] * 2));
-    }
-    sleepDurations.removeRange(0, findCommandExitCode.length - 1);
-    for (int i = 0; i < inspectCommandExitCode.length - 2; i++) {
-      expect(sleepDurations[i + 1], equals(sleepDurations[i] * 2));
-    }
+        fakeSsh.inspectCommandCount, anyOf(0, inspectCommandExitCode.length));
   });
 }
 
-Function _createSshProcessFactory({
-  String findCommandStdOut,
-  String expectedInspectSuffix,
-  dynamic inspectCommandContentsRoot,
-  List<int> findCommandExitCode = const <int>[0],
-  List<int> inspectCommandExitCode = const <int>[0],
-}) {
+class FakeSsh implements Ssh {
   int findCommandCount = 0;
   int inspectCommandCount = 0;
-  return (String command) async {
-    final process = MockProcess();
+
+  String findCommandStdOut;
+  String expectedInspectSuffix;
+  dynamic inspectCommandContentsRoot;
+  List<int> findCommandExitCode;
+  List<int> inspectCommandExitCode;
+
+  FakeSsh({
+    this.findCommandStdOut,
+    this.expectedInspectSuffix,
+    this.inspectCommandContentsRoot,
+    this.findCommandExitCode = const <int>[0],
+    this.inspectCommandExitCode = const <int>[0],
+  });
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnsupportedError(invocation.toString());
+
+  @override
+  Future<ProcessResult> run(String command, {String stdin}) async {
+    int exitCode;
+    String stdout;
+
     if (command.trim() == _iqueryFindCommand) {
-      when(process.exitCode).thenAnswer((_) async {
-        final result = findCommandExitCode[findCommandCount];
-        findCommandCount++;
-        return result;
-      });
-      when(process.stdout).thenAnswer(
-          (_) => Stream.fromIterable([utf8.encode(findCommandStdOut)]));
-      when(process.stderr).thenAnswer((_) => Stream.empty());
+      exitCode = findCommandExitCode[findCommandCount++];
+      stdout = findCommandStdOut;
     } else if (command.trim() ==
         '$_iqueryRecursiveInspectCommandPrefix $expectedInspectSuffix') {
-      when(process.exitCode).thenAnswer((_) async {
-        final result = inspectCommandExitCode[inspectCommandCount];
-        inspectCommandCount++;
-        return result;
-      });
-      when(process.stdout).thenAnswer((_) => Stream.fromIterable(
-          [utf8.encode(json.encode(inspectCommandContentsRoot))]));
-      when(process.stderr).thenAnswer((_) => Stream.empty());
+      exitCode = inspectCommandExitCode[inspectCommandCount++];
+      stdout = json.encode(inspectCommandContentsRoot);
     } else {
       print('got unknown command $command');
-      when(process.exitCode).thenAnswer((_) async => -1);
-      when(process.stdout).thenAnswer((_) => Stream.empty());
-      when(process.stderr).thenAnswer((_) => Stream.empty());
+      exitCode = -1;
     }
-    return process;
-  };
+    return ProcessResult(0, exitCode, stdout, '');
+  }
 }

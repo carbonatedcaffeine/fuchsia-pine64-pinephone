@@ -40,8 +40,9 @@
 #include <threads.h>
 #include <zircon/listnode.h>
 
+#include <wlan/protocol/info.h>
+
 #include "src/connectivity/wlan/drivers/third_party/intel/iwlwifi/fw/acpi.h"
-#include "src/connectivity/wlan/drivers/third_party/intel/iwlwifi/fw/api/fmac.h"  // for enum umac_scan_type
 #include "src/connectivity/wlan/drivers/third_party/intel/iwlwifi/fw/dbg.h"
 #include "src/connectivity/wlan/drivers/third_party/intel/iwlwifi/fw/file.h"
 #include "src/connectivity/wlan/drivers/third_party/intel/iwlwifi/fw/notif-wait.h"
@@ -123,12 +124,6 @@ struct iwl_mvm_phy_ctxt {
   uint32_t ref;
 
   enum nl80211_chan_width width;
-
-  /*
-   * TODO: This should probably be removed. Currently here only for rate
-   * scaling algorithm
-   */
-  struct ieee80211_channel* channel;
 
 #ifdef CPTCFG_IWLWIFI_FRQ_MGR
   /* Frequency Manager tx power limit*/
@@ -484,13 +479,11 @@ enum iwl_scan_status {
 };
 
 enum iwl_mvm_scan_type {
-#if 0   // NEEDS_PORTING: duplicate with 'enum umac_scan_type'
-    IWL_SCAN_TYPE_NOT_SET,
-    IWL_SCAN_TYPE_UNASSOC,
-    IWL_SCAN_TYPE_WILD,
-    IWL_SCAN_TYPE_MILD,
-    IWL_SCAN_TYPE_FRAGMENTED,
-#endif  // NEEDS_PORTING
+  IWL_SCAN_TYPE_NOT_SET,
+  IWL_SCAN_TYPE_UNASSOC,
+  IWL_SCAN_TYPE_WILD,
+  IWL_SCAN_TYPE_MILD,
+  IWL_SCAN_TYPE_FRAGMENTED,
   IWL_SCAN_TYPE_FAST_BALANCE = IWL_SCAN_TYPE_FRAGMENTED + 1,
 };
 
@@ -1469,7 +1462,8 @@ struct iwl_rate_info {
 };
 
 void __iwl_mvm_mac_stop(struct iwl_mvm* mvm);
-int __iwl_mvm_mac_start(struct iwl_mvm* mvm);
+zx_status_t iwl_mvm_mac_start(struct iwl_mvm* mvm);
+zx_status_t __iwl_mvm_mac_start(struct iwl_mvm* mvm);
 
 /******************
  * MVM Methods
@@ -1490,12 +1484,12 @@ void iwl_mvm_get_sync_time(struct iwl_mvm* mvm, uint32_t* gp2, uint64_t* boottim
 
 /* Tx / Host Commands */
 zx_status_t __must_check iwl_mvm_send_cmd(struct iwl_mvm* mvm, struct iwl_host_cmd* cmd);
-int __must_check iwl_mvm_send_cmd_pdu(struct iwl_mvm* mvm, uint32_t id, uint32_t flags,
-                                      uint16_t len, const void* data);
+zx_status_t __must_check iwl_mvm_send_cmd_pdu(struct iwl_mvm* mvm, uint32_t id, uint32_t flags,
+                                              uint16_t len, const void* data);
 zx_status_t __must_check iwl_mvm_send_cmd_status(struct iwl_mvm* mvm, struct iwl_host_cmd* cmd,
                                                  uint32_t* status);
-int __must_check iwl_mvm_send_cmd_pdu_status(struct iwl_mvm* mvm, uint32_t id, uint16_t len,
-                                             const void* data, uint32_t* status);
+zx_status_t __must_check iwl_mvm_send_cmd_pdu_status(struct iwl_mvm* mvm, uint32_t id, uint16_t len,
+                                                     const void* data, uint32_t* status);
 int iwl_mvm_tx_skb(struct iwl_mvm* mvm, struct sk_buff* skb, struct ieee80211_sta* sta);
 int iwl_mvm_tx_skb_non_sta(struct iwl_mvm* mvm, struct sk_buff* skb);
 void iwl_mvm_set_tx_cmd(struct iwl_mvm* mvm, struct sk_buff* skb, struct iwl_tx_cmd* tx_cmd,
@@ -1536,7 +1530,7 @@ static inline void iwl_mvm_wait_for_async_handlers(struct iwl_mvm* mvm) {
 /* Statistics */
 void iwl_mvm_handle_rx_statistics(struct iwl_mvm* mvm, struct iwl_rx_packet* pkt);
 void iwl_mvm_rx_statistics(struct iwl_mvm* mvm, struct iwl_rx_cmd_buffer* rxb);
-int iwl_mvm_request_statistics(struct iwl_mvm* mvm, bool clear);
+zx_status_t iwl_mvm_request_statistics(struct iwl_mvm* mvm, bool clear);
 void iwl_mvm_accu_radio_stats(struct iwl_mvm* mvm);
 
 /* NVM */
@@ -1571,7 +1565,7 @@ static inline uint32_t iwl_mvm_get_phy_config(struct iwl_mvm* mvm) {
   return mvm->fw->phy_config & phy_config;
 }
 
-int iwl_mvm_up(struct iwl_mvm* mvm);
+zx_status_t iwl_mvm_up(struct iwl_mvm* mvm);
 int iwl_mvm_load_d3_fw(struct iwl_mvm* mvm);
 
 int iwl_mvm_mac_setup_register(struct iwl_mvm* mvm);
@@ -1608,16 +1602,15 @@ void iwl_mvm_rx_shared_mem_cfg_notif(struct iwl_mvm* mvm, struct iwl_rx_cmd_buff
 
 /* MVM PHY */
 int iwl_mvm_phy_ctxt_add(struct iwl_mvm* mvm, struct iwl_mvm_phy_ctxt* ctxt,
-                         struct cfg80211_chan_def* chandef, uint8_t chains_static,
-                         uint8_t chains_dynamic);
+                         wlan_channel_t* chandef, uint8_t chains_static, uint8_t chains_dynamic);
 int iwl_mvm_phy_ctxt_changed(struct iwl_mvm* mvm, struct iwl_mvm_phy_ctxt* ctxt,
                              struct cfg80211_chan_def* chandef, uint8_t chains_static,
                              uint8_t chains_dynamic);
 void iwl_mvm_phy_ctxt_ref(struct iwl_mvm* mvm, struct iwl_mvm_phy_ctxt* ctxt);
 void iwl_mvm_phy_ctxt_unref(struct iwl_mvm* mvm, struct iwl_mvm_phy_ctxt* ctxt);
 int iwl_mvm_phy_ctx_count(struct iwl_mvm* mvm);
-uint8_t iwl_mvm_get_channel_width(struct cfg80211_chan_def* chandef);
-uint8_t iwl_mvm_get_ctrl_pos(struct cfg80211_chan_def* chandef);
+uint8_t iwl_mvm_get_channel_width(wlan_channel_t* chandef);
+uint8_t iwl_mvm_get_ctrl_pos(wlan_channel_t* chandef);
 
 /* MAC (virtual interface) programming */
 int iwl_mvm_mac_ctxt_init(struct iwl_mvm* mvm, struct ieee80211_vif* vif);
@@ -1721,14 +1714,14 @@ static inline void iwl_mvm_vif_dbgfs_clean(struct iwl_mvm* mvm, struct ieee80211
 #endif /* CPTCFG_IWLWIFI_DEBUGFS */
 
 /* rate scaling */
-int iwl_mvm_send_lq_cmd(struct iwl_mvm* mvm, struct iwl_lq_cmd* lq, bool sync);
+zx_status_t iwl_mvm_send_lq_cmd(struct iwl_mvm* mvm, struct iwl_lq_cmd* lq, bool sync);
 void iwl_mvm_update_frame_stats(struct iwl_mvm* mvm, uint32_t rate, bool agg);
 int rs_pretty_print_rate(char* buf, int bufsz, const uint32_t rate);
 void rs_update_last_rssi(struct iwl_mvm* mvm, struct iwl_mvm_sta* mvmsta,
                          struct ieee80211_rx_status* rx_status);
 
 /* power management */
-int iwl_mvm_power_update_device(struct iwl_mvm* mvm);
+zx_status_t iwl_mvm_power_update_device(struct iwl_mvm* mvm);
 int iwl_mvm_power_update_mac(struct iwl_mvm* mvm);
 int iwl_mvm_power_update_ps(struct iwl_mvm* mvm);
 int iwl_mvm_power_mac_dbgfs_read(struct iwl_mvm* mvm, struct ieee80211_vif* vif, char* buf,
@@ -1866,17 +1859,20 @@ static inline uint32_t iwl_mvm_flushable_queues(struct iwl_mvm* mvm) {
 
 static inline void iwl_mvm_stop_device(struct iwl_mvm* mvm) {
   lockdep_assert_held(&mvm->mutex);
+
+  /* calling this function without using dump_start/end since at this
+   * point we already hold the op mode mutex
+   */
 #if 0   // NEEDS_PORTING
-    /* calling this function without using dump_start/end since at this
-     * point we already hold the op mode mutex
-     */
-    iwl_fw_dbg_collect_sync(&mvm->fwrt);
-    iwl_fw_cancel_timestamp(&mvm->fwrt);
-    iwl_free_fw_paging(&mvm->fwrt);
-    clear_bit(IWL_MVM_STATUS_FIRMWARE_RUNNING, &mvm->status);
-    iwl_fw_dump_conf_clear(&mvm->fwrt);
-    iwl_trans_stop_device(mvm->trans);
+  iwl_fw_dbg_collect_sync(&mvm->fwrt);
 #endif  // NEEDS_PORTING
+  iwl_fw_cancel_timestamp(&mvm->fwrt);
+#if 0   // NEEDS_PORTING
+  iwl_free_fw_paging(&mvm->fwrt);
+#endif  // NEEDS_PORTING
+  clear_bit(IWL_MVM_STATUS_FIRMWARE_RUNNING, &mvm->status);
+  iwl_fw_dump_conf_clear(&mvm->fwrt);
+  iwl_trans_stop_device(mvm->trans);
 }
 
 /* Re-configure the SCD for a queue that has already been configured */

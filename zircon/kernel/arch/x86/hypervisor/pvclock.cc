@@ -4,14 +4,15 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT
 
+#include <bits.h>
+#include <lib/zircon-internal/thread_annotations.h>
+#include <platform.h>
+#include <zircon/types.h>
+
 #include <arch/hypervisor.h>
 #include <arch/x86/pvclock.h>
-#include <bits.h>
 #include <hypervisor/guest_physical_address_space.h>
-#include <platform.h>
 #include <vm/physmap.h>
-#include <lib/zircon-internal/thread_annotations.h>
-#include <zircon/types.h>
 
 #include "pvclock_priv.h"
 

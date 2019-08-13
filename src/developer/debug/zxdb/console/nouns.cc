@@ -41,6 +41,7 @@ namespace {
 
 constexpr int kForceTypes = 1;
 constexpr int kVerboseSwitch = 2;
+constexpr int kForceUpdate = 3;
 
 // Frames ------------------------------------------------------------------------------------------
 
@@ -62,6 +63,11 @@ const char kFrameHelp[] =
   regardless of which is the active one.
 
 Options
+
+  -f
+  --force
+      When listing frames, force updates the stack, replacing and recomputing
+      all addresses even if the debugger thinks nothing has changed.
 
   -t
   --types
@@ -101,6 +107,8 @@ bool HandleFrameNoun(ConsoleContext* context, const Command& cmd, Err* err) {
 
   if (cmd.GetNounIndex(Noun::kFrame) == Command::kNoIndex) {
     // Just "frame", this lists available frames.
+    if (cmd.HasSwitch(kForceUpdate))
+      cmd.thread()->GetStack().ClearFrames();
     Console::get()->Output(
         FormatFrameList(cmd.thread(), cmd.HasSwitch(kForceTypes), cmd.HasSwitch(kVerboseSwitch)));
     return true;
@@ -116,6 +124,10 @@ bool HandleFrameNoun(ConsoleContext* context, const Command& cmd, Err* err) {
   context->SetActiveTarget(cmd.target());
 
   ConsoleFormatOptions options;
+  options.verbosity = ConsoleFormatOptions::Verbosity::kMinimal;
+  options.pointer_expand_depth = 1;
+  options.max_depth = 4;
+
   Console::get()->Output(FormatFrameLong(cmd.frame(), cmd.HasSwitch(kForceTypes), options));
   return true;
 }
@@ -166,7 +178,7 @@ void ListFilters(ConsoleContext* context, JobContext* job) {
 
     // "Current thread" marker.
     if (id == active_filter_id)
-      row.push_back(GetRightArrow());
+      row.push_back(GetCurrentRowMarker());
     else
       row.emplace_back();
 
@@ -274,7 +286,7 @@ void ListThreads(ConsoleContext* context, Process* process) {
 
     // "Current thread" marker.
     if (pair.first == active_thread_id)
-      row.push_back(GetRightArrow());
+      row.push_back(GetCurrentRowMarker());
     else
       row.emplace_back();
 
@@ -535,7 +547,7 @@ void ListBreakpoints(ConsoleContext* context, bool include_locations) {
 
     // "Current breakpoint" marker.
     if (pair.first == active_breakpoint_id)
-      row.emplace_back(GetRightArrow());
+      row.emplace_back(GetCurrentRowMarker());
     else
       row.emplace_back();
 
@@ -664,7 +676,7 @@ void ListSymbolServers(ConsoleContext* context) {
 
     // "Current symbol_server" marker.
     if (id == active_symbol_server_id)
-      row.emplace_back(GetRightArrow());
+      row.emplace_back(GetCurrentRowMarker());
     else
       row.emplace_back();
 
@@ -823,6 +835,7 @@ void AppendNouns(std::map<Noun, NounRecord>* nouns) {
 const std::vector<SwitchRecord>& GetNounSwitches() {
   static std::vector<SwitchRecord> switches;
   if (switches.empty()) {
+    switches.emplace_back(kForceUpdate, false, "force", 'f');
     switches.emplace_back(kForceTypes, false, "types", 't');
     switches.emplace_back(kVerboseSwitch, false, "verbose", 'v');
   }

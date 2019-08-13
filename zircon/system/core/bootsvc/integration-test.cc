@@ -4,11 +4,6 @@
 
 #include <dirent.h>
 #include <dlfcn.h>
-#include <fbl/algorithm.h>
-#include <fbl/string.h>
-#include <fbl/string_printf.h>
-#include <fbl/unique_fd.h>
-#include <fbl/vector.h>
 #include <fcntl.h>
 #include <fuchsia/boot/c/fidl.h>
 #include <lib/fdio/directory.h>
@@ -16,19 +11,77 @@
 #include <lib/zx/channel.h>
 #include <lib/zx/debuglog.h>
 #include <lib/zx/job.h>
+#include <lib/zx/time.h>
 #include <lib/zx/vmo.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unittest/unittest.h>
 #include <zircon/boot/image.h>
 #include <zircon/process.h>
 #include <zircon/processargs.h>
+#include <zircon/syscalls/system.h>
 
 #include <utility>
+
+#include <fbl/algorithm.h>
+#include <fbl/string.h>
+#include <fbl/string_printf.h>
+#include <fbl/unique_fd.h>
+#include <fbl/vector.h>
+#include <unittest/unittest.h>
 
 #include "util.h"
 
 static fbl::Vector<fbl::String> arguments;
+
+constexpr char kArgumentsPath[] = "/svc/" fuchsia_boot_Arguments_Name;
+constexpr char kFactoryItemsPath[] = "/svc/" fuchsia_boot_FactoryItems_Name;
+constexpr char kItemsPath[] = "/svc/" fuchsia_boot_Items_Name;
+constexpr char kLogPath[] = "/svc/" fuchsia_boot_Log_Name;
+constexpr char kRootJobPath[] = "/svc/" fuchsia_boot_RootJob_Name;
+constexpr char kRootResourcePath[] = "/svc/" fuchsia_boot_RootResource_Name;
+
+[[noreturn]] void poweroff() {
+  // Grab the root resource, needed to make the poweroff call.
+  // We ignore returned status codes; there's nothing useful for us to do in
+  // the event of a failure.
+  zx::channel local, remote;
+  zx::channel::create(0, &local, &remote);
+  fdio_service_connect(kRootResourcePath, remote.release());
+  zx::resource root_resource;
+  fuchsia_boot_RootResourceGet(local.get(), root_resource.reset_and_get_address());
+
+  // Power off.
+  zx_system_powerctl(root_resource.get(), ZX_SYSTEM_POWERCTL_SHUTDOWN, NULL);
+
+  while (true) {
+    __builtin_trap();
+  }
+}
+
+void print_test_success_string() {
+  // Get the debuglog handle.
+  // If any of these operations fail, there's nothing we can really do here, so
+  // just move along.
+  zx::channel local, remote;
+  zx_status_t status = zx::channel::create(0, &local, &remote);
+  if (status != ZX_OK) {
+    return;
+  }
+  status = fdio_service_connect(kLogPath, remote.release());
+  if (status != ZX_OK) {
+    return;
+  }
+
+  zx::debuglog log;
+  status = fuchsia_boot_LogGet(local.get(), log.reset_and_get_address());
+  if (status != ZX_OK) {
+    return;
+  }
+
+  // print the success string to the debug log
+  zx_debuglog_write(log.get(), 0, ZBI_TEST_SUCCESS_STRING,
+                    sizeof(ZBI_TEST_SUCCESS_STRING));
+}
 
 int main(int argc, char** argv) {
   // Copy arguments for later use in tests.
@@ -36,17 +89,21 @@ int main(int argc, char** argv) {
     arguments.push_back(fbl::String(argv[i]));
   }
 
-  return unittest_run_all_tests(argc, argv) ? 0 : -1;
+  int result = unittest_run_all_tests(argc, argv) ? 0 : -1;
+  if (result == 0) {
+    print_test_success_string();
+  }
+
+  // Sleep 3 seconds to allow buffers to flush before powering off
+  zx::nanosleep(zx::deadline_after(zx::sec(3)));
+
+  // Exit.  This won't actually return.
+  poweroff();
+
+  return result;
 }
 
 namespace {
-
-constexpr char kArgumentsPath[] = "/bootsvc/" fuchsia_boot_Arguments_Name;
-constexpr char kFactoryItemsPath[] = "/bootsvc/" fuchsia_boot_FactoryItems_Name;
-constexpr char kItemsPath[] = "/bootsvc/" fuchsia_boot_Items_Name;
-constexpr char kLogPath[] = "/bootsvc/" fuchsia_boot_Log_Name;
-constexpr char kRootJobPath[] = "/bootsvc/" fuchsia_boot_RootJob_Name;
-constexpr char kRootResourcePath[] = "/bootsvc/" fuchsia_boot_RootResource_Name;
 
 // Make sure the loader works
 bool TestLoader() {
@@ -60,7 +117,7 @@ bool TestLoader() {
   END_TEST;
 }
 
-// Make sure that bootsvc gave us a namespace with only /boot and /bootsvc.
+// Make sure that bootsvc gave us a namespace with only /boot and /svc.
 bool TestNamespace() {
   BEGIN_TEST;
 
@@ -74,7 +131,7 @@ bool TestNamespace() {
 
   ASSERT_EQ(ns->count, 2);
   EXPECT_STR_EQ(ns->path[0], "/boot");
-  EXPECT_STR_EQ(ns->path[1], "/bootsvc");
+  EXPECT_STR_EQ(ns->path[1], "/svc");
 
   free(ns);
   END_TEST;
@@ -156,18 +213,50 @@ bool TestFactoryItems() {
   status = fdio_service_connect(kFactoryItemsPath, remote_factory_items.release());
   ASSERT_EQ(ZX_OK, status);
 
-  status = fuchsia_boot_FactoryItemsGet(local_factory_items.get(), 0,
-                                        payload.reset_and_get_address(), &length);
-  ASSERT_EQ(ZX_OK, status);
+  static constexpr char kExpected[] = "IAmAFactoryItemHooray";
+  uint8_t buf[sizeof(kExpected) - 1];
 
-  // If we have a valid payload, verify that a second call vends nothing.
-  if (payload.is_valid()) {
+  // Verify that multiple calls work.
+  for (int i = 0; i < 2; i++) {
     status = fuchsia_boot_FactoryItemsGet(local_factory_items.get(), 0,
                                           payload.reset_and_get_address(), &length);
     ASSERT_EQ(ZX_OK, status);
-    ASSERT_FALSE(payload.is_valid());
-    ASSERT_EQ(0, length);
+    ASSERT_TRUE(payload.is_valid());
+    ASSERT_EQ(sizeof(buf), length);
+    ASSERT_EQ(ZX_OK, payload.read(buf, 0, sizeof(buf)));
+    ASSERT_BYTES_EQ(reinterpret_cast<const uint8_t*>(kExpected), buf, sizeof(buf), "");
   }
+  END_TEST;
+}
+
+// Make sure that bootsvc parsed and passed boot args from ZBI_ITEM_IMAGE_ARGS
+// correctly.
+bool TestBootArgsFromImage() {
+  BEGIN_TEST;
+
+  zx::channel local, remote;
+  zx_status_t status = zx::channel::create(0, &local, &remote);
+  ASSERT_EQ(ZX_OK, status);
+
+  // Check that we can open the fuchsia.boot.Arguments service.
+  status = fdio_service_connect(kArgumentsPath, remote.release());
+  ASSERT_EQ(ZX_OK, status);
+
+  // Check that we received a VMO from the service, each time we call it.
+  zx::vmo vmo;
+  size_t size;
+  status = fuchsia_boot_ArgumentsGet(local.get(), vmo.reset_and_get_address(), &size);
+  ASSERT_EQ(ZX_OK, status);
+  ASSERT_TRUE(vmo.is_valid());
+
+  auto buf = std::make_unique<char[]>(size);
+  status = vmo.read(buf.get(), 0, size);
+  ASSERT_EQ(ZX_OK, status);
+
+  /* Boot args from Image are at the beginning of Arguments VMO */
+  static constexpr char kExpected[] = "testkey=testvalue";
+  auto actual = reinterpret_cast<const uint8_t*>(buf.get());
+  ASSERT_BYTES_EQ(reinterpret_cast<const uint8_t*>(kExpected), actual, sizeof(kExpected) - 1, "");
 
   END_TEST;
 }
@@ -196,10 +285,14 @@ bool TestBootItems() {
     status = fuchsia_boot_ItemsGet(local.get(), type, 0, payload.reset_and_get_address(), &length);
     ASSERT_EQ(ZX_OK, status);
 
+#ifdef __x64_64__
+    // (The following is only implemented on x64 at this time, so we only test
+    // it there.)
     // If we see a ZBI_TYPE_CRASHLOG item, then the kernel should have
     // translated it into a VMO file, and bootsvc should have put it at the
     // path below.
-    if (type == ZBI_TYPE_CRASHLOG && payload.is_valid()) {
+    if (type == ZBI_TYPE_CRASHLOG) {
+      ASSERT_TRUE(payload.is_valid());
       fbl::String path = fbl::StringPrintf("/boot/%s", bootsvc::kLastPanicFilePath);
       fbl::unique_fd fd(open(path.data(), O_RDONLY));
       ASSERT_TRUE(fd.is_valid());
@@ -210,6 +303,7 @@ bool TestBootItems() {
       ASSERT_EQ(ZX_OK, payload.read(payload_buf.get(), 0, length));
       ASSERT_BYTES_EQ(file_buf.get(), payload_buf.get(), length, "");
     }
+#endif
   }
 
   END_TEST;
@@ -315,6 +409,7 @@ RUN_TEST(TestLoader)
 RUN_TEST(TestNamespace)
 RUN_TEST(TestArguments)
 RUN_TEST(TestBootArguments)
+RUN_TEST(TestBootArgsFromImage)
 RUN_TEST(TestBootItems)
 RUN_TEST(TestBootLog)
 RUN_TEST(TestBootRootJob)

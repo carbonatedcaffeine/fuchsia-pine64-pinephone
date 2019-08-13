@@ -3,14 +3,10 @@
 // found in the LICENSE file.
 
 #include <assert.h>
-#include <ddk/device.h>
-#include <ddk/driver.h>
-#include <fbl/auto_lock.h>
 #include <fcntl.h>
-#include <fs/connection.h>
-#include <fs/handler.h>
 #include <fuchsia/device/c/fidl.h>
 #include <fuchsia/device/manager/c/fidl.h>
+#include <fuchsia/device/manager/llcpp/fidl.h>
 #include <fuchsia/io/c/fidl.h>
 #include <lib/fdio/io.h>
 #include <lib/fdio/vfs.h>
@@ -23,7 +19,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <threads.h>
-#include <zircon/device/ioctl.h>
 #include <zircon/device/vfs.h>
 #include <zircon/processargs.h>
 #include <zircon/status.h>
@@ -32,6 +27,12 @@
 
 #include <new>
 #include <utility>
+
+#include <ddk/device.h>
+#include <ddk/driver.h>
+#include <fbl/auto_lock.h>
+#include <fs/connection.h>
+#include <fs/handler.h>
 
 #include "devhost.h"
 #include "zx-device.h"
@@ -253,9 +254,13 @@ static zx_status_t fidl_directory_watch(void* ctx, uint32_t mask, uint32_t optio
     return fuchsia_io_DirectoryWatch_reply(txn, ZX_ERR_INTERNAL);
   }
 
-  zx_status_t call_status;
-  zx_status_t status = fuchsia_device_manager_CoordinatorDirectoryWatch(
-      rpc.get(), mask, options, watcher.release(), &call_status);
+  auto response = fuchsia::device::manager::Coordinator::Call::DirectoryWatch(
+      zx::unowned_channel(rpc.get()), mask, options, std::move(watcher));
+  zx_status_t status = response.status();
+  zx_status_t call_status = ZX_OK;
+  if (status == ZX_OK && response.Unwrap()->result.is_err()) {
+    call_status = response.Unwrap()->result.err();
+  }
 
   return fuchsia_io_DirectoryWatch_reply(txn, status != ZX_OK ? status : call_status);
 }
@@ -504,40 +509,7 @@ static zx_status_t fidl_node_setattr(void* ctx, uint32_t flags,
 static zx_status_t fidl_node_ioctl(void* ctx, uint32_t opcode, uint64_t max_out,
                                    const zx_handle_t* handles_data, size_t handles_count,
                                    const uint8_t* in_data, size_t in_count, fidl_txn_t* txn) {
-  auto conn = static_cast<DevfsConnection*>(ctx);
-  char in_buf[FDIO_IOCTL_MAX_INPUT];
-  size_t hsize = handles_count * sizeof(zx_handle_t);
-  if ((in_count > FDIO_IOCTL_MAX_INPUT) || (max_out > ZXFIDL_MAX_MSG_BYTES)) {
-    zx_handle_close_many(handles_data, handles_count);
-    return fuchsia_io_NodeIoctl_reply(txn, ZX_ERR_INVALID_ARGS, nullptr, 0, nullptr, 0);
-  }
-  memcpy(in_buf, in_data, in_count);
-  memcpy(in_buf, handles_data, hsize);
-
-  uint8_t out[max_out];
-  zx_handle_t* out_handles = (zx_handle_t*)out;
-  size_t out_count = 0;
-  ssize_t r = conn->dev->IoctlOp(opcode, in_buf, in_count, out, max_out, &out_count);
-  size_t out_hcount = 0;
-  if (r >= 0) {
-    switch (IOCTL_KIND(opcode)) {
-      case IOCTL_KIND_GET_HANDLE:
-        out_hcount = 1;
-        break;
-      case IOCTL_KIND_GET_TWO_HANDLES:
-        out_hcount = 2;
-        break;
-      case IOCTL_KIND_GET_THREE_HANDLES:
-        out_hcount = 3;
-        break;
-      default:
-        out_hcount = 0;
-        break;
-    }
-  }
-
-  auto status = static_cast<zx_status_t>(r);
-  return fuchsia_io_NodeIoctl_reply(txn, status, out_handles, out_hcount, out, out_count);
+  return fuchsia_io_NodeIoctl_reply(txn, ZX_ERR_NOT_SUPPORTED, nullptr, 0, nullptr, 0);
 }
 
 static const fuchsia_io_Node_ops_t kNodeOps = {
@@ -573,15 +545,15 @@ static zx_status_t fidl_DeviceControllerBind(void* ctx, const char* driver_data,
 
 static zx_status_t fidl_DeviceControllerRunCompatibilityTests(void* ctx, int64_t hook_wait_time,
                                                               fidl_txn_t* txn) {
-    auto conn = static_cast<DevfsConnection*>(ctx);
-    conn->dev->PushTestCompatibilityConn(fs::FidlConnection::CopyTxn(txn));
-    return device_run_compatibility_tests(conn->dev, hook_wait_time);
+  auto conn = static_cast<DevfsConnection*>(ctx);
+  conn->dev->PushTestCompatibilityConn(fs::FidlConnection::CopyTxn(txn));
+  return device_run_compatibility_tests(conn->dev, hook_wait_time);
 }
 
-static zx_status_t fidl_DeviceControllerUnbind(void* ctx, fidl_txn_t* txn) {
+static zx_status_t fidl_DeviceControllerScheduleUnbind(void* ctx, fidl_txn_t* txn) {
   auto conn = static_cast<DevfsConnection*>(ctx);
   zx_status_t status = device_unbind(conn->dev);
-  return fuchsia_device_ControllerUnbind_reply(txn, status);
+  return fuchsia_device_ControllerScheduleUnbind_reply(txn, status);
 }
 
 static zx_status_t fidl_DeviceControllerGetDriverName(void* ctx, fidl_txn_t* txn) {
@@ -663,7 +635,7 @@ static zx_status_t fidl_DeviceControllerDebugResume(void* ctx, fidl_txn_t* txn) 
 
 static const fuchsia_device_Controller_ops_t kDeviceControllerOps = {
     .Bind = fidl_DeviceControllerBind,
-    .Unbind = fidl_DeviceControllerUnbind,
+    .ScheduleUnbind = fidl_DeviceControllerScheduleUnbind,
     .GetDriverName = fidl_DeviceControllerGetDriverName,
     .GetDeviceName = fidl_DeviceControllerGetDeviceName,
     .GetTopologicalPath = fidl_DeviceControllerGetTopologicalPath,

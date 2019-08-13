@@ -12,26 +12,46 @@ namespace common {
 namespace {
 
 [[maybe_unused]]
-constexpr uint64_t kStream_Start_Ordinal = 932812003lu << 32;
+constexpr uint64_t kStream_Start_GenOrdinal = 0x379994e300000000lu;
 [[maybe_unused]]
-constexpr uint64_t kStream_Stop_Ordinal = 9009058lu << 32;
+constexpr uint64_t kStream_Stop_GenOrdinal = 0x8977a200000000lu;
 [[maybe_unused]]
-constexpr uint64_t kStream_ReleaseFrame_Ordinal = 629961612lu << 32;
+constexpr uint64_t kStream_ReleaseFrame_GenOrdinal = 0x258c738c00000000lu;
 extern "C" const fidl_type_t fuchsia_camera_common_StreamReleaseFrameRequestTable;
 [[maybe_unused]]
-constexpr uint64_t kStream_OnFrameAvailable_Ordinal = 1771204245lu << 32;
+constexpr uint64_t kStream_OnFrameAvailable_GenOrdinal = 0x69926e9500000000lu;
 
 }  // namespace
 
-zx_status_t Stream::SyncClient::Start() {
-  return Stream::Call::Start(zx::unowned_channel(this->channel_));
+Stream::ResultOf::Start_Impl::Start_Impl(zx::unowned_channel _client_end) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<StartRequest, ::fidl::MessageDirection::kSending>();
+  ::fidl::internal::AlignedBuffer<_kWriteAllocSize> _write_bytes_inlined;
+  auto& _write_bytes_array = _write_bytes_inlined;
+  uint8_t* _write_bytes = _write_bytes_array.view().data();
+  memset(_write_bytes, 0, StartRequest::PrimarySize);
+  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(StartRequest));
+  ::fidl::DecodedMessage<StartRequest> _decoded_request(std::move(_request_bytes));
+  Super::operator=(
+      Stream::InPlace::Start(std::move(_client_end)));
 }
 
-zx_status_t Stream::Call::Start(zx::unowned_channel _client_end) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<StartRequest>();
+Stream::ResultOf::Start Stream::SyncClient::Start() {
+  return ResultOf::Start(zx::unowned_channel(this->channel_));
+}
+
+Stream::ResultOf::Start Stream::Call::Start(zx::unowned_channel _client_end) {
+  return ResultOf::Start(std::move(_client_end));
+}
+
+zx_status_t Stream::SyncClient::Start_Deprecated() {
+  return Stream::Call::Start_Deprecated(zx::unowned_channel(this->channel_));
+}
+
+zx_status_t Stream::Call::Start_Deprecated(zx::unowned_channel _client_end) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<StartRequest, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _request = *reinterpret_cast<StartRequest*>(_write_bytes);
-  _request._hdr.ordinal = kStream_Start_Ordinal;
+  _request._hdr.ordinal = kStream_Start_GenOrdinal;
   ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(StartRequest));
   ::fidl::DecodedMessage<StartRequest> _decoded_request(std::move(_request_bytes));
   auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
@@ -41,16 +61,58 @@ zx_status_t Stream::Call::Start(zx::unowned_channel _client_end) {
   return ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
 }
 
-
-zx_status_t Stream::SyncClient::Stop() {
-  return Stream::Call::Stop(zx::unowned_channel(this->channel_));
+::fidl::internal::StatusAndError Stream::InPlace::Start(zx::unowned_channel _client_end) {
+  constexpr uint32_t _write_num_bytes = sizeof(StartRequest);
+  ::fidl::internal::AlignedBuffer<_write_num_bytes> _write_bytes;
+  ::fidl::BytePart _request_buffer = _write_bytes.view();
+  _request_buffer.set_actual(_write_num_bytes);
+  ::fidl::DecodedMessage<StartRequest> params(std::move(_request_buffer));
+  params.message()->_hdr = {};
+  params.message()->_hdr.ordinal = kStream_Start_GenOrdinal;
+  auto _encode_request_result = ::fidl::Encode(std::move(params));
+  if (_encode_request_result.status != ZX_OK) {
+    return ::fidl::internal::StatusAndError::FromFailure(
+        std::move(_encode_request_result));
+  }
+  zx_status_t _write_status =
+      ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
+  if (_write_status != ZX_OK) {
+    return ::fidl::internal::StatusAndError(_write_status, ::fidl::internal::kErrorWriteFailed);
+  } else {
+    return ::fidl::internal::StatusAndError(ZX_OK, nullptr);
+  }
 }
 
-zx_status_t Stream::Call::Stop(zx::unowned_channel _client_end) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<StopRequest>();
+
+Stream::ResultOf::Stop_Impl::Stop_Impl(zx::unowned_channel _client_end) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<StopRequest, ::fidl::MessageDirection::kSending>();
+  ::fidl::internal::AlignedBuffer<_kWriteAllocSize> _write_bytes_inlined;
+  auto& _write_bytes_array = _write_bytes_inlined;
+  uint8_t* _write_bytes = _write_bytes_array.view().data();
+  memset(_write_bytes, 0, StopRequest::PrimarySize);
+  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(StopRequest));
+  ::fidl::DecodedMessage<StopRequest> _decoded_request(std::move(_request_bytes));
+  Super::operator=(
+      Stream::InPlace::Stop(std::move(_client_end)));
+}
+
+Stream::ResultOf::Stop Stream::SyncClient::Stop() {
+  return ResultOf::Stop(zx::unowned_channel(this->channel_));
+}
+
+Stream::ResultOf::Stop Stream::Call::Stop(zx::unowned_channel _client_end) {
+  return ResultOf::Stop(std::move(_client_end));
+}
+
+zx_status_t Stream::SyncClient::Stop_Deprecated() {
+  return Stream::Call::Stop_Deprecated(zx::unowned_channel(this->channel_));
+}
+
+zx_status_t Stream::Call::Stop_Deprecated(zx::unowned_channel _client_end) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<StopRequest, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _request = *reinterpret_cast<StopRequest*>(_write_bytes);
-  _request._hdr.ordinal = kStream_Stop_Ordinal;
+  _request._hdr.ordinal = kStream_Stop_GenOrdinal;
   ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(StopRequest));
   ::fidl::DecodedMessage<StopRequest> _decoded_request(std::move(_request_bytes));
   auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
@@ -60,16 +122,84 @@ zx_status_t Stream::Call::Stop(zx::unowned_channel _client_end) {
   return ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
 }
 
-
-zx_status_t Stream::SyncClient::ReleaseFrame(uint32_t buffer_id) {
-  return Stream::Call::ReleaseFrame(zx::unowned_channel(this->channel_), std::move(buffer_id));
+::fidl::internal::StatusAndError Stream::InPlace::Stop(zx::unowned_channel _client_end) {
+  constexpr uint32_t _write_num_bytes = sizeof(StopRequest);
+  ::fidl::internal::AlignedBuffer<_write_num_bytes> _write_bytes;
+  ::fidl::BytePart _request_buffer = _write_bytes.view();
+  _request_buffer.set_actual(_write_num_bytes);
+  ::fidl::DecodedMessage<StopRequest> params(std::move(_request_buffer));
+  params.message()->_hdr = {};
+  params.message()->_hdr.ordinal = kStream_Stop_GenOrdinal;
+  auto _encode_request_result = ::fidl::Encode(std::move(params));
+  if (_encode_request_result.status != ZX_OK) {
+    return ::fidl::internal::StatusAndError::FromFailure(
+        std::move(_encode_request_result));
+  }
+  zx_status_t _write_status =
+      ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
+  if (_write_status != ZX_OK) {
+    return ::fidl::internal::StatusAndError(_write_status, ::fidl::internal::kErrorWriteFailed);
+  } else {
+    return ::fidl::internal::StatusAndError(ZX_OK, nullptr);
+  }
 }
 
-zx_status_t Stream::Call::ReleaseFrame(zx::unowned_channel _client_end, uint32_t buffer_id) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<ReleaseFrameRequest>();
+
+Stream::ResultOf::ReleaseFrame_Impl::ReleaseFrame_Impl(zx::unowned_channel _client_end, uint32_t buffer_id) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<ReleaseFrameRequest, ::fidl::MessageDirection::kSending>();
+  ::fidl::internal::AlignedBuffer<_kWriteAllocSize> _write_bytes_inlined;
+  auto& _write_bytes_array = _write_bytes_inlined;
+  uint8_t* _write_bytes = _write_bytes_array.view().data();
+  memset(_write_bytes, 0, ReleaseFrameRequest::PrimarySize);
+  auto& _request = *reinterpret_cast<ReleaseFrameRequest*>(_write_bytes);
+  _request.buffer_id = std::move(buffer_id);
+  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(ReleaseFrameRequest));
+  ::fidl::DecodedMessage<ReleaseFrameRequest> _decoded_request(std::move(_request_bytes));
+  Super::operator=(
+      Stream::InPlace::ReleaseFrame(std::move(_client_end), std::move(_decoded_request)));
+}
+
+Stream::ResultOf::ReleaseFrame Stream::SyncClient::ReleaseFrame(uint32_t buffer_id) {
+  return ResultOf::ReleaseFrame(zx::unowned_channel(this->channel_), std::move(buffer_id));
+}
+
+Stream::ResultOf::ReleaseFrame Stream::Call::ReleaseFrame(zx::unowned_channel _client_end, uint32_t buffer_id) {
+  return ResultOf::ReleaseFrame(std::move(_client_end), std::move(buffer_id));
+}
+
+
+Stream::UnownedResultOf::ReleaseFrame_Impl::ReleaseFrame_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t buffer_id) {
+  if (_request_buffer.capacity() < ReleaseFrameRequest::PrimarySize) {
+    Super::status_ = ZX_ERR_BUFFER_TOO_SMALL;
+    Super::error_ = ::fidl::internal::kErrorRequestBufferTooSmall;
+    return;
+  }
+  memset(_request_buffer.data(), 0, ReleaseFrameRequest::PrimarySize);
+  auto& _request = *reinterpret_cast<ReleaseFrameRequest*>(_request_buffer.data());
+  _request.buffer_id = std::move(buffer_id);
+  _request_buffer.set_actual(sizeof(ReleaseFrameRequest));
+  ::fidl::DecodedMessage<ReleaseFrameRequest> _decoded_request(std::move(_request_buffer));
+  Super::operator=(
+      Stream::InPlace::ReleaseFrame(std::move(_client_end), std::move(_decoded_request)));
+}
+
+Stream::UnownedResultOf::ReleaseFrame Stream::SyncClient::ReleaseFrame(::fidl::BytePart _request_buffer, uint32_t buffer_id) {
+  return UnownedResultOf::ReleaseFrame(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(buffer_id));
+}
+
+Stream::UnownedResultOf::ReleaseFrame Stream::Call::ReleaseFrame(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t buffer_id) {
+  return UnownedResultOf::ReleaseFrame(std::move(_client_end), std::move(_request_buffer), std::move(buffer_id));
+}
+
+zx_status_t Stream::SyncClient::ReleaseFrame_Deprecated(uint32_t buffer_id) {
+  return Stream::Call::ReleaseFrame_Deprecated(zx::unowned_channel(this->channel_), std::move(buffer_id));
+}
+
+zx_status_t Stream::Call::ReleaseFrame_Deprecated(zx::unowned_channel _client_end, uint32_t buffer_id) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<ReleaseFrameRequest, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _request = *reinterpret_cast<ReleaseFrameRequest*>(_write_bytes);
-  _request._hdr.ordinal = kStream_ReleaseFrame_Ordinal;
+  _request._hdr.ordinal = kStream_ReleaseFrame_GenOrdinal;
   _request.buffer_id = std::move(buffer_id);
   ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(ReleaseFrameRequest));
   ::fidl::DecodedMessage<ReleaseFrameRequest> _decoded_request(std::move(_request_bytes));
@@ -80,16 +210,16 @@ zx_status_t Stream::Call::ReleaseFrame(zx::unowned_channel _client_end, uint32_t
   return ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
 }
 
-zx_status_t Stream::SyncClient::ReleaseFrame(::fidl::BytePart _request_buffer, uint32_t buffer_id) {
-  return Stream::Call::ReleaseFrame(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(buffer_id));
+zx_status_t Stream::SyncClient::ReleaseFrame_Deprecated(::fidl::BytePart _request_buffer, uint32_t buffer_id) {
+  return Stream::Call::ReleaseFrame_Deprecated(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(buffer_id));
 }
 
-zx_status_t Stream::Call::ReleaseFrame(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t buffer_id) {
+zx_status_t Stream::Call::ReleaseFrame_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t buffer_id) {
   if (_request_buffer.capacity() < ReleaseFrameRequest::PrimarySize) {
     return ZX_ERR_BUFFER_TOO_SMALL;
   }
   auto& _request = *reinterpret_cast<ReleaseFrameRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kStream_ReleaseFrame_Ordinal;
+  _request._hdr.ordinal = kStream_ReleaseFrame_GenOrdinal;
   _request.buffer_id = std::move(buffer_id);
   _request_buffer.set_actual(sizeof(ReleaseFrameRequest));
   ::fidl::DecodedMessage<ReleaseFrameRequest> _decoded_request(std::move(_request_buffer));
@@ -100,18 +230,21 @@ zx_status_t Stream::Call::ReleaseFrame(zx::unowned_channel _client_end, ::fidl::
   return ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
 }
 
-zx_status_t Stream::SyncClient::ReleaseFrame(::fidl::DecodedMessage<ReleaseFrameRequest> params) {
-  return Stream::Call::ReleaseFrame(zx::unowned_channel(this->channel_), std::move(params));
-}
-
-zx_status_t Stream::Call::ReleaseFrame(zx::unowned_channel _client_end, ::fidl::DecodedMessage<ReleaseFrameRequest> params) {
+::fidl::internal::StatusAndError Stream::InPlace::ReleaseFrame(zx::unowned_channel _client_end, ::fidl::DecodedMessage<ReleaseFrameRequest> params) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kStream_ReleaseFrame_Ordinal;
+  params.message()->_hdr.ordinal = kStream_ReleaseFrame_GenOrdinal;
   auto _encode_request_result = ::fidl::Encode(std::move(params));
   if (_encode_request_result.status != ZX_OK) {
-    return _encode_request_result.status;
+    return ::fidl::internal::StatusAndError::FromFailure(
+        std::move(_encode_request_result));
   }
-  return ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
+  zx_status_t _write_status =
+      ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
+  if (_write_status != ZX_OK) {
+    return ::fidl::internal::StatusAndError(_write_status, ::fidl::internal::kErrorWriteFailed);
+  } else {
+    return ::fidl::internal::StatusAndError(ZX_OK, nullptr);
+  }
 }
 
 zx_status_t Stream::SyncClient::HandleEvents(Stream::EventHandlers handlers) {
@@ -128,8 +261,8 @@ zx_status_t Stream::Call::HandleEvents(zx::unowned_channel client_end,
   }
   constexpr uint32_t kReadAllocSize = ([]() constexpr {
     uint32_t x = 0;
-    if (::fidl::internal::ClampedMessageSize<OnFrameAvailableResponse>() >= x) {
-      x = ::fidl::internal::ClampedMessageSize<OnFrameAvailableResponse>();
+    if (::fidl::internal::ClampedMessageSize<OnFrameAvailableResponse, ::fidl::MessageDirection::kReceiving>() >= x) {
+      x = ::fidl::internal::ClampedMessageSize<OnFrameAvailableResponse, ::fidl::MessageDirection::kReceiving>();
     }
     return x;
   })();
@@ -172,7 +305,8 @@ zx_status_t Stream::Call::HandleEvents(zx::unowned_channel client_end,
   };
   fidl_message_header_t* hdr = reinterpret_cast<fidl_message_header_t*>(msg.bytes);
   switch (hdr->ordinal) {
-    case kStream_OnFrameAvailable_Ordinal: {
+    case kStream_OnFrameAvailable_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<OnFrameAvailableResponse>(&msg);
       if (result.status != ZX_OK) {
         return result.status;
@@ -194,7 +328,8 @@ bool Stream::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* 
   }
   fidl_message_header_t* hdr = reinterpret_cast<fidl_message_header_t*>(msg->bytes);
   switch (hdr->ordinal) {
-    case kStream_Start_Ordinal: {
+    case kStream_Start_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<StartRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);
@@ -204,7 +339,8 @@ bool Stream::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* 
         Interface::StartCompleter::Sync(txn));
       return true;
     }
-    case kStream_Stop_Ordinal: {
+    case kStream_Stop_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<StopRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);
@@ -214,7 +350,8 @@ bool Stream::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* 
         Interface::StopCompleter::Sync(txn));
       return true;
     }
-    case kStream_ReleaseFrame_Ordinal: {
+    case kStream_ReleaseFrame_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<ReleaseFrameRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);
@@ -242,11 +379,11 @@ bool Stream::Dispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* txn
 
 
 zx_status_t Stream::SendOnFrameAvailableEvent(::zx::unowned_channel _chan, FrameAvailableEvent frame) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<OnFrameAvailableResponse>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<OnFrameAvailableResponse, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _response = *reinterpret_cast<OnFrameAvailableResponse*>(_write_bytes);
   _response._hdr = {};
-  _response._hdr.ordinal = kStream_OnFrameAvailable_Ordinal;
+  _response._hdr.ordinal = kStream_OnFrameAvailable_GenOrdinal;
   _response.frame = std::move(frame);
   ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(OnFrameAvailableResponse));
   return ::fidl::Write(zx::unowned_channel(_chan), ::fidl::DecodedMessage<OnFrameAvailableResponse>(std::move(_response_bytes)));
@@ -258,7 +395,7 @@ zx_status_t Stream::SendOnFrameAvailableEvent(::zx::unowned_channel _chan, ::fid
   }
   auto& _response = *reinterpret_cast<OnFrameAvailableResponse*>(_buffer.data());
   _response._hdr = {};
-  _response._hdr.ordinal = kStream_OnFrameAvailable_Ordinal;
+  _response._hdr.ordinal = kStream_OnFrameAvailable_GenOrdinal;
   _response.frame = std::move(frame);
   _buffer.set_actual(sizeof(OnFrameAvailableResponse));
   return ::fidl::Write(zx::unowned_channel(_chan), ::fidl::DecodedMessage<OnFrameAvailableResponse>(std::move(_buffer)));
@@ -266,7 +403,7 @@ zx_status_t Stream::SendOnFrameAvailableEvent(::zx::unowned_channel _chan, ::fid
 
 zx_status_t Stream::SendOnFrameAvailableEvent(::zx::unowned_channel _chan, ::fidl::DecodedMessage<OnFrameAvailableResponse> params) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kStream_OnFrameAvailable_Ordinal;
+  params.message()->_hdr.ordinal = kStream_OnFrameAvailable_GenOrdinal;
   return ::fidl::Write(zx::unowned_channel(_chan), std::move(params));
 }
 
@@ -290,21 +427,72 @@ void ::llcpp::fuchsia::camera::common::VirtualStreamConfig::SizeAndOffsetAsserti
 namespace {
 
 [[maybe_unused]]
-constexpr uint64_t kVirtualCameraFactory_CreateDevice_Ordinal = 2009870148lu << 32;
+constexpr uint64_t kVirtualCameraFactory_CreateDevice_GenOrdinal = 0x77cc2f4400000000lu;
 extern "C" const fidl_type_t fuchsia_camera_common_VirtualCameraFactoryCreateDeviceRequestTable;
 
 }  // namespace
 
-zx_status_t VirtualCameraFactory::SyncClient::CreateDevice(VirtualCameraConfig config) {
-  return VirtualCameraFactory::Call::CreateDevice(zx::unowned_channel(this->channel_), std::move(config));
+VirtualCameraFactory::ResultOf::CreateDevice_Impl::CreateDevice_Impl(zx::unowned_channel _client_end, VirtualCameraConfig config) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<CreateDeviceRequest, ::fidl::MessageDirection::kSending>();
+  std::unique_ptr _write_bytes_boxed = std::make_unique<::fidl::internal::AlignedBuffer<_kWriteAllocSize>>();
+  auto& _write_bytes_array = *_write_bytes_boxed;
+  CreateDeviceRequest _request = {};
+  _request.config = std::move(config);
+  auto _linearize_result = ::fidl::Linearize(&_request, _write_bytes_array.view());
+  if (_linearize_result.status != ZX_OK) {
+    Super::SetFailure(std::move(_linearize_result));
+    return;
+  }
+  ::fidl::DecodedMessage<CreateDeviceRequest> _decoded_request = std::move(_linearize_result.message);
+  Super::operator=(
+      VirtualCameraFactory::InPlace::CreateDevice(std::move(_client_end), std::move(_decoded_request)));
 }
 
-zx_status_t VirtualCameraFactory::Call::CreateDevice(zx::unowned_channel _client_end, VirtualCameraConfig config) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<CreateDeviceRequest>();
+VirtualCameraFactory::ResultOf::CreateDevice VirtualCameraFactory::SyncClient::CreateDevice(VirtualCameraConfig config) {
+  return ResultOf::CreateDevice(zx::unowned_channel(this->channel_), std::move(config));
+}
+
+VirtualCameraFactory::ResultOf::CreateDevice VirtualCameraFactory::Call::CreateDevice(zx::unowned_channel _client_end, VirtualCameraConfig config) {
+  return ResultOf::CreateDevice(std::move(_client_end), std::move(config));
+}
+
+
+VirtualCameraFactory::UnownedResultOf::CreateDevice_Impl::CreateDevice_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, VirtualCameraConfig config) {
+  if (_request_buffer.capacity() < CreateDeviceRequest::PrimarySize) {
+    Super::status_ = ZX_ERR_BUFFER_TOO_SMALL;
+    Super::error_ = ::fidl::internal::kErrorRequestBufferTooSmall;
+    return;
+  }
+  CreateDeviceRequest _request = {};
+  _request.config = std::move(config);
+  auto _linearize_result = ::fidl::Linearize(&_request, std::move(_request_buffer));
+  if (_linearize_result.status != ZX_OK) {
+    Super::SetFailure(std::move(_linearize_result));
+    return;
+  }
+  ::fidl::DecodedMessage<CreateDeviceRequest> _decoded_request = std::move(_linearize_result.message);
+  Super::operator=(
+      VirtualCameraFactory::InPlace::CreateDevice(std::move(_client_end), std::move(_decoded_request)));
+}
+
+VirtualCameraFactory::UnownedResultOf::CreateDevice VirtualCameraFactory::SyncClient::CreateDevice(::fidl::BytePart _request_buffer, VirtualCameraConfig config) {
+  return UnownedResultOf::CreateDevice(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(config));
+}
+
+VirtualCameraFactory::UnownedResultOf::CreateDevice VirtualCameraFactory::Call::CreateDevice(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, VirtualCameraConfig config) {
+  return UnownedResultOf::CreateDevice(std::move(_client_end), std::move(_request_buffer), std::move(config));
+}
+
+zx_status_t VirtualCameraFactory::SyncClient::CreateDevice_Deprecated(VirtualCameraConfig config) {
+  return VirtualCameraFactory::Call::CreateDevice_Deprecated(zx::unowned_channel(this->channel_), std::move(config));
+}
+
+zx_status_t VirtualCameraFactory::Call::CreateDevice_Deprecated(zx::unowned_channel _client_end, VirtualCameraConfig config) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<CreateDeviceRequest, ::fidl::MessageDirection::kSending>();
   std::unique_ptr<uint8_t[]> _write_bytes_unique_ptr(new uint8_t[_kWriteAllocSize]);
   uint8_t* _write_bytes = _write_bytes_unique_ptr.get();
   CreateDeviceRequest _request = {};
-  _request._hdr.ordinal = kVirtualCameraFactory_CreateDevice_Ordinal;
+  _request._hdr.ordinal = kVirtualCameraFactory_CreateDevice_GenOrdinal;
   _request.config = std::move(config);
   auto _linearize_result = ::fidl::Linearize(&_request, ::fidl::BytePart(_write_bytes,
                                                                          _kWriteAllocSize));
@@ -319,16 +507,16 @@ zx_status_t VirtualCameraFactory::Call::CreateDevice(zx::unowned_channel _client
   return ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
 }
 
-zx_status_t VirtualCameraFactory::SyncClient::CreateDevice(::fidl::BytePart _request_buffer, VirtualCameraConfig config) {
-  return VirtualCameraFactory::Call::CreateDevice(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(config));
+zx_status_t VirtualCameraFactory::SyncClient::CreateDevice_Deprecated(::fidl::BytePart _request_buffer, VirtualCameraConfig config) {
+  return VirtualCameraFactory::Call::CreateDevice_Deprecated(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(config));
 }
 
-zx_status_t VirtualCameraFactory::Call::CreateDevice(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, VirtualCameraConfig config) {
+zx_status_t VirtualCameraFactory::Call::CreateDevice_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, VirtualCameraConfig config) {
   if (_request_buffer.capacity() < CreateDeviceRequest::PrimarySize) {
     return ZX_ERR_BUFFER_TOO_SMALL;
   }
   CreateDeviceRequest _request = {};
-  _request._hdr.ordinal = kVirtualCameraFactory_CreateDevice_Ordinal;
+  _request._hdr.ordinal = kVirtualCameraFactory_CreateDevice_GenOrdinal;
   _request.config = std::move(config);
   auto _linearize_result = ::fidl::Linearize(&_request, std::move(_request_buffer));
   if (_linearize_result.status != ZX_OK) {
@@ -342,18 +530,21 @@ zx_status_t VirtualCameraFactory::Call::CreateDevice(zx::unowned_channel _client
   return ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
 }
 
-zx_status_t VirtualCameraFactory::SyncClient::CreateDevice(::fidl::DecodedMessage<CreateDeviceRequest> params) {
-  return VirtualCameraFactory::Call::CreateDevice(zx::unowned_channel(this->channel_), std::move(params));
-}
-
-zx_status_t VirtualCameraFactory::Call::CreateDevice(zx::unowned_channel _client_end, ::fidl::DecodedMessage<CreateDeviceRequest> params) {
+::fidl::internal::StatusAndError VirtualCameraFactory::InPlace::CreateDevice(zx::unowned_channel _client_end, ::fidl::DecodedMessage<CreateDeviceRequest> params) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kVirtualCameraFactory_CreateDevice_Ordinal;
+  params.message()->_hdr.ordinal = kVirtualCameraFactory_CreateDevice_GenOrdinal;
   auto _encode_request_result = ::fidl::Encode(std::move(params));
   if (_encode_request_result.status != ZX_OK) {
-    return _encode_request_result.status;
+    return ::fidl::internal::StatusAndError::FromFailure(
+        std::move(_encode_request_result));
   }
-  return ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
+  zx_status_t _write_status =
+      ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
+  if (_write_status != ZX_OK) {
+    return ::fidl::internal::StatusAndError(_write_status, ::fidl::internal::kErrorWriteFailed);
+  } else {
+    return ::fidl::internal::StatusAndError(ZX_OK, nullptr);
+  }
 }
 
 
@@ -365,7 +556,8 @@ bool VirtualCameraFactory::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl:
   }
   fidl_message_header_t* hdr = reinterpret_cast<fidl_message_header_t*>(msg->bytes);
   switch (hdr->ordinal) {
-    case kVirtualCameraFactory_CreateDevice_Ordinal: {
+    case kVirtualCameraFactory_CreateDevice_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<CreateDeviceRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);

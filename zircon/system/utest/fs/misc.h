@@ -6,24 +6,23 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
-
 #include <zircon/compiler.h>
 
 // Filesystem test utilities
 
 __BEGIN_CDECLS
 
-#define ASSERT_STREAM_ALL(op, fd, buf, len) \
-    ASSERT_EQ(op(fd, (buf), (len)), (ssize_t)(len), "");
+#define ASSERT_STREAM_ALL(op, fd, buf, len) ASSERT_EQ(op(fd, (buf), (len)), (ssize_t)(len), "");
 
 typedef struct expected_dirent {
-    bool seen; // Should be set to "false", used internally by checking function.
-    const char* d_name;
-    unsigned char d_type;
+  bool seen;  // Should be set to "false", used internally by checking function.
+  const char* d_name;
+  unsigned char d_type;
 } expected_dirent_t;
 
 bool fcheck_dir_contents(DIR* dir, expected_dirent_t* edirents, size_t len);

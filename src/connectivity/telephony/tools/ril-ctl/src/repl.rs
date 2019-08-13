@@ -28,8 +28,8 @@ pub async fn run<'a>(
     // the main thread via async channels.
     let (mut commands, mut acks) = cmd_stream();
     loop {
-        if let Some(cmd) = await!(commands.next()) {
-            match await!(crate::handle_cmd(&ril_modem, cmd, state.clone())) {
+        if let Some(cmd) = commands.next().await {
+            match crate::handle_cmd(&ril_modem, cmd, state.clone()).await {
                 Ok(ReplControl::Continue) => {}
                 Ok(ReplControl::Break) => {
                     break;
@@ -41,7 +41,7 @@ pub async fn run<'a>(
         } else {
             break;
         }
-        await!(acks.send(()))?;
+        acks.send(()).await?;
     }
     Ok(())
 }
@@ -55,7 +55,7 @@ pub async fn run<'a>(
 /// Because rustyline shares control over output to the screen with other parts of the system, a
 /// `Sink` is passed to the caller to send acknowledgements that a command has been processed and
 /// that rustyline should handle the next line of input.
-fn cmd_stream() -> (impl Stream<Item = String>, impl Sink<(), SinkError = SendError>) {
+fn cmd_stream() -> (impl Stream<Item = String>, impl Sink<(), Error = SendError>) {
     // Editor thread and command processing thread must be synchronized so that output
     // is printed in the correct order.
     let (mut cmd_sender, cmd_receiver) = channel(512);
@@ -90,7 +90,7 @@ fn cmd_stream() -> (impl Stream<Item = String>, impl Sink<(), SinkError = SendEr
                 }
                 // wait until processing thread is finished evaluating the last command
                 // before running the next loop in the repl
-                await!(ack_receiver.next());
+                ack_receiver.next().await;
             }
         };
         exec.run_singlethreaded(fut)

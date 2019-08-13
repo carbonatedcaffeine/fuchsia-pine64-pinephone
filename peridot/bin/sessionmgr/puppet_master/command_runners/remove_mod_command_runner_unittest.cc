@@ -22,8 +22,7 @@ class RemoveModCommandRunnerTest : public testing::TestWithSessionStorage {
     return module_path;
   }
 
-  void InitModuleData(StoryStorage* const story_storage,
-                      std::vector<std::string> path) {
+  void InitModuleData(StoryStorage* const story_storage, std::vector<std::string> path) {
     fuchsia::modular::ModuleData module_data;
     module_data.module_path = std::move(path);
     module_data.intent = fuchsia::modular::Intent::New();
@@ -37,7 +36,7 @@ TEST_F(RemoveModCommandRunnerTest, Execute) {
   auto storage = MakeSessionStorage("page");
   auto runner = MakeRunner();
   auto story_id = CreateStory(storage.get());
-  auto story_storage = GetStoryStorage(storage.get(), story_id);
+  auto story_storage = GetStoryStorage(storage.get(), story_id.value_or(""));
 
   auto mod_name = MakeModulePath("mod");
   InitModuleData(story_storage.get(), mod_name);
@@ -50,8 +49,7 @@ TEST_F(RemoveModCommandRunnerTest, Execute) {
   bool done{};
   runner->Execute(story_id, story_storage.get(), std::move(command),
                   [&](fuchsia::modular::ExecuteResult result) {
-                    EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK,
-                              result.status);
+                    EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK, result.status);
                     done = true;
                   });
   RunLoopUntil([&] { return done; });
@@ -69,7 +67,7 @@ TEST_F(RemoveModCommandRunnerTest, ExecuteNoModuleData) {
   auto storage = MakeSessionStorage("page");
   auto runner = MakeRunner();
   auto story_id = CreateStory(storage.get());
-  auto story_storage = GetStoryStorage(storage.get(), story_id);
+  auto story_storage = GetStoryStorage(storage.get(), story_id.value_or(""));
 
   auto mod_name = MakeModulePath("mod");
   fuchsia::modular::RemoveMod remove_mod;
@@ -78,13 +76,12 @@ TEST_F(RemoveModCommandRunnerTest, ExecuteNoModuleData) {
   command.set_remove_mod(std::move(remove_mod));
 
   bool done{};
-  runner->Execute(
-      story_id, story_storage.get(), std::move(command),
-      [&](fuchsia::modular::ExecuteResult result) {
-        EXPECT_EQ(fuchsia::modular::ExecuteStatus::INVALID_MOD, result.status);
-        EXPECT_EQ(result.error_message, "No module data for given name.");
-        done = true;
-      });
+  runner->Execute(story_id, story_storage.get(), std::move(command),
+                  [&](fuchsia::modular::ExecuteResult result) {
+                    EXPECT_EQ(fuchsia::modular::ExecuteStatus::INVALID_MOD, result.status);
+                    EXPECT_EQ(result.error_message, "No module data for given name.");
+                    done = true;
+                  });
 
   RunLoopUntil([&] { return done; });
 }
@@ -93,7 +90,7 @@ TEST_F(RemoveModCommandRunnerTest, ExecuteModNameTransitional) {
   auto storage = MakeSessionStorage("page");
   auto runner = MakeRunner();
   auto story_id = CreateStory(storage.get());
-  auto story_storage = GetStoryStorage(storage.get(), story_id);
+  auto story_storage = GetStoryStorage(storage.get(), story_id.value_or(""));
 
   auto mod_name_transitional = "mod";
   auto mod_name = MakeModulePath(mod_name_transitional);
@@ -107,8 +104,7 @@ TEST_F(RemoveModCommandRunnerTest, ExecuteModNameTransitional) {
   bool done{};
   runner->Execute(story_id, story_storage.get(), std::move(command),
                   [&](fuchsia::modular::ExecuteResult result) {
-                    EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK,
-                              result.status);
+                    EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK, result.status);
                     done = true;
                   });
   RunLoopUntil([&] { return done; });

@@ -12,7 +12,6 @@
 #include "src/ledger/bin/environment/environment.h"
 #include "src/ledger/bin/filesystem/detached_path.h"
 #include "src/ledger/bin/storage/impl/page_db.h"
-#include "src/ledger/bin/storage/impl/piece_tracker.h"
 #include "src/ledger/bin/storage/public/db.h"
 #include "src/ledger/bin/storage/public/types.h"
 #include "src/ledger/lib/coroutine/coroutine.h"
@@ -25,7 +24,8 @@ class PageStorageImpl;
 // TRANSIENT objects.
 class PageDbImpl : public PageDb {
  public:
-  PageDbImpl(ledger::Environment* environment, std::unique_ptr<Db> db);
+  PageDbImpl(ledger::Environment* environment, ObjectIdentifierFactory* object_identifier_factory,
+             std::unique_ptr<Db> db);
   ~PageDbImpl() override;
 
   // PageDb:
@@ -88,6 +88,7 @@ class PageDbImpl : public PageDb {
 
  private:
   ledger::Environment* environment_;
+  ObjectIdentifierFactory* object_identifier_factory_;
   std::unique_ptr<Db> db_;
 };
 

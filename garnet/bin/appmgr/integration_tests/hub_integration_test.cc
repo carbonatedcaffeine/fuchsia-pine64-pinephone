@@ -40,9 +40,7 @@ class HubTest : public sys::testing::TestWithEnvironment {
     int out_fd = fileno(outf);
     fuchsia::sys::LaunchInfo launch_info;
     launch_info.url = component_url;
-    for (auto arg : args) {
-      launch_info.arguments.push_back(arg);
-    }
+    launch_info.arguments = args;
 
     launch_info.out = sys::CloneFileDescriptor(out_fd);
 
@@ -90,9 +88,14 @@ TEST_F(HubTest, Services) {
 
     // Expected files are built-in services plus sysmgr services.
     std::vector<std::string> expected_files = {".",
+                                               "fuchsia.boot.FactoryItems",
+                                               "fuchsia.boot.RootJob",
+                                               "fuchsia.boot.RootResource",
+                                               "fuchsia.device.NameProvider",
                                                "fuchsia.device.manager.Administrator",
                                                "fuchsia.device.manager.DebugDumper",
                                                "fuchsia.paver.Paver",
+                                               "fuchsia.kernel.Counter",
                                                "fuchsia.kernel.DebugBroker",
                                                "fuchsia.process.Launcher",
                                                "fuchsia.process.Resolver",

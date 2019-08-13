@@ -1,0 +1,23 @@
+{
+    "program": {
+        "binary": "bin/feedback_agent"
+    },
+    "sandbox": {
+        "dev": [
+            "misc/sysinfo"
+        ],
+        "features": [
+            "build-info",
+            "config-data",
+            "deprecated-shell",
+            "deprecated-ambient-replace-as-executable"
+        ],
+        "services": [
+            "fuchsia.logger.Log",
+            "fuchsia.logger.LogSink",
+            "fuchsia.process.Launcher",
+            "fuchsia.ui.scenic.Scenic",
+            "fuchsia.update.Info"
+        ]
+    }
+}

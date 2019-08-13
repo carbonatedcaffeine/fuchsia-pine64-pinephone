@@ -4,12 +4,13 @@
 
 #include "../fake-buffer-collection.h"
 
-#include <ddk/debug.h>
 #include <fuchsia/sysmem/c/fidl.h>
 #include <lib/fake-bti/bti.h>
 #include <lib/zx/vmo.h>
 #include <stdlib.h>
 #include <unistd.h>
+
+#include <ddk/debug.h>
 #include <zxtest/zxtest.h>
 
 namespace camera {
@@ -23,8 +24,8 @@ TEST(CreateContiguousBufferCollectionInfo, CreatesCollection) {
   ASSERT_OK(fake_bti_create(&bti_handle));
 
   fuchsia_sysmem_BufferCollectionInfo buffer_collection;
-  ASSERT_OK(CreateContiguousBufferCollectionInfo(
-      &buffer_collection, bti_handle, kWidth, kHeight, kNumberOfBuffers));
+  ASSERT_OK(CreateContiguousBufferCollectionInfo(&buffer_collection, bti_handle, kWidth, kHeight,
+                                                 kNumberOfBuffers));
 
   // Check it made the buffer collection like we want:
   EXPECT_EQ(buffer_collection.buffer_count, kNumberOfBuffers);
@@ -43,8 +44,8 @@ TEST(CreateContiguousBufferCollectionInfo, FailsOnBadHandle) {
   zx_handle_t bti_handle = ZX_HANDLE_INVALID;
   fuchsia_sysmem_BufferCollectionInfo buffer_collection;
   ASSERT_DEATH(([&buffer_collection, bti_handle]() {
-    camera::CreateContiguousBufferCollectionInfo(
-        &buffer_collection, bti_handle, kWidth, kHeight, kNumberOfBuffers);
+    camera::CreateContiguousBufferCollectionInfo(&buffer_collection, bti_handle, kWidth, kHeight,
+                                                 kNumberOfBuffers);
   }));
 }
 

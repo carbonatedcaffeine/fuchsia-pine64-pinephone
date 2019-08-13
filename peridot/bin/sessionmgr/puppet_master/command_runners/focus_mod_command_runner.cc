@@ -12,17 +12,16 @@ FocusModCommandRunner::FocusModCommandRunner(
 
 FocusModCommandRunner::~FocusModCommandRunner() = default;
 
-void FocusModCommandRunner::Execute(
-    fidl::StringPtr story_id, StoryStorage* const story_storage,
-    fuchsia::modular::StoryCommand command,
-    fit::function<void(fuchsia::modular::ExecuteResult)> done) {
+void FocusModCommandRunner::Execute(fidl::StringPtr story_id, StoryStorage* const story_storage,
+                                    fuchsia::modular::StoryCommand command,
+                                    fit::function<void(fuchsia::modular::ExecuteResult)> done) {
   fuchsia::modular::ExecuteResult result;
 
   auto focus_mod_command = command.focus_mod();
 
   // Prefer |mod_name_transitional| over |mod_name|
   std::vector<std::string> mod_name{};
-  if (!focus_mod_command.mod_name_transitional.is_null()) {
+  if (focus_mod_command.mod_name_transitional.has_value()) {
     mod_name.push_back(*focus_mod_command.mod_name_transitional);
   } else {
     mod_name = focus_mod_command.mod_name;
@@ -35,7 +34,7 @@ void FocusModCommandRunner::Execute(
     return;
   }
 
-  module_focuser_(story_id, std::move(mod_name));
+  module_focuser_(story_id.value_or(""), std::move(mod_name));
 
   result.status = fuchsia::modular::ExecuteStatus::OK;
   done(std::move(result));

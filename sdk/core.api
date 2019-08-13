@@ -7,6 +7,7 @@ sdk://docs/metadata_schemas
 sdk://docs/musl_license
 sdk://docs/open_source
 sdk://docs/vulkan_license
+sdk://fidl/fuchsia.accessibility.semantics
 sdk://fidl/fuchsia.auth.oldtokens
 sdk://fidl/fuchsia.bluetooth
 sdk://fidl/fuchsia.bluetooth.gatt
@@ -37,6 +38,7 @@ sdk://fidl/fuchsia.media.audio
 sdk://fidl/fuchsia.media.drm
 sdk://fidl/fuchsia.media.playback
 sdk://fidl/fuchsia.media.sessions
+sdk://fidl/fuchsia.media.sessions2
 sdk://fidl/fuchsia.mediacodec
 sdk://fidl/fuchsia.mem
 sdk://fidl/fuchsia.net
@@ -44,7 +46,9 @@ sdk://fidl/fuchsia.net.http
 sdk://fidl/fuchsia.net.mdns
 sdk://fidl/fuchsia.net.oldhttp
 sdk://fidl/fuchsia.netstack
+sdk://fidl/fuchsia.posix.socket
 sdk://fidl/fuchsia.process
+sdk://fidl/fuchsia.settings
 sdk://fidl/fuchsia.simplecamera
 sdk://fidl/fuchsia.sys
 sdk://fidl/fuchsia.sys.test
@@ -57,10 +61,9 @@ sdk://fidl/fuchsia.ui.input
 sdk://fidl/fuchsia.ui.input2
 sdk://fidl/fuchsia.ui.policy
 sdk://fidl/fuchsia.ui.scenic
+sdk://fidl/fuchsia.ui.types
 sdk://fidl/fuchsia.ui.vectorial
 sdk://fidl/fuchsia.ui.views
-sdk://fidl/fuchsia.ui.viewsv1
-sdk://fidl/fuchsia.ui.viewsv1token
 sdk://fidl/fuchsia.web
 sdk://fidl/fuchsia.wlan.common
 sdk://fidl/fuchsia.wlan.service
@@ -86,6 +89,7 @@ sdk://pkg/svc
 sdk://pkg/sync
 sdk://pkg/sys_cpp
 sdk://pkg/sys_cpp_testing
+sdk://pkg/sys_service_cpp
 sdk://pkg/syslog
 sdk://pkg/sysroot
 sdk://pkg/trace
@@ -102,6 +106,7 @@ sdk://tools/dev_finder
 sdk://tools/far
 sdk://tools/fidl-format
 sdk://tools/fidlc
+sdk://tools/fidlcat
 sdk://tools/fidlgen
 sdk://tools/fvm
 sdk://tools/loglistener

@@ -5,7 +5,7 @@
 #ifndef GARNET_LIB_UI_GFX_ENGINE_FRAME_STATS_H_
 #define GARNET_LIB_UI_GFX_ENGINE_FRAME_STATS_H_
 
-#include <lib/inspect/inspect.h>
+#include <lib/inspect_deprecated/inspect.h>
 #include <lib/zx/time.h>
 
 #include <deque>
@@ -18,9 +18,9 @@ namespace gfx {
 // FrameTiming::Timestamps. Used for debug data, i.e. inspect.
 class FrameStats {
  public:
-  explicit FrameStats(inspect::Node inspect_node);
+  explicit FrameStats(inspect_deprecated::Node inspect_node);
 
-  void RecordFrame(FrameTimings::Timestamps timestamps, zx_duration_t display_vsync_interval);
+  void RecordFrame(FrameTimings::Timestamps timestamps, zx::duration display_vsync_interval);
 
  private:
   static constexpr size_t kNumFramesToReport = 200;
@@ -31,9 +31,9 @@ class FrameStats {
   static void FrameTimingsOutputToCsv(const std::deque<const FrameTimings::Timestamps>& timestamps,
                                       std::ostream* output);
 
-  static zx_duration_t CalculateAverageDuration(
+  static zx::duration CalculateAverageDuration(
       const std::deque<const FrameTimings::Timestamps>& timestamps,
-      std::function<zx_duration_t(const FrameTimings::Timestamps&)> duration_func,
+      std::function<zx::duration(const FrameTimings::Timestamps&)> duration_func,
       uint32_t percentile);
 
   void RecordDroppedFrame(const FrameTimings::Timestamps timestamps);
@@ -50,8 +50,8 @@ class FrameStats {
   std::deque<const FrameTimings::Timestamps> dropped_frames_;
   std::deque<const FrameTimings::Timestamps> delayed_frames_;
 
-  inspect::Node inspect_node_;
-  inspect::LazyStringProperty inspect_frame_stats_dump_;
+  inspect_deprecated::Node inspect_node_;
+  inspect_deprecated::LazyStringProperty inspect_frame_stats_dump_;
 };
 
 }  // namespace gfx

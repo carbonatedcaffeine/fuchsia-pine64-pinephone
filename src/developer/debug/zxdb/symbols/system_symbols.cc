@@ -7,36 +7,12 @@
 #include "src/developer/debug/zxdb/common/file_util.h"
 #include "src/developer/debug/zxdb/common/host_util.h"
 #include "src/developer/debug/zxdb/symbols/module_symbols_impl.h"
+#include "src/lib/elflib/elflib.h"
 #include "src/lib/fxl/strings/string_printf.h"
 
 namespace zxdb {
 
-namespace {
-
-// TODO(brettw) this is hardcoded and will only work in a full local build.
-// We will need a more flexible way to do handle this, and also a way to
-// explicitly specify a location for the mapping file.
-std::string GetBuildDir() {
-  // Expect the debugger to be in "<build>/host_x64/zxdb" and the build dir
-  // to be one directory up.
-  std::string path = GetSelfPath();
-  if (path.empty())
-    return path;
-
-  // Trim off the last two slash-separated components ("host_x64/zxdb").
-  size_t last_slash = path.rfind('/');
-  if (last_slash != std::string::npos) {
-    path.resize(last_slash);
-    last_slash = path.rfind('/');
-    if (last_slash != std::string::npos)
-      path.resize(last_slash + 1);  // + 1 means keep the last slash.
-  }
-  return path;
-}
-
-}  // namespace
-
-// SystemSymbols::ModuleRef ----------------------------------------------------
+// SystemSymbols::ModuleRef ------------------------------------------------------------------------
 
 SystemSymbols::ModuleRef::ModuleRef(SystemSymbols* system_symbols,
                                     std::unique_ptr<ModuleSymbols> module_symbols)
@@ -49,10 +25,10 @@ SystemSymbols::ModuleRef::~ModuleRef() {
 
 void SystemSymbols::ModuleRef::SystemSymbolsDeleting() { system_symbols_ = nullptr; }
 
-// SystemSymbols ---------------------------------------------------------------
+// SystemSymbols -----------------------------------------------------------------------------------
 
 SystemSymbols::SystemSymbols(DownloadHandler* download_handler)
-    : build_dir_(GetBuildDir()), download_handler_(download_handler) {}
+    : download_handler_(download_handler) {}
 
 SystemSymbols::~SystemSymbols() {
   // Disown any remaining ModuleRefs so they don't call us back.
@@ -72,7 +48,7 @@ fxl::RefPtr<SystemSymbols::ModuleRef> SystemSymbols::InjectModuleForTesting(
 }
 
 Err SystemSymbols::GetModule(const std::string& build_id, fxl::RefPtr<ModuleRef>* module,
-                             bool download) {
+                             SystemSymbols::DownloadType download_type) {
   auto found_existing = modules_.find(build_id);
   if (found_existing != modules_.end()) {
     *module = fxl::RefPtr<ModuleRef>(found_existing->second);
@@ -80,16 +56,20 @@ Err SystemSymbols::GetModule(const std::string& build_id, fxl::RefPtr<ModuleRef>
   }
 
   std::string file_name = build_id_index_.FileForBuildID(build_id, DebugSymbolFileType::kDebugInfo);
-  if (file_name.empty() && download && download_handler_) {
+  std::string binary_file_name =
+      build_id_index_.FileForBuildID(build_id, DebugSymbolFileType::kBinary);
+
+  if (file_name.empty() && download_type == SystemSymbols::DownloadType::kSymbols &&
+      download_handler_) {
     *module = nullptr;
     download_handler_->RequestDownload(build_id, DebugSymbolFileType::kDebugInfo, false);
   }
 
-  std::string binary_file_name =
-      build_id_index_.FileForBuildID(build_id, DebugSymbolFileType::kBinary);
-
-  if (binary_file_name.empty() && download && download_handler_) {
-    download_handler_->RequestDownload(build_id, DebugSymbolFileType::kBinary, false);
+  if (auto debug = elflib::ElfLib::Create(file_name)) {
+    if (!debug->ProbeHasProgramBits() && binary_file_name.empty() &&
+        download_type == SystemSymbols::DownloadType::kBinary && download_handler_) {
+      download_handler_->RequestDownload(build_id, DebugSymbolFileType::kBinary, false);
+    }
   }
 
   if (file_name.empty()) {

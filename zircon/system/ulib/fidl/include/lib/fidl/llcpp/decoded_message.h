@@ -46,8 +46,7 @@ class DecodedMessage final {
   // The buffer region is assumed to contain a linearized FIDL message with valid pointers.
   // This does not take ownership of that buffer region.
   // But it does take ownership of the handles within the buffer.
-  explicit DecodedMessage(BytePart bytes)
-      : bytes_(std::move(bytes)) {
+  explicit DecodedMessage(BytePart bytes) : bytes_(std::move(bytes)) {
     ZX_DEBUG_ASSERT(bytes_.actual() >= FidlType::PrimarySize);
   }
 
@@ -68,6 +67,12 @@ class DecodedMessage final {
   void Reset(BytePart bytes) {
     CloseHandles();
     bytes_ = std::move(bytes);
+  }
+
+  // Returns ownership of the buffer and handles contained within to the caller.
+  BytePart Release() {
+    fidl::BytePart released_bytes = std::move(bytes_);
+    return released_bytes;
   }
 
   // Accesses the FIDL message by reinterpreting the buffer pointer.

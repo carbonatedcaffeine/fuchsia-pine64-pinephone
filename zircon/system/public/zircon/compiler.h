@@ -61,6 +61,10 @@
 #define __has_feature(x) 0
 #endif
 
+#ifndef __has_cpp_attribute
+#define __has_cpp_attribute(x) 0
+#endif
+
 #define __ALWAYS_INLINE __attribute__((__always_inline__))
 #define __MAY_ALIAS __attribute__((__may_alias__))
 #define __NONNULL(x) __attribute__((__nonnull__ x))
@@ -73,6 +77,15 @@
 #define __THREAD __thread
 #define __offsetof(type, field) __builtin_offsetof(type, field)
 
+// Only define __NO_UNIQUE_ADDRESS for C++, since it doesn't make sense in C.
+#ifdef __cplusplus
+#if __has_cpp_attribute(no_unique_address)
+#define __NO_UNIQUE_ADDRESS [[no_unique_address]]
+#else
+#define __NO_UNIQUE_ADDRESS
+#endif
+#endif  // ifdef __cplusplus
+
 #if defined(__cplusplus) && __cplusplus >= 201703L
 #define __FALLTHROUGH [[fallthrough]]
 #elif defined(__cplusplus) && defined(__clang__)
@@ -81,8 +94,8 @@
 #define __FALLTHROUGH __attribute__((__fallthrough__))
 #else
 #define __FALLTHROUGH \
-    do {              \
-    } while (0)
+  do {                \
+  } while (0)
 #endif
 
 // Publicly exposed thread annotation macros. These have a long and ugly name to
@@ -105,7 +118,7 @@
 #define __TA_SCOPED_CAPABILITY __THREAD_ANNOTATION(__scoped_lockable__)
 #define __TA_NO_THREAD_SAFETY_ANALYSIS __THREAD_ANNOTATION(__no_thread_safety_analysis__)
 
-#endif // ifndef __ASSEMBLER__
+#endif  // ifndef __ASSEMBLER__
 
 #if !defined(__DEPRECATE)
 #define __DEPRECATE __attribute__((__deprecated__))

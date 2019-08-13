@@ -1,16 +1,17 @@
 // Copyright 2019 The Fuchsia Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 #ifndef SRC_MEDIA_AUDIO_DRIVERS_VIRTUAL_AUDIO_VIRTUAL_AUDIO_DEVICE_IMPL_H_
 #define SRC_MEDIA_AUDIO_DRIVERS_VIRTUAL_AUDIO_VIRTUAL_AUDIO_DEVICE_IMPL_H_
 
-#include <audio-proto/audio-proto.h>
-#include <fbl/ref_ptr.h>
 #include <fuchsia/virtualaudio/cpp/fidl.h>
 
 #include <memory>
 
+#include <audio-proto/audio-proto.h>
+#include <fbl/ref_ptr.h>
+
+#include "garnet/lib/media/codec_impl/include/lib/media/codec_impl/closure_queue.h"
 #include "src/media/audio/drivers/virtual_audio/virtual_audio_control_impl.h"
 
 namespace virtual_audio {
@@ -37,8 +38,8 @@ class VirtualAudioDeviceImpl : public fuchsia::virtualaudio::Input,
       .max_frames_per_second = 48000,
       .flags = ASF_RANGE_FLAG_FPS_48000_FAMILY};
 
-  // Default FIFO is 1 msec, at 48k stereo 16
-  static constexpr uint32_t kDefaultFifoDepthBytes = 192;
+  // Default FIFO is 250 usec, at 48k stereo 16
+  static constexpr uint32_t kDefaultFifoDepthBytes = 48;
   static constexpr zx_time_t kDefaultExternalDelayNsec = 0;
 
   // At default rate 48k, this is 250 msec
@@ -63,8 +64,8 @@ class VirtualAudioDeviceImpl : public fuchsia::virtualaudio::Input,
   static fbl::unique_ptr<VirtualAudioDeviceImpl> Create(VirtualAudioControlImpl* owner,
                                                         bool is_input);
 
-  // Execute the given task on the FIDL channel's main dispatcher thread.
-  // Used to deliver callbacks or events, from the driver execution domain.
+  // Execute the given task on the FIDL channel's main dispatcher thread. Used to deliver callbacks
+  // or events, from the driver execution domain.
   void PostToDispatcher(fit::closure task_to_post);
 
   void SetBinding(fidl::Binding<fuchsia::virtualaudio::Input,
@@ -128,7 +129,7 @@ class VirtualAudioDeviceImpl : public fuchsia::virtualaudio::Input,
   virtual void NotifyStop(zx_time_t stop_time, uint32_t ring_buffer_position);
 
   void GetPosition(fuchsia::virtualaudio::Device::GetPositionCallback callback) override;
-  virtual void NotifyPosition(uint32_t ring_buffer_position, zx_time_t start_time);
+  virtual void NotifyPosition(zx_time_t monotonic_time, uint32_t ring_buffer_position);
 
   void ChangePlugState(zx_time_t plug_change_time, bool plugged) override;
 
@@ -143,18 +144,16 @@ class VirtualAudioDeviceImpl : public fuchsia::virtualaudio::Input,
   fbl::RefPtr<VirtualAudioStream> stream_;
   bool is_input_;
 
-  // When the binding is closed, it is removed from the (ControlImpl-owned)
-  // BindingSet that contains it, which in turn deletes the associated impl
-  // (since the binding holds a unique_ptr<impl>, not an impl*). Something might
-  // get dispatched from another thread at around this time, so we always check
-  // the binding __once we get to our main thread__, wherever these are used.
+  // When the binding is closed, it is removed from the (ControlImpl-owned) BindingSet that contains
+  // it, which in turn deletes the associated impl (since the binding holds a unique_ptr<impl>, not
+  // an impl*). Something might get dispatched from other thread at around this time, so we enqueue
+  // them (ClosureQueue) and use StopAndClear to cancel them during ~DeviceImpl (in RemoveStream).
   fidl::Binding<fuchsia::virtualaudio::Input,
                 fbl::unique_ptr<virtual_audio::VirtualAudioDeviceImpl>>* input_binding_ = nullptr;
   fidl::Binding<fuchsia::virtualaudio::Output,
                 fbl::unique_ptr<virtual_audio::VirtualAudioDeviceImpl>>* output_binding_ = nullptr;
 
-  // We initialize no member variables here, nor in the constructor -- we do
-  // everything within Init() so that ResetConfiguration() has the same effect.
+  // Don't initialize here or in ctor; do it all in Init() so ResetConfiguration has same effect.
   std::string device_name_;
   std::string mfr_name_;
   std::string prod_name_;
@@ -178,6 +177,9 @@ class VirtualAudioDeviceImpl : public fuchsia::virtualaudio::Input,
 
   bool override_notification_frequency_;
   uint32_t notifications_per_ring_;
+
+  // The optional enables this to be emplaced when stream_ is created, minimizing memory churn.
+  std::optional<ClosureQueue> task_queue_;
 };
 
 }  // namespace virtual_audio

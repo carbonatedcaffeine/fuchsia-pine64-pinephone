@@ -5,7 +5,6 @@
 #ifndef SRC_LIB_ELFLIB_ELFLIB_H_
 #define SRC_LIB_ELFLIB_ELFLIB_H_
 
-#include <fbl/macros.h>
 #include <stdio.h>
 
 #include <map>
@@ -13,6 +12,8 @@
 #include <optional>
 #include <utility>
 #include <vector>
+
+#include <fbl/macros.h>
 
 #include "garnet/third_party/llvm/include/llvm/BinaryFormat/ELF.h"
 
@@ -40,10 +41,6 @@ class ElfLib {
   // method.
   enum class Ownership { kTakeOwnership, kDontTakeOwnership };
 
-  // Do not use. See Create.
-  explicit ElfLib(std::unique_ptr<MemoryAccessor>&& memory,
-                  AddressMode address_mode);
-
   virtual ~ElfLib();
 
   // Attach a second ElfLib to this one which contains debug info. This second
@@ -66,8 +63,7 @@ class ElfLib {
   MemoryRegion GetSegmentData(size_t segment);
 
   // Get a note from the notes section.
-  std::optional<std::vector<uint8_t>> GetNote(const std::string& name,
-                                              uint64_t type);
+  std::optional<std::vector<uint8_t>> GetNote(const std::string& name, uint64_t type);
 
   // Get the NT_GNU_BUILD_ID note as a hex string. Return empty string if we
   // don't have that note.
@@ -91,6 +87,13 @@ class ElfLib {
 
   // Attempt to discern whether this file has debug symbols (otherwise it is
   // presumably stripped).
+  //
+  // There are different types of debug information and a file could contain an
+  // arbitrary subset of it. This function specifically probes for a
+  // ".debug_info" section which contains the main DWARF symbol information. But
+  // a file could lack this but still contain certain names or unwind
+  // information. If you need to tell if a file has this other information, a
+  // different probe function should be added for the specific thing you need.
   bool ProbeHasDebugInfo();
 
   // Attempt to discern whether this file has the actual program contents. It
@@ -113,9 +116,8 @@ class ElfLib {
   // Create an ElfLib object for reading ELF structures via a read callback.
   // The offsets will assume either an ELF file or an ELF mapped address space
   // depending on the value of the address_mode argument.
-  static std::unique_ptr<ElfLib> Create(
-      std::function<bool(uint64_t, std::vector<uint8_t>*)> fetch,
-      AddressMode address_mode = AddressMode::kProcess);
+  static std::unique_ptr<ElfLib> Create(std::function<bool(uint64_t, std::vector<uint8_t>*)> fetch,
+                                        AddressMode address_mode = AddressMode::kProcess);
 
   // Returns a map from symbol names to the locations of their PLT entries.
   // Returns an empty map if the data is inaccessible.
@@ -137,6 +139,8 @@ class ElfLib {
   }
 
  private:
+  explicit ElfLib(std::unique_ptr<MemoryAccessor>&& memory, AddressMode address_mode);
+
   // Add a warning to this instance. See GetAndClearWarnings.
   void Warn(const std::string&& m) { warnings_.push_back(m); }
 
@@ -149,8 +153,8 @@ class ElfLib {
   };
 
   // Create a new ElfLib object.
-  static std::unique_ptr<ElfLib> Create(
-      std::unique_ptr<MemoryAccessor>&& memory, AddressMode address_mode);
+  static std::unique_ptr<ElfLib> Create(std::unique_ptr<MemoryAccessor>&& memory,
+                                        AddressMode address_mode);
 
   // See the definition of this class in elflib.cc for details.
   class PltEntryBuffer;

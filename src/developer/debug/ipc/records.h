@@ -31,8 +31,7 @@ struct ProcessTreeRecord {
 // Value representing a particular register.
 struct Register {
   Register() = default;
-  Register(RegisterID rid, std::vector<uint8_t> d)
-      : id(rid), data(std::move(d)) {}
+  Register(RegisterID rid, std::vector<uint8_t> d) : id(rid), data(std::move(d)) {}
 
   // Constructs a 64-bit value for the current platform.
   Register(RegisterID rid, uint64_t val) : id(rid) {
@@ -41,9 +40,7 @@ struct Register {
   }
 
   // Comparisons (primarily for tests).
-  bool operator==(const Register& other) const {
-    return id == other.id && data == other.data;
-  }
+  bool operator==(const Register& other) const { return id == other.id && data == other.data; }
   bool operator!=(const Register& other) const { return !operator==(other); }
 
   RegisterID id = RegisterID::kUnknown;
@@ -55,14 +52,12 @@ struct Register {
 
 struct StackFrame {
   StackFrame() = default;
-  StackFrame(uint64_t ip, uint64_t sp, uint64_t cfa = 0,
-             std::vector<Register> r = {})
+  StackFrame(uint64_t ip, uint64_t sp, uint64_t cfa = 0, std::vector<Register> r = {})
       : ip(ip), sp(sp), cfa(cfa), regs(std::move(r)) {}
 
   // Comparisons (primarily for tests).
   bool operator==(const StackFrame& other) const {
-    return ip == other.ip && sp == other.sp && cfa == other.cfa &&
-           regs == other.regs;
+    return ip == other.ip && sp == other.sp && cfa == other.cfa && regs == other.regs;
   }
   bool operator!=(const StackFrame& other) const { return !operator==(other); }
 
@@ -210,6 +205,9 @@ struct BreakpointSettings {
   // different than the ID in the console frontend which can be across mutliple
   // processes or may match several addresses in a single process.
   uint32_t id = 0;
+
+  // Name used to recognize a breakpoint. Useful for debugging purposes. Optional.
+  std::string name;
 
   // When set, the breakpoint will automatically be removed as soon as it is
   // hit.

@@ -25,6 +25,9 @@ declare_args() {
 #
 # Parameters
 #
+#   gopackages (required)
+#     List of packages to build.
+#
 #   sdk_category (optional)
 #     Publication level of the library in SDKs.
 #     See //build/sdk/sdk_atom.gni.
@@ -45,8 +48,8 @@ declare_args() {
 #     Whether this target defines a test.
 #
 template("go_build") {
-  assert(defined(invoker.gopackage),
-         "gopackage must be defined for $target_name")
+  assert(defined(invoker.gopackages),
+         "gopackages must be defined for $target_name")
 
   main_target_name = target_name
 
@@ -56,7 +59,12 @@ template("go_build") {
   }
   output_path = "${root_out_dir}/${output_name}"
 
-  use_strip = is_fuchsia
+  is_test = defined(invoker.test) && invoker.test
+  define_sdk_target = defined(invoker.sdk_category) &&
+                      invoker.sdk_category != "excluded" && !is_test
+
+  # Strip target binaries and binaries that are included in the SDK.
+  use_strip = is_fuchsia || define_sdk_target
   if (use_strip) {
     unstripped_output_path = "${root_out_dir}/exe.unstripped/${output_name}"
   }
@@ -197,7 +205,7 @@ template("go_build") {
       ".build-id",
     ]
 
-    if (defined(invoker.test) && invoker.test) {
+    if (is_test) {
       testonly = true
       args += [ "--is-test=true" ]
     }
@@ -212,15 +220,32 @@ template("go_build") {
       }
     }
 
-    args += [
-      "--package",
-      invoker.gopackage,
-    ]
+    foreach(gopackage, invoker.gopackages) {
+      args += [
+        "--package",
+        gopackage,
+      ]
+    }
+
+    metadata = {
+      tool_paths = []
+
+      # Record metadata for the //:tool_paths build API for all non-test,
+      # host binaries.
+      if (current_toolchain == host_toolchain && !is_test) {
+        tool_paths = [
+          {
+            name = output_name
+            path = rebase_path(output_path, root_build_dir)
+            label = get_label_info(":$main_target_name", "label_with_toolchain")
+          },
+        ]
+      }
+    }
   }
 
   # Allow host binaries to be published in SDKs.
-  if (defined(invoker.sdk_category) && invoker.sdk_category != "excluded" &&
-      !is_fuchsia && (!defined(invoker.test) || !invoker.test)) {
+  if (define_sdk_target) {
     file_base = "tools/$output_name"
 
     sdk_atom("${target_name}_sdk") {

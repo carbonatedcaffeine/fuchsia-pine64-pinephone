@@ -11,9 +11,8 @@
 //! A client of the TokenManager must provide the path for the credential database and suppliers
 //! for AuthProviders and AuthenticationUiContexts.
 
-#![deny(warnings)]
 #![deny(missing_docs)]
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 use fidl::endpoints::ClientEnd;
 use fidl_fuchsia_auth::{AuthProviderMarker, AuthenticationContextProviderProxy};

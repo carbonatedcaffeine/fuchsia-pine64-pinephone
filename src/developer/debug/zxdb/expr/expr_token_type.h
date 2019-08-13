@@ -13,27 +13,35 @@ namespace zxdb {
 // as an index into the parser lookup table.
 enum class ExprTokenType : size_t {
   kInvalid = 0,
-  kName,         // random_text
-  kInteger,      // 123, 0x89ab
-  kEquals,       // =
-  kEquality,     // ==
-  kDot,          // .
-  kComma,        // ,
-  kStar,         // *
-  kAmpersand,    // &
-  kDoubleAnd,    // && (logical "and" or rvalue reference)
-  kBitwiseOr,    // |
-  kLogicalOr,    // ||
-  kArrow,        // ->
-  kLeftSquare,   // [
-  kRightSquare,  // ]
-  kLeftParen,    // (
-  kRightParen,   // )
-  kLess,         // <
-  kGreater,      // >
-  kMinus,        // - (by itself, not part of "->")
-  kPlus,         // +
-  kColonColon,   // ::
+  kName,          // random_text
+  kInteger,       // 123, 0x89ab
+  kEquals,        // =
+  kEquality,      // ==
+  kInequality,    // !=
+  kLessEqual,     // <=
+  kGreaterEqual,  // >=
+  kSpaceship,     // <=>
+  kDot,           // .
+  kComma,         // ,
+  kStar,          // *
+  kAmpersand,     // &
+  kDoubleAnd,     // && (logical "and" or rvalue reference)
+  kBitwiseOr,     // |
+  kLogicalOr,     // ||
+  kArrow,         // ->
+  kLeftSquare,    // [
+  kRightSquare,   // ]
+  kLeftParen,     // (
+  kRightParen,    // )
+  kLess,          // <
+  kGreater,       // >
+  kMinus,         // - (by itself, not part of "->")
+  kBang,          // !
+  kPlus,          // +
+  kSlash,         // /
+  kCaret,         // ^
+  kPercent,       // %
+  kColonColon,    // ::
 
   // Special keywords.
   kTrue,             // true

@@ -9,12 +9,12 @@
 #include "src/media/audio/audio_core/audio_capturer_impl.h"
 #include "src/media/audio/audio_core/audio_core_impl.h"
 #include "src/media/audio/audio_core/audio_link.h"
-#include "src/media/audio/audio_core/audio_output.h"
 #include "src/media/audio/audio_core/audio_plug_detector.h"
 #include "src/media/audio/audio_core/audio_renderer_impl.h"
-#include "src/media/audio/audio_core/mixer/fx_loader.h"
+#include "src/media/audio/audio_core/driver_output.h"
 #include "src/media/audio/audio_core/reporter.h"
 #include "src/media/audio/audio_core/throttle_output.h"
+#include "src/media/audio/lib/logging/logging.h"
 
 namespace media::audio {
 
@@ -52,7 +52,7 @@ zx_status_t AudioDeviceManager::Init() {
   }
 
   // Initialize the FxLoader and load the device effect library, if present.
-  res = fx_loader_.LoadLibrary();
+  res = effects_loader_.LoadLibrary();
   if (res == ZX_ERR_ALREADY_EXISTS) {
     FXL_LOG(ERROR) << "FxLoader already started!";
   } else if (res != ZX_OK) {
@@ -95,7 +95,7 @@ void AudioDeviceManager::Shutdown() {
   }
 
   // Step #6: Close and unload the device effect library SO.
-  fx_loader_.UnloadLibrary();
+  effects_loader_.UnloadLibrary();
 
   // Step #7: Shut down the throttle output.
   throttle_output_->Shutdown();
@@ -163,8 +163,8 @@ void AudioDeviceManager::ActivateDevice(const fbl::RefPtr<AudioDevice>& device) 
                   id[13], id[14], id[15]);
     FXL_LOG(WARNING) << "Warning: Device ID (" << device->token()
                      << ") shares a persistent unique ID (" << id_buf
-                     << ") with another device in the system.  Initial Settings "
-                        "will be cloned from this device, and not persisted";
+                     << ") with another device in the system.  Initial Settings will be cloned "
+                        "from this device, and not persisted";
     settings->InitFromClone(*collision);
   }
 
@@ -234,6 +234,7 @@ void AudioDeviceManager::RemoveDevice(const fbl::RefPtr<AudioDevice>& device) {
 
   REP(RemovingDevice(*device));
 
+  // TODO(mpuryear): Considering eliminating this; it may not be needed.
   device->PreventNewLinks();
   device->Unlink();
 
@@ -313,7 +314,7 @@ void AudioDeviceManager::GetDevices(GetDevicesCallback cbk) {
     }
   }
 
-  cbk(fidl::VectorPtr<fuchsia::media::AudioDeviceInfo>(std::move(ret)));
+  cbk(std::move(ret));
 }
 
 void AudioDeviceManager::GetDeviceGain(uint64_t device_token, GetDeviceGainCallback cbk) {
@@ -749,6 +750,31 @@ void AudioDeviceManager::CommitDirtySettings() {
   // If we need to update in the future, schedule a commit task to do so.
   if (next != zx::time::infinite()) {
     commit_settings_task_.PostForTime(service_->dispatcher(), next);
+  }
+}
+
+void AudioDeviceManager::AddDeviceByChannel(::zx::channel device_channel, std::string device_name,
+                                            bool is_input) {
+  AUD_VLOG(TRACE) << " adding " << (is_input ? "input" : "output") << " '" << device_name << "'";
+
+  // Hand the stream off to the proper type of class to manage.
+  fbl::RefPtr<AudioDevice> new_device;
+  if (is_input) {
+    new_device = AudioInput::Create(std::move(device_channel), this);
+  } else {
+    new_device = DriverOutput::Create(std::move(device_channel), this);
+  }
+
+  if (new_device == nullptr) {
+    FXL_LOG(ERROR) << "Failed to instantiate audio " << (is_input ? "input" : "output") << " for '"
+                   << device_name << "'";
+  }
+
+  REP(AddingDevice(device_name, *new_device));
+  zx_status_t status = AddDevice(std::move(new_device));
+
+  if (status != ZX_OK) {
+    FXL_PLOG(ERROR, status) << "AddDevice failed";
   }
 }
 

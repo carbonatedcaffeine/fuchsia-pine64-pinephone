@@ -1,0 +1,13 @@
+{
+    "program": {
+        "binary": "bin/netdump"
+    },
+    "sandbox": {
+        "dev": [
+            "class/ethernet"
+        ],
+        "features": [
+            "isolated-persistent-storage"
+        ]
+    }
+}

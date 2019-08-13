@@ -299,6 +299,7 @@ type XUnion struct {
 	Members   []XUnionMember
 	Size      int
 	Alignment int
+	types.Strictness
 }
 
 type XUnionMember struct {
@@ -402,19 +403,7 @@ type Interface struct {
 // Method represents a method of a FIDL interface in terms of golang structures.
 type Method struct {
 	types.Attributes
-
-	// Ordinal is the ordinal for this method.
-	Ordinal uint64
-
-	// OrdinalName is the name of the ordinal for this method, including the interface
-	// name as a prefix.
-	OrdinalName string
-
-	// TODO(FIDL-524): Remove.
-	GenOrdinal uint64
-
-	// TODO(FIDL-524): Remove.
-	GenOrdinalName string
+	types.Ordinals
 
 	// Name is the name of the Method, including the interface name as a prefix.
 	Name string
@@ -623,19 +612,23 @@ func (_ *compiler) compileIdentifier(id types.Identifier, export bool, ext strin
 
 func (c *compiler) compileCompoundIdentifier(eci types.EncodedCompoundIdentifier, export bool, ext string) string {
 	ci := types.ParseCompoundIdentifier(eci)
+	var name string
 	if export {
-		ci.Name = types.Identifier(common.ToUpperCamelCase(string(ci.Name)))
+		name = common.ToUpperCamelCase(string(ci.Name))
 	} else {
-		ci.Name = types.Identifier(common.ToLowerCamelCase(string(ci.Name)))
+		name = common.ToLowerCamelCase(string(ci.Name))
 	}
 	pkg := compileLibraryIdentifier(ci.Library)
-	strs := []string{}
+	var strs []string
 	if c.inExternalLibrary(ci) {
 		pkgAlias := c.libraryDeps[pkg]
 		strs = append(strs, pkgAlias)
 		c.usedLibraryDeps[pkg] = pkgAlias
 	}
-	strs = append(strs, changeIfReserved(ci.Name, ext))
+	strs = append(strs, changeIfReserved(types.Identifier(name), ext))
+	if ci.Member != "" {
+		strs = append(strs, string(ci.Member))
+	}
 	return strings.Join(strs, ".")
 }
 
@@ -657,7 +650,8 @@ func (_ *compiler) compileLiteral(val types.Literal) string {
 
 func (c *compiler) compileConstant(val types.Constant) string {
 	switch val.Kind {
-	// TODO(mknyszek): Support identifiers.
+	case types.IdentifierConstant:
+		return c.compileCompoundIdentifier(val.Identifier, true, "")
 	case types.LiteralConstant:
 		return c.compileLiteral(val.Literal)
 	default:
@@ -898,6 +892,7 @@ func (c *compiler) compileXUnion(val types.XUnion) XUnion {
 		Size:       val.Size,
 		Alignment:  val.Alignment,
 		Members:    members,
+		Strictness: val.Strictness,
 	}
 }
 
@@ -950,12 +945,13 @@ func (c *compiler) compileParameter(p types.Parameter) StructMember {
 func (c *compiler) compileMethod(ifaceName types.EncodedCompoundIdentifier, val types.Method) Method {
 	methodName := c.compileIdentifier(val.Name, true, "")
 	r := Method{
-		Attributes:      val.Attributes,
-		Name:            methodName,
-		Ordinal:         val.Ordinal,
-		OrdinalName:     c.compileCompoundIdentifier(ifaceName, true, methodName+"Ordinal"),
-		GenOrdinal:      val.GenOrdinal,
-		GenOrdinalName:  c.compileCompoundIdentifier(ifaceName, true, methodName+"GenOrdinal"),
+		Attributes: val.Attributes,
+		Name:       methodName,
+		Ordinals: types.NewOrdinalsStep3(
+			val,
+			c.compileCompoundIdentifier(ifaceName, true, methodName+"Ordinal"),
+			c.compileCompoundIdentifier(ifaceName, true, methodName+"GenOrdinal"),
+		),
 		EventExpectName: "Expect" + methodName,
 		IsEvent:         !val.HasRequest && val.HasResponse,
 		IsTransitional:  val.IsTransitional(),
@@ -988,9 +984,10 @@ func (c *compiler) compileMethod(ifaceName types.EncodedCompoundIdentifier, val 
 }
 
 func (c *compiler) compileInterface(val types.Interface) Interface {
-	proxyType := "ChannelProxy"
-	if val.Attributes.GetAttribute("Transport").Value == "SocketControl" {
-		proxyType = "SocketControlProxy"
+	var proxyType string
+	switch val.Attributes.GetAttribute("Transport").Value {
+	case "", "Channel":
+		proxyType = "ChannelProxy"
 	}
 	r := Interface{
 		Attributes:           val.Attributes,

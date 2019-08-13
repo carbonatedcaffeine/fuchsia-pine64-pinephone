@@ -7,11 +7,11 @@
 #include <lib/fidl/cpp/string_view.h>
 #include <lib/fidl/llcpp/array.h>
 #include <lib/fidl/llcpp/coding.h>
+#include <lib/fidl/llcpp/sync_call.h>
 #include <lib/fidl/llcpp/traits.h>
 #include <lib/fidl/llcpp/transaction.h>
 #include <lib/fit/function.h>
 #include <lib/zx/channel.h>
-#include <lib/zx/socket.h>
 #include <zircon/fidl.h>
 
 namespace llcpp {
@@ -19,7 +19,6 @@ namespace llcpp {
 namespace fuchsia {
 namespace net {
 
-class SocketControl;
 class Connectivity;
 struct NameLookup_LookupHostname_Response;
 struct MacAddress;
@@ -119,663 +118,12 @@ enum class AddrInfoStatus : uint32_t {
 class SocketProvider;
 struct AddrInfoHints;
 
-extern "C" const fidl_type_t fuchsia_net_SocketControlBindRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlBindResponseTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlConnectRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlConnectResponseTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlListenRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlListenResponseTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlAcceptRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlAcceptResponseTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlCloseResponseTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlGetSockNameResponseTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlGetPeerNameResponseTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlSetSockOptRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlSetSockOptResponseTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlGetSockOptRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlGetSockOptResponseTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlIoctlRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlIoctlResponseTable;
-
-// The control plane for a network socket. Once a socket has been retrieved from a
-// `SocketProvider`, this interface is then used to further configure and use the socket.
-// This interface is essentially POSIX. Its implementation must support Linux-specific arguments
-// to {Get,Set}SockOpt.
-class SocketControl final {
- public:
-
-  struct BindResponse final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t code;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlBindResponseTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 24;
-    static constexpr uint32_t MaxOutOfLine = 0;
-  };
-  struct BindRequest final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    ::fidl::VectorView<uint8_t> addr;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlBindRequestTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 32;
-    static constexpr uint32_t MaxOutOfLine = 128;
-    using ResponseType = BindResponse;
-  };
-
-  struct ConnectResponse final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t code;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlConnectResponseTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 24;
-    static constexpr uint32_t MaxOutOfLine = 0;
-  };
-  struct ConnectRequest final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    ::fidl::VectorView<uint8_t> addr;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlConnectRequestTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 32;
-    static constexpr uint32_t MaxOutOfLine = 128;
-    using ResponseType = ConnectResponse;
-  };
-
-  struct ListenResponse final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t code;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlListenResponseTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 24;
-    static constexpr uint32_t MaxOutOfLine = 0;
-  };
-  struct ListenRequest final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t backlog;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlListenRequestTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 24;
-    static constexpr uint32_t MaxOutOfLine = 0;
-    using ResponseType = ListenResponse;
-  };
-
-  struct AcceptResponse final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t code;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlAcceptResponseTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 24;
-    static constexpr uint32_t MaxOutOfLine = 0;
-  };
-  struct AcceptRequest final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t flags;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlAcceptRequestTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 24;
-    static constexpr uint32_t MaxOutOfLine = 0;
-    using ResponseType = AcceptResponse;
-  };
-
-  struct CloseResponse final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t code;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlCloseResponseTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 24;
-    static constexpr uint32_t MaxOutOfLine = 0;
-  };
-  using CloseRequest = ::fidl::AnyZeroArgMessage;
-
-  struct GetSockNameResponse final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t code;
-    ::fidl::VectorView<uint8_t> addr;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlGetSockNameResponseTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 40;
-    static constexpr uint32_t MaxOutOfLine = 128;
-  };
-  using GetSockNameRequest = ::fidl::AnyZeroArgMessage;
-
-  struct GetPeerNameResponse final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t code;
-    ::fidl::VectorView<uint8_t> addr;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlGetPeerNameResponseTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 40;
-    static constexpr uint32_t MaxOutOfLine = 128;
-  };
-  using GetPeerNameRequest = ::fidl::AnyZeroArgMessage;
-
-  struct SetSockOptResponse final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t code;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlSetSockOptResponseTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 24;
-    static constexpr uint32_t MaxOutOfLine = 0;
-  };
-  struct SetSockOptRequest final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t level;
-    int16_t optname;
-    ::fidl::VectorView<uint8_t> optval;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlSetSockOptRequestTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 40;
-    static constexpr uint32_t MaxOutOfLine = 904;
-    using ResponseType = SetSockOptResponse;
-  };
-
-  struct GetSockOptResponse final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t code;
-    ::fidl::VectorView<uint8_t> optval;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlGetSockOptResponseTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 40;
-    static constexpr uint32_t MaxOutOfLine = 904;
-  };
-  struct GetSockOptRequest final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t level;
-    int16_t optname;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlGetSockOptRequestTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 24;
-    static constexpr uint32_t MaxOutOfLine = 0;
-    using ResponseType = GetSockOptResponse;
-  };
-
-  struct IoctlResponse final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t code;
-    ::fidl::VectorView<uint8_t> out;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlIoctlResponseTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 40;
-    static constexpr uint32_t MaxOutOfLine = 904;
-  };
-  struct IoctlRequest final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t req;
-    ::fidl::VectorView<uint8_t> in;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketControlIoctlRequestTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 40;
-    static constexpr uint32_t MaxOutOfLine = 904;
-    using ResponseType = IoctlResponse;
-  };
-
-
-  class SyncClient final {
-   public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
-    SyncClient(SyncClient&&) = default;
-
-    SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
-
-    const ::zx::channel& channel() const { return channel_; }
-
-    ::zx::channel* mutable_channel() { return &channel_; }
-
-    // Sets the local address used for the socket.
-    zx_status_t Bind(::fidl::VectorView<uint8_t> addr, int16_t* out_code);
-
-    // Sets the local address used for the socket.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<BindResponse> Bind(::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> addr, ::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Sets the local address used for the socket.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<BindResponse> Bind(::fidl::DecodedMessage<BindRequest> params, ::fidl::BytePart response_buffer);
-
-    // Initiates a connection to a network endpoint.
-    zx_status_t Connect(::fidl::VectorView<uint8_t> addr, int16_t* out_code);
-
-    // Initiates a connection to a network endpoint.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<ConnectResponse> Connect(::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> addr, ::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Initiates a connection to a network endpoint.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<ConnectResponse> Connect(::fidl::DecodedMessage<ConnectRequest> params, ::fidl::BytePart response_buffer);
-
-    // Begin listening for new connections from network endpoints. At most `backlog` connections
-    // will be buffered.
-    zx_status_t Listen(int16_t backlog, int16_t* out_code);
-
-    // Begin listening for new connections from network endpoints. At most `backlog` connections
-    // will be buffered.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<ListenResponse> Listen(::fidl::BytePart _request_buffer, int16_t backlog, ::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Begin listening for new connections from network endpoints. At most `backlog` connections
-    // will be buffered.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<ListenResponse> Listen(::fidl::DecodedMessage<ListenRequest> params, ::fidl::BytePart response_buffer);
-
-    // Accepts an incoming connection from a network endpoint.
-    zx_status_t Accept(int16_t flags, int16_t* out_code);
-
-    // Accepts an incoming connection from a network endpoint.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<AcceptResponse> Accept(::fidl::BytePart _request_buffer, int16_t flags, ::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Accepts an incoming connection from a network endpoint.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<AcceptResponse> Accept(::fidl::DecodedMessage<AcceptRequest> params, ::fidl::BytePart response_buffer);
-
-    // Closes the socket.
-    zx_status_t Close(int16_t* out_code);
-
-    // Closes the socket.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<CloseResponse> Close(::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Closes the socket.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<CloseResponse> Close(::fidl::BytePart response_buffer);
-
-
-    // Retrieves the local socket address.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetSockNameResponse> GetSockName(::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_addr);
-
-    // Retrieves the local socket address.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetSockNameResponse> GetSockName(::fidl::BytePart response_buffer);
-
-
-    // Retrieves the remote socket address.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetPeerNameResponse> GetPeerName(::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_addr);
-
-    // Retrieves the remote socket address.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetPeerNameResponse> GetPeerName(::fidl::BytePart response_buffer);
-
-    // Sets a socket option. TODO(NET-1699): link to description of supported socket options.
-    zx_status_t SetSockOpt(int16_t level, int16_t optname, ::fidl::VectorView<uint8_t> optval, int16_t* out_code);
-
-    // Sets a socket option. TODO(NET-1699): link to description of supported socket options.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<SetSockOptResponse> SetSockOpt(::fidl::BytePart _request_buffer, int16_t level, int16_t optname, ::fidl::VectorView<uint8_t> optval, ::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Sets a socket option. TODO(NET-1699): link to description of supported socket options.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<SetSockOptResponse> SetSockOpt(::fidl::DecodedMessage<SetSockOptRequest> params, ::fidl::BytePart response_buffer);
-
-
-    // Retrieves the current value of a socket option. TODO(NET-1699): link to description of
-    // supported socket options.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetSockOptResponse> GetSockOpt(::fidl::BytePart _request_buffer, int16_t level, int16_t optname, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_optval);
-
-    // Retrieves the current value of a socket option. TODO(NET-1699): link to description of
-    // supported socket options.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetSockOptResponse> GetSockOpt(::fidl::DecodedMessage<GetSockOptRequest> params, ::fidl::BytePart response_buffer);
-
-
-    // Runs operations (e.g., get the receive timestamp of the last packet) on the socket.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<IoctlResponse> Ioctl(::fidl::BytePart _request_buffer, int16_t req, ::fidl::VectorView<uint8_t> in, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_out);
-
-    // Runs operations (e.g., get the receive timestamp of the last packet) on the socket.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<IoctlResponse> Ioctl(::fidl::DecodedMessage<IoctlRequest> params, ::fidl::BytePart response_buffer);
-
-   private:
-    ::zx::channel channel_;
-  };
-
-  // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
-  class Call final {
-   public:
-
-    // Sets the local address used for the socket.
-    static zx_status_t Bind(zx::unowned_channel _client_end, ::fidl::VectorView<uint8_t> addr, int16_t* out_code);
-
-    // Sets the local address used for the socket.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<BindResponse> Bind(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> addr, ::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Sets the local address used for the socket.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<BindResponse> Bind(zx::unowned_channel _client_end, ::fidl::DecodedMessage<BindRequest> params, ::fidl::BytePart response_buffer);
-
-    // Initiates a connection to a network endpoint.
-    static zx_status_t Connect(zx::unowned_channel _client_end, ::fidl::VectorView<uint8_t> addr, int16_t* out_code);
-
-    // Initiates a connection to a network endpoint.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<ConnectResponse> Connect(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> addr, ::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Initiates a connection to a network endpoint.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<ConnectResponse> Connect(zx::unowned_channel _client_end, ::fidl::DecodedMessage<ConnectRequest> params, ::fidl::BytePart response_buffer);
-
-    // Begin listening for new connections from network endpoints. At most `backlog` connections
-    // will be buffered.
-    static zx_status_t Listen(zx::unowned_channel _client_end, int16_t backlog, int16_t* out_code);
-
-    // Begin listening for new connections from network endpoints. At most `backlog` connections
-    // will be buffered.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<ListenResponse> Listen(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t backlog, ::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Begin listening for new connections from network endpoints. At most `backlog` connections
-    // will be buffered.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<ListenResponse> Listen(zx::unowned_channel _client_end, ::fidl::DecodedMessage<ListenRequest> params, ::fidl::BytePart response_buffer);
-
-    // Accepts an incoming connection from a network endpoint.
-    static zx_status_t Accept(zx::unowned_channel _client_end, int16_t flags, int16_t* out_code);
-
-    // Accepts an incoming connection from a network endpoint.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<AcceptResponse> Accept(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t flags, ::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Accepts an incoming connection from a network endpoint.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<AcceptResponse> Accept(zx::unowned_channel _client_end, ::fidl::DecodedMessage<AcceptRequest> params, ::fidl::BytePart response_buffer);
-
-    // Closes the socket.
-    static zx_status_t Close(zx::unowned_channel _client_end, int16_t* out_code);
-
-    // Closes the socket.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<CloseResponse> Close(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Closes the socket.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<CloseResponse> Close(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
-
-
-    // Retrieves the local socket address.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetSockNameResponse> GetSockName(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_addr);
-
-    // Retrieves the local socket address.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<GetSockNameResponse> GetSockName(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
-
-
-    // Retrieves the remote socket address.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetPeerNameResponse> GetPeerName(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_addr);
-
-    // Retrieves the remote socket address.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<GetPeerNameResponse> GetPeerName(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
-
-    // Sets a socket option. TODO(NET-1699): link to description of supported socket options.
-    static zx_status_t SetSockOpt(zx::unowned_channel _client_end, int16_t level, int16_t optname, ::fidl::VectorView<uint8_t> optval, int16_t* out_code);
-
-    // Sets a socket option. TODO(NET-1699): link to description of supported socket options.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<SetSockOptResponse> SetSockOpt(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t level, int16_t optname, ::fidl::VectorView<uint8_t> optval, ::fidl::BytePart _response_buffer, int16_t* out_code);
-
-    // Sets a socket option. TODO(NET-1699): link to description of supported socket options.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<SetSockOptResponse> SetSockOpt(zx::unowned_channel _client_end, ::fidl::DecodedMessage<SetSockOptRequest> params, ::fidl::BytePart response_buffer);
-
-
-    // Retrieves the current value of a socket option. TODO(NET-1699): link to description of
-    // supported socket options.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetSockOptResponse> GetSockOpt(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t level, int16_t optname, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_optval);
-
-    // Retrieves the current value of a socket option. TODO(NET-1699): link to description of
-    // supported socket options.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<GetSockOptResponse> GetSockOpt(zx::unowned_channel _client_end, ::fidl::DecodedMessage<GetSockOptRequest> params, ::fidl::BytePart response_buffer);
-
-
-    // Runs operations (e.g., get the receive timestamp of the last packet) on the socket.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<IoctlResponse> Ioctl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t req, ::fidl::VectorView<uint8_t> in, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_out);
-
-    // Runs operations (e.g., get the receive timestamp of the last packet) on the socket.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<IoctlResponse> Ioctl(zx::unowned_channel _client_end, ::fidl::DecodedMessage<IoctlRequest> params, ::fidl::BytePart response_buffer);
-
-  };
-
-  // Pure-virtual interface to be implemented by a server.
-  class Interface {
-   public:
-    Interface() = default;
-    virtual ~Interface() = default;
-    using _Outer = SocketControl;
-    using _Base = ::fidl::CompleterBase;
-
-    class BindCompleterBase : public _Base {
-     public:
-      void Reply(int16_t code);
-      void Reply(::fidl::BytePart _buffer, int16_t code);
-      void Reply(::fidl::DecodedMessage<BindResponse> params);
-
-     protected:
-      using ::fidl::CompleterBase::CompleterBase;
-    };
-
-    using BindCompleter = ::fidl::Completer<BindCompleterBase>;
-
-    virtual void Bind(::fidl::VectorView<uint8_t> addr, BindCompleter::Sync _completer) = 0;
-
-    class ConnectCompleterBase : public _Base {
-     public:
-      void Reply(int16_t code);
-      void Reply(::fidl::BytePart _buffer, int16_t code);
-      void Reply(::fidl::DecodedMessage<ConnectResponse> params);
-
-     protected:
-      using ::fidl::CompleterBase::CompleterBase;
-    };
-
-    using ConnectCompleter = ::fidl::Completer<ConnectCompleterBase>;
-
-    virtual void Connect(::fidl::VectorView<uint8_t> addr, ConnectCompleter::Sync _completer) = 0;
-
-    class ListenCompleterBase : public _Base {
-     public:
-      void Reply(int16_t code);
-      void Reply(::fidl::BytePart _buffer, int16_t code);
-      void Reply(::fidl::DecodedMessage<ListenResponse> params);
-
-     protected:
-      using ::fidl::CompleterBase::CompleterBase;
-    };
-
-    using ListenCompleter = ::fidl::Completer<ListenCompleterBase>;
-
-    virtual void Listen(int16_t backlog, ListenCompleter::Sync _completer) = 0;
-
-    class AcceptCompleterBase : public _Base {
-     public:
-      void Reply(int16_t code);
-      void Reply(::fidl::BytePart _buffer, int16_t code);
-      void Reply(::fidl::DecodedMessage<AcceptResponse> params);
-
-     protected:
-      using ::fidl::CompleterBase::CompleterBase;
-    };
-
-    using AcceptCompleter = ::fidl::Completer<AcceptCompleterBase>;
-
-    virtual void Accept(int16_t flags, AcceptCompleter::Sync _completer) = 0;
-
-    class CloseCompleterBase : public _Base {
-     public:
-      void Reply(int16_t code);
-      void Reply(::fidl::BytePart _buffer, int16_t code);
-      void Reply(::fidl::DecodedMessage<CloseResponse> params);
-
-     protected:
-      using ::fidl::CompleterBase::CompleterBase;
-    };
-
-    using CloseCompleter = ::fidl::Completer<CloseCompleterBase>;
-
-    virtual void Close(CloseCompleter::Sync _completer) = 0;
-
-    class GetSockNameCompleterBase : public _Base {
-     public:
-      void Reply(int16_t code, ::fidl::VectorView<uint8_t> addr);
-      void Reply(::fidl::BytePart _buffer, int16_t code, ::fidl::VectorView<uint8_t> addr);
-      void Reply(::fidl::DecodedMessage<GetSockNameResponse> params);
-
-     protected:
-      using ::fidl::CompleterBase::CompleterBase;
-    };
-
-    using GetSockNameCompleter = ::fidl::Completer<GetSockNameCompleterBase>;
-
-    virtual void GetSockName(GetSockNameCompleter::Sync _completer) = 0;
-
-    class GetPeerNameCompleterBase : public _Base {
-     public:
-      void Reply(int16_t code, ::fidl::VectorView<uint8_t> addr);
-      void Reply(::fidl::BytePart _buffer, int16_t code, ::fidl::VectorView<uint8_t> addr);
-      void Reply(::fidl::DecodedMessage<GetPeerNameResponse> params);
-
-     protected:
-      using ::fidl::CompleterBase::CompleterBase;
-    };
-
-    using GetPeerNameCompleter = ::fidl::Completer<GetPeerNameCompleterBase>;
-
-    virtual void GetPeerName(GetPeerNameCompleter::Sync _completer) = 0;
-
-    class SetSockOptCompleterBase : public _Base {
-     public:
-      void Reply(int16_t code);
-      void Reply(::fidl::BytePart _buffer, int16_t code);
-      void Reply(::fidl::DecodedMessage<SetSockOptResponse> params);
-
-     protected:
-      using ::fidl::CompleterBase::CompleterBase;
-    };
-
-    using SetSockOptCompleter = ::fidl::Completer<SetSockOptCompleterBase>;
-
-    virtual void SetSockOpt(int16_t level, int16_t optname, ::fidl::VectorView<uint8_t> optval, SetSockOptCompleter::Sync _completer) = 0;
-
-    class GetSockOptCompleterBase : public _Base {
-     public:
-      void Reply(int16_t code, ::fidl::VectorView<uint8_t> optval);
-      void Reply(::fidl::BytePart _buffer, int16_t code, ::fidl::VectorView<uint8_t> optval);
-      void Reply(::fidl::DecodedMessage<GetSockOptResponse> params);
-
-     protected:
-      using ::fidl::CompleterBase::CompleterBase;
-    };
-
-    using GetSockOptCompleter = ::fidl::Completer<GetSockOptCompleterBase>;
-
-    virtual void GetSockOpt(int16_t level, int16_t optname, GetSockOptCompleter::Sync _completer) = 0;
-
-    class IoctlCompleterBase : public _Base {
-     public:
-      void Reply(int16_t code, ::fidl::VectorView<uint8_t> out);
-      void Reply(::fidl::BytePart _buffer, int16_t code, ::fidl::VectorView<uint8_t> out);
-      void Reply(::fidl::DecodedMessage<IoctlResponse> params);
-
-     protected:
-      using ::fidl::CompleterBase::CompleterBase;
-    };
-
-    using IoctlCompleter = ::fidl::Completer<IoctlCompleterBase>;
-
-    virtual void Ioctl(int16_t req, ::fidl::VectorView<uint8_t> in, IoctlCompleter::Sync _completer) = 0;
-
-  };
-
-  // Attempts to dispatch the incoming message to a handler function in the server implementation.
-  // If there is no matching handler, it returns false, leaving the message and transaction intact.
-  // In all other cases, it consumes the message and returns true.
-  // It is possible to chain multiple TryDispatch functions in this manner.
-  static bool TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* txn);
-
-  // Dispatches the incoming message to one of the handlers functions in the interface.
-  // If there is no matching handler, it closes all the handles in |msg| and closes the channel with
-  // a |ZX_ERR_NOT_SUPPORTED| epitaph, before returning false. The message should then be discarded.
-  static bool Dispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* txn);
-
-  // Same as |Dispatch|, but takes a |void*| instead of |Interface*|. Only used with |fidl::Bind|
-  // to reduce template expansion.
-  // Do not call this method manually. Use |Dispatch| instead.
-  static bool TypeErasedDispatch(void* impl, fidl_msg_t* msg, ::fidl::Transaction* txn) {
-    return Dispatch(static_cast<Interface*>(impl), msg, txn);
-  }
-
-};
-
 extern "C" const fidl_type_t fuchsia_net_ConnectivityOnNetworkReachableEventTable;
 
 class Connectivity final {
+  Connectivity() = delete;
  public:
-  static constexpr char Name_[] = "fuchsia.net.Connectivity";
+  static constexpr char Name[] = "fuchsia.net.Connectivity";
 
   struct OnNetworkReachableResponse final {
     FIDL_ALIGNDECL
@@ -786,28 +134,45 @@ class Connectivity final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
 
   struct EventHandlers {
     // This is triggered on a state change in network reachability. Clients
     // should expect that network requests will succeed when `reachable` is
     // true.
-    fit::function<zx_status_t(bool reachable)> on_network_reachable;
+    fit::callback<zx_status_t(bool reachable)> on_network_reachable;
 
     // Fallback handler when an unknown ordinal is received.
     // Caller may put custom error handling logic here.
-    fit::function<zx_status_t()> unknown;
+    fit::callback<zx_status_t()> unknown;
+  };
+
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+
+   public:
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+
+   public:
   };
 
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
@@ -824,6 +189,7 @@ class Connectivity final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
    public:
 
     // Handle all possible events defined in this protocol.
@@ -831,6 +197,14 @@ class Connectivity final {
     // defined in |EventHandlers|. The return status of the handler function is folded with any
     // transport-level errors and returned.
     static zx_status_t HandleEvents(zx::unowned_channel client_end, EventHandlers handlers);
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
+
   };
 
   // Pure-virtual interface to be implemented by a server.
@@ -889,7 +263,7 @@ struct NameLookup_LookupHostname_Response {
   [[maybe_unused]]
   static constexpr uint32_t MaxOutOfLine = 256;
 
-  ::fidl::StringView hostname{};
+  ::fidl::StringView hostname = {};
 };
 
 
@@ -902,14 +276,10 @@ struct MacAddress {
   [[maybe_unused]]
   static constexpr uint32_t MaxOutOfLine = 0;
 
-  ::fidl::Array<uint8_t, 6> octets{};
+  ::fidl::Array<uint8_t, 6> octets = {};
 };
 
 constexpr uint64_t MAX_HOSTNAME_SIZE = 255u;
-
-constexpr uint64_t MAX_BUFFER = 900u;
-
-constexpr uint64_t MAX_ADDR = 128u;
 
 extern "C" const fidl_type_t fuchsia_net_NameLookup_LookupHostname_ResultTable;
 
@@ -1005,7 +375,7 @@ struct Ipv6Address {
   [[maybe_unused]]
   static constexpr uint32_t MaxOutOfLine = 0;
 
-  ::fidl::Array<uint8_t, 16> addr{};
+  ::fidl::Array<uint8_t, 16> addr = {};
 };
 
 
@@ -1019,7 +389,7 @@ struct Ipv4Address {
   [[maybe_unused]]
   static constexpr uint32_t MaxOutOfLine = 0;
 
-  ::fidl::Array<uint8_t, 4> addr{};
+  ::fidl::Array<uint8_t, 4> addr = {};
 };
 
 extern "C" const fidl_type_t fuchsia_net_IpAddressInfoTable;
@@ -1032,13 +402,13 @@ struct IpAddressInfo {
   static constexpr uint32_t MaxOutOfLine = 4294967295;
 
   // All of the IPv4 addresses for the requested hostname.
-  ::fidl::VectorView<Ipv4Address> ipv4_addrs{};
+  ::fidl::VectorView<Ipv4Address> ipv4_addrs = {};
 
   // All of the IPv6 addresses for the requested hostname.
-  ::fidl::VectorView<Ipv6Address> ipv6_addrs{};
+  ::fidl::VectorView<Ipv6Address> ipv6_addrs = {};
 
   // The canonical name of the requested hostname (usually the DNS CNAME record, if one exists).
-  ::fidl::StringView canonical_name{};
+  ::fidl::StringView canonical_name = {};
 };
 
 extern "C" const fidl_type_t fuchsia_net_NameLookup_LookupIp_ResponseTable;
@@ -1050,7 +420,7 @@ struct NameLookup_LookupIp_Response {
   [[maybe_unused]]
   static constexpr uint32_t MaxOutOfLine = 4294967295;
 
-  IpAddressInfo addr{};
+  IpAddressInfo addr = {};
 };
 
 extern "C" const fidl_type_t fuchsia_net_NameLookup_LookupIp_ResultTable;
@@ -1233,13 +603,13 @@ struct Subnet {
 
   // The Ipv4 or Ipv6 address. Only the `prefix_len` most significant bits may be set in `addr`;
   // all bits in the host portion of the address must be zero.
-  IpAddress addr{};
+  IpAddress addr = {};
 
   // The prefix length of the netmask. E.g. for 192.168.1.0/24, the prefix
   // length is 24, corresponding to a netmask of 255.255.255.0.
   // For Ipv4, prefix_len must be in the range [0, 32].
   // For Ipv6, prefix_len must be in the range [0, 128].
-  uint8_t prefix_len{};
+  uint8_t prefix_len = {};
 };
 
 extern "C" const fidl_type_t fuchsia_net_NameLookupLookupIpRequestTable;
@@ -1248,8 +618,9 @@ extern "C" const fidl_type_t fuchsia_net_NameLookupLookupHostnameRequestTable;
 extern "C" const fidl_type_t fuchsia_net_NameLookupLookupHostnameResponseTable;
 
 class NameLookup final {
+  NameLookup() = delete;
  public:
-  static constexpr char Name_[] = "fuchsia.net.NameLookup";
+  static constexpr char Name[] = "fuchsia.net.NameLookup";
 
   struct LookupIpResponse final {
     FIDL_ALIGNDECL
@@ -1260,6 +631,9 @@ class NameLookup final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 72;
     static constexpr uint32_t MaxOutOfLine = 4294967295;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   struct LookupIpRequest final {
     FIDL_ALIGNDECL
@@ -1271,6 +645,9 @@ class NameLookup final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 40;
     static constexpr uint32_t MaxOutOfLine = 256;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
     using ResponseType = LookupIpResponse;
   };
 
@@ -1283,6 +660,9 @@ class NameLookup final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 40;
     static constexpr uint32_t MaxOutOfLine = 256;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   struct LookupHostnameRequest final {
     FIDL_ALIGNDECL
@@ -1293,47 +673,142 @@ class NameLookup final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 40;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
     using ResponseType = LookupHostnameResponse;
   };
 
 
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class LookupIp_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      LookupIp_Impl(zx::unowned_channel _client_end, ::fidl::StringView hostname, LookupIpOptions options);
+      ~LookupIp_Impl() = default;
+      LookupIp_Impl(LookupIp_Impl&& other) = default;
+      LookupIp_Impl& operator=(LookupIp_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class LookupHostname_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      LookupHostname_Impl(zx::unowned_channel _client_end, IpAddress addr);
+      ~LookupHostname_Impl() = default;
+      LookupHostname_Impl(LookupHostname_Impl&& other) = default;
+      LookupHostname_Impl& operator=(LookupHostname_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using LookupIp = LookupIp_Impl<LookupIpResponse>;
+    using LookupHostname = LookupHostname_Impl<LookupHostnameResponse>;
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class LookupIp_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      LookupIp_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer);
+      ~LookupIp_Impl() = default;
+      LookupIp_Impl(LookupIp_Impl&& other) = default;
+      LookupIp_Impl& operator=(LookupIp_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class LookupHostname_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      LookupHostname_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer);
+      ~LookupHostname_Impl() = default;
+      LookupHostname_Impl(LookupHostname_Impl&& other) = default;
+      LookupHostname_Impl& operator=(LookupHostname_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using LookupIp = LookupIp_Impl<LookupIpResponse>;
+    using LookupHostname = LookupHostname_Impl<LookupHostnameResponse>;
+  };
+
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
     ::zx::channel* mutable_channel() { return &channel_; }
 
+    // Look up a list of IP addresses by hostname.
+    //
+    // If `hostname` is an Internationalized Domain Name, it must be encoded as per RFC 3490.
+    // Allocates 296 bytes of request buffer on the stack. Response is heap-allocated.
+    ResultOf::LookupIp LookupIp(::fidl::StringView hostname, LookupIpOptions options);
+
+    // Look up a list of IP addresses by hostname.
+    //
+    // If `hostname` is an Internationalized Domain Name, it must be encoded as per RFC 3490.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::LookupIp LookupIp(::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer);
+
 
     // Look up a list of IP addresses by hostname.
     //
     // If `hostname` is an Internationalized Domain Name, it must be encoded as per RFC 3490.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<LookupIpResponse> LookupIp(::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer, NameLookup_LookupIp_Result* out_result);
+    ::fidl::DecodeResult<LookupIpResponse> LookupIp_Deprecated(::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer, NameLookup_LookupIp_Result* out_result);
 
-    // Look up a list of IP addresses by hostname.
-    //
-    // If `hostname` is an Internationalized Domain Name, it must be encoded as per RFC 3490.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<LookupIpResponse> LookupIp(::fidl::DecodedMessage<LookupIpRequest> params, ::fidl::BytePart response_buffer);
+    // Look up a hostname by IP address.
+    // Allocates 336 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::LookupHostname LookupHostname(IpAddress addr);
+
+    // Look up a hostname by IP address.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::LookupHostname LookupHostname(::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer);
 
 
     // Look up a hostname by IP address.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<LookupHostnameResponse> LookupHostname(::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer, NameLookup_LookupHostname_Result* out_result);
-
-    // Look up a hostname by IP address.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<LookupHostnameResponse> LookupHostname(::fidl::DecodedMessage<LookupHostnameRequest> params, ::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<LookupHostnameResponse> LookupHostname_Deprecated(::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer, NameLookup_LookupHostname_Result* out_result);
 
    private:
     ::zx::channel channel_;
@@ -1341,30 +816,57 @@ class NameLookup final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
    public:
 
+    // Look up a list of IP addresses by hostname.
+    //
+    // If `hostname` is an Internationalized Domain Name, it must be encoded as per RFC 3490.
+    // Allocates 296 bytes of request buffer on the stack. Response is heap-allocated.
+    static ResultOf::LookupIp LookupIp(zx::unowned_channel _client_end, ::fidl::StringView hostname, LookupIpOptions options);
+
+    // Look up a list of IP addresses by hostname.
+    //
+    // If `hostname` is an Internationalized Domain Name, it must be encoded as per RFC 3490.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::LookupIp LookupIp(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer);
+
 
     // Look up a list of IP addresses by hostname.
     //
     // If `hostname` is an Internationalized Domain Name, it must be encoded as per RFC 3490.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<LookupIpResponse> LookupIp(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer, NameLookup_LookupIp_Result* out_result);
+    static ::fidl::DecodeResult<LookupIpResponse> LookupIp_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer, NameLookup_LookupIp_Result* out_result);
+
+    // Look up a hostname by IP address.
+    // Allocates 336 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::LookupHostname LookupHostname(zx::unowned_channel _client_end, IpAddress addr);
+
+    // Look up a hostname by IP address.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::LookupHostname LookupHostname(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer);
+
+
+    // Look up a hostname by IP address.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<LookupHostnameResponse> LookupHostname_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer, NameLookup_LookupHostname_Result* out_result);
+
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
 
     // Look up a list of IP addresses by hostname.
     //
     // If `hostname` is an Internationalized Domain Name, it must be encoded as per RFC 3490.
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<LookupIpResponse> LookupIp(zx::unowned_channel _client_end, ::fidl::DecodedMessage<LookupIpRequest> params, ::fidl::BytePart response_buffer);
 
-
     // Look up a hostname by IP address.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<LookupHostnameResponse> LookupHostname(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer, NameLookup_LookupHostname_Result* out_result);
-
-    // Look up a hostname by IP address.
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<LookupHostnameResponse> LookupHostname(zx::unowned_channel _client_end, ::fidl::DecodedMessage<LookupHostnameRequest> params, ::fidl::BytePart response_buffer);
 
   };
@@ -1440,10 +942,10 @@ struct Endpoint {
   static constexpr uint32_t MaxOutOfLine = 0;
 
   // The IP address of the endpoint.
-  IpAddress addr{};
+  IpAddress addr = {};
 
   // The port number of the endpoint.
-  uint16_t port{};
+  uint16_t port = {};
 };
 
 
@@ -1455,9 +957,9 @@ struct AddrStorage {
   [[maybe_unused]]
   static constexpr uint32_t MaxOutOfLine = 0;
 
-  ::fidl::Array<uint8_t, 16> val{};
+  ::fidl::Array<uint8_t, 16> val = {};
 
-  uint32_t len{};
+  uint32_t len = {};
 };
 
 extern "C" const fidl_type_t fuchsia_net_AddrInfoTable;
@@ -1469,53 +971,27 @@ struct AddrInfo {
   [[maybe_unused]]
   static constexpr uint32_t MaxOutOfLine = 0;
 
-  int32_t flags{};
+  int32_t flags = {};
 
-  int32_t family{};
+  int32_t family = {};
 
-  int32_t sock_type{};
+  int32_t sock_type = {};
 
-  int32_t protocol{};
+  int32_t protocol = {};
 
-  AddrStorage addr{};
+  AddrStorage addr = {};
 
-  uint16_t port{};
+  uint16_t port = {};
 };
 
-extern "C" const fidl_type_t fuchsia_net_SocketProviderSocketRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketProviderSocketResponseTable;
 extern "C" const fidl_type_t fuchsia_net_SocketProviderGetAddrInfoRequestTable;
 extern "C" const fidl_type_t fuchsia_net_SocketProviderGetAddrInfoResponseTable;
 
 // SocketProvider implements the POSIX sockets API.
 class SocketProvider final {
+  SocketProvider() = delete;
  public:
-  static constexpr char Name_[] = "fuchsia.net.SocketProvider";
-
-  struct SocketResponse final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t code;
-    ::zx::socket s;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketProviderSocketResponseTable;
-    static constexpr uint32_t MaxNumHandles = 1;
-    static constexpr uint32_t PrimarySize = 24;
-    static constexpr uint32_t MaxOutOfLine = 0;
-  };
-  struct SocketRequest final {
-    FIDL_ALIGNDECL
-    fidl_message_header_t _hdr;
-    int16_t domain;
-    int16_t type;
-    int16_t protocol;
-
-    static constexpr const fidl_type_t* Type = &fuchsia_net_SocketProviderSocketRequestTable;
-    static constexpr uint32_t MaxNumHandles = 0;
-    static constexpr uint32_t PrimarySize = 24;
-    static constexpr uint32_t MaxOutOfLine = 0;
-    using ResponseType = SocketResponse;
-  };
+  static constexpr char Name[] = "fuchsia.net.SocketProvider";
 
   struct GetAddrInfoResponse final {
     FIDL_ALIGNDECL
@@ -1528,6 +1004,9 @@ class SocketProvider final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 184;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   struct GetAddrInfoRequest final {
     FIDL_ALIGNDECL
@@ -1540,53 +1019,94 @@ class SocketProvider final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 56;
     static constexpr uint32_t MaxOutOfLine = 528;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
     using ResponseType = GetAddrInfoResponse;
   };
 
 
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class GetAddrInfo_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      GetAddrInfo_Impl(zx::unowned_channel _client_end, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints);
+      ~GetAddrInfo_Impl() = default;
+      GetAddrInfo_Impl(GetAddrInfo_Impl&& other) = default;
+      GetAddrInfo_Impl& operator=(GetAddrInfo_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using GetAddrInfo = GetAddrInfo_Impl<GetAddrInfoResponse>;
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class GetAddrInfo_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      GetAddrInfo_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer);
+      ~GetAddrInfo_Impl() = default;
+      GetAddrInfo_Impl(GetAddrInfo_Impl&& other) = default;
+      GetAddrInfo_Impl& operator=(GetAddrInfo_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using GetAddrInfo = GetAddrInfo_Impl<GetAddrInfoResponse>;
+  };
+
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
     ::zx::channel* mutable_channel() { return &channel_; }
 
-    // Requests a socket with the specified parameters. Values for `code` are defined in
-    // errno.h.
-    zx_status_t Socket(int16_t domain, int16_t type, int16_t protocol, int16_t* out_code, ::zx::socket* out_s);
-
-    // Requests a socket with the specified parameters. Values for `code` are defined in
-    // errno.h.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<SocketResponse> Socket(::fidl::BytePart _request_buffer, int16_t domain, int16_t type, int16_t protocol, ::fidl::BytePart _response_buffer, int16_t* out_code, ::zx::socket* out_s);
-
-    // Requests a socket with the specified parameters. Values for `code` are defined in
-    // errno.h.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<SocketResponse> Socket(::fidl::DecodedMessage<SocketRequest> params, ::fidl::BytePart response_buffer);
+    // Retrieves information about the address of a node and/or service. The number of valid
+    // results in `res` is given by the `count` return value.
+    // Allocates 184 bytes of response buffer on the stack. Request is heap-allocated.
+    ResultOf::GetAddrInfo GetAddrInfo(::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints);
 
     // Retrieves information about the address of a node and/or service. The number of valid
     // results in `res` is given by the `count` return value.
-    zx_status_t GetAddrInfo(::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res);
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::GetAddrInfo GetAddrInfo(::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer);
+
+    // Retrieves information about the address of a node and/or service. The number of valid
+    // results in `res` is given by the `count` return value.
+    zx_status_t GetAddrInfo_Deprecated(::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res);
 
     // Retrieves information about the address of a node and/or service. The number of valid
     // results in `res` is given by the `count` return value.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetAddrInfoResponse> GetAddrInfo(::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res);
-
-    // Retrieves information about the address of a node and/or service. The number of valid
-    // results in `res` is given by the `count` return value.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetAddrInfoResponse> GetAddrInfo(::fidl::DecodedMessage<GetAddrInfoRequest> params, ::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<GetAddrInfoResponse> GetAddrInfo_Deprecated(::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res);
 
    private:
     ::zx::channel channel_;
@@ -1594,36 +1114,39 @@ class SocketProvider final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
    public:
 
-    // Requests a socket with the specified parameters. Values for `code` are defined in
-    // errno.h.
-    static zx_status_t Socket(zx::unowned_channel _client_end, int16_t domain, int16_t type, int16_t protocol, int16_t* out_code, ::zx::socket* out_s);
-
-    // Requests a socket with the specified parameters. Values for `code` are defined in
-    // errno.h.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<SocketResponse> Socket(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t domain, int16_t type, int16_t protocol, ::fidl::BytePart _response_buffer, int16_t* out_code, ::zx::socket* out_s);
-
-    // Requests a socket with the specified parameters. Values for `code` are defined in
-    // errno.h.
-    // Messages are encoded and decoded in-place.
-    static ::fidl::DecodeResult<SocketResponse> Socket(zx::unowned_channel _client_end, ::fidl::DecodedMessage<SocketRequest> params, ::fidl::BytePart response_buffer);
+    // Retrieves information about the address of a node and/or service. The number of valid
+    // results in `res` is given by the `count` return value.
+    // Allocates 184 bytes of response buffer on the stack. Request is heap-allocated.
+    static ResultOf::GetAddrInfo GetAddrInfo(zx::unowned_channel _client_end, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints);
 
     // Retrieves information about the address of a node and/or service. The number of valid
     // results in `res` is given by the `count` return value.
-    static zx_status_t GetAddrInfo(zx::unowned_channel _client_end, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res);
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::GetAddrInfo GetAddrInfo(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer);
+
+    // Retrieves information about the address of a node and/or service. The number of valid
+    // results in `res` is given by the `count` return value.
+    static zx_status_t GetAddrInfo_Deprecated(zx::unowned_channel _client_end, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res);
 
     // Retrieves information about the address of a node and/or service. The number of valid
     // results in `res` is given by the `count` return value.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetAddrInfoResponse> GetAddrInfo(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res);
+    static ::fidl::DecodeResult<GetAddrInfoResponse> GetAddrInfo_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res);
+
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
 
     // Retrieves information about the address of a node and/or service. The number of valid
     // results in `res` is given by the `count` return value.
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<GetAddrInfoResponse> GetAddrInfo(zx::unowned_channel _client_end, ::fidl::DecodedMessage<GetAddrInfoRequest> params, ::fidl::BytePart response_buffer);
 
   };
@@ -1635,20 +1158,6 @@ class SocketProvider final {
     virtual ~Interface() = default;
     using _Outer = SocketProvider;
     using _Base = ::fidl::CompleterBase;
-
-    class SocketCompleterBase : public _Base {
-     public:
-      void Reply(int16_t code, ::zx::socket s);
-      void Reply(::fidl::BytePart _buffer, int16_t code, ::zx::socket s);
-      void Reply(::fidl::DecodedMessage<SocketResponse> params);
-
-     protected:
-      using ::fidl::CompleterBase::CompleterBase;
-    };
-
-    using SocketCompleter = ::fidl::Completer<SocketCompleterBase>;
-
-    virtual void Socket(int16_t domain, int16_t type, int16_t protocol, SocketCompleter::Sync _completer) = 0;
 
     class GetAddrInfoCompleterBase : public _Base {
      public:
@@ -1695,13 +1204,13 @@ struct AddrInfoHints {
   [[maybe_unused]]
   static constexpr uint32_t MaxOutOfLine = 0;
 
-  int32_t flags{};
+  int32_t flags = {};
 
-  int32_t family{};
+  int32_t family = {};
 
-  int32_t sock_type{};
+  int32_t sock_type = {};
 
-  int32_t protocol{};
+  int32_t protocol = {};
 };
 
 }  // namespace net
@@ -1709,150 +1218,6 @@ struct AddrInfoHints {
 }  // namespace llcpp
 
 namespace fidl {
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::BindRequest> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::BindRequest> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::BindRequest)
-    == ::llcpp::fuchsia::net::SocketControl::BindRequest::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::BindRequest, addr) == 16);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::BindResponse> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::BindResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::BindResponse)
-    == ::llcpp::fuchsia::net::SocketControl::BindResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::BindResponse, code) == 16);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::ConnectRequest> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::ConnectRequest> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::ConnectRequest)
-    == ::llcpp::fuchsia::net::SocketControl::ConnectRequest::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::ConnectRequest, addr) == 16);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::ConnectResponse> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::ConnectResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::ConnectResponse)
-    == ::llcpp::fuchsia::net::SocketControl::ConnectResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::ConnectResponse, code) == 16);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::ListenRequest> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::ListenRequest> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::ListenRequest)
-    == ::llcpp::fuchsia::net::SocketControl::ListenRequest::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::ListenRequest, backlog) == 16);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::ListenResponse> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::ListenResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::ListenResponse)
-    == ::llcpp::fuchsia::net::SocketControl::ListenResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::ListenResponse, code) == 16);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::AcceptRequest> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::AcceptRequest> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::AcceptRequest)
-    == ::llcpp::fuchsia::net::SocketControl::AcceptRequest::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::AcceptRequest, flags) == 16);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::AcceptResponse> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::AcceptResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::AcceptResponse)
-    == ::llcpp::fuchsia::net::SocketControl::AcceptResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::AcceptResponse, code) == 16);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::CloseResponse> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::CloseResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::CloseResponse)
-    == ::llcpp::fuchsia::net::SocketControl::CloseResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::CloseResponse, code) == 16);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::GetSockNameResponse> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::GetSockNameResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::GetSockNameResponse)
-    == ::llcpp::fuchsia::net::SocketControl::GetSockNameResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::GetSockNameResponse, code) == 16);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::GetSockNameResponse, addr) == 24);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::GetPeerNameResponse> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::GetPeerNameResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::GetPeerNameResponse)
-    == ::llcpp::fuchsia::net::SocketControl::GetPeerNameResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::GetPeerNameResponse, code) == 16);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::GetPeerNameResponse, addr) == 24);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::SetSockOptRequest> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::SetSockOptRequest> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::SetSockOptRequest)
-    == ::llcpp::fuchsia::net::SocketControl::SetSockOptRequest::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::SetSockOptRequest, level) == 16);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::SetSockOptRequest, optname) == 18);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::SetSockOptRequest, optval) == 24);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::SetSockOptResponse> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::SetSockOptResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::SetSockOptResponse)
-    == ::llcpp::fuchsia::net::SocketControl::SetSockOptResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::SetSockOptResponse, code) == 16);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::GetSockOptRequest> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::GetSockOptRequest> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::GetSockOptRequest)
-    == ::llcpp::fuchsia::net::SocketControl::GetSockOptRequest::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::GetSockOptRequest, level) == 16);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::GetSockOptRequest, optname) == 18);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::GetSockOptResponse> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::GetSockOptResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::GetSockOptResponse)
-    == ::llcpp::fuchsia::net::SocketControl::GetSockOptResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::GetSockOptResponse, code) == 16);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::GetSockOptResponse, optval) == 24);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::IoctlRequest> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::IoctlRequest> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::IoctlRequest)
-    == ::llcpp::fuchsia::net::SocketControl::IoctlRequest::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::IoctlRequest, req) == 16);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::IoctlRequest, in) == 24);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketControl::IoctlResponse> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketControl::IoctlResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketControl::IoctlResponse)
-    == ::llcpp::fuchsia::net::SocketControl::IoctlResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::IoctlResponse, code) == 16);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketControl::IoctlResponse, out) == 24);
 
 template <>
 struct IsFidlType<::llcpp::fuchsia::net::Connectivity::OnNetworkReachableResponse> : public std::true_type {};
@@ -1981,25 +1346,6 @@ static_assert(offsetof(::llcpp::fuchsia::net::AddrInfo, protocol) == 12);
 static_assert(offsetof(::llcpp::fuchsia::net::AddrInfo, addr) == 16);
 static_assert(offsetof(::llcpp::fuchsia::net::AddrInfo, port) == 36);
 static_assert(sizeof(::llcpp::fuchsia::net::AddrInfo) == ::llcpp::fuchsia::net::AddrInfo::PrimarySize);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketProvider::SocketRequest> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketProvider::SocketRequest> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketProvider::SocketRequest)
-    == ::llcpp::fuchsia::net::SocketProvider::SocketRequest::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketProvider::SocketRequest, domain) == 16);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketProvider::SocketRequest, type) == 18);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketProvider::SocketRequest, protocol) == 20);
-
-template <>
-struct IsFidlType<::llcpp::fuchsia::net::SocketProvider::SocketResponse> : public std::true_type {};
-template <>
-struct IsFidlMessage<::llcpp::fuchsia::net::SocketProvider::SocketResponse> : public std::true_type {};
-static_assert(sizeof(::llcpp::fuchsia::net::SocketProvider::SocketResponse)
-    == ::llcpp::fuchsia::net::SocketProvider::SocketResponse::PrimarySize);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketProvider::SocketResponse, code) == 16);
-static_assert(offsetof(::llcpp::fuchsia::net::SocketProvider::SocketResponse, s) == 20);
 
 template <>
 struct IsFidlType<::llcpp::fuchsia::net::SocketProvider::GetAddrInfoRequest> : public std::true_type {};

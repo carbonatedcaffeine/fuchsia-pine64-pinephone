@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 use {
     failure::{format_err, Error, ResultExt},
     fidl_fuchsia_net,
+    fidl_fuchsia_net_stack::StackMarker,
     fidl_fuchsia_netemul_network::{EndpointManagerMarker, NetworkContextMarker},
     fidl_fuchsia_netstack::{InterfaceConfig, IpAddressConfig, NetstackMarker},
     fuchsia_async as fasync,
@@ -26,6 +27,9 @@ struct Opt {
     #[structopt(short = "i")]
     /// Static ip address to assign (don't forget /prefix termination). Omit to use DHCP.
     ip: Option<String>,
+    #[structopt(short = "g")]
+    /// Ip address of the default gateway (useful when DHCP is not used).
+    gateway: Option<String>,
     #[structopt(long = "skip-up-check")]
     /// netstack_cfg will by default wait until it sees the interface be reported as "Up",
     /// skip-up-check will override that behavior.
@@ -45,11 +49,11 @@ async fn config_netstack(opt: Opt) -> Result<(), Error> {
     netctx.get_endpoint_manager(epmch)?;
 
     // retrieve the created endpoint:
-    let ep = await!(epm.get_endpoint(&opt.endpoint))?;
+    let ep = epm.get_endpoint(&opt.endpoint).await?;
     let ep = ep.ok_or_else(|| format_err!("can't find endpoint {}", opt.endpoint))?.into_proxy()?;
     fx_log_info!("Got endpoint.");
     // and the ethernet device:
-    let eth = await!(ep.get_ethernet_device())?;
+    let eth = ep.get_ethernet_device().await?;
     fx_log_info!("Got ethernet.");
 
     let if_name = format!("eth-{}", opt.endpoint);
@@ -77,11 +81,12 @@ async fn config_netstack(opt: Opt) -> Result<(), Error> {
     );
     let mut cfg = InterfaceConfig {
         name: if_name.to_string(),
+        filepath: format!("/vdev/{}", opt.endpoint).to_string(),
         metric: DEFAULT_METRIC,
         ip_address_config: IGNORED_IP_ADDRESS_CONFIG,
     };
     let nicid =
-        await!(netstack.add_ethernet_device(&format!("/vdev/{}", opt.endpoint), &mut cfg, eth))
+        netstack.add_ethernet_device(&format!("/vdev/{}", opt.endpoint), &mut cfg, eth).await
             .context("can't add ethernet device")?;
     let () = netstack.set_interface_status(nicid as u32, true)?;
     fx_log_info!("Added ethernet to stack.");
@@ -89,19 +94,46 @@ async fn config_netstack(opt: Opt) -> Result<(), Error> {
     if let Some(ip) = opt.ip {
         let mut subnet: fidl_fuchsia_net::Subnet =
             ip.parse::<fidl_fuchsia_net_ext::Subnet>().expect("Can't parse provided ip").into();
-        let _ = await!(netstack.set_interface_address(
+        let _ = netstack.set_interface_address(
             nicid as u32,
             &mut subnet.addr,
             subnet.prefix_len,
-        ))?;
+        ).await?;
     } else {
-        let _ = await!(netstack.set_dhcp_client_status(nicid as u32, true))?;
+        let _ = netstack.set_dhcp_client_status(nicid as u32, true).await?;
     };
 
     fx_log_info!("Configured nic address.");
 
+    if let Some(gateway) = opt.gateway {
+        let gw_addr: fidl_fuchsia_net::IpAddress = fidl_fuchsia_net_ext::IpAddress(
+            gateway.parse::<std::net::IpAddr>().context("failed to parse gateway address")?,
+        )
+        .into();
+        let unspec_addr: fidl_fuchsia_net::IpAddress = match gw_addr {
+            fidl_fuchsia_net::IpAddress::Ipv4(..) => fidl_fuchsia_net_ext::IpAddress(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+            ),
+            fidl_fuchsia_net::IpAddress::Ipv6(..) => fidl_fuchsia_net_ext::IpAddress(
+                std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            ),
+        }
+        .into();
+
+        let stack = client::connect_to_service::<StackMarker>()?;
+        let error =
+            stack.add_forwarding_entry(&mut fidl_fuchsia_net_stack::ForwardingEntry {
+                subnet: fidl_fuchsia_net::Subnet { addr: unspec_addr, prefix_len: 0 },
+                destination: fidl_fuchsia_net_stack::ForwardingDestination::NextHop(gw_addr),
+            }).await
+            .context("failed to call add_forward_entry for gateway")?;
+        assert_eq!(error.as_ref(), None);
+
+        fx_log_info!("Configured the default route with gateway address.");
+    }
+
     fx_log_info!("Waiting for interface up...");
-    let (if_id, hwaddr) = await!(if_changed.try_next())
+    let (if_id, hwaddr) = if_changed.try_next().await
         .context("wait for interfaces")?
         .ok_or_else(|| format_err!("interface added"))?;
 

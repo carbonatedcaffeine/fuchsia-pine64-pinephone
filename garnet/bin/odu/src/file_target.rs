@@ -8,16 +8,16 @@
 use {
     crate::common_operations::pwrite,
     crate::io_packet::{IoPacket, IoPacketType, TimeInterval},
-    crate::operations::TargetType,
-    crate::operations::{OperationType, PipelineStages, Target, TargetOps},
+    crate::operations::{OperationType, PipelineStages},
+    crate::target::{Error, Target, TargetOps, TargetType},
     log::debug,
     log::error,
     std::{
         fs::{File, OpenOptions},
-        io::{Error, ErrorKind, Result},
         ops::Range,
         os::unix::io::AsRawFd,
         process,
+        result::Result,
         sync::Arc,
         time::Instant,
     },
@@ -45,7 +45,7 @@ pub struct FileIoPacket {
     offset_range: Range<u64>,
 
     // Result of the completed IO operation
-    io_result: Option<ErrorKind>,
+    io_result: Option<Error>,
 
     // The target(file) on which IO will be performed
     target: TargetType,
@@ -121,19 +121,19 @@ impl IoPacket for FileIoPacket {
         self.target.clone().generate_verify_io(self)
     }
 
-    fn verify(&mut self, verify_packet: &IoPacket) -> bool {
+    fn verify(&mut self, verify_packet: &dyn IoPacket) -> bool {
         self.target.clone().verify(self, verify_packet)
     }
 
-    fn get_error(&self) -> Result<()> {
-        match self.io_result {
-            Some(error) => Err(Error::new(error.clone(), "something went wrong")),
+    fn get_error(&self) -> Result<(), Error> {
+        match &self.io_result {
+            Some(error) => Err(error.clone()),
             None => Ok(()),
         }
     }
 
     fn set_error(&mut self, io_error: Error) {
-        self.io_result = Some(io_error.kind());
+        self.io_result = Some(io_error);
     }
 
     fn buffer_mut(&mut self) -> &mut Vec<u8> {
@@ -183,12 +183,12 @@ impl FileBlockingTarget {
     }
 
     // pwrite the buffer in IoPacket at io_offset_range.
-    fn write(&self, io_packet: &mut IoPacket) {
+    fn write(&self, io_packet: &mut dyn IoPacket) {
         let offset_range = io_packet.io_offset_range().clone();
 
         if offset_range.start < self.offset_range.start || offset_range.end > self.offset_range.end
         {
-            io_packet.set_error(Error::new(ErrorKind::AddrInUse, "Offset out of range!"));
+            io_packet.set_error(Error::OffsetOutOfRange);
             return;
         }
 
@@ -201,18 +201,18 @@ impl FileBlockingTarget {
         }
     }
 
-    fn open(&self, io_packet: &mut IoPacket) {
+    fn open(&self, io_packet: &mut dyn IoPacket) {
         error!("open not yet supported {}", io_packet.sequence_number());
         process::abort();
     }
 
-    fn exit(&self, io_packet: &mut IoPacket) {
+    fn exit(&self, io_packet: &mut dyn IoPacket) {
         debug!("Nothing to do for exit path {}", io_packet.sequence_number());
     }
 }
 
 impl Target for FileBlockingTarget {
-    fn setup(&mut self, _file_name: &String, _range: Range<u64>) -> Result<()> {
+    fn setup(&mut self, _file_name: &String, _range: Range<u64>) -> Result<(), Error> {
         Ok(())
     }
 
@@ -247,7 +247,7 @@ impl Target for FileBlockingTarget {
         &TargetOps { write: true, open: false }
     }
 
-    fn do_io(&self, io_packet: &mut IoPacket) {
+    fn do_io(&self, io_packet: &mut dyn IoPacket) {
         match io_packet.operation_type() {
             OperationType::Write => self.write(io_packet),
             OperationType::Open => self.open(io_packet),
@@ -259,7 +259,7 @@ impl Target for FileBlockingTarget {
         };
     }
 
-    fn is_complete(&self, io_packet: &IoPacket) -> bool {
+    fn is_complete(&self, io_packet: &dyn IoPacket) -> bool {
         match io_packet.operation_type() {
             OperationType::Write | OperationType::Open | OperationType::Exit => true,
             _ => {
@@ -269,7 +269,7 @@ impl Target for FileBlockingTarget {
         }
     }
 
-    fn verify_needs_io(&self, io_packet: &IoPacket) -> bool {
+    fn verify_needs_io(&self, io_packet: &dyn IoPacket) -> bool {
         match io_packet.operation_type() {
             OperationType::Write | OperationType::Open | OperationType::Exit => false,
             _ => {
@@ -279,7 +279,7 @@ impl Target for FileBlockingTarget {
         }
     }
 
-    fn generate_verify_io(&self, io_packet: &mut IoPacket) {
+    fn generate_verify_io(&self, io_packet: &mut dyn IoPacket) {
         match io_packet.operation_type() {
             _ => {
                 error!("generate_verify_io for unsupported operation");
@@ -288,7 +288,7 @@ impl Target for FileBlockingTarget {
         };
     }
 
-    fn verify(&self, io_packet: &mut IoPacket, _verify_packet: &IoPacket) -> bool {
+    fn verify(&self, io_packet: &mut dyn IoPacket, _verify_packet: &dyn IoPacket) -> bool {
         match io_packet.operation_type() {
             OperationType::Write | OperationType::Exit => true,
             _ => {
@@ -305,10 +305,11 @@ impl Target for FileBlockingTarget {
 
 #[cfg(test)]
 mod tests {
+
     use {
         crate::file_target::FileBlockingTarget,
         crate::operations::OperationType,
-        crate::operations::TargetType,
+        crate::target::{Error, TargetType},
         std::{fs, fs::File, time::Instant},
     };
 
@@ -327,7 +328,7 @@ mod tests {
 
     #[test]
     fn simple_write() {
-        let file_name = "/tmp/FileBlockingTargetTestFile".to_string();
+        let file_name = "/tmp/odu-file_target-simple_write-file01".to_string();
 
         let target = setup(&file_name);
         let mut io_packet =
@@ -341,7 +342,7 @@ mod tests {
 
     #[test]
     fn write_failure() {
-        let file_name = "/tmp/FileBlockingTargetTestFile2".to_string();
+        let file_name = "/tmp/odu-file_target-write_failure-file01".to_string();
 
         let target = setup(&file_name);
 
@@ -357,6 +358,7 @@ mod tests {
         io_packet.do_io();
         assert_eq!(io_packet.is_complete(), true);
         assert_eq!(io_packet.get_error().is_err(), true);
+        assert_eq!(io_packet.get_error().err(), Some(Error::OffsetOutOfRange));
         teardown(&file_name);
     }
 }

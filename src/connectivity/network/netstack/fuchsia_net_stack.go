@@ -27,7 +27,7 @@ type stackImpl struct {
 	ns *Netstack
 }
 
-func getInterfaceInfo(ifs *ifState, addresses []tcpip.ProtocolAddress, subnets []tcpip.Subnet) *stack.InterfaceInfo {
+func getInterfaceInfo(ifs *ifState, addresses []tcpip.ProtocolAddress) stack.InterfaceInfo {
 	ifs.mu.Lock()
 	defer ifs.mu.Unlock()
 
@@ -44,30 +44,26 @@ func getInterfaceInfo(ifs *ifState, addresses []tcpip.ProtocolAddress, subnets [
 		if a.Protocol != ipv4.ProtocolNumber && a.Protocol != ipv6.ProtocolNumber {
 			continue
 		}
-		// We should always be guaranteed a matching subnet, since stack.NIC.Subnets constructs a subnet
-		// with an all-1s netmask for each endpoint on the NIC.
-		subnet := leastConstrainedMatchingSubnet(a.Address, subnets)
-		if subnet == (tcpip.Subnet{}) {
-			panic(fmt.Sprintf("NIC [%d]: address %+v has no matching subnet in %+v", ifs.nicid, a, subnets))
-		}
 		addrs = append(addrs, stack.InterfaceAddress{
-			IpAddress: fidlconv.ToNetIpAddress(a.Address),
-			PrefixLen: uint8(subnet.Prefix()),
+			IpAddress: fidlconv.ToNetIpAddress(a.AddressWithPrefix.Address),
+			PrefixLen: uint8(a.AddressWithPrefix.PrefixLen),
 		})
 	}
 
 	var mac *ethernet.MacAddress
-	var path string
+	var topopath string
 	if eth := ifs.eth; eth != nil {
 		mac = &ethernet.MacAddress{}
 		copy(mac.Octets[:], ifs.endpoint.LinkAddress())
-		path = eth.Path()
+		topopath = eth.Path()
 	}
 
-	return &stack.InterfaceInfo{
+	return stack.InterfaceInfo{
 		Id: uint64(ifs.nicid),
 		Properties: stack.InterfaceProperties{
-			Path:                 path,
+			Name:                 ifs.ns.nameLocked(ifs.nicid),
+			Topopath:             topopath,
+			Filepath:             ifs.filepath,
 			Mac:                  mac,
 			Mtu:                  uint32(ifs.endpoint.MTU()),
 			AdministrativeStatus: administrativeStatus,
@@ -78,22 +74,12 @@ func getInterfaceInfo(ifs *ifState, addresses []tcpip.ProtocolAddress, subnets [
 	}
 }
 
-func leastConstrainedMatchingSubnet(address tcpip.Address, subnets []tcpip.Subnet) tcpip.Subnet {
-	var subnet tcpip.Subnet
-	for _, s := range subnets {
-		if s.Contains(address) && !subnet.Contains(s.ID()) {
-			subnet = s
-		}
-	}
-	return subnet
-}
-
 func (ns *Netstack) getNetInterfaces() []stack.InterfaceInfo {
 	ns.mu.Lock()
 	out := make([]stack.InterfaceInfo, 0, len(ns.mu.ifStates))
 	for _, ifs := range ns.mu.ifStates {
-		addresses, subnets := ns.getAddressesLocked(ifs.nicid)
-		out = append(out, *getInterfaceInfo(ifs, addresses, subnets))
+		addresses := ns.getAddressesLocked(ifs.nicid)
+		out = append(out, getInterfaceInfo(ifs, addresses))
 	}
 	ns.mu.Unlock()
 
@@ -134,10 +120,11 @@ func (ns *Netstack) getInterface(id uint64) (*stack.InterfaceInfo, *stack.Error)
 		ns.mu.Unlock()
 		return nil, &stack.Error{Type: stack.ErrorTypeNotFound}
 	}
-	addresses, subnets := ns.getAddressesLocked(ifs.nicid)
+	addresses := ns.getAddressesLocked(ifs.nicid)
+	interfaceInfo := getInterfaceInfo(ifs, addresses)
 	ns.mu.Unlock()
 
-	return getInterfaceInfo(ifs, addresses, subnets), nil
+	return &interfaceInfo, nil
 }
 
 func (ns *Netstack) setInterfaceState(id uint64, enabled bool) *stack.Error {
@@ -191,6 +178,33 @@ func (ns *Netstack) addInterfaceAddr(id uint64, ifAddr stack.InterfaceAddress) *
 	return nil
 }
 
+func (ns *Netstack) delInterfaceAddr(id uint64, addr stack.InterfaceAddress) *stack.Error {
+	ns.mu.Lock()
+	_, ok := ns.mu.ifStates[tcpip.NICID(id)]
+	ns.mu.Unlock()
+
+	if !ok {
+		return &stack.Error{Type: stack.ErrorTypeNotFound}
+	}
+
+	var protocol tcpip.NetworkProtocolNumber
+	switch tag := addr.IpAddress.Which(); tag {
+	case net.IpAddressIpv4:
+		protocol = ipv4.ProtocolNumber
+	case net.IpAddressIpv6:
+		protocol = ipv6.ProtocolNumber
+	default:
+		panic(fmt.Sprintf("unknown IpAddress type %d", tag))
+	}
+
+	if err := ns.removeInterfaceAddress(tcpip.NICID(id), protocol, fidlconv.ToTCPIPAddress(addr.IpAddress), uint8(addr.PrefixLen)); err != nil {
+		syslog.Errorf("failed to remove interface address: %s", err)
+		return &stack.Error{Type: stack.ErrorTypeInternal}
+	}
+
+	return nil
+}
+
 func (ns *Netstack) getForwardingTable() []stack.ForwardingEntry {
 	ert := ns.GetExtendedRouteTable()
 	entries := make([]stack.ForwardingEntry, 0, len(ert))
@@ -198,14 +212,6 @@ func (ns *Netstack) getForwardingTable() []stack.ForwardingEntry {
 		entries = append(entries, fidlconv.TcpipRouteToForwardingEntry(er.Route))
 	}
 	return entries
-}
-
-// equalSubnetAndRoute returns true if and only if the route matches
-// the subnet.  Only the the ip and subnet are compared and must be
-// exact.
-func equalSubnetAndRoute(subnet net.Subnet, tcpipRoute tcpip.Route) bool {
-	return fidlconv.ToTCPIPAddress(subnet.Addr) == tcpipRoute.Destination &&
-		subnet.PrefixLen == fidlconv.GetPrefixLen(tcpipRoute.Mask)
 }
 
 // validateSubnet returns true if the prefix length is valid and no
@@ -270,32 +276,6 @@ func (ns *Netstack) delForwardingEntry(subnet net.Subnet) *stack.Error {
 	return nil
 }
 
-func (ns *Netstack) enablePacketFilter(id uint64) *stack.Error {
-	ns.mu.Lock()
-	ifs, ok := ns.mu.ifStates[tcpip.NICID(id)]
-	ns.mu.Unlock()
-
-	if !ok || ifs.filterEndpoint == nil {
-		return &stack.Error{Type: stack.ErrorTypeNotFound}
-	}
-
-	ifs.filterEndpoint.Enable()
-	return nil
-}
-
-func (ns *Netstack) disablePacketFilter(id uint64) *stack.Error {
-	ns.mu.Lock()
-	ifs, ok := ns.mu.ifStates[tcpip.NICID(id)]
-	ns.mu.Unlock()
-
-	if !ok || ifs.filterEndpoint == nil {
-		return &stack.Error{Type: stack.ErrorTypeNotFound}
-	}
-
-	ifs.filterEndpoint.Enable()
-	return nil
-}
-
 func (ni *stackImpl) AddEthernetInterface(topologicalPath string, device ethernet.DeviceInterface) (*stack.Error, uint64, error) {
 	err, id := ni.ns.addInterface(topologicalPath, device)
 	return err, id, nil
@@ -327,30 +307,7 @@ func (ni *stackImpl) AddInterfaceAddress(id uint64, addr stack.InterfaceAddress)
 }
 
 func (ni *stackImpl) DelInterfaceAddress(id uint64, addr stack.InterfaceAddress) (*stack.Error, error) {
-	ni.ns.mu.Lock()
-	_, ok := ni.ns.mu.ifStates[tcpip.NICID(id)]
-	ni.ns.mu.Unlock()
-
-	if !ok {
-		return &stack.Error{Type: stack.ErrorTypeNotFound}, nil
-	}
-
-	var protocol tcpip.NetworkProtocolNumber
-	switch tag := addr.IpAddress.Which(); tag {
-	case net.IpAddressIpv4:
-		protocol = ipv4.ProtocolNumber
-	case net.IpAddressIpv6:
-		protocol = ipv6.ProtocolNumber
-	default:
-		panic(fmt.Sprintf("unknown IpAddress type %d", tag))
-	}
-
-	if err := ni.ns.removeInterfaceAddress(tcpip.NICID(id), protocol, fidlconv.ToTCPIPAddress(addr.IpAddress), uint8(addr.PrefixLen)); err != nil {
-		syslog.Errorf("failed to remove interface address: %s", err)
-		return &stack.Error{Type: stack.ErrorTypeInternal}, nil
-	}
-
-	return nil, nil
+	return ni.ns.delInterfaceAddr(id, addr), nil
 }
 
 func (ni *stackImpl) GetForwardingTable() ([]stack.ForwardingEntry, error) {
@@ -365,10 +322,50 @@ func (ni *stackImpl) DelForwardingEntry(subnet net.Subnet) (*stack.Error, error)
 	return ni.ns.delForwardingEntry(subnet), nil
 }
 
-func (ni *stackImpl) EnablePacketFilter(id uint64) (*stack.Error, error) {
-	return ni.ns.enablePacketFilter(id), nil
+func (ni *stackImpl) EnablePacketFilter(id uint64) (stack.StackEnablePacketFilterResult, error) {
+	ni.ns.mu.Lock()
+	ifs, ok := ni.ns.mu.ifStates[tcpip.NICID(id)]
+	ni.ns.mu.Unlock()
+
+	var result stack.StackEnablePacketFilterResult
+	if !ok {
+		result.SetErr(stack.ErrorTypeNotFound)
+	} else if ifs.filterEndpoint == nil {
+		result.SetErr(stack.ErrorTypeNotSupported)
+	} else {
+		ifs.filterEndpoint.Enable()
+		result.SetResponse(stack.StackEnablePacketFilterResponse{})
+	}
+	return result, nil
 }
 
-func (ni *stackImpl) DisablePacketFilter(id uint64) (*stack.Error, error) {
-	return ni.ns.disablePacketFilter(id), nil
+func (ni *stackImpl) DisablePacketFilter(id uint64) (stack.StackDisablePacketFilterResult, error) {
+	ni.ns.mu.Lock()
+	ifs, ok := ni.ns.mu.ifStates[tcpip.NICID(id)]
+	ni.ns.mu.Unlock()
+
+	var result stack.StackDisablePacketFilterResult
+	if !ok {
+		result.SetErr(stack.ErrorTypeNotFound)
+	} else if ifs.filterEndpoint == nil {
+		result.SetErr(stack.ErrorTypeNotSupported)
+	} else {
+		ifs.filterEndpoint.Disable()
+		result.SetResponse(stack.StackDisablePacketFilterResponse{})
+	}
+	return result, nil
+}
+
+func (ni *stackImpl) EnableIpForwarding() error {
+	ni.ns.mu.Lock()
+	ni.ns.mu.stack.SetForwarding(true)
+	ni.ns.mu.Unlock()
+	return nil
+}
+
+func (ni *stackImpl) DisableIpForwarding() error {
+	ni.ns.mu.Lock()
+	ni.ns.mu.stack.SetForwarding(false)
+	ni.ns.mu.Unlock()
+	return nil
 }

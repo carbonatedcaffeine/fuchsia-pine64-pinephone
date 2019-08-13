@@ -14,16 +14,21 @@ rustc_binary("bin") {
   with_unit_tests = true
   edition = "2018"
   deps = [
+    "//garnet/lib/rust/forced_fdr",
     "//garnet/public/lib/fidl/rust/fidl",
     "//garnet/public/rust/fdio",
     "//garnet/public/rust/fuchsia-async",
     "//garnet/public/rust/fuchsia-component",
+    "//garnet/public/rust/fuchsia-inspect",
     "//garnet/public/rust/fuchsia-merkle",
     "//garnet/public/rust/fuchsia-syslog",
     "//garnet/public/rust/fuchsia-zircon",
     "//sdk/fidl/fuchsia.pkg:fuchsia.pkg-rustc",
+    "//sdk/fidl/fuchsia.pkg.rewrite:fuchsia.pkg.rewrite-rustc",
     "//sdk/fidl/fuchsia.sys:fuchsia.sys-rustc",
     "//sdk/fidl/fuchsia.update:fuchsia.update-rustc",
+    "//src/sys/lib/fuchsia_url",
+    "//third_party/rust_crates:derivative",
     "//third_party/rust_crates:failure",
     "//third_party/rust_crates:futures-preview",
     "//third_party/rust_crates:maplit",
@@ -35,6 +40,7 @@ rustc_binary("bin") {
     "//third_party/rust_crates:serde_derive",
     "//third_party/rust_crates:serde_json",
     "//third_party/rust_crates:tempfile",
+    "//zircon/public/fidl/fuchsia-cobalt:fuchsia-cobalt-rustc",
     "//zircon/public/fidl/fuchsia-io:fuchsia-io-rustc",
   ]
 }
@@ -63,6 +69,7 @@ package("system-update-checker") {
 test_package("system-update-checker-tests") {
   deps = [
     ":bin_test",
+    "//third_party/sbase:test_bin",
   ]
   tests = [
     {
@@ -73,16 +80,15 @@ test_package("system-update-checker-tests") {
   ]
   binaries = [
     {
-      name = "exit-with-code"
-      source = rebase_path(
-              "//garnet/bin/system-update-checker/test/exit-with-code.sh")
+      name = "test-shell-command"
+      source = "test"
     },
   ]
   meta = [
     {
       path = rebase_path(
-              "//garnet/bin/system-update-checker/meta/exit-with-code.cmx")
-      dest = "exit-with-code.cmx"
+              "//garnet/bin/system-update-checker/meta/test-shell-command.cmx")
+      dest = "test-shell-command.cmx"
     },
   ]
 }

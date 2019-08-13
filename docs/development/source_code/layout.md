@@ -82,8 +82,14 @@ pattern:
  * `tests/` (optional)
     * This directory contains integration tests that span multiple source code
       directories within the area
+    * If disparate areas can have tests in subdirectories, it is suggested
+      to add OWNERS files for different test directories to clarify ownership.
     * Unit tests that cover a single binary or library are better placed
       alongside the code they test
+ * `testing/` (optional)
+    * This directory contains utilities and libraries useful for writing tests
+      in this area and subareas.
+    * Targets in this directory can only be depended on by testonly targets.
  * `third_party/` (optional)
     * Most third_party dependencies should be in separate repositories
     * Include third_party dependencies in an area only if all of the following:
@@ -121,6 +127,11 @@ In the `fuchsia.git` repository, there exist directories with `OWNERS` that are
 not considered areas, e.g. the top level `products` directory, or subdirectories
 of the `/src/lib` directory.
 
+One exception is the `//src/tests` directory where tests from different areas
+that cover multiple aspects of the system (not just a particular area) are
+expected to live. Because of this, every area should add OWNERS files for any
+tests that live in this directory.
+
 ### Dependency Structure
 
 In addition to depending on itself, an area can depend only on the top-level
@@ -131,6 +142,11 @@ of its ancestors:
  * `//sdk`
  * `//third_party`
  * `(../)+lib/`
+
+Targets in an area that are marked testonly in the build system may
+additionally depend on the `testing` directory in that area and ancestors:
+
+ * `(../)+testing/` (testonly=true targets only)
 
 ### Canonical targets
 
@@ -212,9 +228,9 @@ separate repositories that are mapped into the directory structure using `jiri`
     * `media/`
     * `modular/`
     * `storage/`
+    * `testing/`
     * `updater/`
     * `virtualization/`
-    * `zircon/docs/`
     * `zircon/kernel/`
     * `zircon/drivers/`
     * `zircon/userspace/`

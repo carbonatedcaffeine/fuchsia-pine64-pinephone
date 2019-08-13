@@ -31,8 +31,7 @@ bool Config::ReadFrom(const std::string& config_file) {
   if (!document.ParseStream(isw).IsObject()) {
     FXL_LOG(ERROR) << "Failed to parse JSON object from: " << config_file;
     if (document.HasParseError()) {
-      FXL_LOG(ERROR) << "Parse error "
-                     << GetParseError_En(document.GetParseError()) << " ("
+      FXL_LOG(ERROR) << "Parse error " << GetParseError_En(document.GetParseError()) << " ("
                      << document.GetErrorOffset() << ")";
     }
     return false;
@@ -71,10 +70,11 @@ bool Config::ReadFrom(const std::string& config_file) {
         if (array.Empty() || !array[0].IsString())
           return false;
         launch_info->url = array[0].GetString();
+        launch_info->arguments.emplace();
         for (size_t i = 1; i < array.Size(); ++i) {
           if (!array[i].IsString())
             return false;
-          launch_info->arguments.push_back(array[i].GetString());
+          launch_info->arguments->push_back(array[i].GetString());
         }
       } else {
         return false;

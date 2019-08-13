@@ -5,12 +5,14 @@
 //! Parsing and serialization of Ethernet frames.
 
 use byteorder::{ByteOrder, NetworkEndian};
+use net_types::ethernet::Mac;
 use packet::{
-    BufferView, BufferViewMut, PacketBuilder, ParsablePacket, ParseMetadata, SerializeBuffer,
+    BufferView, BufferViewMut, PacketBuilder, PacketConstraints, ParsablePacket, ParseMetadata,
+    SerializeBuffer,
 };
 use zerocopy::{AsBytes, ByteSlice, FromBytes, LayoutVerified, Unaligned};
 
-use crate::device::ethernet::{EtherType, Mac};
+use crate::device::ethernet::EtherType;
 use crate::error::{ParseError, ParseResult};
 use crate::wire::{U16, U32};
 
@@ -26,9 +28,9 @@ pub(crate) const ETHERNET_MIN_BODY_LEN_NO_TAG: usize = 46;
 pub(crate) const ETHERNET_MIN_BODY_LEN_WITH_TAG: usize = 42;
 #[cfg(test)]
 pub(crate) const ETHERNET_ETHERTYPE_BYTE_OFFSET: usize = 12;
-#[cfg(all(test, feature = "benchmark"))]
+#[cfg(test)]
 pub(crate) const ETHERNET_DST_MAC_BYTE_OFFSET: usize = 0;
-#[cfg(all(test, feature = "benchmark"))]
+#[cfg(test)]
 pub(crate) const ETHERNET_SRC_MAC_BYTE_OFFSET: usize = 6;
 
 const ETHERNET_MIN_ILLEGAL_ETHERTYPE: u16 = 1501;
@@ -99,7 +101,6 @@ impl<B: ByteSlice> ParsablePacket<B, ()> for EthernetFrame<B> {
         };
 
         let frame = EthernetFrame { hdr_prefix, tag, ethertype, body };
-
         let et = frame.ethertype.get();
         if (et >= ETHERNET_MIN_ILLEGAL_ETHERTYPE && et <= ETHERNET_MAX_ILLEGAL_ETHERTYPE)
             || (et < ETHERNET_MIN_ILLEGAL_ETHERTYPE && et as usize != frame.body.len())
@@ -189,23 +190,16 @@ impl EthernetFrameBuilder {
 // these to compute dynamically.
 
 impl PacketBuilder for EthernetFrameBuilder {
-    fn header_len(&self) -> usize {
-        ETHERNET_HDR_LEN_NO_TAG
+    fn constraints(&self) -> PacketConstraints {
+        PacketConstraints::new(
+            ETHERNET_HDR_LEN_NO_TAG,
+            0,
+            ETHERNET_MIN_BODY_LEN_NO_TAG,
+            core::usize::MAX,
+        )
     }
 
-    fn min_body_len(&self) -> usize {
-        ETHERNET_MIN_BODY_LEN_NO_TAG
-    }
-
-    fn max_body_len(&self) -> usize {
-        std::usize::MAX
-    }
-
-    fn footer_len(&self) -> usize {
-        0
-    }
-
-    fn serialize(self, mut buffer: SerializeBuffer) {
+    fn serialize(&self, buffer: &mut SerializeBuffer) {
         // NOTE: EtherType values of 1500 and below are used to indicate the
         // length of the body in bytes. We don't need to validate this because
         // the EtherType enum has no variants with values in that range.
@@ -239,7 +233,7 @@ impl PacketBuilder for EthernetFrameBuilder {
 
 #[cfg(test)]
 mod tests {
-    use packet::{Buf, BufferSerializer, ParseBuffer, SerializeBuffer, Serializer};
+    use packet::{Buf, InnerPacketBuilder, ParseBuffer, SerializeBuffer, Serializer};
 
     use super::*;
 
@@ -336,12 +330,13 @@ mod tests {
     #[test]
     fn test_serialize() {
         let buf = (&new_serialize_buf()[..])
+            .into_serializer()
             .encapsulate(EthernetFrameBuilder::new(
                 DEFAULT_DST_MAC,
                 DEFAULT_SRC_MAC,
                 EtherType::Arp,
             ))
-            .serialize_outer()
+            .serialize_vec_outer()
             .unwrap();
         assert_eq!(
             &buf.as_ref()[..ETHERNET_HDR_LEN_NO_TAG],
@@ -355,23 +350,23 @@ mod tests {
         // serializing the header.
         let mut buf_0 = [0; ETHERNET_MIN_FRAME_LEN];
 
-        BufferSerializer::new_vec(Buf::new(&mut buf_0[..], ETHERNET_HDR_LEN_NO_TAG..))
+        Buf::new(&mut buf_0[..], ETHERNET_HDR_LEN_NO_TAG..)
             .encapsulate(EthernetFrameBuilder::new(
                 DEFAULT_SRC_MAC,
                 DEFAULT_DST_MAC,
                 EtherType::Arp,
             ))
-            .serialize_outer()
+            .serialize_vec_outer()
             .unwrap();
         let mut buf_1 = [0; ETHERNET_MIN_FRAME_LEN];
         (&mut buf_1[..ETHERNET_HDR_LEN_NO_TAG]).copy_from_slice(&[0xFF; ETHERNET_HDR_LEN_NO_TAG]);
-        BufferSerializer::new_vec(Buf::new(&mut buf_1[..], ETHERNET_HDR_LEN_NO_TAG..))
+        Buf::new(&mut buf_1[..], ETHERNET_HDR_LEN_NO_TAG..)
             .encapsulate(EthernetFrameBuilder::new(
                 DEFAULT_SRC_MAC,
                 DEFAULT_DST_MAC,
                 EtherType::Arp,
             ))
-            .serialize_outer()
+            .serialize_vec_outer()
             .unwrap();
         assert_eq!(&buf_0[..], &buf_1[..]);
     }
@@ -412,7 +407,7 @@ mod tests {
     fn test_serialize_panic() {
         // create with a body which is below the minimum length
         let mut buf = [0u8; ETHERNET_MIN_FRAME_LEN];
-        let buffer = SerializeBuffer::new(
+        let mut buffer = SerializeBuffer::new(
             &mut buf[..],
             (ETHERNET_MIN_FRAME_LEN - (ETHERNET_MIN_BODY_LEN_WITH_TAG - 1))..,
         );
@@ -421,6 +416,6 @@ mod tests {
             Mac::new([6, 7, 8, 9, 10, 11]),
             EtherType::Arp,
         )
-        .serialize(buffer);
+        .serialize(&mut buffer);
     }
 }

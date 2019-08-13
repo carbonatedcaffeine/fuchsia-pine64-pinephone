@@ -46,7 +46,7 @@ TEST(Directory, CreateDirectoryAt) {
 
   ScopedTempDir dir;
   EXPECT_TRUE(IsDirectory(dir.path()));
-  fxl::UniqueFD root(open(dir.path().c_str(), O_RDONLY));
+  fbl::unique_fd root(open(dir.path().c_str(), O_RDONLY));
   EXPECT_TRUE(root.is_valid());
   EXPECT_FALSE(IsDirectoryAt(root.get(), "foo/bar/baz"));
   EXPECT_TRUE(CreateDirectoryAt(root.get(), "foo/bar/baz"));
@@ -64,11 +64,9 @@ TEST(Directory, ReadDirContents) {
   std::vector<std::string> contents;
   EXPECT_TRUE(ReadDirContents(dir.path(), &contents));
 #if defined(OS_FUCHSIA)
-  EXPECT_THAT(contents,
-              ::testing::UnorderedElementsAre(".", "foo", "bar", "baz"));
+  EXPECT_THAT(contents, ::testing::UnorderedElementsAre(".", "foo", "bar", "baz"));
 #else
-  EXPECT_THAT(contents,
-              ::testing::UnorderedElementsAre(".", "..", "foo", "bar", "baz"));
+  EXPECT_THAT(contents, ::testing::UnorderedElementsAre(".", "..", "foo", "bar", "baz"));
 #endif
   EXPECT_FALSE(ReadDirContents("bogus", &contents));
   EXPECT_EQ(errno, ENOENT);

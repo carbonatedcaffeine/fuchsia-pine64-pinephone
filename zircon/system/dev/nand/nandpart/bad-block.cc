@@ -5,16 +5,19 @@
 #include "bad-block.h"
 
 #include "aml-bad-block.h"
+#include "synaptics-bad-block.h"
 
 namespace nand {
 
 zx_status_t BadBlock::Create(Config config, fbl::RefPtr<BadBlock>* out) {
-    switch (config.bad_block_config.type) {
+  switch (config.bad_block_config.type) {
     case kAmlogicUboot:
-        return AmlBadBlock::Create(config, out);
+      return AmlBadBlock::Create(config, out);
+    case kSynaptics:
+      return SynapticsBadBlock::Create(config, out);
     default:
-        return ZX_ERR_NOT_SUPPORTED;
-    }
+      return ZX_ERR_NOT_SUPPORTED;
+  }
 }
 
-} // namespace nand
+}  // namespace nand

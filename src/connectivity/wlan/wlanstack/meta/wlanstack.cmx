@@ -8,10 +8,8 @@
             "class/wlanif"
         ],
         "services": [
-            "fuchsia.cobalt.LoggerFactory"
-        ],
-        "system": [
-            "data/wlanstack"
+            "fuchsia.cobalt.LoggerFactory",
+            "fuchsia.wlan.devmgr.IsolatedDevmgr"
         ]
     }
 }

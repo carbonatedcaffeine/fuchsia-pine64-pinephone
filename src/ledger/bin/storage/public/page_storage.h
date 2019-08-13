@@ -41,13 +41,55 @@ class PageStorage : public PageSyncClient {
   };
 
   // Location where to search an object. See |GetObject| call for usage.
-  enum Location { LOCAL, NETWORK };
+  class Location {
+   public:
+    Location();
+
+    // Object should only be searched locally.
+    static Location Local();
+    // Object is from a value and should be searched both locally and from the network.
+    //
+    // Compatibility: during the transition to diffs, using |ValueFromNetwork| as a location for a
+    // tree node is valid, and indicates that this object is expected to be present in the cloud and
+    // should be fetched using |GetObject|.
+    // TODO(LE-823): remove once transition to diffs is complete.
+    static Location ValueFromNetwork();
+    // Object is from a tree node and should be searched both locally and from the
+    // network. |in_commit| is the identifier of a commit that has the object as part of a tree
+    // node.
+    static Location TreeNodeFromNetwork(CommitId in_commit);
+
+    bool is_local() const;
+    bool is_value_from_network() const;
+    bool is_tree_node_from_network() const;
+    bool is_network() const;
+    const CommitId& in_commit() const;
+
+   private:
+    enum class Tag {
+      LOCAL,
+      NETWORK_VALUE,
+      NETWORK_TREE_NODE,
+    };
+
+    Location(Tag flag, CommitId in_commit);
+    friend bool operator==(const Location& lhs, const Location& rhs);
+    friend bool operator<(const Location& lhs, const Location& rhs);
+
+    Tag tag_;
+    // Only valid if |tag_| is |NETWORK_TREE_NODE|.
+    CommitId in_commit_;
+  };
 
   PageStorage() {}
   ~PageStorage() override {}
 
   // Returns the id of this page.
   virtual PageId GetId() = 0;
+
+  // Returns the ObjectIdentifierFactory associated with this page. |PageStorage| must outlive the
+  // returned pointer.
+  virtual ObjectIdentifierFactory* GetObjectIdentifierFactory() = 0;
 
   // Finds all head commits. It is guaranteed that valid pages have at least one
   // head commit, even if they are empty. The returned list is sorted according
@@ -214,20 +256,30 @@ class PageStorage : public PageSyncClient {
   virtual void GetEntryFromCommit(const Commit& commit, std::string key,
                                   fit::function<void(Status, Entry)> on_done) = 0;
 
-  // Iterates over the difference between the contents of two commits and calls
-  // |on_next_diff| on found changed entries. Returning false from
-  // |on_next_diff| will immediately stop the iteration. |on_done| is called
-  // once, upon successfull completion, i.e. when there are no more differences
+  // Diff used for the cloud provider.
+
+  // Computes the diff between the |target_commit| and another commit, available locally. |callback|
+  // is called with the status of the operation, the id of the commit used as the base of the diff
+  // and the vector of all changes. Note that updating an entry will add two values in the vector of
+  // changes: one deleting the previous entry and one adding the next one.
+  virtual void GetDiffForCloud(
+      const Commit& target_commit,
+      fit::function<void(Status, CommitIdView, std::vector<EntryChange>)> callback) = 0;
+
+  // Diffs for Merging and other client-facing usages.
+
+  // Iterates over the difference between the contents of two commits and calls |on_next_diff| on
+  // found changed entries. Returning false from |on_next_diff| will immediately stop the iteration.
+  // |on_done| is called once, upon successfull completion, i.e. when there are no more differences
   // or iteration was interrupted, or if an error occurs.
   virtual void GetCommitContentsDiff(const Commit& base_commit, const Commit& other_commit,
                                      std::string min_key,
                                      fit::function<bool(EntryChange)> on_next_diff,
                                      fit::function<void(Status)> on_done) = 0;
 
-  // Computes the 3-way diff between a base commit and two other commits. Calls
-  // |on_next_diff| on found changed entries. Returning false from
-  // |on_next_diff| will immediately stop the iteration. |on_done| is called
-  // once, upon successfull completion, i.e. when there are no more differences
+  // Computes the 3-way diff between a base commit and two other commits. Calls |on_next_diff| on
+  // found changed entries. Returning false from |on_next_diff| will immediately stop the iteration.
+  // |on_done| is called once, upon successfull completion, i.e. when there are no more differences
   // or iteration was interrupted, or if an error occurs.
   virtual void GetThreeWayContentsDiff(const Commit& base_commit, const Commit& left_commit,
                                        const Commit& right_commit, std::string min_key,
@@ -237,6 +289,10 @@ class PageStorage : public PageSyncClient {
  private:
   FXL_DISALLOW_COPY_AND_ASSIGN(PageStorage);
 };
+
+bool operator==(const PageStorage::Location& lhs, const PageStorage::Location& rhs);
+bool operator!=(const PageStorage::Location& lhs, const PageStorage::Location& rhs);
+bool operator<(const PageStorage::Location& lhs, const PageStorage::Location& rhs);
 
 }  // namespace storage
 

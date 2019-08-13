@@ -6,7 +6,7 @@
 //!
 //! Most assertions are macros as they need to call async functions themselves.  As a typical test
 //! will have multiple assertions, it save a bit of typing to write `assert_something!(arg)`
-//! instead of `await!(assert_something(arg))`.
+//! instead of `assert_something(arg).await`.
 
 #[doc(hidden)]
 pub mod reexport {
@@ -84,7 +84,7 @@ pub fn run_server_client_with_executor<GetClientRes>(
     exec: Executor,
     server: impl DirectoryEntry,
     get_client: impl FnOnce(DirectoryProxy) -> GetClientRes,
-    executor: impl FnOnce(&mut FnMut(bool) -> ()),
+    executor: impl FnOnce(&mut dyn FnMut(bool) -> ()),
 ) where
     GetClientRes: Future<Output = ()>,
 {
@@ -169,7 +169,7 @@ fn run_server_client_with_mode_and_executor_dyn<'a>(
 
 /// Holds arguments for a [`DirectoryEntry::open()`] call.
 pub type OpenRequestArgs<'path> =
-    (u32, u32, Box<Iterator<Item = &'path str>>, ServerEnd<DirectoryMarker>);
+    (u32, u32, Box<dyn Iterator<Item = &'path str>>, ServerEnd<DirectoryMarker>);
 
 /// The sender end of a channel to proxy open requests.
 pub type OpenRequestSender<'path> = mpsc::Sender<OpenRequestArgs<'path>>;
@@ -316,7 +316,7 @@ macro_rules! assert_rewind {
     ($proxy:expr) => {{
         use $crate::directory::test_utils::reexport::*;
 
-        let status = await!($proxy.rewind()).expect("rewind failed");
+        let status = $proxy.rewind().await.expect("rewind failed");
         assert_eq!(Status::from_raw(status), Status::OK);
     }};
 }
@@ -340,7 +340,7 @@ macro_rules! assert_watch {
         let (watcher_client, watcher_server) = zx::Channel::create().unwrap();
         let watcher_client = Channel::from_channel(watcher_client).unwrap();
 
-        let status = await!($proxy.watch($mask, 0, watcher_server)).expect("watch failed");
+        let status = $proxy.watch($mask, 0, watcher_server).await.expect("watch failed");
         assert_eq!(Status::from_raw(status), Status::OK);
 
         watcher_client
@@ -354,7 +354,7 @@ macro_rules! assert_watch_err {
 
         let (_watcher_client, watcher_server) = zx::Channel::create().unwrap();
 
-        let status = await!($proxy.watch($mask, 0, watcher_server)).expect("watch failed");
+        let status = $proxy.watch($mask, 0, watcher_server).await.expect("watch failed");
         assert_eq!(Status::from_raw(status), $expected_status);
     }};
 }
@@ -365,7 +365,7 @@ macro_rules! assert_watcher_one_message_watched_events {
         use $crate::directory::test_utils::reexport::*;
 
         let mut buf = MessageBuf::new();
-        await!($watcher.recv_msg(&mut buf)).unwrap();
+        $watcher.recv_msg(&mut buf).await.unwrap();
 
         let (bytes, handles) = buf.split();
         assert_eq!(

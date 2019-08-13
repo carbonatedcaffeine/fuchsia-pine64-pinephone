@@ -11,7 +11,7 @@ namespace gfx {
 namespace test {
 
 SessionUpdater::UpdateResults MockSessionUpdater::UpdateSessions(
-    std::unordered_set<SessionId> sessions_to_update, zx_time_t presentation_time,
+    std::unordered_set<SessionId> sessions_to_update, zx::time presentation_time,
     uint64_t trace_id) {
   ++update_sessions_call_count_;
 
@@ -63,7 +63,7 @@ SessionUpdater::UpdateResults MockSessionUpdater::UpdateSessions(
 }
 
 std::shared_ptr<const MockSessionUpdater::CallbackStatus> MockSessionUpdater::AddCallback(
-    SessionId session_id, zx_time_t presentation_time, zx_time_t acquire_fence_time) {
+    SessionId session_id, zx::time presentation_time, zx::time acquire_fence_time) {
   auto status = std::make_shared<CallbackStatus>();
   status->session_id = session_id;
 
@@ -84,7 +84,7 @@ std::shared_ptr<const MockSessionUpdater::CallbackStatus> MockSessionUpdater::Ad
 }
 
 bool MockFrameRenderer::RenderFrame(const FrameTimingsPtr& frame_timings,
-                                    zx_time_t presentation_time) {
+                                    zx::time presentation_time) {
   const uint64_t frame_number = frame_timings->frame_number();
   FXL_CHECK(frames_.find(frame_number) == frames_.end());
   // Check that no frame numbers were skipped.
@@ -95,15 +95,17 @@ bool MockFrameRenderer::RenderFrame(const FrameTimingsPtr& frame_timings,
   size_t swapchain_index = frame_timings->RegisterSwapchain();
   frames_[frame_number] = {.frame_timings = std::move(frame_timings),
                            .swapchain_index = swapchain_index};
+
   return render_frame_return_value_;
 }
 
-void MockFrameRenderer::EndFrame(uint64_t frame_number, zx_time_t time_done) {
+void MockFrameRenderer::EndFrame(uint64_t frame_number, zx::time time_done) {
   SignalFrameRendered(frame_number, time_done);
+  SignalFrameCpuRendered(frame_number, time_done);
   SignalFramePresented(frame_number, time_done);
 }
 
-void MockFrameRenderer::SignalFrameRendered(uint64_t frame_number, zx_time_t time_done) {
+void MockFrameRenderer::SignalFrameRendered(uint64_t frame_number, zx::time time_done) {
   auto find_it = frames_.find(frame_number);
   FXL_CHECK(find_it != frames_.end());
 
@@ -116,7 +118,18 @@ void MockFrameRenderer::SignalFrameRendered(uint64_t frame_number, zx_time_t tim
   CleanUpFrame(frame_number);
 }
 
-void MockFrameRenderer::SignalFramePresented(uint64_t frame_number, zx_time_t time_done) {
+void MockFrameRenderer::SignalFrameCpuRendered(uint64_t frame_number, zx::time time_done) {
+  auto find_it = frames_.find(frame_number);
+  FXL_CHECK(find_it != frames_.end());
+
+  auto& frame = find_it->second;
+  frame.frame_cpu_rendered = true;
+  frame.frame_timings->OnFrameCpuRendered(time_done);
+
+  CleanUpFrame(frame_number);
+}
+
+void MockFrameRenderer::SignalFramePresented(uint64_t frame_number, zx::time time_done) {
   auto find_it = frames_.find(frame_number);
   FXL_CHECK(find_it != frames_.end());
 
@@ -147,7 +160,7 @@ void MockFrameRenderer::CleanUpFrame(uint64_t frame_number) {
   FXL_CHECK(find_it != frames_.end());
 
   auto& frame = find_it->second;
-  if (!frame.frame_rendered || !frame.frame_presented) {
+  if (!frame.frame_rendered || !frame.frame_presented || !frame.frame_cpu_rendered) {
     return;
   }
   frames_.erase(frame_number);

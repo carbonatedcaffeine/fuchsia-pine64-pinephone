@@ -19,6 +19,13 @@ namespace {
 // This is an arbitrary default port.
 constexpr char DEFAULT_SERVER_ADDRESS[] = "0.0.0.0:50051";
 
+// Determine whether |haystack| begins with |needle|.
+inline bool StringBeginsWith(const std::string& haystack,
+                             const std::string& needle) {
+  return std::mismatch(needle.begin(), needle.end(), haystack.begin()).first ==
+         needle.end();
+}
+
 // Determine whether |haystack| ends with |needle|.
 inline bool StringEndsWith(const std::string& haystack,
                            const std::string& needle) {
@@ -64,6 +71,33 @@ bool StreamSetsRequest::HasFlag(StreamSetsRequestFlags flag) const {
   return (flags & flag) != 0;
 }
 
+std::ostream& operator<<(std::ostream& out,
+                         const DiscardSamplesRequest& request) {
+  out << "DiscardSamplesRequest {" << std::endl;
+  out << "  request_id: " << request.request_id() << std::endl;
+  out << "  start_time_ns: " << request.start_time_ns << std::endl;
+  out << "  end_time_ns:   " << request.end_time_ns << std::endl;
+  out << "    delta time in seconds: "
+      << double(request.end_time_ns - request.start_time_ns) /
+             kNanosecondsPerSecond
+      << std::endl;
+  out << "  ids (" << request.dockyard_ids.size() << "): [";
+  for (const auto& dockyard_id : request.dockyard_ids) {
+    out << " " << dockyard_id;
+  }
+  out << " ]" << std::endl;
+  out << "}" << std::endl;
+  return out;
+}
+
+std::ostream& operator<<(std::ostream& out,
+                         const DiscardSamplesResponse& response) {
+  out << "DiscardSamplesResponse {" << std::endl;
+  out << "  request_id: " << response.request_id << std::endl;
+  out << "}" << std::endl;
+  return out;
+}
+
 std::ostream& operator<<(std::ostream& out, const StreamSetsRequest& request) {
   out << "StreamSetsRequest {" << std::endl;
   out << "  request_id: " << request.request_id() << std::endl;
@@ -95,19 +129,33 @@ std::ostream& operator<<(std::ostream& out,
   out << "  lowest_value: " << response.lowest_value << std::endl;
   out << "  highest_value: " << response.highest_value << std::endl;
   out << "  data_sets (" << response.data_sets.size() << "): [" << std::endl;
-  for (auto list = response.data_sets.begin(); list != response.data_sets.end();
-       ++list) {
+  for (const auto& list : response.data_sets) {
     out << "    data_set: {";
-    for (auto data = list->begin(); data != list->end(); ++data) {
-      if (*data == NO_DATA) {
+    for (const auto& data : list) {
+      if (data == NO_DATA) {
         out << " NO_DATA";
       } else {
-        out << " " << *data;
+        out << " " << data;
       }
     }
     out << " }, " << std::endl;
   }
   out << "  ]" << std::endl;
+  out << "}" << std::endl;
+  return out;
+}
+
+std::ostream& operator<<(std::ostream& out, const Dockyard& dockyard) {
+  out << "Dockyard {" << std::endl;
+  out << "  sample_stream: {";
+  for (const auto& stream : dockyard.sample_streams_) {
+    out << "    " << stream.first << " (" << stream.second->size() << "): {";
+    for (const auto& sample : *stream.second) {
+      out << " " << sample.second;
+    }
+    out << " }, " << std::endl;
+  }
+  out << " }, " << std::endl;
   out << "}" << std::endl;
   return out;
 }
@@ -135,14 +183,18 @@ SampleTimeNs Dockyard::LatestSampleTimeNs() const {
 
 void Dockyard::AddSample(DockyardId dockyard_id, Sample sample) {
   std::lock_guard<std::mutex> guard(mutex_);
+  if (ignore_dockyard_ids_.find(dockyard_id) != ignore_dockyard_ids_.end()) {
+    return;
+  }
+
   // Find or create a sample_stream for this dockyard_id.
   SampleStream& sample_stream = sample_streams_.StreamRef(dockyard_id);
   sample_stream.emplace(sample.time, sample.value);
   latest_sample_time_ns_ = sample.time;
 
   // Track the overall lowest and highest values encountered.
-  sample_stream_low_high_.try_emplace(dockyard_id,
-                                      std::make_pair(SAMPLE_MAX_VALUE, 0ULL));
+  sample_stream_low_high_.emplace(dockyard_id,
+                                  std::make_pair(SAMPLE_MAX_VALUE, 0ULL));
   auto low_high = sample_stream_low_high_.find(dockyard_id);
   SampleValue lowest = low_high->second.first;
   SampleValue highest = low_high->second.second;
@@ -162,30 +214,39 @@ void Dockyard::AddSample(DockyardId dockyard_id, Sample sample) {
 
 void Dockyard::AddSamples(DockyardId dockyard_id, std::vector<Sample> samples) {
   std::lock_guard<std::mutex> guard(mutex_);
+  if (ignore_dockyard_ids_.find(dockyard_id) != ignore_dockyard_ids_.end()) {
+    return;
+  }
+
   // Find or create a sample_stream for this dockyard_id.
   SampleStream& sample_stream = sample_streams_.StreamRef(dockyard_id);
 
   // Track the overall lowest and highest values encountered.
-  sample_stream_low_high_.try_emplace(dockyard_id,
-                                      std::make_pair(SAMPLE_MAX_VALUE, 0ULL));
+  sample_stream_low_high_.emplace(dockyard_id,
+                                  std::make_pair(SAMPLE_MAX_VALUE, 0ULL));
   auto low_high = sample_stream_low_high_.find(dockyard_id);
   SampleValue lowest = low_high->second.first;
   SampleValue highest = low_high->second.second;
-  for (auto i = samples.begin(); i != samples.end(); ++i) {
-    if (lowest > i->value) {
-      lowest = i->value;
+  for (const auto& sample : samples) {
+    if (lowest > sample.value) {
+      lowest = sample.value;
     }
-    if (highest < i->value) {
-      highest = i->value;
+    if (highest < sample.value) {
+      highest = sample.value;
     }
-    sample_stream.emplace(i->time, i->value);
+    sample_stream.emplace(sample.time, sample.value);
   }
   sample_stream_low_high_[dockyard_id] = std::make_pair(lowest, highest);
 }
 
+void Dockyard::DiscardSamples(DiscardSamplesRequest* request) {
+  std::lock_guard<std::mutex> guard(mutex_);
+  pending_discard_requests_.emplace_back(request);
+}
+
 DockyardId Dockyard::GetDockyardId(const std::string& dockyard_path) {
   std::lock_guard<std::mutex> guard(mutex_);
-  return GetDockyardIdImpl(dockyard_path);
+  return GetDockyardIdLocked(dockyard_path);
 }
 
 bool Dockyard::HasDockyardPath(const std::string& dockyard_path,
@@ -215,6 +276,11 @@ bool Dockyard::GetDockyardPath(DockyardId dockyard_id,
 DockyardPathToIdMap Dockyard::MatchPaths(const std::string& starting,
                                          const std::string& ending) const {
   std::lock_guard<std::mutex> guard(mutex_);
+  return MatchPathsLocked(starting, ending);
+}
+
+DockyardPathToIdMap Dockyard::MatchPathsLocked(
+    const std::string& starting, const std::string& ending) const {
   DockyardPathToIdMap result;
   DockyardPathToIdMap::const_iterator lower;
   DockyardPathToIdMap::const_iterator upper;
@@ -251,8 +317,11 @@ void Dockyard::ResetHarvesterData() {
   latest_sample_time_ns_ = 0;
 
   // Maybe send error responses.
-  pending_requests_.clear();
+  pending_get_requests_.clear();
+  pending_discard_requests_.clear();
 
+  ignore_streams_.clear();
+  ignore_dockyard_ids_.clear();
   sample_streams_.clear();
   sample_stream_low_high_.clear();
 
@@ -260,7 +329,7 @@ void Dockyard::ResetHarvesterData() {
   dockyard_id_to_path_.clear();
 
   // The ID of the invalid value is zero because it's the first value created.
-  DockyardId dockyard_id = GetDockyardIdImpl("<INVALID>");
+  DockyardId dockyard_id = GetDockyardIdLocked("<INVALID>");
   // The test below should never fail (unless there's a bug).
   if (dockyard_id != INVALID_DOCKYARD_ID) {
     GT_LOG(ERROR) << "INVALID_DOCKYARD_ID string allocation failed. Exiting.";
@@ -270,7 +339,14 @@ void Dockyard::ResetHarvesterData() {
 
 void Dockyard::GetStreamSets(StreamSetsRequest* request) {
   std::lock_guard<std::mutex> guard(mutex_);
-  pending_requests_.push_back(request);
+  pending_get_requests_.push_back(request);
+}
+
+void Dockyard::IgnoreSamples(const IgnoreSamplesRequest& request,
+                             IgnoreSamplesCallback callback) {
+  std::lock_guard<std::mutex> guard(mutex_);
+  pending_ignore_samples_owned_.emplace_back(std::move(request),
+                                             std::move(callback));
 }
 
 void Dockyard::OnConnection() {
@@ -299,6 +375,19 @@ void Dockyard::StopCollectingFromDevice() {
   protocol_buffer_service_.reset();
 }
 
+void Dockyard::IgnoreSamplesLocked(const std::string& starting,
+                                   const std::string& ending) {
+  // If someone in the future sends repeated requests to ignore the same samples
+  // this would be a good place to detect and decline subsequent requests.
+  // Repeated calls are harmless and not expected. So that check is not being
+  // made.
+  ignore_streams_.emplace(std::make_pair(starting, ending));
+  DockyardPathToIdMap matches = MatchPathsLocked(starting, ending);
+  for (const auto& match : matches) {
+    ignore_dockyard_ids_.emplace(match.second);
+  }
+}
+
 void Dockyard::Initialize() {
   std::lock_guard<std::mutex> guard(mutex_);
   if (server_thread_.joinable()) {
@@ -307,7 +396,7 @@ void Dockyard::Initialize() {
   }
 
   GT_LOG(INFO) << "Starting dockyard server";
-  protocol_buffer_service_ = std::make_unique<DockyardServiceImpl>();
+  protocol_buffer_service_ = make_unique<DockyardServiceImpl>();
 
   protocol_buffer_service_->SetDockyard(this);
 
@@ -353,45 +442,89 @@ OnStreamSetsCallback Dockyard::SetStreamSetsHandler(
   return old_handler;
 }
 
+OnDiscardSamplesCallback Dockyard::SetDiscardSamplesHandler(
+    OnDiscardSamplesCallback callback) {
+  auto old_handler = on_discard_samples_handler_;
+  on_discard_samples_handler_ = callback;
+  return old_handler;
+}
+
+void Dockyard::ProcessDiscardSamples(const DiscardSamplesRequest& request,
+                                     DiscardSamplesResponse* response) {
+  std::lock_guard<std::mutex> guard(mutex_);
+  response->request_id = request.request_id();
+  for (DockyardId dockyard_id : request.dockyard_ids) {
+    auto search = sample_streams_.find(dockyard_id);
+    if (search == sample_streams_.end()) {
+      // No work to do. (Not an error.)
+      continue;
+    }
+    SampleStream* sample_stream = search->second.get();
+    auto begin = sample_stream->lower_bound(request.start_time_ns);
+    if (begin == sample_stream->end()) {
+      // No work to do. (Not an error.)
+      continue;
+    }
+    auto end = sample_stream->lower_bound(request.end_time_ns);
+    // If the end time is not found, delete to the end of what we have.
+    sample_stream->erase(begin, end);
+  }
+  // Note: Do not remove the entries from |dockyard_id_to_path_| and
+  //       |dockyard_path_to_id_| since those may be sync'd with a remote
+  //       process. E.g. the Harvester.
+  //
+  // Note: Do not alter the values in |sample_stream_low_high_|. Doing so would
+  //       cause (GUI) normalization issues when trimming old data. The low/high
+  //       information is about the entire history of the sample stream, not any
+  //       particular range of time. If clearing or recalculating the low/high
+  //       values becomes desirable, do so with a flag in DiscardSamplesRequest
+  //       or create a new type of request.
+}
+
+void Dockyard::ProcessIgnoreSamples(const IgnoreSamplesRequest& request,
+                                    IgnoreSamplesResponse* response) {
+  std::lock_guard<std::mutex> guard(mutex_);
+  response->request_id = request.request_id();
+  IgnoreSamplesLocked(request.prefix, request.suffix);
+}
+
 void Dockyard::ProcessSingleRequest(const StreamSetsRequest& request,
                                     StreamSetsResponse* response) const {
   std::lock_guard<std::mutex> guard(mutex_);
   response->request_id = request.request_id();
-  for (auto dockyard_id = request.dockyard_ids.begin();
-       dockyard_id != request.dockyard_ids.end(); ++dockyard_id) {
+  for (const auto& dockyard_id : request.dockyard_ids) {
     std::vector<SampleValue> samples;
-    auto search = sample_streams_.find(*dockyard_id);
+    auto search = sample_streams_.find(dockyard_id);
     if (search == sample_streams_.end()) {
       samples.push_back(NO_STREAM);
     } else {
-      auto sample_stream = *search->second;
+      SampleStream& sample_stream = *search->second.get();
       switch (request.render_style) {
         case StreamSetsRequest::SCULPTING:
-          ComputeSculpted(*dockyard_id, sample_stream, request, &samples);
+          ComputeSculpted(dockyard_id, sample_stream, request, &samples);
           break;
         case StreamSetsRequest::WIDE_SMOOTHING:
-          ComputeSmoothed(*dockyard_id, sample_stream, request, &samples);
+          ComputeSmoothed(dockyard_id, sample_stream, request, &samples);
           break;
         case StreamSetsRequest::LOWEST_PER_COLUMN:
-          ComputeLowestPerColumn(*dockyard_id, sample_stream, request,
-                                 &samples);
+          ComputeLowestPerColumn(dockyard_id, sample_stream, request, &samples);
           break;
         case StreamSetsRequest::HIGHEST_PER_COLUMN:
-          ComputeHighestPerColumn(*dockyard_id, sample_stream, request,
+          ComputeHighestPerColumn(dockyard_id, sample_stream, request,
                                   &samples);
           break;
         case StreamSetsRequest::AVERAGE_PER_COLUMN:
-          ComputeAveragePerColumn(*dockyard_id, sample_stream, request,
+          ComputeAveragePerColumn(dockyard_id, sample_stream, request,
                                   &samples);
           break;
         case StreamSetsRequest::RECENT:
-          ComputeRecent(*dockyard_id, sample_stream, request, &samples);
+          ComputeRecent(dockyard_id, sample_stream, request, &samples);
           break;
         default:
           break;
       }
       if (request.HasFlag(StreamSetsRequest::NORMALIZE)) {
-        NormalizeResponse(*dockyard_id, sample_stream, request, &samples);
+        NormalizeResponse(dockyard_id, sample_stream, request, &samples);
       }
     }
     response->data_sets.push_back(samples);
@@ -588,9 +721,8 @@ void Dockyard::NormalizeResponse(DockyardId dockyard_id,
     return;
   }
 
-  for (std::vector<SampleValue>::iterator i = samples->begin();
-       i != samples->end(); ++i) {
-    *i = (*i - lowest) * NORMALIZATION_RANGE / value_range;
+  for (auto& sample : *samples) {
+    sample = (sample - lowest) * NORMALIZATION_RANGE / value_range;
   }
 }
 
@@ -684,7 +816,7 @@ void Dockyard::ComputeSmoothed(DockyardId dockyard_id,
   }
 }
 
-DockyardId Dockyard::GetDockyardIdImpl(const std::string& dockyard_path) {
+DockyardId Dockyard::GetDockyardIdLocked(const std::string& dockyard_path) {
   auto search = dockyard_path_to_id_.find(dockyard_path);
   if (search != dockyard_path_to_id_.end()) {
     return search->second;
@@ -692,6 +824,17 @@ DockyardId Dockyard::GetDockyardIdImpl(const std::string& dockyard_path) {
   DockyardId id = dockyard_path_to_id_.size();
   dockyard_path_to_id_.emplace(dockyard_path, id);
   dockyard_id_to_path_.emplace(id, dockyard_path);
+
+  // Check whether the new path matches any in the ignore list. This is a
+  // potentially expensive operation, but the number of ignore elements should
+  // be small / reasonable.
+  for (const auto& ignore : ignore_streams_) {
+    if (StringBeginsWith(dockyard_path, ignore.first) &&
+        StringEndsWith(dockyard_path, ignore.second)) {
+      ignore_dockyard_ids_.emplace(id);
+    }
+  }
+
   return id;
 }
 
@@ -714,9 +857,8 @@ void Dockyard::ComputeLowestHighestForRequest(
   // Gather the overall lowest and highest values encountered.
   SampleValue lowest = SAMPLE_MAX_VALUE;
   SampleValue highest = 0ULL;
-  for (auto dockyard_id = request.dockyard_ids.begin();
-       dockyard_id != request.dockyard_ids.end(); ++dockyard_id) {
-    auto low_high = sample_stream_low_high_.find(*dockyard_id);
+  for (const auto& dockyard_id : request.dockyard_ids) {
+    auto low_high = sample_stream_low_high_.find(dockyard_id);
     if (low_high == sample_stream_low_high_.end()) {
       continue;
     }
@@ -734,15 +876,34 @@ void Dockyard::ComputeLowestHighestForRequest(
 void Dockyard::ProcessRequests() {
   if (on_stream_sets_handler_ != nullptr) {
     StreamSetsResponse response;
-    for (auto i = pending_requests_.begin(); i != pending_requests_.end();
-         ++i) {
-      ProcessSingleRequest(**i, &response);
+    for (const auto& request : pending_get_requests_) {
+      ProcessSingleRequest(*request, &response);
       on_stream_sets_handler_(response);
     }
   } else {
     GT_LOG(ERROR) << "Please register a stream sets handler!";
   }
-  pending_requests_.clear();
+  pending_get_requests_.clear();
+
+  {
+    IgnoreSamplesResponse response;
+    for (const auto& request : pending_ignore_samples_owned_) {
+      ProcessIgnoreSamples(request.first, &response);
+      request.second(response);
+    }
+    pending_ignore_samples_owned_.clear();
+  }
+
+  {
+    DiscardSamplesResponse response;
+    for (const auto& request : pending_discard_requests_) {
+      ProcessDiscardSamples(*request, &response);
+      if (on_discard_samples_handler_) {
+        on_discard_samples_handler_(response);
+      }
+    }
+    pending_discard_requests_.clear();
+  }
 }
 
 std::ostringstream Dockyard::DebugDump() const {
@@ -840,8 +1001,8 @@ std::ostringstream DebugPrintQuery(const Dockyard& dockyard,
   out << "  id:data (" << request.dockyard_ids.size() << "): [" << std::endl;
   auto dockyard_id = request.dockyard_ids.begin();
   auto data_set = response.data_sets.begin();
-  std::string path;
   for (; data_set != response.data_sets.end(); ++data_set, ++dockyard_id) {
+    std::string path;
     dockyard.GetDockyardPath(*dockyard_id, &path);
     out << "    data_set " << *dockyard_id << "=" << path << " {";
     for (const auto& data : *data_set) {

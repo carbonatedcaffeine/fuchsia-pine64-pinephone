@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef ZIRCON_BOOTLOADER_SRC_FRAMEBUFFER_H_
+#define ZIRCON_BOOTLOADER_SRC_FRAMEBUFFER_H_
+
+#include <lib/gfx-font-data/gfx-font-data.h>
 
 #include <efi/protocol/graphics-output.h>
 #include <efi/system-table.h>
-#include <lib/gfx-font-data/gfx-font-data.h>
 
 // Gets the current framebuffer graphics mode.
 uint32_t get_gfx_mode(void);
@@ -33,14 +35,15 @@ void print_fb_modes(void);
 void draw_logo(void);
 
 typedef struct fb_font {
-    const gfx_font* font;
-    efi_graphics_output_blt_pixel* color;
+  const gfx_font* font;
+  efi_graphics_output_blt_pixel* color;
 } fb_font;
 
 // Draws provided text at coordinate x and y of the framebuffer.
-void draw_text(const char* text, size_t length, const fb_font* font,
-               int x, int y);
+void draw_text(const char* text, size_t length, const fb_font* font, int x, int y);
 void draw_version(const char*);
 
 // Draws nodename in appropriate location based on mode.
 void draw_nodename(const char* text);
+
+#endif  // ZIRCON_BOOTLOADER_SRC_FRAMEBUFFER_H_

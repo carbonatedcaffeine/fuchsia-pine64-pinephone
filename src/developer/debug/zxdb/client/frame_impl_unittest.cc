@@ -39,26 +39,28 @@ class MockThread : public Thread, public Stack::Delegate {
   debug_ipc::ThreadRecord::BlockedReason GetBlockedReason() const override {
     return debug_ipc::ThreadRecord::BlockedReason::kNotBlocked;
   }
-  void Pause(std::function<void()> on_paused) override {
-    debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE, [on_paused]() { on_paused(); });
+  void Pause(fit::callback<void()> on_paused) override {
+    debug_ipc::MessageLoop::Current()->PostTask(
+        FROM_HERE, [on_paused = std::move(on_paused)]() mutable { on_paused(); });
   }
   void Continue() override {}
   void ContinueWith(std::unique_ptr<ThreadController> controller,
-                    std::function<void(const Err&)> on_continue) override {}
-  void JumpTo(uint64_t new_address, std::function<void(const Err&)> cb) override {}
+                    fit::callback<void(const Err&)> on_continue) override {}
+  void JumpTo(uint64_t new_address, fit::callback<void(const Err&)> cb) override {}
   void NotifyControllerDone(ThreadController* controller) override {}
   void StepInstruction() override {}
   const Stack& GetStack() const override { return stack_; }
   Stack& GetStack() override { return stack_; }
   void ReadRegisters(std::vector<debug_ipc::RegisterCategory::Type> cats_to_get,
-                     std::function<void(const Err&, const RegisterSet&)> cb) override {
+                     fit::callback<void(const Err&, const RegisterSet&)> cb) override {
     debug_ipc::MessageLoop::Current()->PostTask(
-        FROM_HERE, [registers = register_contents_, cb]() { cb(Err(), registers); });
+        FROM_HERE,
+        [registers = register_contents_, cb = std::move(cb)]() mutable { cb(Err(), registers); });
   }
 
  private:
   // Stack::Delegate implementation.
-  void SyncFramesForStack(std::function<void(const Err&)> callback) override {
+  void SyncFramesForStack(fit::callback<void(const Err&)> callback) override {
     FXL_NOTREACHED();  // All frames are available.
   }
   std::unique_ptr<Frame> MakeFrameForStack(const debug_ipc::StackFrame& input,
@@ -80,9 +82,9 @@ class MockThread : public Thread, public Stack::Delegate {
 
 // Tests asynchronous evaluation and callbacks for evaluating the base pointer.
 //
-// This test uses the RemoteAPITest harness which normally creates ThreadImpls.
-// But to get the stack frames the way they're needed, it creates its own
-// thread implementation rather than relying on the ThreadImpl.
+// This test uses the RemoteAPITest harness which normally creates ThreadImpls.  But to get the
+// stack frames the way they're needed, it creates its own thread implementation rather than relying
+// on the ThreadImpl.
 TEST_F(FrameImplTest, AsyncBasePointer) {
   // Make a process for notifying about.
   constexpr uint64_t kProcessKoid = 1234;
@@ -103,15 +105,15 @@ TEST_F(FrameImplTest, AsyncBasePointer) {
   memcpy(&mem_value[0], &kMemoryValue, sizeof(kMemoryValue));
   mock_remote_api()->AddMemory(kAddress, mem_value);
 
-  // This describes the frame base location for the function. This encodes
-  // the memory pointed to by register 0.
+  // This describes the frame base location for the function. This encodes the memory pointed to by
+  // register 0.
   const uint8_t kSelectRegRef[2] = {llvm::dwarf::DW_OP_reg0, llvm::dwarf::DW_OP_deref};
   VariableLocation frame_base(kSelectRegRef, 2);
 
   auto function = fxl::MakeRefCounted<Function>(DwarfTag::kSubprogram);
   function->set_frame_base(frame_base);
 
-  Location location(stack.ip, FileLine("file.cc", 12), 0, symbol_context, LazySymbol(function));
+  Location location(stack.ip, FileLine("file.cc", 12), 0, symbol_context, function);
 
   MockThread thread(process);
   thread.register_contents().set_arch(debug_ipc::Arch::kX64);
@@ -121,8 +123,8 @@ TEST_F(FrameImplTest, AsyncBasePointer) {
   Frame* frame = frames[0].get();
   thread.GetStack().SetFramesForTest(std::move(frames), true);
 
-  // This should not be able to complete synchronously because the memory isn't
-  // available synchronously.
+  // This should not be able to complete synchronously because the memory isn't available
+  // synchronously.
   auto optional_base = frame->GetBasePointer();
   EXPECT_FALSE(optional_base);
 
@@ -132,8 +134,7 @@ TEST_F(FrameImplTest, AsyncBasePointer) {
     debug_ipc::MessageLoop::Current()->QuitNow();
   });
 
-  // The base pointer should have picked up our register0 value for the base
-  // pointer.
+  // The base pointer should have picked up our register0 value for the base pointer.
   debug_ipc::MessageLoop::Current()->Run();
   EXPECT_EQ(kMemoryValue, result_base);
 }

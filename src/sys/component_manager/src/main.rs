@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 use {
     component_manager_lib::{
         elf_runner::{ElfRunner, ProcessLauncherConnector},
-        framework_services::RealFrameworkServiceHost,
+        framework::RealFrameworkServiceHost,
         klog,
-        model::{AbsoluteMoniker, Model, ModelParams},
+        model::{AbsoluteMoniker, Model, ModelConfig, ModelParams},
         startup,
     },
     failure::{self, Error, ResultExt},
@@ -39,11 +39,12 @@ fn main() -> Result<(), Error> {
     let builtin_services = Arc::new(startup::BuiltinRootServices::new(&args)?);
     let launcher_connector = ProcessLauncherConnector::new(&args, builtin_services);
     let mut params = ModelParams {
-        framework_services: Box::new(RealFrameworkServiceHost::new()),
+        framework_services: Arc::new(RealFrameworkServiceHost::new()),
         root_component_url: args.root_component_url,
         root_resolver_registry: resolver_registry,
-        root_default_runner: Box::new(ElfRunner::new(launcher_connector)),
+        root_default_runner: Arc::new(ElfRunner::new(launcher_connector)),
         hooks: Vec::new(),
+        config: ModelConfig::default(),
     };
     startup::install_hub_if_possible(&mut params)?;
 
@@ -55,12 +56,12 @@ fn main() -> Result<(), Error> {
 }
 
 async fn run_root(model: Arc<Model>) {
-    match await!(model.look_up_and_bind_instance(AbsoluteMoniker::root())) {
+    match model.look_up_and_bind_instance(AbsoluteMoniker::root()).await {
         Ok(()) => {
             // TODO: Exit the component manager when the root component's binding is lost
             // (when it terminates) or perhaps attempt to rebind automatically.
             // For now, the component manager just runs forever.
-            await!(future::empty::<()>())
+            future::pending::<()>().await
         }
         Err(error) => {
             error!("Failed to bind to root component: {:?}", error);

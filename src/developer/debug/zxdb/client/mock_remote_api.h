@@ -55,21 +55,28 @@ class MockRemoteAPI : public RemoteAPI {
 
   // RemoteAPI implementation.
   void Attach(const debug_ipc::AttachRequest& request,
-              std::function<void(const Err&, debug_ipc::AttachReply)> cb) override;
+              fit::callback<void(const Err&, debug_ipc::AttachReply)> cb) override;
   void AddOrChangeBreakpoint(
       const debug_ipc::AddOrChangeBreakpointRequest& request,
-      std::function<void(const Err&, debug_ipc::AddOrChangeBreakpointReply)> cb) override;
+      fit::callback<void(const Err&, debug_ipc::AddOrChangeBreakpointReply)> cb) override;
   void RemoveBreakpoint(
       const debug_ipc::RemoveBreakpointRequest& request,
-      std::function<void(const Err&, debug_ipc::RemoveBreakpointReply)> cb) override;
+      fit::callback<void(const Err&, debug_ipc::RemoveBreakpointReply)> cb) override;
   void ThreadStatus(const debug_ipc::ThreadStatusRequest& request,
-                    std::function<void(const Err&, debug_ipc::ThreadStatusReply)> cb) override;
+                    fit::callback<void(const Err&, debug_ipc::ThreadStatusReply)> cb) override;
   void Resume(const debug_ipc::ResumeRequest& request,
-              std::function<void(const Err&, debug_ipc::ResumeReply)> cb) override;
+              fit::callback<void(const Err&, debug_ipc::ResumeReply)> cb) override;
   void ReadMemory(const debug_ipc::ReadMemoryRequest& request,
-                  std::function<void(const Err&, debug_ipc::ReadMemoryReply)> cb) override;
+                  fit::callback<void(const Err&, debug_ipc::ReadMemoryReply)> cb) override;
   void WriteRegisters(const debug_ipc::WriteRegistersRequest& request,
-                      std::function<void(const Err&, debug_ipc::WriteRegistersReply)> cb) override;
+                      fit::callback<void(const Err&, debug_ipc::WriteRegistersReply)> cb) override;
+
+  // No-op for now.
+  // TODO(donosoc): The client will detect underlying exceptions by analyzing the threads it
+  //                receives upon process attaching, so this will be filled then.
+  //                Currently we need this to not assert existing tests.
+  void Threads(const debug_ipc::ThreadsRequest& request,
+               fit::callback<void(const Err&, debug_ipc::ThreadsReply)> cb) override {}
 
  private:
   debug_ipc::ThreadStatusReply thread_status_reply_;

@@ -13,7 +13,6 @@
 #include <lib/fsl/syslogger/init.h>
 #include <lib/zx/channel.h>
 #include <stdlib.h>
-#include <trace-provider/provider.h>
 #include <zircon/boot/image.h>
 
 #include <chrono>
@@ -22,6 +21,8 @@
 #include <string>
 #include <thread>
 #include <utility>
+
+#include <trace-provider/provider.h>
 
 #include "lib/syslog/cpp/logger.h"
 #include "src/cobalt/bin/app/cobalt_app.h"
@@ -36,28 +37,22 @@
 // Command-line flags
 
 // Used to override kScheduleIntervalDefault;
-constexpr fxl::StringView kScheduleIntervalSecondsFlagName =
-    "schedule_interval_seconds";
+constexpr fxl::StringView kScheduleIntervalSecondsFlagName = "schedule_interval_seconds";
 
-constexpr fxl::StringView kInitialIntervalSecondsFlagName =
-    "initial_interval_seconds";
+constexpr fxl::StringView kInitialIntervalSecondsFlagName = "initial_interval_seconds";
 
 // Used to override kMinIntervalDefault;
 constexpr fxl::StringView kMinIntervalSecondsFlagName = "min_interval_seconds";
 
 // Used to override kEventAggregatorBackfillDaysDefault
-constexpr fxl::StringView kEventAggregatorBackfillDaysFlagName =
-    "event_aggregator_backfill_days";
+constexpr fxl::StringView kEventAggregatorBackfillDaysFlagName = "event_aggregator_backfill_days";
 
 // Used to override kStartEventAggregatorWorkerDefault
-constexpr fxl::StringView kStartEventAggregatorWorkerFlagName =
-    "start_event_aggregator_worker";
+constexpr fxl::StringView kStartEventAggregatorWorkerFlagName = "start_event_aggregator_worker";
 
-constexpr fxl::StringView kUseMemoryObservationStore =
-    "use_memory_observation_store";
+constexpr fxl::StringView kUseMemoryObservationStore = "use_memory_observation_store";
 
-constexpr fxl::StringView kMaxBytesTotalFlagName =
-    "max_bytes_per_observation_store";
+constexpr fxl::StringView kMaxBytesTotalFlagName = "max_bytes_per_observation_store";
 
 // We want to only upload every hour. This is the interval that will be
 // approached by the uploader.
@@ -86,9 +81,11 @@ constexpr bool kStartEventAggregatorWorkerDefault(true);
 //
 // - devhost is the channel for development devices.
 // - fishfood-release is the main fishfood channel.
+// - teamfood-release is the main teamfood channel.
 // - qa-daily is a daily QA release.
-const std::vector<std::string> kDebugChannels({"devhost", "fishfood-release",
-                                               "qa-daily"});
+// - cobalt-test-lab mirrors fishfood-release.
+const std::vector<std::string> kDebugChannels({"devhost", "fishfood-release", "teamfood-release",
+                                               "qa-daily", "cobalt-test-lab"});
 
 // ReadBoardName returns the board name of the currently running device.
 //
@@ -108,8 +105,7 @@ std::string ReadBoardName() {
 
   // Connect to the fuchsia-sysinfo service through the file system API.
   zx::channel channel;
-  zx_status_t status =
-      fdio_get_service_handle(fd, channel.reset_and_get_address());
+  zx_status_t status = fdio_get_service_handle(fd, channel.reset_and_get_address());
   if (status != ZX_OK) {
     return "";
   }
@@ -117,8 +113,8 @@ std::string ReadBoardName() {
   // Read the board name out of the ZBI.
   char board_name[ZBI_BOARD_NAME_LEN];
   size_t actual_size = 0;
-  zx_status_t fidl_status = fuchsia_sysinfo_DeviceGetBoardName(
-      channel.get(), &status, board_name, sizeof(board_name), &actual_size);
+  zx_status_t fidl_status = fuchsia_sysinfo_DeviceGetBoardName(channel.get(), &status, board_name,
+                                                               sizeof(board_name), &actual_size);
   if (fidl_status != ZX_OK || status != ZX_OK) {
     return "";
   }
@@ -145,13 +141,11 @@ int main(int argc, const char** argv) {
 
   // Parse the schedule_interval_seconds flag.
   std::chrono::seconds schedule_interval =
-      std::chrono::duration_cast<std::chrono::seconds>(
-          kScheduleIntervalDefault);
+      std::chrono::duration_cast<std::chrono::seconds>(kScheduleIntervalDefault);
   std::chrono::seconds initial_interval =
       std::chrono::duration_cast<std::chrono::seconds>(kInitialIntervalDefault);
   std::string flag_value;
-  if (command_line.GetOptionValue(kScheduleIntervalSecondsFlagName,
-                                  &flag_value)) {
+  if (command_line.GetOptionValue(kScheduleIntervalSecondsFlagName, &flag_value)) {
     int num_seconds = std::stoi(flag_value);
     if (num_seconds > 0) {
       schedule_interval = std::chrono::seconds(num_seconds);
@@ -162,8 +156,7 @@ int main(int argc, const char** argv) {
 
   // Parse the initial_interval_seconds flag.
   flag_value.clear();
-  if (command_line.GetOptionValue(kInitialIntervalSecondsFlagName,
-                                  &flag_value)) {
+  if (command_line.GetOptionValue(kInitialIntervalSecondsFlagName, &flag_value)) {
     int num_seconds = std::stoi(flag_value);
     if (num_seconds > 0) {
       initial_interval = std::chrono::seconds(num_seconds);
@@ -185,8 +178,7 @@ int main(int argc, const char** argv) {
   // Parse the event_aggregator_backfill_days flag.
   size_t event_aggregator_backfill_days = kEventAggregatorBackfillDaysDefault;
   flag_value.clear();
-  if (command_line.GetOptionValue(kEventAggregatorBackfillDaysFlagName,
-                                  &flag_value)) {
+  if (command_line.GetOptionValue(kEventAggregatorBackfillDaysFlagName, &flag_value)) {
     int num_days = std::stoi(flag_value);
     // We allow num_days = 0.
     if (num_days >= 0) {
@@ -197,8 +189,7 @@ int main(int argc, const char** argv) {
   // Parse the start_event_aggregator_worker flag.
   bool start_event_aggregator_worker = kStartEventAggregatorWorkerDefault;
   flag_value.clear();
-  if (command_line.GetOptionValue(kStartEventAggregatorWorkerFlagName,
-                                  &flag_value)) {
+  if (command_line.GetOptionValue(kStartEventAggregatorWorkerFlagName, &flag_value)) {
     if (flag_value == "true") {
       start_event_aggregator_worker = true;
     } else if (flag_value == "false") {
@@ -206,8 +197,7 @@ int main(int argc, const char** argv) {
     }
   }
 
-  bool use_memory_observation_store =
-      command_line.HasOption(kUseMemoryObservationStore);
+  bool use_memory_observation_store = command_line.HasOption(kUseMemoryObservationStore);
 
   // Parse the max_bytes_per_observation_store
   size_t max_bytes_per_observation_store = 1024 * 1024;  // 1 MiB
@@ -223,22 +213,17 @@ int main(int argc, const char** argv) {
                 << "schedule_interval=" << schedule_interval.count()
                 << " seconds, min_interval=" << min_interval.count()
                 << " seconds, initial_interval=" << initial_interval.count()
-                << " seconds, max_bytes_per_observation_store="
-                << max_bytes_per_observation_store
-                << ", event_aggregator_backfill_days="
-                << event_aggregator_backfill_days
-                << ", start_event_aggregator_worker="
-                << start_event_aggregator_worker << ".";
+                << " seconds, max_bytes_per_observation_store=" << max_bytes_per_observation_store
+                << ", event_aggregator_backfill_days=" << event_aggregator_backfill_days
+                << ", start_event_aggregator_worker=" << start_event_aggregator_worker << ".";
 
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
-  trace::TraceProviderWithFdio trace_provider(loop.dispatcher(),
-                                              "cobalt_fidl_provider");
-  cobalt::CobaltApp app(
-      loop.dispatcher(), schedule_interval, min_interval, initial_interval,
-      event_aggregator_backfill_days, start_event_aggregator_worker,
-      use_memory_observation_store, max_bytes_per_observation_store,
-      ReadBuildInfo("product"), ReadBoardName(), ReadBuildInfo("version"),
-      kDebugChannels);
+  trace::TraceProviderWithFdio trace_provider(loop.dispatcher(), "cobalt_fidl_provider");
+  cobalt::CobaltApp app(loop.dispatcher(), schedule_interval, min_interval, initial_interval,
+                        event_aggregator_backfill_days, start_event_aggregator_worker,
+                        use_memory_observation_store, max_bytes_per_observation_store,
+                        ReadBuildInfo("product"), ReadBoardName(), ReadBuildInfo("version"),
+                        kDebugChannels);
   loop.Run();
   return 0;
 }

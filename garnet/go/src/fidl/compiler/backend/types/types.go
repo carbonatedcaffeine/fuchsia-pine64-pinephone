@@ -31,6 +31,7 @@ type LibraryIdentifier []Identifier
 type CompoundIdentifier struct {
 	Library LibraryIdentifier
 	Name    Identifier
+	Member  Identifier
 }
 
 type EncodedLibraryIdentifier string
@@ -82,8 +83,13 @@ func ParseCompoundIdentifier(eci EncodedCompoundIdentifier) CompoundIdentifier {
 		raw_name = parts[1]
 	}
 	library := ParseLibraryName(EncodedLibraryIdentifier(raw_library))
-	name := Identifier(raw_name)
-	return CompoundIdentifier{library, name}
+	name_parts := strings.SplitN(raw_name, ".", 2)
+	name := Identifier(name_parts[0])
+	member := Identifier("")
+	if len(name_parts) == 2 {
+		member = Identifier(name_parts[1])
+	}
+	return CompoundIdentifier{library, name, member}
 }
 
 func EnsureLibrary(l EncodedLibraryIdentifier, eci EncodedCompoundIdentifier) EncodedCompoundIdentifier {
@@ -93,8 +99,6 @@ func EnsureLibrary(l EncodedLibraryIdentifier, eci EncodedCompoundIdentifier) En
 	new_eci := strings.Join([]string{string(l), "/", string(eci)}, "")
 	return EncodedCompoundIdentifier(new_eci)
 }
-
-type Ordinal uint32
 
 type PrimitiveSubtype string
 
@@ -115,26 +119,32 @@ const (
 type HandleSubtype string
 
 const (
-	Handle    HandleSubtype = "handle"
-	Exception               = "exception"
-	Process                 = "process"
-	Thread                  = "thread"
-	Vmo                     = "vmo"
-	Channel                 = "channel"
-	Event                   = "event"
-	Port                    = "port"
-	Interrupt               = "interrupt"
-	Log                     = "debuglog"
-	Socket                  = "socket"
-	Resource                = "resource"
-	Eventpair               = "eventpair"
-	Job                     = "job"
-	Vmar                    = "vmar"
-	Fifo                    = "fifo"
-	Guest                   = "guest"
-	Time                    = "timer"
-	Bti                     = "bti"
-	Profile                 = "profile"
+	Handle       HandleSubtype = "handle"
+	Bti                        = "bti"
+	Channel                    = "channel"
+	Event                      = "event"
+	Eventpair                  = "eventpair"
+	Exception                  = "exception"
+	Fifo                       = "fifo"
+	Guest                      = "guest"
+	Interrupt                  = "interrupt"
+	Iommu                      = "iommu"
+	Job                        = "job"
+	Log                        = "debuglog"
+	Pager                      = "pager"
+	PciDevice                  = "pcidevice"
+	Pmt                        = "pmt"
+	Port                       = "port"
+	Process                    = "process"
+	Profile                    = "profile"
+	Resource                   = "resource"
+	Socket                     = "socket"
+	SuspendToken               = "suspendtoken"
+	Thread                     = "thread"
+	Time                       = "timer"
+	Vcpu                       = "vcpu"
+	Vmar                       = "vmar"
+	Vmo                        = "vmo"
 )
 
 type LiteralKind string
@@ -467,17 +477,19 @@ func (d *Interface) GetServiceName() string {
 // Method represents the declaration of a FIDL method.
 type Method struct {
 	Attributes
-	Ordinal         uint64      `json:"ordinal"`
-	GenOrdinal      uint64      `json:"generated_ordinal"`
-	Name            Identifier  `json:"name"`
-	HasRequest      bool        `json:"has_request"`
-	Request         []Parameter `json:"maybe_request,omitempty"`
-	RequestSize     int         `json:"maybe_request_size,omitempty"`
-	RequestPadding  bool        `json:"maybe_request_has_padding,omitempty"`
-	HasResponse     bool        `json:"has_response"`
-	Response        []Parameter `json:"maybe_response,omitempty"`
-	ResponseSize    int         `json:"maybe_response_size,omitempty"`
-	ResponsePadding bool        `json:"maybe_response_has_padding,omitempty"`
+	Ordinal          uint64      `json:"ordinal"`
+	GenOrdinal       uint64      `json:"generated_ordinal"`
+	Name             Identifier  `json:"name"`
+	HasRequest       bool        `json:"has_request"`
+	Request          []Parameter `json:"maybe_request,omitempty"`
+	RequestSize      int         `json:"maybe_request_size,omitempty"`
+	RequestPadding   bool        `json:"maybe_request_has_padding,omitempty"`
+	RequestFlexible  bool        `json:"experimental_maybe_request_has_flexible_envelope,omitempty"`
+	HasResponse      bool        `json:"has_response"`
+	Response         []Parameter `json:"maybe_response,omitempty"`
+	ResponseSize     int         `json:"maybe_response_size,omitempty"`
+	ResponsePadding  bool        `json:"maybe_response_has_padding,omitempty"`
+	ResponseFlexible bool        `json:"experimental_maybe_response_has_flexible_envelope,omitempty"`
 }
 
 // IsTransitional returns whether this method has the `Transitional` attribute.

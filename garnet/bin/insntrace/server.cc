@@ -93,11 +93,11 @@ uint64_t IptConfig::AddrEnd(unsigned i) const {
   return addr_range[i].end;
 }
 
-IptServer::IptServer(const IptConfig& config,
-                     const debugger_utils::Argv& argv)
+IptServer::IptServer(const IptConfig& config, const debugger_utils::Argv& argv)
     : Server(debugger_utils::GetRootJob(), debugger_utils::GetDefaultJob(),
              sys::ServiceDirectory::CreateFromNamespace()),
-      config_(config), inferior_argv_(argv) {}
+      config_(config),
+      inferior_argv_(argv) {}
 
 bool IptServer::StartInferior() {
   inferior_control::Process* inferior = current_process();
@@ -109,7 +109,7 @@ bool IptServer::StartInferior() {
   if (!AllocTrace(config_))
     return false;
 
-  if (config_.mode == IPT_MODE_CPUS) {
+  if (config_.mode == Mode::CPU) {
     if (!InitTrace(config_))
       goto Fail;
   }
@@ -140,7 +140,7 @@ bool IptServer::StartInferior() {
   // If tracing cpus, defer turning on tracing as long as possible so that we
   // don't include all the initialization. For threads it doesn't matter.
   // TODO(dje): Could even defer until the first thread is started.
-  if (config_.mode == IPT_MODE_CPUS) {
+  if (config_.mode == Mode::CPU) {
     if (!StartTrace(config_))
       goto Fail;
   }
@@ -148,7 +148,7 @@ bool IptServer::StartInferior() {
   FXL_DCHECK(!inferior->IsLive());
   if (!inferior->Start()) {
     FXL_LOG(ERROR) << "Unable to start process";
-    if (config_.mode == IPT_MODE_CPUS)
+    if (config_.mode == Mode::CPU)
       StopTrace(config_);
     goto Fail;
   }
@@ -162,13 +162,13 @@ Fail:
 }
 
 bool IptServer::DumpResults() {
-  if (config_.mode == IPT_MODE_CPUS)
+  if (config_.mode == Mode::CPU)
     StopTrace(config_);
   StopSidebandDataCollection(config_);
-  if (config_.mode == IPT_MODE_CPUS)
+  if (config_.mode == Mode::CPU)
     DumpTrace(config_);
   DumpSidebandData(config_);
-  if (config_.mode == IPT_MODE_CPUS)
+  if (config_.mode == Mode::CPU)
     ResetTrace(config_);
   FreeTrace(config_);
   return true;
@@ -202,8 +202,7 @@ bool IptServer::Run() {
 }
 
 void IptServer::OnThreadStarting(inferior_control::Process* process,
-                                 inferior_control::Thread* thread,
-                                 zx_handle_t eport,
+                                 inferior_control::Thread* thread, zx_handle_t eport,
                                  const zx_exception_context_t& context) {
   FXL_DCHECK(process);
   FXL_DCHECK(thread);
@@ -216,7 +215,7 @@ void IptServer::OnThreadStarting(inferior_control::Process* process,
       FXL_DCHECK(false);
   }
 
-  if (config_.mode == IPT_MODE_THREADS) {
+  if (config_.mode == Mode::THREAD) {
     if (!InitThreadTrace(thread, config_))
       goto Fail;
     if (!StartThreadTrace(thread, config_)) {
@@ -230,14 +229,13 @@ Fail:
 }
 
 void IptServer::OnThreadExiting(inferior_control::Process* process,
-                                inferior_control::Thread* thread,
-                                zx_handle_t eport,
+                                inferior_control::Thread* thread, zx_handle_t eport,
                                 const zx_exception_context_t& context) {
   FXL_DCHECK(process);
   FXL_DCHECK(thread);
 
   // Dump any collected trace.
-  if (config_.mode == IPT_MODE_THREADS) {
+  if (config_.mode == Mode::THREAD) {
     if (thread->ipt_buffer() >= 0) {
       StopThreadTrace(thread, config_);
       DumpThreadTrace(thread, config_);
@@ -253,18 +251,17 @@ void IptServer::OnThreadExiting(inferior_control::Process* process,
 void IptServer::OnProcessTermination(inferior_control::Process* process) {
   FXL_DCHECK(process);
 
-  printf("Process %s is gone, rc %d\n", process->GetName().c_str(),
-         process->return_code());
+  printf("Process %s is gone, rc %d\n", process->GetName().c_str(), process->return_code());
 
   // If the process is gone, unset current thread, and exit main loop.
   SetCurrentThread(nullptr);
   QuitMessageLoop(true);
 }
 
-void IptServer::OnArchitecturalException(
-    inferior_control::Process* process, inferior_control::Thread* thread,
-    zx_handle_t eport, const zx_excp_type_t type,
-    const zx_exception_context_t& context) {
+void IptServer::OnArchitecturalException(inferior_control::Process* process,
+                                         inferior_control::Thread* thread, zx_handle_t eport,
+                                         const zx_excp_type_t type,
+                                         const zx_exception_context_t& context) {
   FXL_DCHECK(process);
   FXL_DCHECK(thread);
   // TODO(armansito): Fine-tune this check if we ever support multi-processing.
@@ -275,9 +272,8 @@ void IptServer::OnArchitecturalException(
 }
 
 void IptServer::OnSyntheticException(inferior_control::Process* process,
-                                     inferior_control::Thread* thread,
-                                     zx_handle_t eport, zx_excp_type_t type,
-                                     const zx_exception_context_t& context) {
+                                     inferior_control::Thread* thread, zx_handle_t eport,
+                                     zx_excp_type_t type, const zx_exception_context_t& context) {
   FXL_DCHECK(process);
   FXL_DCHECK(thread);
 

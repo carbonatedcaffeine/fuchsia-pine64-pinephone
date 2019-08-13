@@ -42,9 +42,7 @@ bool IsPeerValid(const zx::unowned_eventpair& handle) {
   }
 }
 
-bool IsPeerValid(zx_handle_t handle) {
-  return IsPeerValid(zx::unowned_eventpair(handle));
-}
+bool IsPeerValid(zx_handle_t handle) { return IsPeerValid(zx::unowned_eventpair(handle)); }
 
 template <typename T, size_t N>
 constexpr uint32_t ArrayCount(T const (&array)[N]) {
@@ -57,8 +55,7 @@ constexpr uint32_t ArrayCount(T const (&array)[N]) {
 // C server implementation
 namespace internal_c {
 
-zx_status_t ConsumeSimpleStruct(void* ctx,
-                                const fidl_test_llcpp_basictypes_SimpleStruct* arg,
+zx_status_t ConsumeSimpleStruct(void* ctx, const fidl_test_llcpp_basictypes_SimpleStruct* arg,
                                 fidl_txn_t* txn) {
   // Verify that all the handles are valid channels
   if (!IsPeerValid(arg->ep)) {
@@ -84,8 +81,7 @@ zx_status_t ConsumeSimpleStruct(void* ctx,
   return fidl_test_llcpp_basictypes_TestInterfaceConsumeSimpleStruct_reply(txn, ZX_OK, arg->field);
 }
 
-zx_status_t ConsumeSimpleUnion(void* ctx,
-                               const fidl_test_llcpp_basictypes_SimpleUnion* arg,
+zx_status_t ConsumeSimpleUnion(void* ctx, const fidl_test_llcpp_basictypes_SimpleUnion* arg,
                                fidl_txn_t* txn) {
   if (arg->tag == fidl_test_llcpp_basictypes_SimpleUnionTag_field_a) {
     return fidl_test_llcpp_basictypes_TestInterfaceConsumeSimpleUnion_reply(txn, 0, arg->field_a);
@@ -101,9 +97,7 @@ const fidl_test_llcpp_basictypes_TestInterface_ops_t kOps = {
     .ConsumeSimpleUnion = ConsumeSimpleUnion,
 };
 
-zx_status_t ServerDispatch(void* ctx,
-                           fidl_txn_t* txn,
-                           fidl_msg_t* msg,
+zx_status_t ServerDispatch(void* ctx, fidl_txn_t* txn, fidl_msg_t* msg,
                            const fidl_test_llcpp_basictypes_TestInterface_ops_t* ops) {
   zx_status_t status = fidl_test_llcpp_basictypes_TestInterface_try_dispatch(ctx, txn, msg, ops);
   if (status == ZX_ERR_NOT_SUPPORTED) {
@@ -119,8 +113,8 @@ namespace {
 
 void SpinUpAsyncCServerHelper(zx::channel server, async_loop_t** out_loop) {
   async_loop_t* loop = nullptr;
-  ASSERT_EQ(ZX_OK, async_loop_create(&kAsyncLoopConfigNoAttachToThread, &loop), "");
-  ASSERT_EQ(ZX_OK, async_loop_start_thread(loop, "basictypes-dispatcher", NULL), "");
+  ASSERT_OK(async_loop_create(&kAsyncLoopConfigNoAttachToThread, &loop), "");
+  ASSERT_OK(async_loop_start_thread(loop, "basictypes-dispatcher", NULL), "");
 
   async_dispatcher_t* dispatcher = async_loop_get_dispatcher(loop);
   fidl_bind(dispatcher, server.release(), (fidl_dispatch_t*)internal_c::ServerDispatch, NULL,
@@ -128,15 +122,13 @@ void SpinUpAsyncCServerHelper(zx::channel server, async_loop_t** out_loop) {
   *out_loop = loop;
 }
 
-void TearDownAsyncCServerHelper(async_loop_t* loop) {
-  async_loop_destroy(loop);
-}
+void TearDownAsyncCServerHelper(async_loop_t* loop) { async_loop_destroy(loop); }
 
 }  // namespace
 
 TEST(BasicTypesTest, RawChannelCallStruct) {
   zx::channel client, server;
-  ASSERT_EQ(zx::channel::create(0, &client, &server), ZX_OK);
+  ASSERT_OK(zx::channel::create(0, &client, &server));
 
   async_loop_t* loop = nullptr;
   ASSERT_NO_FATAL_FAILURES(SpinUpAsyncCServerHelper(std::move(server), &loop));
@@ -161,11 +153,11 @@ TEST(BasicTypesTest, RawChannelCallStruct) {
   // insert handles to be sent over
   zx::eventpair single_handle_payload;
   zx::eventpair single_handle_ourside;
-  ASSERT_EQ(zx::eventpair::create(0, &single_handle_ourside, &single_handle_payload), ZX_OK);
+  ASSERT_OK(zx::eventpair::create(0, &single_handle_ourside, &single_handle_payload));
   std::unique_ptr<zx::eventpair[]> handle_payload(new zx::eventpair[kNumHandlesInArray]);
   std::unique_ptr<zx::eventpair[]> handle_our_side(new zx::eventpair[kNumHandlesInArray]);
   for (size_t i = 0; i < kNumHandlesInArray; i++) {
-    ASSERT_EQ(zx::eventpair::create(0, &handle_our_side[i], &handle_payload[i]), ZX_OK);
+    ASSERT_OK(zx::eventpair::create(0, &handle_our_side[i], &handle_payload[i]));
   }
   // fill the |ep| field
   request.message()->arg.ep = std::move(single_handle_payload);
@@ -176,13 +168,13 @@ TEST(BasicTypesTest, RawChannelCallStruct) {
     }
   }
   auto encode_result = fidl::Encode(std::move(request));
-  ASSERT_EQ(encode_result.status, ZX_OK);
+  ASSERT_OK(encode_result.status);
 
   FIDL_ALIGNDECL uint8_t response_storage[512];
   fidl::BytePart response_bytes(&response_storage[0], sizeof(response_storage));
   auto response = fidl::Call(client, std::move(encode_result.message), std::move(response_bytes));
 
-  ASSERT_EQ(response.status, ZX_OK);
+  ASSERT_OK(response.status);
   auto decode_result = fidl::Decode(std::move(response.message));
   ASSERT_EQ(decode_result.message.message()->field, 123);
 
@@ -191,7 +183,7 @@ TEST(BasicTypesTest, RawChannelCallStruct) {
 
 TEST(BasicTypesTest, RawChannelCallUnion) {
   zx::channel client, server;
-  ASSERT_EQ(zx::channel::create(0, &client, &server), ZX_OK);
+  ASSERT_OK(zx::channel::create(0, &client, &server));
 
   async_loop_t* loop = nullptr;
   ASSERT_NO_FATAL_FAILURES(SpinUpAsyncCServerHelper(std::move(server), &loop));
@@ -208,13 +200,13 @@ TEST(BasicTypesTest, RawChannelCallUnion) {
   request.message()->arg.mutable_field_b() = 456;
 
   auto encode_result = fidl::Encode(std::move(request));
-  ASSERT_EQ(encode_result.status, ZX_OK);
+  ASSERT_OK(encode_result.status);
 
   FIDL_ALIGNDECL uint8_t response_storage[512];
   fidl::BytePart response_bytes(&response_storage[0], sizeof(response_storage));
   auto response = fidl::Call(client, std::move(encode_result.message), std::move(response_bytes));
 
-  ASSERT_EQ(response.status, ZX_OK);
+  ASSERT_OK(response.status);
   auto decode_result = fidl::Decode(std::move(response.message));
   ASSERT_EQ(decode_result.message.message()->index, 1);
   ASSERT_EQ(decode_result.message.message()->field, 456);
@@ -224,7 +216,7 @@ TEST(BasicTypesTest, RawChannelCallUnion) {
 
 TEST(BasicTypesTest, SyncCallStruct) {
   zx::channel client, server;
-  ASSERT_EQ(zx::channel::create(0, &client, &server), ZX_OK);
+  ASSERT_OK(zx::channel::create(0, &client, &server));
 
   async_loop_t* loop = nullptr;
   ASSERT_NO_FATAL_FAILURES(SpinUpAsyncCServerHelper(std::move(server), &loop));
@@ -232,8 +224,6 @@ TEST(BasicTypesTest, SyncCallStruct) {
   // generated interface API
   basictypes::TestInterface::SyncClient test(std::move(client));
 
-  int32_t out_status;
-  int32_t out_field;
   basictypes::SimpleStruct simple_struct = {};
   simple_struct.field = 123;
   // make sure array shape is as expected (5 by 4)
@@ -245,11 +235,11 @@ TEST(BasicTypesTest, SyncCallStruct) {
   // insert handles to be sent over
   zx::eventpair single_handle_payload;
   zx::eventpair single_handle_ourside;
-  ASSERT_EQ(zx::eventpair::create(0, &single_handle_ourside, &single_handle_payload), ZX_OK);
+  ASSERT_OK(zx::eventpair::create(0, &single_handle_ourside, &single_handle_payload));
   std::unique_ptr<zx::eventpair[]> handle_payload(new zx::eventpair[kNumHandlesInArray]);
   std::unique_ptr<zx::eventpair[]> handle_our_side(new zx::eventpair[kNumHandlesInArray]);
   for (size_t i = 0; i < kNumHandlesInArray; i++) {
-    ASSERT_EQ(zx::eventpair::create(0, &handle_our_side[i], &handle_payload[i]), ZX_OK);
+    ASSERT_OK(zx::eventpair::create(0, &handle_our_side[i], &handle_payload[i]));
   }
   // fill the |ep| field
   simple_struct.ep = std::move(single_handle_payload);
@@ -260,17 +250,17 @@ TEST(BasicTypesTest, SyncCallStruct) {
     }
   }
   // perform call
-  zx_status_t status = test.ConsumeSimpleStruct(std::move(simple_struct), &out_status, &out_field);
-  ASSERT_EQ(status, ZX_OK);
-  ASSERT_EQ(out_status, ZX_OK);
-  ASSERT_EQ(out_field, 123);
+  auto result = test.ConsumeSimpleStruct(std::move(simple_struct));
+  ASSERT_OK(result.status());
+  ASSERT_OK(result.Unwrap()->status);
+  ASSERT_EQ(result.Unwrap()->field, 123);
 
   TearDownAsyncCServerHelper(loop);
 }
 
 TEST(BasicTypesTest, SyncCallerAllocateCallStruct) {
   zx::channel client, server;
-  ASSERT_EQ(zx::channel::create(0, &client, &server), ZX_OK);
+  ASSERT_OK(zx::channel::create(0, &client, &server));
 
   async_loop_t* loop = nullptr;
   ASSERT_NO_FATAL_FAILURES(SpinUpAsyncCServerHelper(std::move(server), &loop));
@@ -278,8 +268,6 @@ TEST(BasicTypesTest, SyncCallerAllocateCallStruct) {
   // generated interface API
   basictypes::TestInterface::SyncClient test(std::move(client));
 
-  int32_t out_status;
-  int32_t out_field;
   basictypes::SimpleStruct simple_struct = {};
   simple_struct.field = 123;
   // make sure array shape is as expected (5 by 4)
@@ -291,11 +279,11 @@ TEST(BasicTypesTest, SyncCallerAllocateCallStruct) {
   // insert handles to be sent over
   zx::eventpair single_handle_payload;
   zx::eventpair single_handle_ourside;
-  ASSERT_EQ(zx::eventpair::create(0, &single_handle_ourside, &single_handle_payload), ZX_OK);
+  ASSERT_OK(zx::eventpair::create(0, &single_handle_ourside, &single_handle_payload));
   std::unique_ptr<zx::eventpair[]> handle_payload(new zx::eventpair[kNumHandlesInArray]);
   std::unique_ptr<zx::eventpair[]> handle_our_side(new zx::eventpair[kNumHandlesInArray]);
   for (size_t i = 0; i < kNumHandlesInArray; i++) {
-    ASSERT_EQ(zx::eventpair::create(0, &handle_our_side[i], &handle_payload[i]), ZX_OK);
+    ASSERT_OK(zx::eventpair::create(0, &handle_our_side[i], &handle_payload[i]));
   }
   // fill the |ep| field
   simple_struct.ep = std::move(single_handle_payload);
@@ -309,20 +297,20 @@ TEST(BasicTypesTest, SyncCallerAllocateCallStruct) {
   // perform call
   FIDL_ALIGNDECL uint8_t request_buf[512] = {};
   FIDL_ALIGNDECL uint8_t response_buf[512] = {};
-  auto result = test.ConsumeSimpleStruct(
-      fidl::BytePart(request_buf, sizeof(request_buf)), std::move(simple_struct),
-      fidl::BytePart(response_buf, sizeof(response_buf)), &out_status, &out_field);
-  ASSERT_EQ(result.status, ZX_OK);
-  ASSERT_NULL(result.error, "%s", result.error);
-  ASSERT_EQ(out_status, ZX_OK);
-  ASSERT_EQ(out_field, 123);
+  auto result = test.ConsumeSimpleStruct(fidl::BytePart(request_buf, sizeof(request_buf)),
+                                         std::move(simple_struct),
+                                         fidl::BytePart(response_buf, sizeof(response_buf)));
+  ASSERT_OK(result.status());
+  ASSERT_NULL(result.error(), "%s", result.error());
+  ASSERT_OK(result.Unwrap()->status);
+  ASSERT_EQ(result.Unwrap()->field, 123);
 
   TearDownAsyncCServerHelper(loop);
 }
 
 TEST(BasicTypesTest, SyncCallUnion) {
   zx::channel client, server;
-  ASSERT_EQ(zx::channel::create(0, &client, &server), ZX_OK);
+  ASSERT_OK(zx::channel::create(0, &client, &server));
 
   async_loop_t* loop = nullptr;
   ASSERT_NO_FATAL_FAILURES(SpinUpAsyncCServerHelper(std::move(server), &loop));
@@ -330,23 +318,21 @@ TEST(BasicTypesTest, SyncCallUnion) {
   // generated interface API
   basictypes::TestInterface::SyncClient test(std::move(client));
 
-  uint32_t out_index;
-  int32_t out_field;
   basictypes::SimpleUnion simple_union;
   simple_union.mutable_field_b() = 456;
 
   // perform call
-  zx_status_t status = test.ConsumeSimpleUnion(std::move(simple_union), &out_index, &out_field);
-  ASSERT_EQ(status, ZX_OK);
-  ASSERT_EQ(out_index, 1);
-  ASSERT_EQ(out_field, 456);
+  auto result = test.ConsumeSimpleUnion(std::move(simple_union));
+  ASSERT_OK(result.status());
+  ASSERT_EQ(result.Unwrap()->index, 1);
+  ASSERT_EQ(result.Unwrap()->field, 456);
 
   TearDownAsyncCServerHelper(loop);
 }
 
 TEST(BasicTypesTest, SyncCallerAllocateCallUnion) {
   zx::channel client, server;
-  ASSERT_EQ(zx::channel::create(0, &client, &server), ZX_OK);
+  ASSERT_OK(zx::channel::create(0, &client, &server));
 
   async_loop_t* loop = nullptr;
   ASSERT_NO_FATAL_FAILURES(SpinUpAsyncCServerHelper(std::move(server), &loop));
@@ -354,21 +340,19 @@ TEST(BasicTypesTest, SyncCallerAllocateCallUnion) {
   // generated interface API
   basictypes::TestInterface::SyncClient test(std::move(client));
 
-  uint32_t out_index;
-  int32_t out_field;
   basictypes::SimpleUnion simple_union;
   simple_union.mutable_field_b() = 456;
 
   // perform call
   FIDL_ALIGNDECL uint8_t request_buf[512] = {};
   FIDL_ALIGNDECL uint8_t response_buf[512] = {};
-  auto result = test.ConsumeSimpleUnion(
-      fidl::BytePart(request_buf, sizeof(request_buf)), std::move(simple_union),
-      fidl::BytePart(response_buf, sizeof(response_buf)), &out_index, &out_field);
-  ASSERT_EQ(result.status, ZX_OK);
-  ASSERT_NULL(result.error, "%s", result.error);
-  ASSERT_EQ(out_index, 1);
-  ASSERT_EQ(out_field, 456);
+  auto result = test.ConsumeSimpleUnion(fidl::BytePart(request_buf, sizeof(request_buf)),
+                                        std::move(simple_union),
+                                        fidl::BytePart(response_buf, sizeof(response_buf)));
+  ASSERT_OK(result.status());
+  ASSERT_NULL(result.error(), "%s", result.error());
+  ASSERT_EQ(result.Unwrap()->index, 1);
+  ASSERT_EQ(result.Unwrap()->field, 456);
 
   TearDownAsyncCServerHelper(loop);
 }
@@ -423,15 +407,15 @@ class Server : public gen::TestInterface::Interface {
 void SpinUp(zx::channel server, Server* impl, std::unique_ptr<async::Loop>* out_loop) {
   auto loop = std::make_unique<async::Loop>(&kAsyncLoopConfigAttachToThread);
   zx_status_t status = fidl::Bind(loop->dispatcher(), std::move(server), impl);
-  ASSERT_EQ(status, ZX_OK);
-  ASSERT_EQ(loop->StartThread("test_llcpp_basictypes_server"), ZX_OK);
+  ASSERT_OK(status);
+  ASSERT_OK(loop->StartThread("test_llcpp_basictypes_server"));
   *out_loop = std::move(loop);
 }
 
 TEST(BasicTypesTest, ServerUnion) {
   Server server_impl;
   zx::channel client_chan, server_chan;
-  ASSERT_EQ(zx::channel::create(0, &client_chan, &server_chan), ZX_OK);
+  ASSERT_OK(zx::channel::create(0, &client_chan, &server_chan));
   std::unique_ptr<async::Loop> loop;
   ASSERT_NO_FATAL_FAILURES(SpinUp(std::move(server_chan), &server_impl, &loop));
 
@@ -457,7 +441,7 @@ TEST(BasicTypesTest, ServerUnion) {
 TEST(BasicTypesTest, ServerStruct) {
   Server server_impl;
   zx::channel client_chan, server_chan;
-  ASSERT_EQ(zx::channel::create(0, &client_chan, &server_chan), ZX_OK);
+  ASSERT_OK(zx::channel::create(0, &client_chan, &server_chan));
   std::unique_ptr<async::Loop> loop;
   ASSERT_NO_FATAL_FAILURES(SpinUp(std::move(server_chan), &server_impl, &loop));
 
@@ -472,11 +456,11 @@ TEST(BasicTypesTest, ServerStruct) {
   // insert handles to be sent over
   zx::eventpair single_handle_payload;
   zx::eventpair single_handle_ourside;
-  ASSERT_EQ(zx::eventpair::create(0, &single_handle_ourside, &single_handle_payload), ZX_OK);
+  ASSERT_OK(zx::eventpair::create(0, &single_handle_ourside, &single_handle_payload));
   std::unique_ptr<zx::eventpair[]> handle_payload(new zx::eventpair[kNumHandlesInArray]);
   std::unique_ptr<zx::eventpair[]> handle_our_side(new zx::eventpair[kNumHandlesInArray]);
   for (size_t i = 0; i < kNumHandlesInArray; i++) {
-    ASSERT_EQ(zx::eventpair::create(0, &handle_our_side[i], &handle_payload[i]), ZX_OK);
+    ASSERT_OK(zx::eventpair::create(0, &handle_our_side[i], &handle_payload[i]));
   }
   // fill the |ep| field
   simple_struct.ep = single_handle_payload.release();
@@ -493,8 +477,8 @@ TEST(BasicTypesTest, ServerStruct) {
   zx_status_t status = fidl_test_llcpp_basictypes_TestInterfaceConsumeSimpleStruct(
       client_chan.get(), &simple_struct, &out_status, &out_field);
 
-  ASSERT_EQ(status, ZX_OK);
-  ASSERT_EQ(out_status, ZX_OK);
+  ASSERT_OK(status);
+  ASSERT_OK(out_status);
   ASSERT_EQ(out_field, 123);
   ASSERT_EQ(server_impl.num_struct_calls(), 1);
   ASSERT_EQ(server_impl.num_union_calls(), 0);

@@ -26,8 +26,11 @@ class ReleaseFenceSignallerForTest : public escher::ReleaseFenceSignaller {
 
 class SessionManagerForTest : public SessionManager {
  public:
-  SessionManagerForTest(EventReporter* event_reporter = nullptr,
-                        ErrorReporter* error_reporter = nullptr);
+  // |event_reporter| and |error_reporter| default to nullptr because of the way that
+  // CreateSessionHandler() works: if either of these is non-null then it will override the
+  // corresponding argument passed to CreateSessionHandler().
+  SessionManagerForTest(std::shared_ptr<EventReporter> event_reporter = nullptr,
+                        std::shared_ptr<ErrorReporter> error_reporter = nullptr);
   ~SessionManagerForTest() override = default;
 
   // Publicly accessible for tests.
@@ -41,49 +44,12 @@ class SessionManagerForTest : public SessionManager {
       SessionId session_id,
       // If tests instances of reporters were provided at SessionManager
       // creation, those are used instead of the ones provided here
-      EventReporter* error_reporter, ErrorReporter* event_reporter) override;
+      std::shared_ptr<EventReporter> event_reporter,
+      std::shared_ptr<ErrorReporter> error_reporter) override;
 
  private:
-  EventReporter* event_reporter_;
-  ErrorReporter* error_reporter_;
-};
-
-class GfxSystemForTest : public GfxSystem {
- public:
-  static constexpr TypeId kTypeId = GfxSystem::kTypeId;
-
-  explicit GfxSystemForTest(SystemContext context, std::unique_ptr<DisplayManager> display_manager,
-                            escher::impl::CommandBufferSequencer* command_buffer_sequencer)
-      : GfxSystem(std::move(context), std::move(display_manager)),
-        command_buffer_sequencer_(command_buffer_sequencer) {}
-
-  Engine* engine() { return engine_.get(); }
-
- private:
-  std::unique_ptr<SessionManager> InitializeSessionManager() override {
-    return std::make_unique<SessionManagerForTest>();
-  }
-
-  std::unique_ptr<gfx::Engine> InitializeEngine() override {
-    return std::make_unique<Engine>(
-        context()->app_context(), frame_scheduler_, display_manager_.get(),
-        std::make_unique<ReleaseFenceSignallerForTest>(command_buffer_sequencer_),
-        escher_ ? escher_->GetWeakPtr() : escher::EscherWeakPtr());
-  }
-
-  std::unique_ptr<escher::Escher> InitializeEscher() override { return nullptr; }
-
-  escher::impl::CommandBufferSequencer* command_buffer_sequencer_;
-};
-
-// Device-independent "display"; for testing only. Needed to ensure GfxSystem
-// doesn't wait for a device-driven "display ready" signal.
-class TestDisplay : public Display {
- public:
-  TestDisplay(uint64_t id, uint32_t width_px, uint32_t height_px)
-      : Display(id, width_px, height_px) {}
-  ~TestDisplay() = default;
-  bool is_test_display() const override { return true; }
+  std::shared_ptr<EventReporter> event_reporter_;
+  std::shared_ptr<ErrorReporter> error_reporter_;
 };
 
 }  // namespace test

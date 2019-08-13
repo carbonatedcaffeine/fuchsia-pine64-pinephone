@@ -6,6 +6,7 @@
 /// host-driven tests.
 
 export 'src/audio.dart';
+export 'src/device_log.dart';
 export 'src/dump.dart';
 export 'src/exceptions.dart';
 export 'src/input.dart';
@@ -15,5 +16,6 @@ export 'src/performance.dart';
 export 'src/scenic.dart';
 export 'src/setui.dart';
 export 'src/sl4f_client.dart';
+export 'src/ssh.dart';
 export 'src/storage.dart';
 export 'src/webdriver.dart';

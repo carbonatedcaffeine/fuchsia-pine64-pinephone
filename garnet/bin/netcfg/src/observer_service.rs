@@ -21,61 +21,64 @@ pub async fn serve_fidl_requests(
     stream: ObserverRequestStream,
     interface_ids: Arc<Mutex<HashMap<String, u64>>>,
 ) -> Result<(), fidl::Error> {
-    await!(stream.try_for_each(|req| async {
-        let interface_ids_lock = await!(interface_ids.lock());
-        match req {
-            ObserverRequest::ListInterfaces { responder } => {
-                let (mut infos, status) = if let Ok(infos) = await!(stack.list_interfaces()) {
-                    let infos = infos
-                        .into_iter()
-                        .filter_map(|info| {
-                            match interface_ids_lock.iter().find(|(_name, id)| &&info.id == id) {
-                                Some((name, _)) => Some(InterfaceInfo {
-                                    name: name.to_owned(),
-                                    properties: info.properties,
-                                }),
-
-                                None => {
-                                    fx_log_err!("faild to find nic {}", info.id,);
-                                    Some(InterfaceInfo {
-                                        name: EMPTY.to_owned(),
+    stream.try_for_each(|req| {
+        async {
+            let interface_ids_lock = interface_ids.lock().await;
+            match req {
+                ObserverRequest::ListInterfaces { responder } => {
+                    let (mut infos, status) = if let Ok(infos) = stack.list_interfaces().await {
+                        let infos = infos
+                            .into_iter()
+                            .filter_map(|info| {
+                                match interface_ids_lock.iter().find(|(_name, id)| &&info.id == id)
+                                {
+                                    Some((name, _)) => Some(InterfaceInfo {
+                                        name: name.to_owned(),
                                         properties: info.properties,
-                                    })
+                                    }),
+
+                                    None => {
+                                        fx_log_err!("faild to find nic {}", info.id,);
+                                        Some(InterfaceInfo {
+                                            name: EMPTY.to_owned(),
+                                            properties: info.properties,
+                                        })
+                                    }
                                 }
-                            }
-                        })
-                        .collect::<Vec<InterfaceInfo>>();
-                    (Some(infos), zx::sys::ZX_OK)
-                } else {
-                    fx_log_err!("failed to get response from netstack: list_interface");
-                    (None, zx::sys::ZX_ERR_INTERNAL)
-                };
-                responder.send(
-                    infos
-                        .as_mut()
-                        .map(|x| x.iter_mut())
-                        .as_mut()
-                        .map(|x| x as &mut ExactSizeIterator<Item = &mut InterfaceInfo>),
-                    status,
-                )
-            }
-            ObserverRequest::GetInterfaceInfo { name, responder } => {
-                let (mut info, status) = if let Some(&id) = interface_ids_lock.get(&name) {
-                    if let Ok((info, None)) = await!(stack.get_interface_info(id)) {
-                        (
-                            Some(InterfaceInfo { name, properties: info.unwrap().properties }),
-                            zx::sys::ZX_OK,
-                        )
+                            })
+                            .collect::<Vec<InterfaceInfo>>();
+                        (Some(infos), zx::sys::ZX_OK)
                     } else {
+                        fx_log_err!("failed to get response from netstack: list_interface");
                         (None, zx::sys::ZX_ERR_INTERNAL)
-                    }
-                } else {
-                    (None, zx::sys::ZX_ERR_NOT_FOUND)
-                };
-                responder.send(info.as_mut().map(OutOfLine), status)
+                    };
+                    responder.send(
+                        infos
+                            .as_mut()
+                            .map(|x| x.iter_mut())
+                            .as_mut()
+                            .map(|x| x as &mut dyn ExactSizeIterator<Item = &mut InterfaceInfo>),
+                        status,
+                    )
+                }
+                ObserverRequest::GetInterfaceInfo { name, responder } => {
+                    let (mut info, status) = if let Some(&id) = interface_ids_lock.get(&name) {
+                        if let Ok((info, None)) = stack.get_interface_info(id).await {
+                            (
+                                Some(InterfaceInfo { name, properties: info.unwrap().properties }),
+                                zx::sys::ZX_OK,
+                            )
+                        } else {
+                            (None, zx::sys::ZX_ERR_INTERNAL)
+                        }
+                    } else {
+                        (None, zx::sys::ZX_ERR_NOT_FOUND)
+                    };
+                    responder.send(info.as_mut().map(OutOfLine), status)
+                }
             }
         }
-    }))
+    }).await
 }
 
 #[cfg(test)]
@@ -103,7 +106,9 @@ mod tests {
 
     fn build_interface_properties() -> fidl_fuchsia_net_stack::InterfaceProperties {
         fidl_fuchsia_net_stack::InterfaceProperties {
-            path: "/all/the/way/home".to_owned(),
+            name: "eth000".to_owned(),
+            topopath: "/all/the/way/home".to_owned(),
+            filepath: "/dev/class/ethernet/123".to_owned(),
             mac: Some(Box::new(fidl_fuchsia_hardware_ethernet::MacAddress {
                 octets: [0, 1, 2, 255, 254, 253],
             })),

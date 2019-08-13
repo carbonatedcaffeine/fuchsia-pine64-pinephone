@@ -4,7 +4,8 @@
     },
     "sandbox": {
         "features": [
-            "config-data"
+            "config-data",
+            "deprecated-ambient-replace-as-executable"
         ],
         "pkgfs": [
             "packages"
@@ -14,7 +15,6 @@
             "fuchsia.sys.Loader"
         ],
         "system": [
-            "data/sysmgr",
             "bin",
             "pkgs"
         ]

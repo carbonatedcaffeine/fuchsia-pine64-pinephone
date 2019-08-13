@@ -5,6 +5,8 @@
 #ifndef GARNET_LIB_MEDIA_CODEC_IMPL_INCLUDE_LIB_MEDIA_CODEC_IMPL_CODEC_ADAPTER_EVENTS_H_
 #define GARNET_LIB_MEDIA_CODEC_IMPL_INCLUDE_LIB_MEDIA_CODEC_IMPL_CODEC_ADAPTER_EVENTS_H_
 
+#include <fuchsia/media/cpp/fidl.h>
+
 class CodecPacket;
 
 //
@@ -25,7 +27,7 @@ class CodecAdapterEvents {
 
   // The core codec should only call this method at times when there is a
   // current stream, not between streams.
-  virtual void onCoreCodecFailStream() = 0;
+  virtual void onCoreCodecFailStream(fuchsia::media::StreamError error) = 0;
 
   // "Mid-stream" can mean at the start of a stream also - it's just required
   // that a stream be active currently.  The core codec must ensure that this
@@ -36,8 +38,7 @@ class CodecAdapterEvents {
   // followed by any more output (including EndOfStream) until the associated
   // output re-config is completed by a call to
   // CoreCodecMidStreamOutputBufferReConfigFinish().
-  virtual void onCoreCodecMidStreamOutputConstraintsChange(
-      bool output_re_config_required) = 0;
+  virtual void onCoreCodecMidStreamOutputConstraintsChange(bool output_re_config_required) = 0;
 
   // When the core codec calls this method, the CodecImpl will note that the
   // format has changed, and on next onCoreCodecOutputPacket(), the CodecImpl
@@ -51,8 +52,7 @@ class CodecAdapterEvents {
 
   virtual void onCoreCodecInputPacketDone(CodecPacket* packet) = 0;
 
-  virtual void onCoreCodecOutputPacket(CodecPacket* packet,
-                                       bool error_detected_before,
+  virtual void onCoreCodecOutputPacket(CodecPacket* packet, bool error_detected_before,
                                        bool error_detected_during) = 0;
 
   virtual void onCoreCodecOutputEndOfStream(bool error_detected_before) = 0;

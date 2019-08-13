@@ -16,8 +16,6 @@
 #include <wlan/protocol/mac.h>
 #include <zircon/types.h>
 
-#include "lib/svc/cpp/services.h"
-
 namespace wlan {
 
 // The Dispatcher converts Packets, forwarded by the Device, into concrete
@@ -54,9 +52,7 @@ class Dispatcher {
   // set upon querying the underlying DeviceInterface, based on the role of the
   // device (e.g., Client or AP).
   fbl::unique_ptr<Mlme> mlme_ = nullptr;
-  common::WlanStats<common::DispatcherStats,
-                    ::fuchsia::wlan::stats::DispatcherStats>
-      stats_;
+  common::WlanStats<common::DispatcherStats, ::fuchsia::wlan::stats::DispatcherStats> stats_;
 };
 
 }  // namespace wlan

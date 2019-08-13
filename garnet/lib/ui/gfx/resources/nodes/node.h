@@ -14,6 +14,7 @@
 #include "garnet/lib/ui/gfx/resources/variable.h"
 #include "src/lib/fxl/memory/ref_ptr.h"
 #include "src/ui/lib/escher/geometry/bounding_box.h"
+#include "src/ui/lib/escher/geometry/interval.h"
 #include "src/ui/lib/escher/geometry/transform.h"
 
 namespace scenic_impl {
@@ -30,29 +31,47 @@ using ViewPtr = fxl::RefPtr<View>;
 // scene/services/nodes.fidl.
 class Node : public Resource {
  public:
+  // Per-node intersection data for HitTester object.
+  struct IntersectionInfo {
+    // Maximum possible hit distance allowed.
+    static constexpr float kMaximumDistance = 1000000000.f;
+
+    // True if the ray intersects the given node.
+    bool did_hit = false;
+
+    // True if hit tester should traverse the node's descendants.
+    bool continue_with_children = true;
+
+    // Distance from ray origin to node hit point.
+    float distance = 0;
+
+    // Min and max extent of what can be hit.
+    escher::Interval interval = escher::Interval(0.f, kMaximumDistance);
+  };
+
   static const ResourceTypeInfo kTypeInfo;
 
   virtual ~Node() override;
 
-  bool AddChild(NodePtr child_node);
-  bool AddPart(NodePtr part_node);
-  bool DetachChildren();
+  bool AddChild(NodePtr child_node, ErrorReporter* error_reporter);
+  bool AddPart(NodePtr part_node, ErrorReporter* error_reporter);
+  bool DetachChildren(ErrorReporter* error_reporter);
 
   bool SetTagValue(uint32_t tag_value);
   uint32_t tag_value() const { return tag_value_; }
 
-  bool SetTransform(const escher::Transform& transform);
-  bool SetTranslation(const escher::vec3& translation);
-  bool SetTranslation(Vector3VariablePtr translation);
-  bool SetScale(const escher::vec3& scale);
-  bool SetScale(Vector3VariablePtr scale);
-  bool SetRotation(const escher::quat& rotation);
-  bool SetRotation(QuaternionVariablePtr rotation);
-  bool SetAnchor(const escher::vec3& anchor);
-  bool SetAnchor(Vector3VariablePtr anchor);
-  bool SetClipToSelf(bool clip_to_self);
-  bool SetClipPlanes(std::vector<escher::plane3> clip_planes);
-  bool SetClipPlanesFromBBox(const escher::BoundingBox& box);
+  bool SetTransform(const escher::Transform& transform, ErrorReporter* error_reporter);
+  bool SetTranslation(const escher::vec3& translation, ErrorReporter* error_reporter);
+  bool SetTranslation(Vector3VariablePtr translation, ErrorReporter* error_reporter);
+  bool SetScale(const escher::vec3& scale, ErrorReporter* error_reporter);
+  bool SetScale(Vector3VariablePtr scale, ErrorReporter* error_reporter);
+  bool SetRotation(const escher::quat& rotation, ErrorReporter* error_reporter);
+  bool SetRotation(QuaternionVariablePtr rotation, ErrorReporter* error_reporter);
+  bool SetAnchor(const escher::vec3& anchor, ErrorReporter* error_reporter);
+  bool SetAnchor(Vector3VariablePtr anchor, ErrorReporter* error_reporter);
+  bool SetClipToSelf(bool clip_to_self, ErrorReporter* error_reporter);
+  bool SetClipPlanes(std::vector<escher::plane3> clip_planes, ErrorReporter* error_reporter);
+  bool SetClipPlanesFromBBox(const escher::BoundingBox& box, ErrorReporter* error_reporter);
   bool SetHitTestBehavior(::fuchsia::ui::gfx::HitTestBehavior behavior);
   bool SendSizeChangeHint(float width_change_factor, float height_change_factor);
 
@@ -72,7 +91,7 @@ class Node : public Resource {
   void set_reported_metrics(::fuchsia::ui::gfx::Metrics metrics) { reported_metrics_ = metrics; }
 
   // |Resource|, DetachCmd.
-  bool Detach() override;
+  bool Detach(ErrorReporter* error_reporter) override;
 
   Node* parent() const { return parent_; }
 
@@ -86,7 +105,7 @@ class Node : public Resource {
 
   bool SetEventMask(uint32_t event_mask) override;
 
-  void AddImport(Import* import) override;
+  void AddImport(Import* import, ErrorReporter* error_reporter) override;
   void RemoveImport(Import* import) override;
 
   // Computes the closest point of intersection between the ray's origin
@@ -98,7 +117,9 @@ class Node : public Resource {
   //
   // Returns true if there is an intersection, otherwise returns false and
   // leaves |out_distance| unmodified.
-  virtual bool GetIntersection(const escher::ray4& ray, float* out_distance) const;
+
+  virtual IntersectionInfo GetIntersection(const escher::ray4& ray,
+                                           const IntersectionInfo& parent_intersection) const;
 
   // Walk up tree until we find the responsible View; otherwise return nullptr.
   // N.B. Typically the view and node are in the same session, but it's possible

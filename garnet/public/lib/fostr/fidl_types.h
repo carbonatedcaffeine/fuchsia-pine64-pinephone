@@ -58,8 +58,7 @@ std::ostream& operator<<(std::ostream& os, const std::array<uint8_t, N>& value) 
     return os << fostr::HexDump(value.data(), N, 0);
   }
 
-  return os << fostr::HexDump(value.data(), fostr::internal::kTruncatedDumpSize,
-                              0)
+  return os << fostr::HexDump(value.data(), fostr::internal::kTruncatedDumpSize, 0)
             << fostr::NewLine << "(truncated, " << N << " bytes total)";
 }
 
@@ -69,8 +68,7 @@ std::ostream& operator<<(std::ostream& os, const std::array<int8_t, N>& value) {
     return os << fostr::HexDump(value.data(), N, 0);
   }
 
-  return os << fostr::HexDump(value.data(), fostr::internal::kTruncatedDumpSize,
-                              0)
+  return os << fostr::HexDump(value.data(), fostr::internal::kTruncatedDumpSize, 0)
             << fostr::NewLine << "(truncated, " << N << " bytes total)";
 }
 
@@ -84,23 +82,21 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T>& value) {
     return os << "<empty>";
   }
 
-  fostr::internal::insert_sequence_container(os, value.get().cbegin(),
-                                             value.get().cend());
+  fostr::internal::insert_sequence_container(os, value.get().cbegin(), value.get().cend());
   return os;
 }
 
 template <typename T>
 std::ostream& operator<<(std::ostream& os, const VectorPtr<T>& value) {
-  if (value.is_null()) {
+  if (!value.has_value()) {
     return os << "<null>";
   }
 
-  if (value.get().empty()) {
+  if (value.value().empty()) {
     return os << "<empty>";
   }
 
-  fostr::internal::insert_sequence_container(os, value.get().cbegin(),
-                                             value.get().cend());
+  fostr::internal::insert_sequence_container(os, value.value().cbegin(), value.value().cend());
   return os;
 }
 
@@ -152,7 +148,8 @@ std::ostream& operator<<(std::ostream& os, const InterfaceRequest<T>& value) {
 
 namespace fostr {
 
-template <typename T> std::string PrintVector(const std::vector<T>& value);
+template <typename T>
+std::string PrintVector(const std::vector<T>& value);
 
 template <typename T>
 std::string PrintVector(const std::vector<std::vector<T>>& value) {
@@ -173,8 +170,7 @@ template <typename T>
 std::string PrintVector(const std::vector<T>& value) {
   std::stringstream os;
 
-  fostr::internal::insert_sequence_container(os, value.cbegin(),
-                                             value.cend());
+  fostr::internal::insert_sequence_container(os, value.cbegin(), value.cend());
   return os.str();
 }
 

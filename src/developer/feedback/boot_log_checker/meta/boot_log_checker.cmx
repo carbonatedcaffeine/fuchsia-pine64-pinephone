@@ -1,0 +1,15 @@
+{
+    "program": {
+        "binary": "bin/boot_log_checker"
+    },
+    "sandbox": {
+        "boot": [
+            "log"
+        ],
+        "services": [
+            "fuchsia.crash.Analyzer",
+            "fuchsia.logger.LogSink",
+            "fuchsia.net.Connectivity"
+        ]
+    }
+}

@@ -2,13 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use crate::constants::{AUTHORIZE_URI, DEFAULT_SCOPES, FUCHSIA_CLIENT_ID, REDIRECT_URI};
+use crate::constants::{
+    FUCHSIA_CLIENT_ID, OAUTH_AUTHORIZE_URI, OAUTH_DEFAULT_SCOPES, REDIRECT_URI,
+};
 use crate::error::{AuthProviderError, ResultExt};
 use crate::http::HttpClient;
 use crate::oauth::{
-    build_request_with_auth_code, parse_auth_code_from_redirect, parse_response_with_refresh_token,
-    AccessToken, AuthCode, RefreshToken,
+    build_request_with_auth_code, build_request_with_refresh_token, build_revocation_request,
+    parse_auth_code_from_redirect, parse_response_with_refresh_token,
+    parse_response_without_refresh_token, parse_revocation_response, AccessToken, AuthCode,
+    RefreshToken,
 };
+use crate::openid::{build_user_info_request, parse_user_info_response};
 use crate::web::StandaloneWebFrame;
 use failure::Error;
 use fidl;
@@ -21,7 +26,7 @@ use fidl_fuchsia_auth::{
     AuthProviderGetPersistentCredentialFromAttestationJwtResponder,
     AuthProviderGetPersistentCredentialResponder, AuthProviderRequest, AuthProviderRequestStream,
     AuthProviderRevokeAppOrPersistentCredentialResponder, AuthProviderStatus, AuthToken,
-    AuthenticationUiContextMarker, FirebaseToken, UserProfileInfo,
+    AuthenticationUiContextMarker, FirebaseToken, TokenType, UserProfileInfo,
 };
 use fuchsia_scenic::ViewTokenPair;
 use futures::prelude::*;
@@ -32,11 +37,13 @@ type AuthProviderResult<T> = Result<T, AuthProviderError>;
 
 /// Trait for structs capable of creating new Web frames.
 pub trait WebFrameSupplier {
+    /// The concrete `StandaloneWebFrame` type the supplier produces.
+    type Frame: StandaloneWebFrame;
     /// Creates a new `StandaloneWebFrame`.  This method guarantees that the
     /// new frame is in its own web context.
     /// Although implementation of this method does not require state, `self`
     /// is added here to allow injection of mocks with canned responses.
-    fn new_standalone_frame(&self) -> Result<StandaloneWebFrame, Error>;
+    fn new_standalone_frame(&self) -> Result<Self::Frame, Error>;
 }
 
 /// An implementation of the `AuthProvider` FIDL protocol that communicates
@@ -68,8 +75,8 @@ where
         &self,
         mut stream: AuthProviderRequestStream,
     ) -> Result<(), Error> {
-        while let Some(request) = await!(stream.try_next())? {
-            await!(self.handle_request(request));
+        while let Some(request) = stream.try_next().await? {
+            self.handle_request(request).await;
         }
         Ok(())
     }
@@ -81,22 +88,21 @@ where
                 auth_ui_context,
                 user_profile_id,
                 responder,
-            } => responder.send_result(await!(
-                self.get_persistent_credential(auth_ui_context, user_profile_id)
-            )),
+            } => responder.send_result(
+                self.get_persistent_credential(auth_ui_context, user_profile_id).await,
+            ),
             AuthProviderRequest::GetAppAccessToken { credential, client_id, scopes, responder } => {
                 responder
-                    .send_result(await!(self.get_app_access_token(credential, client_id, scopes)))
+                    .send_result(self.get_app_access_token(credential, client_id, scopes).await)
             }
             AuthProviderRequest::GetAppIdToken { credential, audience, responder } => {
-                responder.send_result(await!(self.get_app_id_token(credential, audience)))
+                responder.send_result(self.get_app_id_token(credential, audience).await)
             }
             AuthProviderRequest::GetAppFirebaseToken { id_token, firebase_api_key, responder } => {
-                responder
-                    .send_result(await!(self.get_app_firebase_token(id_token, firebase_api_key)))
+                responder.send_result(self.get_app_firebase_token(id_token, firebase_api_key).await)
             }
             AuthProviderRequest::RevokeAppOrPersistentCredential { credential, responder } => {
-                responder.send_result(await!(self.revoke_app_or_persistent_credential(credential)))
+                responder.send_result(self.revoke_app_or_persistent_credential(credential).await)
             }
             AuthProviderRequest::GetPersistentCredentialFromAttestationJwt {
                 attestation_signer,
@@ -104,25 +110,30 @@ where
                 auth_ui_context,
                 user_profile_id,
                 responder,
-            } => responder.send_result(await!(self
-                .get_persistent_credential_from_attestation_jwt(
+            } => responder.send_result(
+                self.get_persistent_credential_from_attestation_jwt(
                     attestation_signer,
                     jwt_params,
                     auth_ui_context,
-                    user_profile_id
-                ))),
+                    user_profile_id,
+                )
+                .await,
+            ),
             AuthProviderRequest::GetAppAccessTokenFromAssertionJwt {
                 attestation_signer,
                 jwt_params,
                 credential,
                 scopes,
                 responder,
-            } => responder.send_result(await!(self.get_app_access_token_from_assertion_jwt(
-                attestation_signer,
-                jwt_params,
-                credential,
-                scopes
-            ))),
+            } => responder.send_result(
+                self.get_app_access_token_from_assertion_jwt(
+                    attestation_signer,
+                    jwt_params,
+                    credential,
+                    scopes,
+                )
+                .await,
+            ),
         }
     }
 
@@ -132,15 +143,15 @@ where
         &self,
         auth_ui_context: Option<ClientEnd<AuthenticationUiContextMarker>>,
         user_profile_id: Option<String>,
-    ) -> AuthProviderResult<(RefreshToken, UserProfileInfo)> {
+    ) -> AuthProviderResult<(String, UserProfileInfo)> {
         match auth_ui_context {
             Some(ui_context) => {
-                let auth_code = await!(self.get_auth_code(ui_context, user_profile_id))?;
+                let auth_code = self.get_auth_code(ui_context, user_profile_id).await?;
                 info!("Received auth code of length: {:?}", &auth_code.0.len());
-                let (refresh_token, access_token) = await!(self.exchange_auth_code(auth_code))?;
+                let (refresh_token, access_token) = self.exchange_auth_code(auth_code).await?;
                 info!("Received refresh token of length {:?}", &refresh_token.0.len());
-                let user_profile_info = await!(self.get_user_profile_info(access_token))?;
-                Ok((refresh_token, user_profile_info))
+                let user_profile_info = self.get_user_profile_info(access_token).await?;
+                Ok((refresh_token.0, user_profile_info))
             }
             None => Err(AuthProviderError::new(AuthProviderStatus::BadRequest)),
         }
@@ -150,12 +161,20 @@ where
     /// interface.
     async fn get_app_access_token(
         &self,
-        _credential: String,
-        _client_id: Option<String>,
-        _scopes: Vec<String>,
+        credential: String,
+        client_id: Option<String>,
+        scopes: Vec<String>,
     ) -> AuthProviderResult<AuthToken> {
-        // TODO(satsukiu): implement
-        Err(AuthProviderError::new(AuthProviderStatus::InternalError))
+        if credential.is_empty() || client_id.as_ref().map(String::is_empty) == Some(true) {
+            return Err(AuthProviderError::new(AuthProviderStatus::BadRequest));
+        }
+
+        let request =
+            build_request_with_refresh_token(RefreshToken(credential), scopes, client_id)?;
+        let (response_body, status) = self.http_client.request(request).await?;
+        let (access_token, expires_in) =
+            parse_response_without_refresh_token(response_body, status)?;
+        Ok(AuthToken { token_type: TokenType::AccessToken, token: access_token.0, expires_in })
     }
 
     /// Implementation of `GetAppIdToken` method for the `AuthProvider`
@@ -184,10 +203,15 @@ where
     /// `AuthProvider` interface.
     async fn revoke_app_or_persistent_credential(
         &self,
-        _credential: String,
+        credential: String,
     ) -> AuthProviderResult<()> {
-        // TODO(satsukiu): implement
-        Err(AuthProviderError::new(AuthProviderStatus::InternalError))
+        if credential.is_empty() {
+            return Err(AuthProviderError::new(AuthProviderStatus::BadRequest));
+        }
+
+        let request = build_revocation_request(credential)?;
+        let (response_body, status) = self.http_client.request(request).await?;
+        parse_revocation_response(response_body, status)
     }
 
     /// Implementation of `GetPersistentCredentialFromAttestationJWT` method
@@ -233,12 +257,12 @@ where
             ViewTokenPair::new().auth_provider_status(AuthProviderStatus::UnknownError)?;
         let authorize_url = Self::authorize_url(user_profile_id)?;
 
-        await!(web_frame.display_url(view_token, authorize_url))?;
+        web_frame.display_url(view_token, authorize_url).await?;
         auth_ui_context
             .start_overlay(&mut view_holder_token)
             .auth_provider_status(AuthProviderStatus::UnknownError)?;
 
-        let redirect_url = await!(web_frame.wait_for_redirect(REDIRECT_URI.clone()))?;
+        let redirect_url = web_frame.wait_for_redirect(REDIRECT_URI.clone()).await?;
 
         if let Err(err) = auth_ui_context.stop_overlay() {
             warn!("Error while attempting to stop UI overlay: {:?}", err);
@@ -249,7 +273,7 @@ where
 
     fn authorize_url(user_profile_id: Option<String>) -> AuthProviderResult<Url> {
         let mut params = vec![
-            ("scope", DEFAULT_SCOPES.as_str()),
+            ("scope", OAUTH_DEFAULT_SCOPES.as_str()),
             ("glif", "false"), // TODO(satsukiu): add a command line parameter to set this
             ("response_type", "code"),
             ("redirect_uri", REDIRECT_URI.as_str()),
@@ -259,7 +283,7 @@ where
             params.push(("login_hint", user));
         }
 
-        Url::parse_with_params(AUTHORIZE_URI.as_str(), &params)
+        Url::parse_with_params(OAUTH_AUTHORIZE_URI.as_str(), &params)
             .auth_provider_status(AuthProviderStatus::InternalError)
     }
 
@@ -268,21 +292,19 @@ where
         &self,
         auth_code: AuthCode,
     ) -> AuthProviderResult<(RefreshToken, AccessToken)> {
-        let request = build_request_with_auth_code(auth_code)
-            .auth_provider_status(AuthProviderStatus::UnknownError)?;
-
-        let (response_body, status_code) = await!(self.http_client.request(request))?;
-
+        let request = build_request_with_auth_code(auth_code)?;
+        let (response_body, status_code) = self.http_client.request(request).await?;
         parse_response_with_refresh_token(response_body, status_code)
     }
 
     /// Use an access token to retrieve profile information.
     async fn get_user_profile_info(
         &self,
-        _access_token: AccessToken,
+        access_token: AccessToken,
     ) -> AuthProviderResult<UserProfileInfo> {
-        // TODO(satukiu): implement
-        Err(AuthProviderError::new(AuthProviderStatus::InternalError))
+        let request = build_user_info_request(access_token)?;
+        let (response_body, status_code) = self.http_client.request(request).await?;
+        parse_user_info_response(response_body, status_code)
     }
 }
 
@@ -313,19 +335,19 @@ trait Responder: Sized {
 }
 
 impl Responder for AuthProviderGetPersistentCredentialResponder {
-    type Data = (RefreshToken, UserProfileInfo);
+    type Data = (String, UserProfileInfo);
     const METHOD_NAME: &'static str = "GetPersistentCredential";
 
     fn send_raw(
         self,
         status: AuthProviderStatus,
-        data: Option<(RefreshToken, UserProfileInfo)>,
+        data: Option<(String, UserProfileInfo)>,
     ) -> Result<(), fidl::Error> {
         match data {
             None => self.send(status, None, None),
             Some((refresh_token, mut user_profile_info)) => self.send(
                 status,
-                Some(refresh_token.0.as_str()),
+                Some(refresh_token.as_str()),
                 Some(OutOfLine(&mut user_profile_info)),
             ),
         }
@@ -429,45 +451,106 @@ mod tests {
 
     use super::*;
     use crate::http::HttpRequest;
-    use fidl::endpoints::{create_proxy, create_proxy_and_stream, create_request_stream};
+    use fidl::endpoints::{create_proxy_and_stream, create_request_stream};
     use fidl_fuchsia_auth::{AuthProviderMarker, AuthProviderProxy};
-    use fidl_fuchsia_web::{ContextMarker, FrameMarker};
+    use fidl_fuchsia_ui_views::ViewToken;
     use fuchsia_async as fasync;
     use futures::future::{ready, FutureObj};
     use hyper::StatusCode;
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
 
-    /// A no-op implementation of `WebFrameSupplier`
-    struct TestWebFrameSupplier;
+    /// Clones an AuthProviderResult.  This is provided instead of a Clone
+    /// implementation due to orphan rules.
+    fn clone_result<T: Clone>(result: &AuthProviderResult<T>) -> AuthProviderResult<T> {
+        match result {
+            Ok(res) => Ok(res.clone()),
+            // error cause cannot be cloned so don't replicate it.
+            Err(err) => Err(AuthProviderError::new(err.status)),
+        }
+    }
+
+    /// A mock implementation of StandaloneWebFrame that always returns the responses
+    /// specified during its creation.
+    struct TestWebFrame {
+        display_url_response: AuthProviderResult<()>,
+        wait_for_redirect_response: AuthProviderResult<Url>,
+    }
+
+    impl TestWebFrame {
+        fn new(
+            display_url_response: AuthProviderResult<()>,
+            wait_for_redirect_response: AuthProviderResult<Url>,
+        ) -> Self {
+            TestWebFrame { display_url_response, wait_for_redirect_response }
+        }
+    }
+
+    impl StandaloneWebFrame for TestWebFrame {
+        fn display_url<'a>(
+            &'a mut self,
+            _view_token: ViewToken,
+            _url: Url,
+        ) -> FutureObj<'a, AuthProviderResult<()>> {
+            FutureObj::new(Box::new(ready(clone_result(&self.display_url_response))))
+        }
+
+        fn wait_for_redirect<'a>(
+            &'a mut self,
+            _redirect_target: Url,
+        ) -> FutureObj<'a, AuthProviderResult<Url>> {
+            FutureObj::new(Box::new(ready(clone_result(&self.wait_for_redirect_response))))
+        }
+    }
+
+    /// A mock implementation of `WebFrameSupplier` that supplies `TestWebFrames`.
+    /// The supplied `TestWebFrames` will return the responses provided during
+    /// creation of the `TestWebFrameSupplier`.
+    struct TestWebFrameSupplier {
+        display_url_response: AuthProviderResult<()>,
+        wait_for_redirect_response: AuthProviderResult<Url>,
+    }
 
     impl TestWebFrameSupplier {
-        fn new() -> Self {
-            TestWebFrameSupplier {}
+        fn new(
+            display_url_response: AuthProviderResult<()>,
+            wait_for_redirect_response: AuthProviderResult<Url>,
+        ) -> Self {
+            TestWebFrameSupplier { display_url_response, wait_for_redirect_response }
         }
     }
 
     impl WebFrameSupplier for TestWebFrameSupplier {
-        fn new_standalone_frame(&self) -> Result<StandaloneWebFrame, Error> {
-            let (context, _) = create_proxy::<ContextMarker>()?;
-
-            let (frame, _) = create_request_stream::<FrameMarker>()?;
-            Ok(StandaloneWebFrame::new(context, frame.into_proxy()?))
+        type Frame = TestWebFrame;
+        fn new_standalone_frame(&self) -> Result<TestWebFrame, Error> {
+            Ok(TestWebFrame::new(
+                clone_result(&self.display_url_response),
+                clone_result(&self.wait_for_redirect_response),
+            ))
         }
     }
 
     /// A mock implementation of `HttpClient`
     struct TestHttpClient {
         /// Response returned on `request`.
-        response: AuthProviderResult<(Option<String>, StatusCode)>,
+        responses: Mutex<VecDeque<AuthProviderResult<(Option<String>, StatusCode)>>>,
     }
 
     impl TestHttpClient {
-        /// Create a new test client that returns the given response on `request`.
-        fn with_response(body: Option<&str>, status: StatusCode) -> Self {
-            TestHttpClient { response: Ok((body.map(String::from), status)) }
+        fn with_responses(
+            responses: Vec<AuthProviderResult<(Option<String>, StatusCode)>>,
+        ) -> Self {
+            TestHttpClient { responses: Mutex::new(VecDeque::from(responses)) }
         }
 
+        /// Create a new test client that returns the given response on `request`.
+        fn with_response(body: Option<&str>, status: StatusCode) -> Self {
+            Self::with_responses(vec![Ok((body.map(str::to_string), status))])
+        }
+
+        /// Create a new test client that returns the given response on `request`.
         fn with_error(status: AuthProviderStatus) -> Self {
-            TestHttpClient { response: Err(AuthProviderError::new(status)) }
+            Self::with_responses(vec![Err(AuthProviderError::new(status))])
         }
     }
 
@@ -476,132 +559,301 @@ mod tests {
             &'a self,
             _http_request: HttpRequest,
         ) -> FutureObj<'a, AuthProviderResult<(Option<String>, StatusCode)>> {
-            let response = match &self.response {
-                Ok(response) => Ok(response.clone()),
-                // cause contained in the error is omitted as it cannot be cloned
-                Err(err) => Err(AuthProviderError::new(err.status)),
-            };
+            let response = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("Mock received more requests than the supplied requests!");
             FutureObj::new(Box::new(ready(response)))
         }
     }
 
-    /// Creates an auth provider.  If http_client is not given, uses a `TestHttpClient`
-    /// that returns an `UnsupportedProvider` error.
-    fn get_auth_provider_proxy(http_client: Option<TestHttpClient>) -> AuthProviderProxy {
+    /// Creates an auth provider.  If frame_supplier is not given, the auth
+    /// provider is instantiated with a `TestWebFrameProvider` that supplies
+    /// `StandaloneWebFrame`s that return an `UnsupportedProvider` error.
+    /// Similarly, if http_client is not given, the auth provider is
+    /// instantiated with a `TestHttpClient` that returns an
+    /// `UnsupportedProvider` error.
+    fn get_auth_provider_proxy(
+        frame_supplier: Option<TestWebFrameSupplier>,
+        http_client: Option<TestHttpClient>,
+    ) -> AuthProviderProxy {
         let (provider_proxy, provider_request_stream) =
             create_proxy_and_stream::<AuthProviderMarker>()
                 .expect("Failed to create proxy and stream");
 
-        let frame_supplier = TestWebFrameSupplier {};
+        let frame_supplier = frame_supplier.unwrap_or(TestWebFrameSupplier::new(
+            Err(AuthProviderError::new(AuthProviderStatus::UnsupportedProvider)),
+            Err(AuthProviderError::new(AuthProviderStatus::UnsupportedProvider)),
+        ));
         let http = http_client
             .unwrap_or(TestHttpClient::with_error(AuthProviderStatus::UnsupportedProvider));
 
         let auth_provider = GoogleAuthProvider::new(frame_supplier, http);
         fasync::spawn(async move {
-            await!(auth_provider.handle_requests_from_stream(provider_request_stream))
+            auth_provider
+                .handle_requests_from_stream(provider_request_stream)
+                .await
                 .expect("Error handling AuthProvider channel");
         });
 
         provider_proxy
     }
 
-    /// Construct an `AuthCode` from a str reference.
-    fn auth_code(code: &str) -> AuthCode {
-        AuthCode(code.to_string())
+    fn get_authentication_ui_context() -> ClientEnd<AuthenticationUiContextMarker> {
+        let (client, mut stream) = create_request_stream::<AuthenticationUiContextMarker>()
+            .expect("Failed to create authentication UI context stream");
+        fasync::spawn(async move { while let Some(_) = stream.try_next().await.unwrap() {} });
+        client
     }
 
     #[fasync::run_until_stalled(test)]
-    async fn test_exchange_auth_code_success() -> Result<(), Error> {
-        let mock_http = TestHttpClient::with_response(
-            Some("{\"refresh_token\": \"test-refresh-token\", \"access_token\": \"test-access-token\"}"),
-            StatusCode::OK);
-        let auth_provider = GoogleAuthProvider::new(TestWebFrameSupplier::new(), mock_http);
+    async fn test_get_persistent_credential_success() -> Result<(), Error> {
+        let mock_frame_supplier = TestWebFrameSupplier::new(
+            Ok(()),
+            Ok(Url::parse_with_params(REDIRECT_URI.as_str(), vec![("code", "test-auth-code")])
+                .unwrap()),
+        );
+        let refresh_token_response =
+            "{\"refresh_token\": \"test-refresh-token\", \"access_token\": \"test-access-token\"}";
+        let user_info_response =
+            "{\"sub\": \"test-id\", \"name\": \"Bill\", \"profile\": \"profile-url\", \
+             \"picture\": \"picture-url\"}";
 
-        let (refresh_token, access_token) =
-            await!(auth_provider.exchange_auth_code(auth_code("auth-code"))).unwrap();
+        let mock_http = TestHttpClient::with_responses(vec![
+            Ok((Some(refresh_token_response.to_string()), StatusCode::OK)),
+            Ok((Some(user_info_response.to_string()), StatusCode::OK)),
+        ]);
+        let auth_provider = get_auth_provider_proxy(Some(mock_frame_supplier), Some(mock_http));
 
-        assert_eq!(refresh_token, RefreshToken("test-refresh-token".to_string()));
-        assert_eq!(access_token, AccessToken("test-access-token".to_string()));
+        let ui_context = get_authentication_ui_context();
+        let (status, refresh_token, user_info) =
+            auth_provider.get_persistent_credential(Some(ui_context), None).await?;
+
+        assert_eq!(status, AuthProviderStatus::Ok);
+        assert_eq!(refresh_token.unwrap(), "test-refresh-token".to_string());
+        assert_eq!(
+            user_info.unwrap(),
+            Box::new(UserProfileInfo {
+                id: "test-id".to_string(),
+                display_name: Some("Bill".to_string()),
+                url: Some("profile-url".to_string()),
+                image_url: Some("picture-url".to_string()),
+            })
+        );
         Ok(())
     }
 
     #[fasync::run_until_stalled(test)]
-    async fn test_exchange_auth_code_failures() -> Result<(), Error> {
-        // Expired auth token
-        let mock_http = TestHttpClient::with_response(
+    async fn test_get_persistent_credential_exchange_web_errors() -> Result<(), Error> {
+        // User denies access
+        let frame_supplier = TestWebFrameSupplier::new(
+            Ok(()),
+            Ok(Url::parse_with_params(REDIRECT_URI.as_str(), vec![("error", "access_denied")])
+                .unwrap()),
+        );
+        assert_persistent_credential_web_err(frame_supplier, AuthProviderStatus::UserCancelled)
+            .await?;
+
+        // Web frame error - UI maybe canceled
+        let frame_supplier = TestWebFrameSupplier::new(
+            Ok(()),
+            Err(AuthProviderError::new(AuthProviderStatus::UnknownError)),
+        );
+        assert_persistent_credential_web_err(frame_supplier, AuthProviderStatus::UnknownError)
+            .await?;
+
+        // Network error
+        let frame_supplier = TestWebFrameSupplier::new(
+            Err(AuthProviderError::new(AuthProviderStatus::NetworkError)),
+            Err(AuthProviderError::new(AuthProviderStatus::NetworkError)),
+        );
+        assert_persistent_credential_web_err(frame_supplier, AuthProviderStatus::NetworkError)
+            .await?;
+        Ok(())
+    }
+
+    /// Assert GetPersistentCredential returns the given error when using the given
+    /// WebFrameSupplier mock
+    async fn assert_persistent_credential_web_err(
+        mock_frame_supplier: TestWebFrameSupplier,
+        expected_status: AuthProviderStatus,
+    ) -> Result<(), Error> {
+        let auth_provider = get_auth_provider_proxy(Some(mock_frame_supplier), None);
+
+        let ui_context = get_authentication_ui_context();
+        let (status, refresh_token, user_info) =
+            auth_provider.get_persistent_credential(Some(ui_context), None).await?;
+        assert_eq!(status, expected_status);
+        assert!(refresh_token.is_none());
+        assert!(user_info.is_none());
+        Ok(())
+    }
+
+    #[fasync::run_until_stalled(test)]
+    async fn test_get_persistent_credential_exchange_auth_code_failures() -> Result<(), Error> {
+        // Error response
+        let http = TestHttpClient::with_response(
             Some("{\"error\": \"invalid_grant\", \"error_description\": \"ouch\"}"),
             StatusCode::BAD_REQUEST,
         );
-        let auth_provider = GoogleAuthProvider::new(TestWebFrameSupplier::new(), mock_http);
-
-        let result = await!(auth_provider.exchange_auth_code(auth_code("auth-code")));
-        assert_eq!(result.unwrap_err().status, AuthProviderStatus::ReauthRequired);
-
-        // Server side error
-        let mock_http = TestHttpClient::with_response(None, StatusCode::INTERNAL_SERVER_ERROR);
-        let auth_provider = GoogleAuthProvider::new(TestWebFrameSupplier::new(), mock_http);
-        let result = await!(auth_provider.exchange_auth_code(auth_code("auth-code")));
-        assert_eq!(result.unwrap_err().status, AuthProviderStatus::OauthServerError);
-
-        // Malformed response
-        let mock_http = TestHttpClient::with_response(
-            Some("{\"refresh_token\": \"test-refresh"),
-            StatusCode::OK,
-        );
-        let auth_provider = GoogleAuthProvider::new(TestWebFrameSupplier::new(), mock_http);
-        let result = await!(auth_provider.exchange_auth_code(auth_code("auth-code")));
-        assert_eq!(result.unwrap_err().status, AuthProviderStatus::OauthServerError);
+        assert_persistent_credential_http_err(http, AuthProviderStatus::ReauthRequired).await?;
 
         // Network error
-        let mock_http = TestHttpClient::with_error(AuthProviderStatus::NetworkError);
-        let auth_provider = GoogleAuthProvider::new(TestWebFrameSupplier::new(), mock_http);
-        let result = await!(auth_provider.exchange_auth_code(auth_code("auth-code")));
-        assert_eq!(result.unwrap_err().status, AuthProviderStatus::NetworkError);
+        let http = TestHttpClient::with_error(AuthProviderStatus::NetworkError);
+        assert_persistent_credential_http_err(http, AuthProviderStatus::NetworkError).await?;
+        Ok(())
+    }
 
+    #[fasync::run_until_stalled(test)]
+    async fn test_get_persistent_credential_get_user_info_failures() -> Result<(), Error> {
+        let auth_code_exchange_body =
+            "{\"refresh_token\": \"test-refresh-token\", \"access_token\": \"test-access-token\"}"
+                .to_string();
+        let auth_code_exchange_response = Ok((Some(auth_code_exchange_body), StatusCode::OK));
+
+        // Error response
+        let http = TestHttpClient::with_responses(vec![
+            clone_result(&auth_code_exchange_response),
+            Ok((None, StatusCode::INTERNAL_SERVER_ERROR)),
+        ]);
+        assert_persistent_credential_http_err(http, AuthProviderStatus::OauthServerError).await?;
+
+        // Network error
+        let http = TestHttpClient::with_responses(vec![
+            auth_code_exchange_response,
+            Err(AuthProviderError::new(AuthProviderStatus::NetworkError)),
+        ]);
+        assert_persistent_credential_http_err(http, AuthProviderStatus::NetworkError).await?;
+        Ok(())
+    }
+
+    /// Assert GetPersistentCredential returns the given error when the authentication
+    /// flow succeeds and using the given HttpClient mock
+    async fn assert_persistent_credential_http_err(
+        mock_http: TestHttpClient,
+        expected_status: AuthProviderStatus,
+    ) -> Result<(), Error> {
+        let frame_supplier = TestWebFrameSupplier::new(
+            Ok(()),
+            Ok(Url::parse_with_params(REDIRECT_URI.as_str(), vec![("code", "test-auth-code")])
+                .unwrap()),
+        );
+        let auth_provider = get_auth_provider_proxy(Some(frame_supplier), Some(mock_http));
+
+        let ui_context = get_authentication_ui_context();
+        let (status, refresh_token, user_info) =
+            auth_provider.get_persistent_credential(Some(ui_context), None).await?;
+        assert_eq!(status, expected_status);
+        assert!(refresh_token.is_none());
+        assert!(user_info.is_none());
         Ok(())
     }
 
     #[fasync::run_until_stalled(test)]
     async fn test_get_persistent_credential_requires_ui_context() -> Result<(), Error> {
-        let auth_provider = get_auth_provider_proxy(None);
-        let result = await!(auth_provider.get_persistent_credential(None, None))?;
+        let auth_provider = get_auth_provider_proxy(None, None);
+        let result = auth_provider.get_persistent_credential(None, None).await?;
         assert_eq!(result.0, AuthProviderStatus::BadRequest);
         Ok(())
     }
 
     #[fasync::run_until_stalled(test)]
-    async fn test_get_app_access_token() -> Result<(), Error> {
-        let auth_provider = get_auth_provider_proxy(None);
-        let result = await!(auth_provider.get_app_access_token(
-            "credential",
-            None,
-            &mut vec![].into_iter()
-        ))?;
-        assert_eq!(result.0, AuthProviderStatus::InternalError);
+    async fn test_get_app_access_token_success() -> Result<(), Error> {
+        let http_result = "{\"access_token\": \"test-access-token\", \"expires_in\": 3600}";
+        let mock_http = TestHttpClient::with_response(Some(http_result), StatusCode::OK);
+        let auth_provider = get_auth_provider_proxy(None, Some(mock_http));
+        let (result_status, result_token) =
+            auth_provider.get_app_access_token("credential", None, &mut vec![].into_iter()).await?;
+        assert_eq!(result_status, AuthProviderStatus::Ok);
+        assert_eq!(
+            result_token.unwrap(),
+            Box::new(AuthToken {
+                token_type: TokenType::AccessToken,
+                token: "test-access-token".to_string(),
+                expires_in: 3600,
+            })
+        );
+        Ok(())
+    }
+
+    #[fasync::run_until_stalled(test)]
+    async fn test_get_app_access_token_failures() -> Result<(), Error> {
+        // Invalid request
+        let mock_http = TestHttpClient::with_error(AuthProviderStatus::InternalError);
+        let auth_provider = get_auth_provider_proxy(None, Some(mock_http));
+        let result = auth_provider.get_app_access_token("", None, &mut vec![].into_iter()).await?;
+        assert_eq!(result.0, AuthProviderStatus::BadRequest);
+
+        // Error response
+        let http_result = "{\"error\": \"invalid_scope\", \"error_description\": \"bad scope\"}";
+        let mock_http = TestHttpClient::with_response(Some(http_result), StatusCode::BAD_REQUEST);
+        let auth_provider = get_auth_provider_proxy(None, Some(mock_http));
+        let result = auth_provider
+            .get_app_access_token("credential", None, &mut vec!["bad-scope"].into_iter())
+            .await?;
+        assert_eq!(result.0, AuthProviderStatus::OauthServerError);
+
+        // Network error
+        let mock_http = TestHttpClient::with_error(AuthProviderStatus::NetworkError);
+        let auth_provider = get_auth_provider_proxy(None, Some(mock_http));
+        let result =
+            auth_provider.get_app_access_token("credential", None, &mut vec![].into_iter()).await?;
+        assert_eq!(result.0, AuthProviderStatus::NetworkError);
+
         Ok(())
     }
 
     #[fasync::run_until_stalled(test)]
     async fn test_get_app_id_token() -> Result<(), Error> {
-        let auth_provider = get_auth_provider_proxy(None);
-        let result = await!(auth_provider.get_app_id_token("credential", None))?;
+        let auth_provider = get_auth_provider_proxy(None, None);
+        let result = auth_provider.get_app_id_token("credential", None).await?;
         assert_eq!(result.0, AuthProviderStatus::InternalError);
         Ok(())
     }
 
     #[fasync::run_until_stalled(test)]
     async fn test_get_app_firebase_token() -> Result<(), Error> {
-        let auth_provider = get_auth_provider_proxy(None);
-        let result = await!(auth_provider.get_app_firebase_token("id_token", "api_key"))?;
+        let auth_provider = get_auth_provider_proxy(None, None);
+        let result = auth_provider.get_app_firebase_token("id_token", "api_key").await?;
         assert_eq!(result.0, AuthProviderStatus::InternalError);
         Ok(())
     }
 
     #[fasync::run_until_stalled(test)]
-    async fn test_revoke_app_or_persistent_credential() -> Result<(), Error> {
-        let auth_provider = get_auth_provider_proxy(None);
-        let result = await!(auth_provider.revoke_app_or_persistent_credential("credential"))?;
-        assert_eq!(result, AuthProviderStatus::InternalError);
+    async fn test_revoke_app_or_persistent_credential_success() -> Result<(), Error> {
+        let mock_http = TestHttpClient::with_response(None, StatusCode::OK);
+        let auth_provider = get_auth_provider_proxy(None, Some(mock_http));
+        let result = auth_provider.revoke_app_or_persistent_credential("credential").await?;
+        assert_eq!(result, AuthProviderStatus::Ok);
+        Ok(())
+    }
+
+    #[fasync::run_until_stalled(test)]
+    async fn test_revoke_app_or_persistent_credential_failures() -> Result<(), Error> {
+        // Empty credential
+        let auth_provider = get_auth_provider_proxy(None, None);
+        let result = auth_provider.revoke_app_or_persistent_credential("").await?;
+        assert_eq!(result, AuthProviderStatus::BadRequest);
+
+        // Error response
+        let http_response = "bad response";
+        let mock_http = TestHttpClient::with_response(Some(http_response), StatusCode::BAD_REQUEST);
+        let auth_provider = get_auth_provider_proxy(None, Some(mock_http));
+        assert_eq!(
+            auth_provider.revoke_app_or_persistent_credential("credential").await?,
+            AuthProviderStatus::OauthServerError
+        );
+
+        // Network error
+        let mock_http = TestHttpClient::with_error(AuthProviderStatus::NetworkError);
+        let auth_provider = get_auth_provider_proxy(None, Some(mock_http));
+        assert_eq!(
+            auth_provider.revoke_app_or_persistent_credential("credential").await?,
+            AuthProviderStatus::NetworkError
+        );
+
         Ok(())
     }
 }

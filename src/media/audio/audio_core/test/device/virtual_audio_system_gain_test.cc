@@ -19,9 +19,6 @@ namespace media::audio::test {
 //
 // These tests verifies async usage of AudioDeviceEnumerator w/SystemGain.
 class VirtualAudioSystemGainTest : public VirtualAudioDeviceTest {
- public:
-  static void TearDownTestSuite() { VirtualAudioDeviceTest::DisableVirtualDevices(); }
-
  protected:
   void SetUp() override;
   void TearDown() override;
@@ -50,7 +47,7 @@ class VirtualAudioSystemGainTest : public VirtualAudioDeviceTest {
 void VirtualAudioSystemGainTest::SetUp() {
   VirtualAudioDeviceTest::SetUp();
 
-  startup_context_->svc()->Connect(audio_core_.NewRequest());
+  environment()->ConnectToService(audio_core_.NewRequest());
   audio_core_.set_error_handler(ErrorHandler());
 
   audio_core_.events().SystemGainMuteChanged =
@@ -118,7 +115,7 @@ void VirtualAudioSystemGainTest::AddDeviceForSystemGainTesting(bool is_input) {
   }
   ExpectDeviceAdded(unique_id);
 
-  uint64_t added_token = received_device_.token_id;
+  auto added_token = received_device_.token_id;
 
   // If the device is different than expected, set it up as we expect.
   if ((received_device_.gain_info.gain_db != kInitialSystemGainDb) ||

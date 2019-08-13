@@ -27,68 +27,9 @@
 #undef __TA_REQUIRES
 
 #include "tools/fidlcat/lib/interception_workflow.h"
-#include "tools/fidlcat/lib/syscall_decoder.h"
+#include "tools/fidlcat/lib/type_decoder.h"
 
 namespace fidlcat {
-
-#define ErrorNameCase(name) \
-  case name:                \
-    os << #name;            \
-    return
-
-// TODO: (use zx_status_get_string when it will be available).
-void ErrorName(int64_t error_code, std::ostream& os) {
-  switch (error_code) {
-    ErrorNameCase(ZX_ERR_INTERNAL);
-    ErrorNameCase(ZX_ERR_NOT_SUPPORTED);
-    ErrorNameCase(ZX_ERR_NO_RESOURCES);
-    ErrorNameCase(ZX_ERR_NO_MEMORY);
-    ErrorNameCase(ZX_ERR_INTERNAL_INTR_RETRY);
-    ErrorNameCase(ZX_ERR_INVALID_ARGS);
-    ErrorNameCase(ZX_ERR_BAD_HANDLE);
-    ErrorNameCase(ZX_ERR_WRONG_TYPE);
-    ErrorNameCase(ZX_ERR_BAD_SYSCALL);
-    ErrorNameCase(ZX_ERR_OUT_OF_RANGE);
-    ErrorNameCase(ZX_ERR_BUFFER_TOO_SMALL);
-    ErrorNameCase(ZX_ERR_BAD_STATE);
-    ErrorNameCase(ZX_ERR_TIMED_OUT);
-    ErrorNameCase(ZX_ERR_SHOULD_WAIT);
-    ErrorNameCase(ZX_ERR_CANCELED);
-    ErrorNameCase(ZX_ERR_PEER_CLOSED);
-    ErrorNameCase(ZX_ERR_NOT_FOUND);
-    ErrorNameCase(ZX_ERR_ALREADY_EXISTS);
-    ErrorNameCase(ZX_ERR_ALREADY_BOUND);
-    ErrorNameCase(ZX_ERR_UNAVAILABLE);
-    ErrorNameCase(ZX_ERR_ACCESS_DENIED);
-    ErrorNameCase(ZX_ERR_IO);
-    ErrorNameCase(ZX_ERR_IO_REFUSED);
-    ErrorNameCase(ZX_ERR_IO_DATA_INTEGRITY);
-    ErrorNameCase(ZX_ERR_IO_DATA_LOSS);
-    ErrorNameCase(ZX_ERR_IO_NOT_PRESENT);
-    ErrorNameCase(ZX_ERR_IO_OVERRUN);
-    ErrorNameCase(ZX_ERR_IO_MISSED_DEADLINE);
-    ErrorNameCase(ZX_ERR_IO_INVALID);
-    ErrorNameCase(ZX_ERR_BAD_PATH);
-    ErrorNameCase(ZX_ERR_NOT_DIR);
-    ErrorNameCase(ZX_ERR_NOT_FILE);
-    ErrorNameCase(ZX_ERR_FILE_BIG);
-    ErrorNameCase(ZX_ERR_NO_SPACE);
-    ErrorNameCase(ZX_ERR_NOT_EMPTY);
-    ErrorNameCase(ZX_ERR_STOP);
-    ErrorNameCase(ZX_ERR_NEXT);
-    ErrorNameCase(ZX_ERR_ASYNC);
-    ErrorNameCase(ZX_ERR_PROTOCOL_NOT_SUPPORTED);
-    ErrorNameCase(ZX_ERR_ADDRESS_UNREACHABLE);
-    ErrorNameCase(ZX_ERR_ADDRESS_IN_USE);
-    ErrorNameCase(ZX_ERR_NOT_CONNECTED);
-    ErrorNameCase(ZX_ERR_CONNECTION_REFUSED);
-    ErrorNameCase(ZX_ERR_CONNECTION_RESET);
-    ErrorNameCase(ZX_ERR_CONNECTION_ABORTED);
-    default:
-      os << "errno=" << error_code;
-      return;
-  }
-}
 
 // Helper function to convert a vector of bytes to a T.
 template <typename T>
@@ -161,7 +102,20 @@ void SyscallDecoder::LoadArgument(int argument_index, size_t size) {
     return;
   }
   decoded_arguments_[argument_index].set_loading();
-  LoadMemory(Value(argument_index), size, &decoded_arguments_[argument_index].loaded_values());
+  LoadMemory(ArgumentValue(argument_index), size,
+             &decoded_arguments_[argument_index].loaded_values());
+}
+
+void SyscallDecoder::LoadBuffer(uint64_t address, size_t size) {
+  if (address == 0) {
+    return;
+  }
+  SyscallDecoderBuffer& buffer = buffers_[address];
+  if (buffer.loading()) {
+    return;
+  }
+  buffer.set_loading();
+  LoadMemory(address, size, &buffer.loaded_values());
 }
 
 void SyscallDecoder::Decode() {
@@ -273,8 +227,16 @@ void SyscallDecoder::LoadInputs() {
 
 void SyscallDecoder::StepToReturnAddress() {
   use_->SyscallInputsDecoded(this);
+
+  if (syscall_->return_type() == SyscallReturnType::kVoid) {
+    // We don't expect the syscall to return and it doesn't have any output.
+    use_->SyscallOutputsDecoded(this);
+    return;
+  }
+
   zxdb::BreakpointSettings settings;
   settings.enabled = true;
+  settings.name = syscall_->name() + "-return";
   settings.stop_mode = zxdb::BreakpointSettings::StopMode::kThread;
   settings.type = debug_ipc::BreakpointType::kSoftware;
   settings.location.address = return_address_;
@@ -284,6 +246,8 @@ void SyscallDecoder::StepToReturnAddress() {
   settings.scope_target = thread_->GetProcess()->GetTarget();
   settings.one_shot = true;
   thread_observer_->CreateNewBreakpoint(settings);
+  FXL_VLOG(2) << "Thread " << thread_->GetKoid() << ": creating return value breakpoint for "
+              << syscall_->name() << " at address " << std::hex << return_address_ << std::dec;
   // Registers a one time breakpoint for this decoder.
   thread_observer_->Register(thread_->GetKoid(), this);
   // Restarts the stopped thread. When the breakpoint will be reached (at the
@@ -366,20 +330,42 @@ void SyscallDisplay::SyscallInputsDecoded(SyscallDecoder* syscall) {
 }
 
 void SyscallDisplay::SyscallOutputsDecoded(SyscallDecoder* syscall) {
+  const Colors& colors = dispatcher_->colors();
+  // Displays the returned value.
   if (dispatcher_->last_displayed_syscall() != this) {
     // Add a blank line to tell the user that this display is not linked to the
     // previous displayed lines.
     os_ << "\n";
-  }
-  const Colors& colors = dispatcher_->colors();
-  // Displays the returned value.
-  os_ << line_header_ << "  -> ";
-  if (static_cast<zx_status_t>(syscall->syscall_return_value()) == ZX_OK) {
-    os_ << colors.green << "ZX_OK" << colors.reset;
+    // Then always display the process info to be able able to know for which thread
+    // we are displaying the output.
+    std::string first_line_header = syscall->thread()->GetProcess()->GetName() + ' ' + colors.red +
+                                    std::to_string(syscall->thread()->GetProcess()->GetKoid()) +
+                                    colors.reset + ':' + colors.red +
+                                    std::to_string(syscall->thread_id()) + colors.reset + ' ';
+    os_ << first_line_header << "  -> ";
   } else {
-    os_ << colors.red;
-    ErrorName(static_cast<zx_status_t>(syscall->syscall_return_value()), os_);
-    os_ << colors.reset;
+    os_ << line_header_ << "  -> ";
+  }
+  switch (syscall->syscall()->return_type()) {
+    case SyscallReturnType::kVoid:
+      break;
+    case SyscallReturnType::kStatus:
+      StatusName(colors, static_cast<zx_status_t>(syscall->syscall_return_value()), os_);
+      break;
+    case SyscallReturnType::kTicks:
+      os_ << colors.green << "ticks" << colors.reset << ": " << colors.blue
+          << static_cast<uint64_t>(syscall->syscall_return_value()) << colors.reset;
+      break;
+    case SyscallReturnType::kTime:
+      os_ << colors.green << "time" << colors.reset << ": "
+          << DisplayTime(colors, static_cast<zx_time_t>(syscall->syscall_return_value()));
+      break;
+    case SyscallReturnType::kUint32:
+      os_ << colors.blue << static_cast<uint32_t>(syscall->syscall_return_value()) << colors.reset;
+      break;
+    case SyscallReturnType::kUint64:
+      os_ << colors.blue << static_cast<uint64_t>(syscall->syscall_return_value()) << colors.reset;
+      break;
   }
   // And the inline output arguments (if any).
   const char* separator = " (";
@@ -398,6 +384,9 @@ void SyscallDisplay::SyscallOutputsDecoded(SyscallDecoder* syscall) {
       output->DisplayOutline(dispatcher_, syscall, line_header_, /*tabs=*/2, os_);
     }
   }
+
+  dispatcher_->set_last_displayed_syscall(this);
+
   // Now our job is done, we can destroy the object.
   syscall->Destroy();
 }

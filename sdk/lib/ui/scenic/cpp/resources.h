@@ -9,6 +9,7 @@
 #include <fuchsia/ui/gfx/cpp/fidl.h>
 #include <fuchsia/ui/views/cpp/fidl.h>
 #include <lib/ui/scenic/cpp/session.h>
+#include <lib/zx/time.h>
 #include <zircon/assert.h>
 
 #include <array>
@@ -342,6 +343,8 @@ class ViewHolder final : public Resource {
   void SetViewProperties(const float bounding_box_min[3], const float bounding_box_max[3],
                          const float inset_from_min[3], const float inset_from_max[3]);
   void SetViewProperties(const fuchsia::ui::gfx::ViewProperties& props);
+
+  void SetDebugBoundsColor(uint8_t red, uint8_t green, uint8_t blue);
 };
 
 // Represents the root of a subgraph within a larger scene graph.  |Node|s can
@@ -362,6 +365,8 @@ class View final : public Resource {
 
   void AddChild(const Node& child) const;
   void DetachChild(const Node& child) const;
+
+  void enableDebugBounds(bool enable);
 };
 
 // Creates a node that clips the contents of its hierarchy to the specified clip
@@ -495,6 +500,9 @@ class CameraBase : public Resource {
   // Sets the camera pose buffer
   void SetPoseBuffer(const Buffer& buffer, uint32_t num_entries, int64_t base_time,
                      uint64_t time_interval);
+  // Overloaded version of |SetPoseBuffer()| using `zx::time` and `zx::duration`.
+  void SetPoseBuffer(const Buffer& buffer, uint32_t num_entries, zx::time base_time,
+                     zx::duration time_interval);
 };
 
 // Represents a camera resource in a session.

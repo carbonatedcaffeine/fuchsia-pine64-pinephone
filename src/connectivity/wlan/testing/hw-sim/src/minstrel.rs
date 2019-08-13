@@ -3,9 +3,10 @@
 // found in the LICENSE file.
 
 use {
-    crate::{simulation_tests::*, *},
+    crate::{eth_helper::create_eth_client, simulation_tests::*, *},
     fidl_fuchsia_wlan_service as fidl_wlan_service, fidl_fuchsia_wlan_tap as wlantap,
-    fuchsia_async as fasync, fuchsia_component as app,
+    fuchsia_async as fasync,
+    fuchsia_component::client::connect_to_service,
     futures::{channel::mpsc, poll},
     pin_utils::pin_mut,
     std::collections::HashMap,
@@ -22,7 +23,7 @@ const SSID_MINSTREL: &[u8] = b"minstrel";
 
 pub fn test_rate_selection() {
     let mut exec = fasync::Executor::new().expect("error creating executor");
-    let wlan_service = app::client::connect_to_service::<fidl_wlan_service::WlanMarker>()
+    let wlan_service = connect_to_service::<fidl_wlan_service::WlanMarker>()
         .expect("Error connecting to wlan service");
     let mut helper = test_utils::TestHelper::begin_test(
         &mut exec,
@@ -31,7 +32,7 @@ pub fn test_rate_selection() {
     loop_until_iface_is_found(&mut exec);
 
     let phy = helper.proxy();
-    connect(&mut exec, &wlan_service, &phy, &mut helper, SSID_MINSTREL, &BSS_MINSTL);
+    connect(&mut exec, &wlan_service, &phy, &mut helper, SSID_MINSTREL, &BSS_MINSTL, None);
 
     let (sender, mut receiver) = mpsc::channel(1);
     let eth_and_beacon_sender_fut = eth_and_beacon_sender(&mut receiver, &phy);
@@ -175,7 +176,7 @@ async fn eth_and_beacon_sender<'a>(
     receiver: &'a mut mpsc::Receiver<bool>,
     phy: &'a wlantap::WlantapPhyProxy,
 ) -> Result<(), failure::Error> {
-    let mut client = await!(create_eth_client(&HW_MAC_ADDR))
+    let mut client = create_eth_client(&HW_MAC_ADDR).await
         .expect("cannot create ethernet client")
         .expect(&format!("ethernet client not found {:?}", &HW_MAC_ADDR));
 
@@ -191,23 +192,23 @@ async fn eth_and_beacon_sender<'a>(
     let mut intervals_since_last_beacon: i64 = i64::max_value() / DATA_FRAME_INTERVAL_NANOS;
     let mut client_stream = client.get_stream();
     loop {
-        await!(timer_stream.next());
+        timer_stream.next().await;
 
         // auto-deauthentication timeout is 10.24 seconds.
         // Send a beacon before that to stay connected.
         if (intervals_since_last_beacon * DATA_FRAME_INTERVAL_NANOS).nanos() >= 8765.millis() {
             intervals_since_last_beacon = 0;
-            send_beacon(&mut vec![], &CHANNEL, &BSS_MINSTL, SSID_MINSTREL, &phy).unwrap();
+            send_beacon(&mut vec![], &CHANNEL, &BSS_MINSTL, SSID_MINSTREL, false, &phy).unwrap();
         }
         intervals_since_last_beacon += 1;
 
         client.send(&buf);
         if let Poll::Ready(Some(Ok(ethernet::Event::StatusChanged))) = poll!(client_stream.next()) {
-            println!("status changed to: {:?}", await!(client.get_status())?);
+            println!("status changed to: {:?}", client.get_status().await?);
             // There was an event waiting, ethernet frames have NOT been sent on the previous poll.
             let _ = poll!(client_stream.next());
         }
-        let converged = await!(receiver.next()).expect("error receiving channel message");
+        let converged = receiver.next().await.expect("error receiving channel message");
         if converged {
             break;
         }

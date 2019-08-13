@@ -20,22 +20,6 @@ namespace zxdb {
 // expressions which are evaluated, and ExprValue classes which contain already-evaluated values.
 // This tree can represent expansions for things like struct members.
 //
-// TRANSITION
-// ----------
-// Development of this is currently in-progress.
-//
-// To print a value in the old model, code in the console frontend converts an ExprValue to a string
-// that's printed.
-//
-// With this class, the formatted "data model" is separate from the code to format for the console.
-// This class represents that data model.
-//
-// During the transition, the console formatting code calls into this code for the sub-types that
-// FormatNode supports and immediately stringifies it. This allows for an incremental conversion.
-// When FormatNode supports all data types, the console formatter will be replaced with some code
-// that takes a FormatNode and converts to a string specifically for the console context (possibly
-// with wrapping and indenting, etc.).
-//
 // DESIGN
 // ------
 // Think of this class as being a tree node in a GUI debugger's "watch" window. The "source" is the
@@ -72,7 +56,7 @@ class FormatNode {
   // asynchronously in the future. The implementation of GetProgramaticValue does not have to worry
   // about the lifetime of the FormatNode, that will be handled by the implementation of the
   // callback passed to it.
-  using GetProgramaticValue = std::function<void(
+  using GetProgramaticValue = fit::function<void(
       fxl::RefPtr<EvalContext> context, fit::callback<void(const Err& err, ExprValue value)> cb)>;
 
   // The original source or the value for this node.
@@ -93,18 +77,35 @@ class FormatNode {
     kOther,            // Unknown or stuff that doesn't fit into other categories.
     kPointer,
     kReference,
-    kRustEnum,   // Rust-style enum (can have values associated with enums).
-    kRustTuple,  // Includes TupleStructs (check the type).
+    kRustEnum,         // Rust-style enum (can have values associated with enums).
+    kRustTuple,        // Unnamed tuple.
+    kRustTupleStruct,  // Named tuple.
     kString,
   };
 
   // What this node means to its parent. This is not based on the value in any way and can only
   // be computed by the parent.
   enum ChildKind {
-    kNormalChild = 0,   // No special meaning.
-    kBaseClass,         // The base class of a collection. Normally a collection itself.
-    kArrayItem,         // One member of an array.
-    kPointerExpansion,  // The child of a pointer node that represents the thing it points to.
+    kNormalChild = 0,  // No special meaning.
+
+    // The base class of a collection. Normally a collection itself.
+    kBaseClass,
+
+    // One member of an array.
+    kArrayItem,
+
+    // The child of a pointer, reference, or some other node that represents the thing it points or
+    // otherwise expands to.
+    kPointerExpansion,
+
+    // This type indicates that the node represents a toplevel global or local variable.
+    //
+    // Some languages format variables (function or global scope) differently than members of
+    // structs or other hierarchical things. For example, Rust and Go both use colons to initialize
+    // struct members, but equals signs for assignments to locals:
+    //
+    //   let p = Person{FirstName: "Buzz", LastName: "Lightyear", Age: 25}
+    kVariable,
   };
 
   // See the class comment above about the lifecycle.
@@ -172,7 +173,7 @@ class FormatNode {
   const std::string& type() const { return type_; }
   void set_type(std::string t) { type_ = std::move(t); }
 
-  // The short descrition of this node's value. It is valid when State == kDescribed. For composite
+  // The short description of this node's value. It is valid when State == kDescribed. For composite
   // things like structs, the description might be an abbreviated version of the struct's members.
   const std::string& description() const { return description_; }
   void set_description(std::string d) { description_ = std::move(d); }
@@ -193,6 +194,7 @@ class FormatNode {
   // from the error without the value changing.
   const Err& err() const { return err_; }
   void set_err(const Err& e) { err_ = e; }
+  void SetDescribedError(const Err& e);  // Sets the state to "kDescribed" and the error.
 
  private:
   // See the getters above for documentation.

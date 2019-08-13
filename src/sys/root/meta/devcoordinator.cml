@@ -2,13 +2,14 @@
   "program": { "binary": "bin/devcoordinator" },
   "use": [
     { "directory": "/boot" },
-    // TODO: Update to use /svc once this won't conflict with svchost's /svc
-    { "service": "/bootsvc/fuchsia.boot.RootResource" },
-    { "service": "/bootsvc/fuchsia.boot.RootJob" },
-    { "service": "/bootsvc/fuchsia.boot.Arguments" },
-    { "service": "/bootsvc/fuchsia.boot.FactoryItems" },
-    { "service": "/bootsvc/fuchsia.boot.Items" },
-    { "service": "/bootsvc/fuchsia.boot.Log" },
-    { "service": "/builtin/fuchsia.process.Launcher" },
+    // TODO: Remove rename from /svc -> /bootsvc once that won't conflict with svchost's /svc
+    { "legacy_service": "/svc/fuchsia.boot.RootResource",  "as": "/bootsvc/fuchsia.boot.RootResource" },
+    { "legacy_service": "/svc/fuchsia.boot.RootJob",       "as": "/bootsvc/fuchsia.boot.RootJob" },
+    { "legacy_service": "/svc/fuchsia.boot.Arguments",     "as": "/bootsvc/fuchsia.boot.Arguments" },
+    { "legacy_service": "/svc/fuchsia.boot.FactoryItems",  "as": "/bootsvc/fuchsia.boot.FactoryItems" },
+    { "legacy_service": "/svc/fuchsia.boot.Items",         "as": "/bootsvc/fuchsia.boot.Items" },
+    { "legacy_service": "/svc/fuchsia.boot.Log",           "as": "/bootsvc/fuchsia.boot.Log" },
+    { "legacy_service": "/svc/fuchsia.hardware.pty.Device", "as": "/bootsvc/fuchsia.hardware.pty.Device" },
+    { "legacy_service": "/builtin/fuchsia.process.Launcher" },
   ],
 }

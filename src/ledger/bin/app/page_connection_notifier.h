@@ -6,6 +6,7 @@
 #define SRC_LEDGER_BIN_APP_PAGE_CONNECTION_NOTIFIER_H_
 
 #include <lib/fit/function.h>
+
 #include <trace/event.h>
 
 #include "src/ledger/bin/app/page_usage_listener.h"
@@ -19,12 +20,12 @@ namespace ledger {
 //
 // Given information about when internal and external page connections open and
 // close, |PageConnectionNotifier| calls the corresponding methods from
-// |PageUsageListener|. The |PageUsageListener| given in the constructor should
+// |PageUsageListener|. All |PageUsageListener| given in the constructor should
 // outlive this object.
 class PageConnectionNotifier {
  public:
   PageConnectionNotifier(std::string ledger_name, storage::PageId page_id,
-                         PageUsageListener* page_usage_listener);
+                         std::vector<PageUsageListener*> page_usage_listeners);
   ~PageConnectionNotifier();
 
   // Registers a new external page request.
@@ -53,12 +54,8 @@ class PageConnectionNotifier {
 
   const std::string ledger_name_;
   const storage::PageId page_id_;
-  PageUsageListener* page_usage_listener_;
+  std::vector<PageUsageListener*> page_usage_listeners_;
 
-  // Stores whether the page was opened by an external request but did not yet
-  // send a corresponding OnPageUnused. The OnPageUnused notification is sent as
-  // soon as all internal and external requests to the page are done.
-  bool must_notify_on_page_unused_ = false;
   // Stores whether the page is currently opened by an external request.
   bool has_external_requests_ = false;
   // Stores the number of active internal requests.

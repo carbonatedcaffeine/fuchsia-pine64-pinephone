@@ -11,6 +11,7 @@
 #include "flatbuffers/flatbuffers.h"
 #include "peridot/lib/convert/convert.h"
 #include "src/ledger/bin/p2p_sync/impl/message_generated.h"
+#include "src/ledger/bin/storage/public/page_storage.h"
 #include "src/ledger/bin/storage/public/read_data_source.h"
 #include "src/ledger/bin/storage/public/types.h"
 #include "src/ledger/lib/coroutine/coroutine_waiter.h"
@@ -18,11 +19,12 @@
 
 namespace p2p_sync {
 namespace {
-storage::ObjectIdentifier ToObjectIdentifier(const ObjectId* fb_object_id) {
+storage::ObjectIdentifier ToObjectIdentifier(const ObjectId* fb_object_id,
+                                             storage::PageStorage* storage) {
   uint32_t key_index = fb_object_id->key_index();
   uint32_t deletion_scope_id = fb_object_id->deletion_scope_id();
-  return storage::ObjectIdentifier{key_index, deletion_scope_id,
-                                   storage::ObjectDigest(fb_object_id->digest())};
+  return storage->GetObjectIdentifierFactory()->MakeObjectIdentifier(
+      key_index, deletion_scope_id, storage::ObjectDigest(fb_object_id->digest()));
 }
 }  // namespace
 
@@ -282,7 +284,7 @@ void PageCommunicatorImpl::OnNewResponse(const p2p_provider::P2PClientId& source
       const ObjectResponse* object_response =
           static_cast<const ObjectResponse*>(message->response());
       for (const Object* object : *(object_response->objects())) {
-        auto object_id = ToObjectIdentifier(object->id());
+        auto object_id = ToObjectIdentifier(object->id(), storage_);
         auto pending_request = pending_object_requests_.find(object_id);
         if (pending_request == pending_object_requests_.end()) {
           continue;
@@ -321,7 +323,7 @@ void PageCommunicatorImpl::OnNewResponse(const p2p_provider::P2PClientId& source
 }
 
 void PageCommunicatorImpl::GetObject(
-    storage::ObjectIdentifier object_identifier,
+    storage::ObjectIdentifier object_identifier, storage::ObjectType /*object_type*/,
     fit::function<void(ledger::Status, storage::ChangeSource, storage::IsObjectSynced,
                        std::unique_ptr<storage::DataSource::DataChunk>)>
         callback) {
@@ -345,6 +347,14 @@ void PageCommunicatorImpl::GetObject(
 
     SendToInterestedDevices(buffer);
   }
+}
+
+void PageCommunicatorImpl::GetDiff(
+    storage::CommitId commit_id, std::vector<storage::CommitId> possible_bases,
+    fit::function<void(ledger::Status, storage::CommitId, std::vector<storage::EntryChange>)>
+        callback) {
+  FXL_NOTIMPLEMENTED();
+  callback(ledger::Status::NOT_IMPLEMENTED, {}, {});
 }
 
 void PageCommunicatorImpl::OnNewCommits(
@@ -540,64 +550,63 @@ void PageCommunicatorImpl::ProcessCommitRequest(p2p_provider::P2PClientId source
 
 void PageCommunicatorImpl::ProcessObjectRequest(p2p_provider::P2PClientId source,
                                                 MessageHolder<ObjectRequest> request) {
-  coroutine_manager_.StartCoroutine([this, source, request = std::move(request)](
-                                        coroutine::CoroutineHandler* handler) {
-    // We use a std::list so that we can keep a reference to an element
-    // while adding new items.
-    std::list<ObjectResponseHolder> object_responses;
-    auto response_waiter =
-        fxl::MakeRefCounted<callback::StatusWaiter<ledger::Status>>(ledger::Status::OK);
-    for (const ObjectId* object_id : *request->object_ids()) {
-      storage::ObjectIdentifier identifier{object_id->key_index(), object_id->deletion_scope_id(),
-                                           storage::ObjectDigest(object_id->digest())};
-      object_responses.emplace_back(identifier);
-      auto& response = object_responses.back();
-      storage_->GetPiece(identifier, [callback = response_waiter->NewCallback(), &response](
-                                         ledger::Status status,
-                                         std::unique_ptr<const storage::Piece> piece) mutable {
-        if (status == ledger::Status::INTERNAL_NOT_FOUND) {
-          // Not finding an object is okay in this context: we'll just
-          // reply we don't have it. There is not need to abort
-          // processing the request.
-          callback(ledger::Status::OK);
+  coroutine_manager_.StartCoroutine(
+      [this, source, request = std::move(request)](coroutine::CoroutineHandler* handler) {
+        // We use a std::list so that we can keep a reference to an element
+        // while adding new items.
+        std::list<ObjectResponseHolder> object_responses;
+        auto response_waiter =
+            fxl::MakeRefCounted<callback::StatusWaiter<ledger::Status>>(ledger::Status::OK);
+        for (const ObjectId* object_id : *request->object_ids()) {
+          storage::ObjectIdentifier identifier = ToObjectIdentifier(object_id, storage_);
+          object_responses.emplace_back(identifier);
+          auto& response = object_responses.back();
+          storage_->GetPiece(identifier, [callback = response_waiter->NewCallback(), &response](
+                                             ledger::Status status,
+                                             std::unique_ptr<const storage::Piece> piece) mutable {
+            if (status == ledger::Status::INTERNAL_NOT_FOUND) {
+              // Not finding an object is okay in this context: we'll just
+              // reply we don't have it. There is not need to abort
+              // processing the request.
+              callback(ledger::Status::OK);
+              return;
+            }
+            response.piece = std::move(piece);
+            callback(status);
+          });
+          storage_->IsPieceSynced(std::move(identifier),
+                                  [callback = response_waiter->NewCallback(), &response](
+                                      ledger::Status status, bool is_synced) {
+                                    if (status == ledger::Status::INTERNAL_NOT_FOUND) {
+                                      // Not finding an object is okay in this context: we'll just
+                                      // reply we don't have it. There is not need to abort
+                                      // processing the request.
+                                      callback(ledger::Status::OK);
+                                      return;
+                                    }
+                                    // TODO(LE-788): there is a race-condition here, the piece may
+                                    // disappear while we're fetching it.
+                                    response.is_synced = is_synced;
+                                    callback(status);
+                                  });
+        }
+
+        ledger::Status status;
+        if (coroutine::Wait(handler, response_waiter, &status) ==
+            coroutine::ContinuationStatus::INTERRUPTED) {
           return;
         }
-        response.piece = std::move(piece);
-        callback(status);
+
+        if (status != ledger::Status::OK) {
+          FXL_LOG(WARNING) << "Error while retrieving objects: " << status;
+          return;
+        }
+
+        flatbuffers::FlatBufferBuilder buffer;
+        BuildObjectResponseBuffer(&buffer, std::move(object_responses));
+
+        mesh_->Send(source, buffer);
       });
-      storage_->IsPieceSynced(std::move(identifier),
-                              [callback = response_waiter->NewCallback(), &response](
-                                  ledger::Status status, bool is_synced) {
-                                if (status == ledger::Status::INTERNAL_NOT_FOUND) {
-                                  // Not finding an object is okay in this context: we'll just
-                                  // reply we don't have it. There is not need to abort
-                                  // processing the request.
-                                  callback(ledger::Status::OK);
-                                  return;
-                                }
-                                // TODO(LE-788): there is a race-condition here, the piece may
-                                // disappear while we're fetching it.
-                                response.is_synced = is_synced;
-                                callback(status);
-                              });
-    }
-
-    ledger::Status status;
-    if (coroutine::Wait(handler, response_waiter, &status) ==
-        coroutine::ContinuationStatus::INTERRUPTED) {
-      return;
-    }
-
-    if (status != ledger::Status::OK) {
-      FXL_LOG(WARNING) << "Error while retrieving objects: " << status;
-      return;
-    }
-
-    flatbuffers::FlatBufferBuilder buffer;
-    BuildObjectResponseBuffer(&buffer, std::move(object_responses));
-
-    mesh_->Send(source, buffer);
-  });
 }
 
 void PageCommunicatorImpl::BuildObjectResponseBuffer(

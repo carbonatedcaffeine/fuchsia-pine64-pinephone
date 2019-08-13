@@ -36,9 +36,11 @@ class DebuggedJob : public debug_ipc::ZirconExceptionWatcher {
   struct FilterInfo {
     std::string filter;
     // Filter used to compare against this filter.
-    // We keep it around so we don't need to recompile it everytime we compare
+    // We keep it around so we don't need to recompile it every time we compare
     // against a new process.
     debug_ipc::Regex regex;
+
+    bool Matches(const std::string& proc_name);
   };
 
   // Caller must call Init immediately after construction and delete the
@@ -60,6 +62,8 @@ class DebuggedJob : public debug_ipc::ZirconExceptionWatcher {
   // ZirconExceptionWatcher implementation.
   void OnProcessStarting(zx::exception exception_token,
                          zx_exception_info_t exception_info) override;
+
+  void ApplyToJob(FilterInfo& filter, zx::job& job);
 
   ProcessStartHandler* handler_;  // Non-owning.
   zx_koid_t koid_;

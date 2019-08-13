@@ -5,39 +5,36 @@
 #include "src/developer/memory/metrics/capture.h"
 
 #include <fcntl.h>
-#include <fuchsia/sysinfo/c/fidl.h>
+#include <fuchsia/boot/c/fidl.h>
+#include <lib/fdio/directory.h>
 #include <lib/fdio/fdio.h>
 #include <lib/zx/channel.h>
-#include <src/lib/fxl/logging.h>
-#include <task-utils/walker.h>
 #include <zircon/process.h>
 #include <zircon/status.h>
 
 #include <memory>
+
+#include <src/lib/fxl/logging.h>
+#include <task-utils/walker.h>
+#include <trace/event.h>
 
 namespace memory {
 
 class OSImpl : public OS, public TaskEnumerator {
  private:
   zx_status_t GetRootResource(zx_handle_t* root_resource) override {
-    const char* sysinfo = "/dev/misc/sysinfo";
-    int fd = open(sysinfo, O_RDWR);
-    if (fd < 0) {
-      return ZX_ERR_NOT_FOUND;
+    zx::channel local, remote;
+    zx_status_t status = zx::channel::create(0, &local, &remote);
+    if (status != ZX_OK) {
+      return status;
     }
-
-    zx::channel channel;
-    zx_status_t status = fdio_get_service_handle(fd, channel.reset_and_get_address());
+    const char* root_resource_svc = "/svc/fuchsia.boot.RootResource";
+    status = fdio_service_connect(root_resource_svc, remote.release());
     if (status != ZX_OK) {
       return status;
     }
 
-    zx_status_t fidl_status =
-        fuchsia_sysinfo_DeviceGetRootResource(channel.get(), &status, root_resource);
-    if (fidl_status != ZX_OK) {
-      return fidl_status;
-    }
-    return status;
+    return fuchsia_boot_RootResourceGet(local.get(), root_resource);
   }
 
   zx_handle_t ProcessSelf() override { return zx_process_self(); }
@@ -61,6 +58,7 @@ class OSImpl : public OS, public TaskEnumerator {
 
   zx_status_t GetInfo(zx_handle_t handle, uint32_t topic, void* buffer, size_t buffer_size,
                       size_t* actual, size_t* avail) override {
+    TRACE_DURATION("memory_metrics", "OSImpl::GetInfo", "topic", topic, "buffer_size", buffer_size);
     return zx_object_get_info(handle, topic, buffer, buffer_size, actual, avail);
   }
 
@@ -101,6 +99,7 @@ zx_status_t Capture::GetCapture(Capture& capture, const CaptureState& state, Cap
 
 zx_status_t Capture::GetCapture(Capture& capture, const CaptureState& state, CaptureLevel level,
                                 OS& os) {
+  TRACE_DURATION("memory_metrics", "Capture::GetCapture");
   capture.time_ = os.GetMonotonic();
   zx_status_t err = os.GetInfo(state.root, ZX_INFO_KMEM_STATS, &capture.kmem_,
                                sizeof(capture.kmem_), nullptr, nullptr);
@@ -112,26 +111,16 @@ zx_status_t Capture::GetCapture(Capture& capture, const CaptureState& state, Cap
     return ZX_OK;
   }
 
-  err = os.GetProcesses([state, &capture, level, &os](int depth, zx_handle_t handle, zx_koid_t koid,
-                                                      zx_koid_t parent_koid) {
+  err = os.GetProcesses([&state, &capture, &os](int depth, zx_handle_t handle, zx_koid_t koid,
+                                                zx_koid_t parent_koid) {
+    if (koid == state.self_koid) {
+      return ZX_OK;
+    }
+
     Process process = {.koid = koid};
     zx_status_t s = os.GetProperty(handle, ZX_PROP_NAME, process.name, ZX_MAX_NAME_LEN);
     if (s != ZX_OK) {
       return s == ZX_ERR_BAD_STATE ? ZX_OK : s;
-    }
-    s = os.GetInfo(handle, ZX_INFO_TASK_STATS, &process.stats, sizeof(process.stats), nullptr,
-                   nullptr);
-    if (s != ZX_OK) {
-      return s == ZX_ERR_BAD_STATE ? ZX_OK : s;
-    }
-
-    if (level == PROCESS) {
-      capture.koid_to_process_.emplace(koid, process);
-      return ZX_OK;
-    }
-
-    if (koid == state.self_koid) {
-      return ZX_OK;
     }
 
     size_t num_vmos;
@@ -139,20 +128,20 @@ zx_status_t Capture::GetCapture(Capture& capture, const CaptureState& state, Cap
     if (s != ZX_OK) {
       return s == ZX_ERR_BAD_STATE ? ZX_OK : s;
     }
-    auto vmos = new zx_info_vmo_t[num_vmos];
-    s = os.GetInfo(handle, ZX_INFO_PROCESS_VMOS, vmos, num_vmos * sizeof(zx_info_vmo_t), &num_vmos,
-                   nullptr);
-    if (s != ZX_OK) {
-      delete[] vmos;
-      return s == ZX_ERR_BAD_STATE ? ZX_OK : s;
+    auto vmos = std::make_unique<zx_info_vmo_t[]>(num_vmos);
+    {
+      s = os.GetInfo(handle, ZX_INFO_PROCESS_VMOS, vmos.get(), num_vmos * sizeof(zx_info_vmo_t),
+                     &num_vmos, nullptr);
+      if (s != ZX_OK) {
+        return s == ZX_ERR_BAD_STATE ? ZX_OK : s;
+      }
     }
     process.vmos.reserve(num_vmos);
     for (size_t i = 0; i < num_vmos; i++) {
-      zx_koid_t vmo_koid = vmos[i].koid;
-      capture.koid_to_vmo_.emplace(vmo_koid, vmos[i]);
-      process.vmos.push_back(vmo_koid);
+      const auto& vmo = vmos[i];
+      capture.koid_to_vmo_.try_emplace(vmo.koid, vmo);
+      process.vmos.push_back(vmo.koid);
     }
-    delete[] vmos;
     capture.koid_to_process_.emplace(koid, process);
     return ZX_OK;
   });

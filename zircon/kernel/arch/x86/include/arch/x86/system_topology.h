@@ -7,10 +7,11 @@
 #ifndef ARCH_X86_SYSTEM_TOPOLOGY_H
 #define ARCH_X86_SYSTEM_TOPOLOGY_H
 
-#include <arch/x86/cpuid.h>
-#include <fbl/vector.h>
 #include <lib/acpi_tables.h>
 #include <zircon/boot/image.h>
+
+#include <arch/x86/cpuid.h>
+#include <fbl/vector.h>
 
 namespace x86 {
 // Generates the system topology.
@@ -18,6 +19,6 @@ namespace x86 {
 zx_status_t GenerateFlatTopology(const cpu_id::CpuId& cpuid, const AcpiTables& acpi_tables,
                                  fbl::Vector<zbi_topology_node_t>* topology);
 
-} // namespace x86
+}  // namespace x86
 
-#endif // ARCH_X86_SYSTEM_TOPOLOGY_H
+#endif  // ARCH_X86_SYSTEM_TOPOLOGY_H

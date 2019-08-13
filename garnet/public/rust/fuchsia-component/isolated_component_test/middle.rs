@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 use {
     failure::{Error, ResultExt},
@@ -25,7 +25,7 @@ use {
 fn echo_exposed_server(stream: EchoExposedByParentRequestStream) -> impl Future<Output = ()> {
     stream
         .err_into::<failure::Error>()
-        .try_for_each(async move |EchoExposedByParentRequest::Echo { value: _, responder }| {
+        .try_for_each(|EchoExposedByParentRequest::Echo { value: _, responder }| async move {
             responder.send(42).context("sending response")?;
             Ok(())
         })
@@ -41,11 +41,11 @@ async fn main() -> Result<(), Error> {
 
     // Check that all services provided by the parent are available
     let echo = connect_to_service::<EchoExposedByParentMarker>()?;
-    assert_eq!(1, await!(echo.echo(1))?);
+    assert_eq!(1, echo.echo(1).await?);
     let echo = connect_to_service::<EchoExposedBySiblingMarker>()?;
-    assert_eq!(10, await!(echo.echo(5))?);
+    assert_eq!(10, echo.echo(5).await?);
     let echo = connect_to_service::<EchoHiddenByParentMarker>()?;
-    assert_eq!(2, await!(echo.echo(2))?);
+    assert_eq!(2, echo.echo(2).await?);
 
     println!("connecting to {}", CHILD_URL);
 
@@ -79,7 +79,7 @@ async fn main() -> Result<(), Error> {
     fasync::spawn(fs.for_each_concurrent(None, echo_exposed_server));
 
     let mut component_stream = child_app.controller().take_event_stream();
-    match await!(component_stream.next())
+    match component_stream.next().await
         .expect("component event stream ended before termination event")?
     {
         ComponentControllerEvent::OnDirectoryReady {} => {

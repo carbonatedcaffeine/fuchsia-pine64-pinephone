@@ -2,10 +2,20 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+### NOTE!
+###
+### This is not a normal shell script that executes on its own.
+###
+### It's evaluated directly in a user's interactive shell using
+### the `.` or `source` shell built-in.
+###
+### Hence, this code must be careful not to pollute the user's shell
+### with variable or function symbols that users don't want.
+
 if [[ -n "${ZSH_VERSION}" ]]; then
-  source "$(cd "$(dirname "${(%):-%x}")/.." >/dev/null 2>&1 && pwd)"/tools/devshell/lib/vars.sh || return $?
+  export FUCHSIA_DIR="$(cd "$(dirname "${(%):-%x}")/.." >/dev/null 2>&1 && pwd)"
 else
-  source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." >/dev/null 2>&1 && pwd)"/tools/devshell/lib/vars.sh || return $?
+  export FUCHSIA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." >/dev/null 2>&1 && pwd)"
 fi
 
 # __patched_path <old-regex> <new-component>
@@ -39,7 +49,7 @@ function fx-update-path {
 
   export PATH="$(__patched_path "${FUCHSIA_DIR}/scripts/git" "${FUCHSIA_DIR}/scripts/git")"
 
-  local rust_dir="$(source "${FUCHSIA_DIR}/buildtools/vars.sh" && echo -n "${BUILDTOOLS_RUST_DIR}/bin")"
+  local rust_dir="$(source "${FUCHSIA_DIR}/tools/devshell/lib/vars.sh" && echo -n "${PREBUILT_RUST_DIR}/bin")"
   export PATH="$(__patched_path "${rust_dir}" "${rust_dir}")"
 
   # XXX(raggi): these can get stale, so this really needs rework. Probably the
@@ -60,12 +70,16 @@ function fx-update-path {
 ### fx-prompt-info: prints the current configuration for display in a prompt
 
 function fx-prompt-info {
-  # Run fx-config-read in a subshell to avoid polluting this shell's environment
-  # with data from the config file, which can change without updating this
-  # shell's environment.
+  # Run in a subshell to avoid polluting this shell's environment with data
+  # from the config file, which can change without updating this shell's
+  # environment.
   (
-    fx-config-read
-    echo "${FUCHSIA_BUILD_DIR##*/}"
+    source "${FUCHSIA_DIR}/tools/devshell/lib/vars.sh"
+    if fx-build-dir-if-present; then
+      echo "${FUCHSIA_BUILD_DIR##*/}"
+    else
+      echo "???"
+    fi
   )
 }
 
@@ -148,7 +162,7 @@ if [[ -z "${ZSH_VERSION}" ]]; then
     if [[ ${COMP_CWORD} -eq 1 ]]; then
       for dir in "${FUCHSIA_DIR}/tools/devshell" "${FUCHSIA_DIR}/tools/devshell/contrib" "${fuchsia_tools_dir}"
       do
-        COMPREPLY=(${COMPREPLY} $(/bin/ls -dp1 ${dir}/${COMP_WORDS[1]}* 2>/dev/null | \
+        COMPREPLY=(${COMPREPLY[*]} $(/bin/ls -dp1 ${dir}/${COMP_WORDS[1]}* 2>/dev/null | \
           sed -n "s|^${dir}/\([^/]*\)\$|\1|p" | xargs echo))
       done
     else

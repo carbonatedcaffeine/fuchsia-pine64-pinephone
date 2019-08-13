@@ -11,22 +11,26 @@ type All struct {
 }
 
 type Success struct {
-	Name  string
-	Value interface{}
-	Bytes []byte
+	Name              string
+	Value             interface{}
+	Bytes             []byte
+	BindingsAllowlist []string
 	// Handles
 }
 
 type FailsToEncode struct {
-	Name  string
-	Value interface{}
-	Err   string
+	Name              string
+	Value             interface{}
+	Err               ErrorCode
+	BindingsAllowlist []string
 }
 
 type FailsToDecode struct {
-	Name  string
-	Bytes []byte
-	Err   string
+	Name              string
+	Type              string
+	Bytes             []byte
+	Err               ErrorCode
+	BindingsAllowlist []string
 }
 
 // Value represents any acceptable value used to represent a FIDL value.
@@ -40,7 +44,25 @@ type FailsToDecode struct {
 // - `[]interface{}` for slices of values
 type Value interface{}
 
+type Field struct {
+	Name  string
+	Value Value
+}
+
 type Object struct {
 	Name   string
-	Fields map[string]Value
+	Fields []Field
+}
+
+type ErrorCode string
+
+const (
+	_                           ErrorCode = ""
+	StringTooLong                         = "STRING_TOO_LONG"
+	NullEmptyStringWithNullBody           = "NON_EMPTY_STRING_WITH_NULL_BODY"
+)
+
+var AllErrorCodes = map[ErrorCode]bool{
+	StringTooLong:               true,
+	NullEmptyStringWithNullBody: true,
 }

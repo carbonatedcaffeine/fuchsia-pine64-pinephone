@@ -13,6 +13,8 @@ namespace test {
 SessionHandlerTest::SessionHandlerTest() : weak_factory_(this) {}
 
 void SessionHandlerTest::SetUp() {
+  ErrorReportingTest::SetUp();
+
   InitializeScenic();
   InitializeDisplayManager();
   InitializeEngine();
@@ -28,15 +30,16 @@ void SessionHandlerTest::TearDown() {
   display_manager_.reset();
   scenic_.reset();
   app_context_.reset();
-  events_.clear();
   session_manager_.reset();
+
+  ErrorReportingTest::TearDown();
 }
 
 void SessionHandlerTest::InitializeScenic() {
   // TODO(SCN-720): Wrap Create using ::gtest::Environment
   // instead of this hack.  This code has the chance to break non-ScenicTests.
   app_context_ = sys::ComponentContext::Create();
-  scenic_ = std::make_unique<Scenic>(app_context_.get(), inspect::Node(), [] {});
+  scenic_ = std::make_unique<Scenic>(app_context_.get(), inspect_deprecated::Node(), [] {});
 }
 
 void SessionHandlerTest::InitializeSessionHandler() {
@@ -45,7 +48,8 @@ void SessionHandlerTest::InitializeSessionHandler() {
 
   InitializeScenicSession(session_id);
 
-  session_manager_ = std::make_unique<SessionManagerForTest>(this, this->error_reporter()),
+  session_manager_ = std::make_unique<SessionManagerForTest>(this->shared_event_reporter(),
+                                                             this->shared_error_reporter()),
   command_dispatcher_ = session_manager_->CreateCommandDispatcher(
       CommandDispatcherContext(scenic_.get(), scenic_session_.get()), std::move(session_context));
 }
@@ -67,7 +71,7 @@ void SessionHandlerTest::InitializeEngine() {
       std::make_unique<FramePredictor>(DefaultFrameScheduler::kInitialRenderDuration,
                                        DefaultFrameScheduler::kInitialUpdateDuration));
   engine_ =
-      std::make_unique<Engine>(app_context_.get(), frame_scheduler_, display_manager_.get(),
+      std::make_unique<Engine>(frame_scheduler_, display_manager_.get(),
                                std::move(mock_release_fence_signaller), escher::EscherWeakPtr());
   frame_scheduler_->SetFrameRenderer(engine_->GetWeakPtr());
   frame_scheduler_->AddSessionUpdater(weak_factory_.GetWeakPtr());
@@ -78,26 +82,8 @@ void SessionHandlerTest::InitializeScenicSession(SessionId session_id) {
   scenic_session_ = std::make_unique<scenic_impl::Session>(session_id, std::move(listener));
 }
 
-void SessionHandlerTest::EnqueueEvent(fuchsia::ui::gfx::Event event) {
-  fuchsia::ui::scenic::Event scenic_event;
-  scenic_event.set_gfx(std::move(event));
-  events_.push_back(std::move(scenic_event));
-}
-
-void SessionHandlerTest::EnqueueEvent(fuchsia::ui::input::InputEvent event) {
-  fuchsia::ui::scenic::Event scenic_event;
-  scenic_event.set_input(std::move(event));
-  events_.push_back(std::move(scenic_event));
-}
-
-void SessionHandlerTest::EnqueueEvent(fuchsia::ui::scenic::Command unhandled) {
-  fuchsia::ui::scenic::Event scenic_event;
-  scenic_event.set_unhandled(std::move(unhandled));
-  events_.push_back(std::move(scenic_event));
-}
-
 SessionUpdater::UpdateResults SessionHandlerTest::UpdateSessions(
-    std::unordered_set<SessionId> sessions_to_update, zx_time_t presentation_time,
+    std::unordered_set<SessionId> sessions_to_update, zx::time presentation_time,
     uint64_t trace_id) {
   UpdateResults update_results;
   CommandContext context(nullptr);
@@ -124,7 +110,7 @@ SessionUpdater::UpdateResults SessionHandlerTest::UpdateSessions(
   return update_results;
 }
 
-void SessionHandlerTest::PrepareFrame(zx_time_t presentation_time, uint64_t trace_id) {}
+void SessionHandlerTest::PrepareFrame(zx::time presentation_time, uint64_t trace_id) {}
 
 }  // namespace test
 }  // namespace gfx

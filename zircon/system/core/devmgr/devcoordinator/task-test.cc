@@ -144,7 +144,7 @@ TEST_F(TaskTestCase, SuccessfulDependencies) {
   auto task = DepsTask::Create(fbl::count_of(statuses), statuses, true);
   loop().RunUntilIdle();
   ASSERT_TRUE(task->is_completed());
-  EXPECT_EQ(task->status(), ZX_OK);
+  EXPECT_OK(task->status());
   EXPECT_EQ(task->run_calls(), 1);
   EXPECT_EQ(task->dep_fail_calls(), 0);
 }
@@ -154,7 +154,7 @@ TEST_F(TaskTestCase, FailedDependenciesIgnored) {
   auto task = DepsTask::Create(fbl::count_of(statuses), statuses, false);
   loop().RunUntilIdle();
   ASSERT_TRUE(task->is_completed());
-  EXPECT_EQ(task->status(), ZX_OK);
+  EXPECT_OK(task->status());
   EXPECT_EQ(task->run_calls(), 1);
   EXPECT_EQ(task->dep_fail_calls(), 2);
 }
@@ -190,6 +190,15 @@ TEST_F(TaskTestCase, DependencySequencing) {
   for (auto& child : child1_children) {
     EXPECT_TRUE(child.complete);
   }
+}
+
+TEST_F(TaskTestCase, DependencyTracking) {
+  zx_status_t statuses[] = {ZX_OK, ZX_ERR_NOT_FOUND};
+  auto task = DepsTask::Create(fbl::count_of(statuses), statuses, false);
+  ASSERT_EQ(task->Dependencies().size(), 2);
+  loop().RunUntilIdle();
+  ASSERT_TRUE(task->is_completed());
+  ASSERT_EQ(task->Dependencies().size(), 0);
 }
 
 }  // namespace

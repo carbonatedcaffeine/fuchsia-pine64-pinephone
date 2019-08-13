@@ -6,10 +6,10 @@ group("features") {
   testonly = true
   deps = [
     "build-info",
+    "isolated-temp",
     "shell",
     "shell-commands",
     "storage",
-    "system-deprecated-data",
     "system-temp",
   ]
 }

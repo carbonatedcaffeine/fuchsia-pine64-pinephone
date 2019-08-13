@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <zircon/syscalls.h>
+
 #include <src/camera/simple_camera/simple_camera_lib/frame_scheduler.h>
 #include <src/lib/fxl/command_line.h>
-#include <zircon/syscalls.h>
 
 namespace simple_camera {
 
@@ -14,14 +15,12 @@ uint64_t SimpleFrameScheduler::GetPresentationTimeNs(uint64_t capture_time_ns) {
 
   if (now_ns < capture_time_ns) {
     FXL_LOG(WARNING) << "Capture time is in the future!"
-                     << " now: " << now_ns << " capture_time_ns "
-                     << capture_time_ns;
+                     << " now: " << now_ns << " capture_time_ns " << capture_time_ns;
     capture_time_ns = now_ns;
   }
 
   if (last_capture_time_ns_ > capture_time_ns) {
-    FXL_LOG(ERROR) << "Capture times out of sequence! Previous: "
-                   << last_capture_time_ns_
+    FXL_LOG(ERROR) << "Capture times out of sequence! Previous: " << last_capture_time_ns_
                    << " Current capture time: " << capture_time_ns;
     // Just update the capture time. Previous time cannot be in future...
     capture_time_ns = last_capture_time_ns_;
@@ -38,8 +37,8 @@ uint64_t SimpleFrameScheduler::GetPresentationTimeNs(uint64_t capture_time_ns) {
   // add the lead delay, and send it out:
   if (now_ns - capture_time_ns > kAcquireDelayNs) {
     FXL_VLOG(1) << "Unexpected delay between capture and availability!"
-                << " now_ns - capture_time_ns = " << now_ns - capture_time_ns
-                << " > AcquireDelay (" << kAcquireDelayNs << ")";
+                << " now_ns - capture_time_ns = " << now_ns - capture_time_ns << " > AcquireDelay ("
+                << kAcquireDelayNs << ")";
     pres_time = now_ns + kLeadDelayNs;
   }
 
@@ -60,8 +59,7 @@ uint64_t SimpleFrameScheduler::GetPresentationTimeNs(uint64_t capture_time_ns) {
 // are not meeting our assumptions. It could be augmented to
 // keep an estimate of the lead time required by the compositor. See this
 // class's header file for more information.
-void SimpleFrameScheduler::OnFramePresented(uint64_t pres_time,
-                                            uint64_t pres_interval,
+void SimpleFrameScheduler::OnFramePresented(uint64_t pres_time, uint64_t pres_interval,
                                             uint64_t requested_pres_time) {
   if (pres_time > requested_pres_time + pres_interval) {
     // This means we missed the frame we were targetting.
@@ -69,8 +67,7 @@ void SimpleFrameScheduler::OnFramePresented(uint64_t pres_time,
     FXL_LOG(WARNING) << "Missed rendering deadline!"
                      << "\n  Requested   time: " << requested_pres_time
                      << "\n  Actual pres time: " << pres_time
-                     << "\n  Difference:       "
-                     << pres_time - requested_pres_time
+                     << "\n  Difference:       " << pres_time - requested_pres_time
                      << " > presentation_interval (" << pres_interval << ")";
   }
 }

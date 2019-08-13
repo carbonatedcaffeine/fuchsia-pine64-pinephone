@@ -18,21 +18,15 @@ namespace internal {
 TestDriverImpl::TestDriverImpl() = default;
 TestDriverImpl::~TestDriverImpl() = default;
 
-void TestDriverImpl::Skip() {
-  status_ = TestStatus::kSkipped;
-}
+void TestDriverImpl::Skip() { status_ = TestStatus::kSkipped; }
 
-bool TestDriverImpl::Continue() const {
-  return !current_test_has_fatal_failures_;
-}
+bool TestDriverImpl::Continue() const { return !current_test_has_fatal_failures_; }
 
 void TestDriverImpl::OnTestStart(const TestCase& test_case, const TestInfo& test_info) {
   status_ = TestStatus::kPassed;
 }
 
-void TestDriverImpl::OnTestSkip(const TestCase& test_case, const TestInfo& test_info) {
-  Reset();
-}
+void TestDriverImpl::OnTestSkip(const TestCase& test_case, const TestInfo& test_info) { Reset(); }
 
 void TestDriverImpl::OnTestSuccess(const TestCase& test_case, const TestInfo& test_info) {
   Reset();
@@ -219,7 +213,7 @@ bool MatchPatterns(fbl::StringPiece pattern, fbl::StringPiece str) {
   static constexpr auto match_pattern = [](const char* pattern, const char* str) -> bool {
     auto advance = [](const char* pattern, const char* str, auto& self) -> bool {
       switch (*pattern) {
-        // Single characeter matching for gTest
+        // Single character matching for gTest
         case '?':
           return *str != '\0' && self(pattern + 1, str + 1, self);
         // Wild card matches anything.

@@ -10,11 +10,11 @@ use std::marker::PhantomData;
 use std::ops::Range;
 
 use byteorder::{ByteOrder, NetworkEndian};
-use packet::{EncapsulatingSerializer, Serializer};
+use net_types::ip::{Ipv6, Ipv6Addr};
+use packet::{Nested, Serializer};
 use zerocopy::{AsBytes, ByteSlice, FromBytes, LayoutVerified, Unaligned};
 
 use crate::error::ParseError;
-use crate::ip::{Ipv6, Ipv6Addr};
 use crate::wire::{U16, U32};
 
 use super::{IcmpIpExt, IcmpMessage, IcmpPacketBuilder, IcmpUnusedCode};
@@ -29,7 +29,7 @@ pub(crate) type OptionsSerializer<'a, I> = crate::wire::records::options::Option
 >;
 
 /// An NDP Router Solicitation.
-#[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned)]
+#[derive(Copy, Clone, Default, Debug, FromBytes, AsBytes, Unaligned, PartialEq, Eq)]
 #[repr(C)]
 pub(crate) struct RouterSolicitation {
     _reserved: [u8; 4],
@@ -37,10 +37,10 @@ pub(crate) struct RouterSolicitation {
 
 impl_icmp_message!(Ipv6, RouterSolicitation, RouterSolicitation, IcmpUnusedCode, Options<B>);
 
-/// An NDP Router Advertisment.
-#[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned)]
+/// An NDP Router Advertisement.
+#[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned, PartialEq, Eq)]
 #[repr(C)]
-pub(crate) struct RouterAdvertisment {
+pub(crate) struct RouterAdvertisement {
     current_hop_limit: u8,
     configuration_mo: u8,
     router_lifetime: U16,
@@ -48,9 +48,56 @@ pub(crate) struct RouterAdvertisment {
     retransmit_timer: U32,
 }
 
-impl_icmp_message!(Ipv6, RouterAdvertisment, RouterAdvertisment, IcmpUnusedCode, Options<B>);
+impl_icmp_message!(Ipv6, RouterAdvertisement, RouterAdvertisement, IcmpUnusedCode, Options<B>);
 
-impl RouterAdvertisment {
+impl RouterAdvertisement {
+    /// Managed address configuration flag.
+    ///
+    /// When set, it indicates that addresses are available via Dynamic Host Configuration Protocol
+    /// (DHCPv6).
+    ///
+    /// If set, the "Pther configuration" flag is redundant and can be ignored because DHCPv6 will
+    /// return all available configuration information.
+    const MANAGED_FLAG: u8 = 0x80;
+
+    /// Other configuration flag.
+    ///
+    /// When set, it indicates that other configuration information is available via DHCPv6.
+    /// Examples of such information are DNS-related information or information on other servers
+    /// within the network.
+    const OTHER_CONFIGURATION_FLAG: u8 = 0x40;
+
+    pub(crate) fn new(
+        current_hop_limit: u8,
+        managed_flag: bool,
+        other_config_flag: bool,
+        router_lifetime: u16,
+        reachable_time: u32,
+        retransmit_timer: u32,
+    ) -> Self {
+        let mut configuration_mo = 0;
+
+        if managed_flag {
+            configuration_mo |= Self::MANAGED_FLAG;
+        }
+
+        if other_config_flag {
+            configuration_mo |= Self::OTHER_CONFIGURATION_FLAG;
+        }
+
+        Self {
+            current_hop_limit,
+            configuration_mo,
+            router_lifetime: U16::new(router_lifetime),
+            reachable_time: U32::new(reachable_time),
+            retransmit_timer: U32::new(retransmit_timer),
+        }
+    }
+
+    pub(crate) fn current_hop_limit(&self) -> u8 {
+        self.current_hop_limit
+    }
+
     pub(crate) fn router_lifetime(&self) -> u16 {
         self.router_lifetime.get()
     }
@@ -62,10 +109,18 @@ impl RouterAdvertisment {
     pub(crate) fn retransmit_timer(&self) -> u32 {
         self.retransmit_timer.get()
     }
+
+    pub(crate) fn managed_flag(&self) -> bool {
+        ((self.configuration_mo & Self::MANAGED_FLAG) != 0)
+    }
+
+    pub(crate) fn other_configuration_flag(&self) -> bool {
+        ((self.configuration_mo & Self::OTHER_CONFIGURATION_FLAG) != 0)
+    }
 }
 
 /// An NDP Neighbor Solicitation.
-#[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned)]
+#[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned, PartialEq, Eq)]
 #[repr(C)]
 pub(crate) struct NeighborSolicitation {
     _reserved: [u8; 4],
@@ -87,18 +142,18 @@ impl NeighborSolicitation {
     }
 }
 
-/// An NDP Neighbor Advertisment.
-#[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned)]
+/// An NDP Neighbor Advertisement.
+#[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned, PartialEq, Eq)]
 #[repr(C)]
-pub(crate) struct NeighborAdvertisment {
+pub(crate) struct NeighborAdvertisement {
     flags_rso: u8,
     _reserved: [u8; 3],
     target_address: Ipv6Addr,
 }
 
-impl_icmp_message!(Ipv6, NeighborAdvertisment, NeighborAdvertisment, IcmpUnusedCode, Options<B>);
+impl_icmp_message!(Ipv6, NeighborAdvertisement, NeighborAdvertisement, IcmpUnusedCode, Options<B>);
 
-impl NeighborAdvertisment {
+impl NeighborAdvertisement {
     /// Router flag.
     ///
     /// When set, the R-bit indicates that the sender is a router. The R-bit is
@@ -130,10 +185,30 @@ impl NeighborAdvertisment {
     pub(crate) fn new(flags_rso: u8, target_address: Ipv6Addr) -> Self {
         Self { flags_rso, _reserved: [0; 3], target_address }
     }
+
+    /// Returns the target_address of an NA message.
+    pub(crate) fn target_address(&self) -> &Ipv6Addr {
+        &self.target_address
+    }
+
+    /// Returns the router flag.
+    pub(crate) fn router_flag(&self) -> bool {
+        ((self.flags_rso & Self::FLAG_ROUTER) != 0)
+    }
+
+    /// Returns the solicited flag.
+    pub(crate) fn solicited_flag(&self) -> bool {
+        ((self.flags_rso & Self::FLAG_SOLICITED) != 0)
+    }
+
+    /// Returns the override flag.
+    pub(crate) fn override_flag(&self) -> bool {
+        ((self.flags_rso & Self::FLAG_OVERRIDE) != 0)
+    }
 }
 
 /// An ICMPv6 Redirect Message.
-#[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned)]
+#[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned, PartialEq, Eq)]
 #[repr(C)]
 pub(crate) struct Redirect {
     _reserved: [u8; 4],
@@ -145,11 +220,41 @@ impl_icmp_message!(Ipv6, Redirect, Redirect, IcmpUnusedCode, Options<B>);
 
 pub(crate) mod options {
     use byteorder::{ByteOrder, NetworkEndian};
+    use net_types::ip::{AddrSubnet, Ipv6Addr};
     use zerocopy::{AsBytes, FromBytes, LayoutVerified, Unaligned};
 
-    use crate::ip::Ipv6Addr;
     use crate::wire::records::options::{OptionsImpl, OptionsImplLayout, OptionsSerializerImpl};
     use crate::wire::U32;
+
+    /// The length of an NDP MTU option, excluding the first 2 bytes (kind and length bytes).
+    ///
+    /// See [RFC 4861 section 4.6.3] for more information.
+    ///
+    /// [RFC 4861 section 4.6.3]: https://tools.ietf.org/html/rfc4861#section-4.6.3
+    const MTU_OPTION_LEN: usize = 6;
+
+    /// Number of bytes in a Prefix Information option, excluding the kind
+    /// and length bytes.
+    ///
+    /// See [RFC 4861 section 4.6.2] for more information.
+    ///
+    /// [RFC 4861 section 4.6.2]: https://tools.ietf.org/html/rfc4861#section-4.6.2
+    const PREFIX_INFORMATION_OPTION_LEN: usize = 30;
+
+    /// The on-link flag within the 4th byte in the prefix information buffer.
+    ///
+    /// See [RFC 4861 section 4.6.2] for more information.
+    ///
+    /// [RFC 4861 section 4.6.2]: https://tools.ietf.org/html/rfc4861#section-4.6.2
+    const ON_LINK_FLAG: u8 = 0x80;
+
+    /// The autonomous address configuration flag within the 4th byte in the
+    /// prefix information buffer
+    ///
+    /// See [RFC 4861 section 4.6.2] for more information.
+    ///
+    /// [RFC 4861 section 4.6.2]: https://tools.ietf.org/html/rfc4861#section-4.6.2
+    const AUTONOMOUS_ADDRESS_CONFIGURATION_FLAG: u8 = 0x40;
 
     create_net_enum! {
         NdpOptionType,
@@ -160,9 +265,14 @@ pub(crate) mod options {
         Mtu: MTU = 5,
     }
 
-    #[derive(Debug, FromBytes, AsBytes, Unaligned)]
+    /// Prefix information that is advertised by a router in Router Advertisements.
+    ///
+    /// See [RFC 4861 section 4.6.2].
+    ///
+    /// [RFC 4861 section 4.6.2]: https://tools.ietf.org/html/rfc4861#section-4.6.2
+    #[derive(Debug, FromBytes, AsBytes, Unaligned, PartialEq, Eq, Clone)]
     #[repr(C)]
-    pub(crate) struct PrefixInformation {
+    pub struct PrefixInformation {
         prefix_length: u8,
         flags_la: u8,
         valid_lifetime: U32,
@@ -172,29 +282,97 @@ pub(crate) mod options {
     }
 
     impl PrefixInformation {
+        /// Create a new `PrefixInformation`.
+        pub(crate) fn new(
+            prefix_length: u8,
+            on_link_flag: bool,
+            autonomous_address_configuration_flag: bool,
+            valid_lifetime: u32,
+            preferred_lifetime: u32,
+            prefix: Ipv6Addr,
+        ) -> Self {
+            let mut flags_la = 0;
+
+            if on_link_flag {
+                flags_la |= ON_LINK_FLAG;
+            }
+
+            if autonomous_address_configuration_flag {
+                flags_la |= AUTONOMOUS_ADDRESS_CONFIGURATION_FLAG;
+            }
+
+            Self {
+                prefix_length,
+                flags_la,
+                valid_lifetime: U32::new(valid_lifetime),
+                preferred_lifetime: U32::new(preferred_lifetime),
+                _reserved: [0; 4],
+                prefix,
+            }
+        }
+
+        /// The number of leading bits in the prefix that are valid.
+        pub(crate) fn prefix_length(&self) -> u8 {
+            self.prefix_length
+        }
+
+        /// Is this prefix on the link?
+        ///
+        /// Returns `true` if the prefix is on-link. `false` means that
+        /// no statement is made about on or off-link properties of the
+        /// prefix; nodes MUST NOT conclude that an address derived
+        /// from this prefix is off-link if `false`.
+        pub(crate) fn on_link_flag(&self) -> bool {
+            ((self.flags_la & ON_LINK_FLAG) != 0)
+        }
+
+        /// Can this prefix be used for stateless address configuration?
+        pub(crate) fn autonomous_address_configuration_flag(&self) -> bool {
+            ((self.flags_la & AUTONOMOUS_ADDRESS_CONFIGURATION_FLAG) != 0)
+        }
+
+        /// Get the length of time in seconds (relative to the time the
+        /// packet is sent) that the prefix is valid for the purpose of
+        /// on-link determination.
+        ///
+        /// A value of all one bits (`std::u32::MAX`) represents infinity.
         pub(crate) fn valid_lifetime(&self) -> u32 {
             self.valid_lifetime.get()
         }
 
+        /// Get the length of time in seconds (relative to the time the
+        /// packet is sent) that addresses generated from the prefix via
+        /// stateless address autoconfiguration remains preferred.
+        ///
+        /// A value of all one bits (`std::u32::MAX`) represents infinity.
         pub(crate) fn preferred_lifetime(&self) -> u32 {
             self.preferred_lifetime.get()
         }
 
+        /// An IPv6 address or a prefix of an IPv6 address.
+        ///
+        /// The number of valid leading bits in this prefix is available
+        /// from [`PrefixInformation::prefix_length`];
         pub(crate) fn prefix(&self) -> &Ipv6Addr {
             &self.prefix
+        }
+
+        /// Get an [`AddrSubnet`] from this prefix.
+        pub(crate) fn addr_subnet(&self) -> Option<AddrSubnet<Ipv6Addr>> {
+            AddrSubnet::new(self.prefix, self.prefix_length)
         }
     }
 
     #[allow(missing_docs)]
-    #[derive(Debug)]
+    #[derive(Debug, PartialEq, Eq)]
     pub(crate) enum NdpOption<'a> {
         SourceLinkLayerAddress(&'a [u8]),
         TargetLinkLayerAddress(&'a [u8]),
-        PrefixInformation(LayoutVerified<&'a [u8], PrefixInformation>),
+        PrefixInformation(&'a PrefixInformation),
 
         RedirectedHeader { original_packet: &'a [u8] },
 
-        MTU { mtu: &'a [u8] },
+        MTU(u32),
     }
 
     impl<'a> From<&NdpOption<'a>> for NdpOptionType {
@@ -236,12 +414,13 @@ pub(crate) mod options {
                 }
                 Some(NdpOptionType::PrefixInformation) => NdpOption::PrefixInformation(
                     LayoutVerified::<_, PrefixInformation>::new(data)
-                        .ok_or_else(|| "No parse data".to_string())?,
+                        .ok_or_else(|| "No parse data".to_string())?
+                        .into_ref(),
                 ),
                 Some(NdpOptionType::RedirectedHeader) => {
                     NdpOption::RedirectedHeader { original_packet: &data[6..] }
                 }
-                Some(NdpOptionType::Mtu) => NdpOption::MTU { mtu: &data[2..] },
+                Some(NdpOptionType::Mtu) => NdpOption::MTU(NetworkEndian::read_u32(&data[2..])),
                 None => return Ok(None),
             }))
         }
@@ -254,9 +433,9 @@ pub(crate) mod options {
             match option {
                 NdpOption::SourceLinkLayerAddress(data)
                 | NdpOption::TargetLinkLayerAddress(data)
-                | NdpOption::RedirectedHeader { original_packet: data }
-                | NdpOption::MTU { mtu: data } => data.len(),
-                NdpOption::PrefixInformation(pfx_info) => pfx_info.bytes().len(),
+                | NdpOption::RedirectedHeader { original_packet: data } => data.len(),
+                NdpOption::MTU(mtu) => MTU_OPTION_LEN,
+                NdpOption::PrefixInformation(pfx_info) => PREFIX_INFORMATION_OPTION_LEN,
             }
         }
 
@@ -265,27 +444,86 @@ pub(crate) mod options {
         }
 
         fn serialize(buffer: &mut [u8], option: &Self::Option) {
-            let bytes = match option {
+            match option {
                 NdpOption::SourceLinkLayerAddress(data)
                 | NdpOption::TargetLinkLayerAddress(data)
-                | NdpOption::RedirectedHeader { original_packet: data }
-                | NdpOption::MTU { mtu: data } => data,
-                NdpOption::PrefixInformation(pfx_info) => pfx_info.bytes(),
-            };
-            buffer.copy_from_slice(bytes);
+                | NdpOption::RedirectedHeader { original_packet: data } => {
+                    buffer.copy_from_slice(data);
+                }
+                NdpOption::PrefixInformation(pfx_info) => {
+                    buffer.copy_from_slice(pfx_info.as_bytes());
+                }
+                NdpOption::MTU(mtu) => {
+                    buffer[..2].copy_from_slice(&[0; 2]);
+                    NetworkEndian::write_u32(&mut buffer[2..], *mtu);
+                }
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use packet::{ParsablePacket, ParseBuffer};
+    use packet::{InnerPacketBuilder, ParsablePacket, ParseBuffer};
 
     use super::*;
     use crate::ip;
     use crate::wire::icmp::{IcmpMessage, IcmpPacket, IcmpPacketBuilder, IcmpParseArgs};
     use crate::wire::ipv6::{Ipv6Packet, Ipv6PacketBuilder};
     use packet::serialize::Serializer;
+
+    #[test]
+    fn parse_serialize_mtu_option() {
+        let expected_mtu = 5781;
+        let options = &[options::NdpOption::MTU(expected_mtu)];
+        let serialized = OptionsSerializer::<_>::new(options.iter())
+            .into_serializer()
+            .serialize_vec_outer()
+            .unwrap();
+        let mut expected = [5, 1, 0, 0, 0, 0, 0, 0];
+        NetworkEndian::write_u32(&mut expected[4..], expected_mtu);
+        assert_eq!(serialized.as_ref(), expected);
+
+        let parsed = Options::parse(&expected[..]).unwrap();
+        let parsed = parsed.iter().collect::<Vec<options::NdpOption>>();
+        assert_eq!(parsed.len(), 1);
+        if let options::NdpOption::MTU(mtu) = &parsed[0] {
+            assert_eq!(*mtu, expected_mtu);
+        } else {
+            unreachable!("parsed option should have been an mtu option");
+        }
+    }
+
+    #[test]
+    fn parse_serialize_prefix_option() {
+        let expected_prefix_info = options::PrefixInformation::new(
+            120,
+            true,
+            false,
+            100,
+            100,
+            Ipv6Addr::new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 168, 0, 0]),
+        );
+        let options = &[options::NdpOption::PrefixInformation(&expected_prefix_info)];
+        let serialized = OptionsSerializer::<_>::new(options.iter())
+            .into_serializer()
+            .serialize_vec_outer()
+            .unwrap();
+        let mut expected = [0; 32];
+        expected[0] = 3;
+        expected[1] = 4;
+        (&mut expected[2..]).copy_from_slice(expected_prefix_info.as_bytes());
+        assert_eq!(serialized.as_ref(), expected);
+
+        let parsed = Options::parse(&expected[..]).unwrap();
+        let parsed = parsed.iter().collect::<Vec<options::NdpOption>>();
+        assert_eq!(parsed.len(), 1);
+        if let options::NdpOption::PrefixInformation(prefix_info) = &parsed[0] {
+            assert_eq!(expected_prefix_info, **prefix_info);
+        } else {
+            unreachable!("parsed option should have been a prefix information option");
+        }
+    }
 
     #[test]
     fn parse_neighbor_solicitation() {
@@ -311,6 +549,7 @@ mod tests {
             }
         }
         let serialized = OptionsSerializer::<_>::new(collected.iter())
+            .into_serializer()
             .encapsulate(IcmpPacketBuilder::<Ipv6, &[u8], _>::new(
                 src_ip,
                 dst_ip,
@@ -318,7 +557,7 @@ mod tests {
                 *icmp.message(),
             ))
             .encapsulate(ip_builder)
-            .serialize_outer()
+            .serialize_vec_outer()
             .unwrap()
             .as_ref()
             .to_vec();
@@ -326,14 +565,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_neighbor_advertisment() {
+    fn parse_neighbor_advertisement() {
         use crate::wire::icmp::testdata::ndp_neighbor::*;
-        let mut buf = &ADVERTISMENT_IP_PACKET_BYTES[..];
+        let mut buf = &ADVERTISEMENT_IP_PACKET_BYTES[..];
         let ip = buf.parse::<Ipv6Packet<_>>().unwrap();
         let ip_builder = ip.builder();
         let (src_ip, dst_ip, hop_limit) = (ip.src_ip(), ip.dst_ip(), ip.hop_limit());
         let icmp = buf
-            .parse_with::<_, IcmpPacket<_, _, NeighborAdvertisment>>(IcmpParseArgs::new(
+            .parse_with::<_, IcmpPacket<_, _, NeighborAdvertisement>>(IcmpParseArgs::new(
                 src_ip, dst_ip,
             ))
             .unwrap();
@@ -341,6 +580,7 @@ mod tests {
         assert_eq!(icmp.ndp_options().iter().count(), 0);
 
         let serialized = []
+            .into_serializer()
             .encapsulate(IcmpPacketBuilder::<Ipv6, &[u8], _>::new(
                 src_ip,
                 dst_ip,
@@ -348,22 +588,22 @@ mod tests {
                 *icmp.message(),
             ))
             .encapsulate(ip_builder)
-            .serialize_outer()
+            .serialize_vec_outer()
             .unwrap()
             .as_ref()
             .to_vec();
-        assert_eq!(&serialized, &ADVERTISMENT_IP_PACKET_BYTES);
+        assert_eq!(&serialized, &ADVERTISEMENT_IP_PACKET_BYTES);
     }
 
     #[test]
-    fn parse_router_advertisment() {
+    fn parse_router_advertisement() {
         use crate::wire::icmp::testdata::ndp_router::*;
-        let mut buf = &ADVERTISMENT_IP_PACKET_BYTES[..];
+        let mut buf = &ADVERTISEMENT_IP_PACKET_BYTES[..];
         let ip = buf.parse::<Ipv6Packet<_>>().unwrap();
         let ip_builder = ip.builder();
         let (src_ip, dst_ip) = (ip.src_ip(), ip.dst_ip());
         let icmp = buf
-            .parse_with::<_, IcmpPacket<_, _, RouterAdvertisment>>(IcmpParseArgs::new(
+            .parse_with::<_, IcmpPacket<_, _, RouterAdvertisement>>(IcmpParseArgs::new(
                 src_ip, dst_ip,
             ))
             .unwrap();
@@ -390,6 +630,7 @@ mod tests {
         }
 
         let serialized = OptionsSerializer::<_>::new(collected.iter())
+            .into_serializer()
             .encapsulate(IcmpPacketBuilder::<Ipv6, &[u8], _>::new(
                 src_ip,
                 dst_ip,
@@ -397,10 +638,10 @@ mod tests {
                 *icmp.message(),
             ))
             .encapsulate(ip_builder)
-            .serialize_outer()
+            .serialize_vec_outer()
             .unwrap()
             .as_ref()
             .to_vec();
-        assert_eq!(&serialized, &ADVERTISMENT_IP_PACKET_BYTES);
+        assert_eq!(&serialized, &ADVERTISEMENT_IP_PACKET_BYTES);
     }
 }

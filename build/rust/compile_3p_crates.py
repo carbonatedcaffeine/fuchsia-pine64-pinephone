@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 # Copyright 2018 The Fuchsia Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -156,6 +156,12 @@ def main():
         "--frozen",
     ]
 
+    # Save the cargo arguments so that tooling can properly pick them up. This is so that these
+    # arguments can be changed here without having to go change the tooling scripts as well.
+    # Remove the `cargo build` part of the args, and the message format argument, since tooling
+    # will want to control those itself.
+    cargo_args = call_args[2:]
+
     call_args.append("--message-format=json")
 
     retcode, stdout, stderr = run_command(call_args, env, args.crate_root)
@@ -178,8 +184,16 @@ def main():
         if "filenames" not in data:
             continue
         crate_id = pathless_crate_id(data["package_id"])
-        assert len(data["filenames"]) == 1
-        lib_path = data["filenames"][0]
+        lib_path = None
+        for filename in data["filenames"]:
+            # prefer .rlibs to .sos or .dylibs
+            if filename.endswith(".rlib"):
+                lib_path = filename
+                break
+            if filename.endswith(".so") or filename.endswith(".dylib"):
+                lib_path = filename
+        if lib_path is None:
+            continue
 
         # For libraries built for both the host and the target, pick
         # the one being built for the target.
@@ -249,10 +263,22 @@ def main():
                         # This makes it possible for GN to know where to look for the library
                         # without first running this script.
                         old_lib_path = crate_info["lib_path"]
-                        ext = os.path.splitext(old_lib_path)[1] # save .rlib/.so/.a
+                        old_path_split = os.path.splitext(old_lib_path)
+                        old_path_prefix = old_path_split[0]
+                        ext = old_path_split[1]  # save .rlib/.so/.a
                         new_filename = "lib" + crate_name + "-" + package_name + ext
                         new_lib_path = os.path.join(args.out_dir, new_filename)
                         os.rename(old_lib_path, new_lib_path)
+
+                        # If the artifact was an .rlib and there also exists a corresponding
+                        # .rmeta, we have to move that as well.
+                        if ext == ".rlib":
+                            old_meta_path = old_path_prefix + ".rmeta"
+                            if os.path.exists(old_meta_path):
+                                new_meta_name = "lib" + crate_name + "-" + package_name + ".rmeta"
+                                new_meta_path = os.path.join(args.out_dir, new_meta_name)
+                                os.rename(old_meta_path, new_meta_path)
+
                         crate_info["lib_path"] = new_lib_path
 
                         crates[package_name] = crate_info
@@ -273,6 +299,7 @@ def main():
             "crates": crates,
             "deps_folders": list(deps_folders),
             "patches": patches,
+            "cargo_args": cargo_args
         }, sort_keys=True, indent=4, separators=(",", ": "))) # for humans
 
 if __name__ == '__main__':

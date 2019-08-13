@@ -1,23 +1,39 @@
 // Copyright 2017 The Fuchsia Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 #include "src/media/audio/audio_core/audio_driver.h"
 
-#include <audio-proto-utils/format-utils.h>
+#include <lib/zx/clock.h>
 #include <zircon/status.h>
 
 #include <cstdio>
+#include <iomanip>
+
+#include <audio-proto-utils/format-utils.h>
 
 #include "lib/fidl/cpp/clone.h"
-#include "src/lib/fxl/logging.h"
 #include "src/media/audio/audio_core/driver_utils.h"
+#include "src/media/audio/lib/logging/logging.h"
 
 namespace media::audio {
 
 static constexpr zx_txid_t TXID = 1;
-static constexpr zx_duration_t kDefaultShortCmdTimeout = ZX_MSEC(250);
-static constexpr zx_duration_t kDefaultLongCmdTimeout = ZX_SEC(3);
+
+// Timeout values are chosen to be generous while still providing some guard-rails against hardware
+// errors. Correctly functioning hardware and drivers should never result in any timeouts.
+static constexpr zx_duration_t kDefaultShortCmdTimeout = ZX_SEC(1);
+static constexpr zx_duration_t kDefaultLongCmdTimeout = ZX_SEC(4);
+
+static constexpr bool kEnablePositionNotifications = true;
+// To what extent should position notification messages be logged? If logging level is SPEW, every
+// notification is logged (specified by Spew const). If TRACE, log less frequently, specified by
+// Trace const. If INFO, even less frequently per Info const (INFO is default for DEBUG builds).
+// Default for audio_core in NDEBUG builds is WARNING, so by default we do not log any of these
+// messages on Release builds. Set to false to not log at all, even for unsolicited notifications.
+static constexpr bool kLogPositionNotifications = true;
+static constexpr uint16_t kPositionNotificationSpewInterval = 1;
+static constexpr uint16_t kPositionNotificationTraceInterval = 60;
+static constexpr uint16_t kPositionNotificationInfoInterval = 3600;
 
 AudioDriver::AudioDriver(AudioDevice* owner) : owner_(owner) {
   FXL_DCHECK(owner_ != nullptr);
@@ -33,8 +49,7 @@ zx_status_t AudioDriver::Init(zx::channel stream_channel) {
     return ZX_ERR_NO_RESOURCES;
   }
 
-  // Fetch the KOID of our stream channel.  We will end up using this unique ID
-  // as our device's device token.
+  // Fetch the KOID of our stream channel. We use this unique ID as our device's device token.
   zx_status_t res;
   zx_info_handle_basic_t sc_info;
   res = stream_channel.get_info(ZX_INFO_HANDLE_BASIC, &sc_info, sizeof(sc_info), nullptr, nullptr);
@@ -81,12 +96,11 @@ zx_status_t AudioDriver::Init(zx::channel stream_channel) {
     return res;
   }
 
-  // We are now initialized, but we don't know any of our fundamental driver
-  // level info.  Things like...
+  // We are now initialized, but we don't know any fundamental driver level info, such as:
   //
   // 1) This device's persistent unique ID.
   // 2) The list of formats supported by this device.
-  // 3) The user visible strings for this device (manufacturer, product, etc...)
+  // 3) The user-visible strings for this device (manufacturer, product, etc...).
   state_ = State::MissingDriverInfo;
   return ZX_OK;
 }
@@ -129,7 +143,7 @@ fuchsia::media::AudioStreamTypePtr AudioDriver::GetSourceFormat() const {
 }
 
 zx_status_t AudioDriver::GetDriverInfo() {
-  // TODO(johngro) : Figure out a better way to assert this!
+  // TODO(MTWN-385): Figure out a better way to assert this!
   OBTAIN_EXECUTION_DOMAIN_TOKEN(token, owner_->mix_domain_);
 
   // We have to be operational in order to fetch supported formats.
@@ -139,8 +153,7 @@ zx_status_t AudioDriver::GetDriverInfo() {
     return ZX_ERR_BAD_STATE;
   }
 
-  // If we are already in the process of fetching our initial driver info, just
-  // get out now.  We will inform our owner when the process completes.
+  // If already fetching initial driver info, get out now and inform our owner when this completes.
   if (fetching_driver_info()) {
     return ZX_OK;
   }
@@ -150,7 +163,7 @@ zx_status_t AudioDriver::GetDriverInfo() {
   // 1) Fetch our persistent unique ID.
   // 2) Fetch our manufacturer string.
   // 3) Fetch our product string.
-  // 4) Fetch our current gain state/caps
+  // 4) Fetch our current gain state and capabilities.
   // 5) Fetch our supported format list.
 
   // Step #1, fetch unique IDs.
@@ -184,7 +197,7 @@ zx_status_t AudioDriver::GetDriverInfo() {
     }
   }
 
-  // Step #4.  Fetch our current gain state.
+  // Step #4. Fetch our current gain state.
   {
     audio_stream_cmd_get_gain_req_t req;
     req.hdr.cmd = AUDIO_STREAM_CMD_GET_GAIN;
@@ -197,7 +210,7 @@ zx_status_t AudioDriver::GetDriverInfo() {
     }
   }
 
-  // Step #5.  Fetch our list of supported formats.
+  // Step #5. Fetch our list of supported formats.
   {
     FXL_DCHECK(format_ranges_.empty());
 
@@ -222,7 +235,7 @@ zx_status_t AudioDriver::GetDriverInfo() {
 zx_status_t AudioDriver::Configure(uint32_t frames_per_second, uint32_t channels,
                                    fuchsia::media::AudioSampleFormat fmt,
                                    zx_duration_t min_ring_buffer_duration) {
-  // TODO(johngro) : Figure out a better way to assert this!
+  // TODO(MTWN-385): Figure out a better way to assert this!
   OBTAIN_EXECUTION_DOMAIN_TOKEN(token, owner_->mix_domain_);
 
   // Sanity check arguments.
@@ -238,7 +251,7 @@ zx_status_t AudioDriver::Configure(uint32_t frames_per_second, uint32_t channels
     return ZX_ERR_INVALID_ARGS;
   }
 
-  // TODO(johngro) : sanity check the min_ring_buffer_sz.
+  // TODO(MTWN-386): sanity check the min_ring_buffer_duration.
 
   // Check our known format list for compatibility.
   bool found_format = false;
@@ -257,9 +270,8 @@ zx_status_t AudioDriver::Configure(uint32_t frames_per_second, uint32_t channels
     return ZX_ERR_INVALID_ARGS;
   }
 
-  // We must be in the Unconfigured state in order to change formats.
-  // TODO(johngro): Improve this.  We should permit changing formats if we are
-  // in either the Unconfigured or Configured state.
+  // We must be in Unconfigured state to change formats.
+  // TODO(MTWN-387): Also permit this if we are in Configured state.
   if (state_ != State::Unconfigured) {
     FXL_LOG(ERROR) << "Bad state while attempting to configure for " << frames_per_second << " Hz "
                    << channels << " Ch Fmt 0x" << std::hex << static_cast<uint32_t>(fmt)
@@ -272,7 +284,7 @@ zx_status_t AudioDriver::Configure(uint32_t frames_per_second, uint32_t channels
   channel_count_ = static_cast<uint16_t>(channels);
   sample_format_ = driver_format;
   bytes_per_frame_ = ::audio::utils::ComputeFrameSize(channel_count_, sample_format_);
-  ;
+
   min_ring_buffer_duration_ = min_ring_buffer_duration;
 
   // Start the process of configuring by sending the message to set the format.
@@ -307,16 +319,14 @@ zx_status_t AudioDriver::Configure(uint32_t frames_per_second, uint32_t channels
 }
 
 zx_status_t AudioDriver::Start() {
-  // TODO(johngro) : Figure out a better way to assert this!
+  // TODO(MTWN-385): Figure out a better way to assert this!
   OBTAIN_EXECUTION_DOMAIN_TOKEN(token, owner_->mix_domain_);
 
   // In order to start, we must be in the Configured state.
   //
-  // Note: Attempting to start while already started is considered to be an
-  // error because (since we are already started) we will never deliver the
-  // OnDriverStartComplete callback, and it would be confisuing to do so from
-  // within the call to start itself (before the user's call to Start even
-  // returned)
+  // Note: Attempting to start while already started is considered an error because (since we are
+  // already started) we will never deliver the OnDriverStartComplete callback. It would be
+  // confusing to call it directly from here -- before the user's call to Start even returned.
   if (state_ != State::Configured) {
     FXL_LOG(ERROR) << "Bad state while attempting start (state = " << static_cast<uint32_t>(state_)
                    << ")";
@@ -342,23 +352,21 @@ zx_status_t AudioDriver::Start() {
 }
 
 zx_status_t AudioDriver::Stop() {
-  // TODO(johngro) : Figure out a better way to assert this!
+  // TODO(MTWN-385): Figure out a better way to assert this!
   OBTAIN_EXECUTION_DOMAIN_TOKEN(token, owner_->mix_domain_);
 
   // In order to stop, we must be in the Started state.
-  // TODO(johngro): consider relaxing this restriction to make Stop completely
-  // idempotent.  Care would to be taken to handle the case where a user
-  // attempts to stop while a start operation is in flight but has not
-  // completed.  Allowing multiple start/stop operations to be in flight
-  // simultaneously could get quite confusing.
+  // TODO(MTWN-388): make Stop idempotent. Allow Stop when Configured/Stopping; disallow if
+  // Shutdown; consider what to do if Uninitialized/MissingDriverInfo/Unconfigured/Configuring. Most
+  // importantly, if driver is Starting, queue the request until Start completes (as we cannot
+  // cancel driver commands). Finally, handle multiple Stop calls to be in-flight concurrently.
   if (state_ != State::Started) {
     FXL_LOG(ERROR) << "Bad state while attempting stop (state = " << static_cast<uint32_t>(state_)
                    << ")";
     return ZX_ERR_BAD_STATE;
   }
 
-  // Invalidate our timeline transformation here.  To outside observers, we are
-  // now stopped.
+  // Invalidate our timeline transformation here. To outside observers, we are now stopped.
   {
     std::lock_guard<std::mutex> lock(ring_buffer_state_lock_);
     clock_mono_to_ring_pos_bytes_ = TimelineFunction();
@@ -375,11 +383,10 @@ zx_status_t AudioDriver::Stop() {
     return res;
   }
 
-  // Since we were just recently in steady state, we should be able to assert
-  // that we have no configuration timeout at this point.
+  // We were recently in steady state, so assert that we have no configuration timeout at this time.
   FXL_DCHECK(configuration_timeout_ == ZX_TIME_INFINITE);
 
-  // We are now in the process of stopping.
+  // We are now in the Stopping state.
   state_ = State::Stopping;
   configuration_timeout_ = zx_deadline_after(kDefaultShortCmdTimeout);
   SetupCommandTimeout();
@@ -388,7 +395,7 @@ zx_status_t AudioDriver::Stop() {
 }
 
 zx_status_t AudioDriver::SetPlugDetectEnabled(bool enabled) {
-  // TODO(johngro) : Figure out a better way to assert this!
+  // TODO(MTWN-385): Figure out a better way to assert this!
   OBTAIN_EXECUTION_DOMAIN_TOKEN(token, owner_->mix_domain_);
 
   if (enabled == pd_enabled_) {
@@ -525,12 +532,10 @@ zx_status_t AudioDriver::ProcessStreamChannelMessage() {
       } else {
         plug_state = ((msg.pd_resp.flags & AUDIO_PDNF_PLUGGED) != 0);
         if ((msg.pd_resp.flags & AUDIO_PDNF_CAN_NOTIFY) == 0) {
-          // TODO(johngro) : If we ever encounter hardware which must be polled
-          // in order for plug detection to function properly, we should set up
-          // a timer to periodically poll the plug state instead of just
-          // assuming that the output is always plugged in.
-          FXL_LOG(WARNING) << "Stream is incapable of async plug detection notifications.  "
-                              "Assuming that the stream is always plugged in for now.";
+          // TODO(MTWN-389): If we encounter hardware which must be polled for plug detection, set
+          // a timer to periodically check this; don't just assume that output is always plugged in.
+          FXL_LOG(WARNING) << "Stream is incapable of async plug detection notifications. Assuming "
+                              "that the stream is always plugged in for now.";
           plug_state = true;
         }
       }
@@ -599,10 +604,6 @@ zx_status_t AudioDriver::ProcessRingBufferChannelMessage() {
       res = ProcessStopResponse(msg.stop);
       break;
 
-    // Currently we ignore driver-reported position, instead using the system-
-    // internal clock. This message is benign and can be safely ignored, but
-    // because we did not request it, this may indicate some other problem in
-    // the driver state machine. We issue a warning, eat the msg and continue.
     case AUDIO_RB_POSITION_NOTIFY:
       CHECK_RESP(AUDIO_RB_POSITION_NOTIFY, pos_notify, false, true);
       res = ProcessPositionNotify(msg.pos_notify);
@@ -633,7 +634,7 @@ zx_status_t AudioDriver::ProcessGetStringResponse(audio_stream_cmd_get_string_re
 
   if (resp.result != ZX_OK) {
     FXL_LOG(WARNING) << "Error ( " << resp.result << ") attempting to fetch string id " << resp.id
-                     << ".  Replacing with <unknown>.";
+                     << ". Replacing with <unknown>.";
     resp.strlen = static_cast<uint32_t>(
         snprintf(reinterpret_cast<char*>(resp.str), sizeof(resp.str), "<unknown>"));
   }
@@ -660,8 +661,7 @@ zx_status_t AudioDriver::ProcessGetStringResponse(audio_stream_cmd_get_string_re
     return ZX_ERR_INTERNAL;
   }
 
-  // Stash the string we just received and update our progress in fetching our
-  // initial driver info.
+  // Stash the string we just received and update our progress in fetching our initial driver info.
   FXL_DCHECK(tgt_string != nullptr);
   tgt_string->assign(reinterpret_cast<char*>(resp.str), resp.strlen);
   return OnDriverInfoFetched(info_bit);
@@ -687,8 +687,7 @@ zx_status_t AudioDriver::ProcessGetFormatsResponse(
     return ZX_ERR_BAD_STATE;
   }
 
-  // Is this the first response?  If so, resize our format vector
-  // before proceeding.
+  // Is this the first response? If so, resize our format vector before proceeding.
   if (resp.first_format_range_ndx == 0) {
     format_ranges_.reserve(resp.format_range_count);
   }
@@ -720,9 +719,8 @@ zx_status_t AudioDriver::ProcessGetFormatsResponse(
     format_ranges_.emplace_back(resp.format_ranges[i]);
   }
 
-  // Record the fact that we have now fetched our format list.  This will handle
-  // transitioning to the Unconfigured state and letting our owner know if we
-  // have managed to fetch all of the initial driver info we need to operate.
+  // Record that we have fetched our format list. This will transition us to Unconfigured state and
+  // let our owner know if we are done fetching all the initial driver info needed to operate.
   return OnDriverInfoFetched(kDriverInfoHasFormats);
 }
 
@@ -744,8 +742,7 @@ zx_status_t AudioDriver::ProcessSetFormatResponse(const audio_stream_cmd_set_for
     return resp.result;
   }
 
-  // TODO(johngro): See MTWN-61. Update AudioCapturers and outputs to take
-  // external delay into account when sampling.
+  // TODO(MTWN-61): Update AudioCapturers and outputs to incorporate external delay when resampling.
   external_delay_nsec_ = resp.external_delay_nsec;
 
   // Activate our ring buffer channel in our execution domain.
@@ -771,10 +768,9 @@ zx_status_t AudioDriver::ProcessSetFormatResponse(const audio_stream_cmd_set_for
     return res;
   }
 
-  // Fetch the fifo depth of the ring buffer we just got back.  This determines
-  // how far ahead of the current playout position (in bytes) the hardware may
-  // read.  We need to know this number in order to size the ring buffer vmo
-  // appropriately
+  // Fetch the fifo depth of the ring buffer we just received. This determines how far ahead of
+  // current playout position (in bytes) the hardware may read. We need to know this number, in
+  // order to size the ring buffer vmo appropriately.
   audio_rb_cmd_get_fifo_depth_req req;
 
   req.hdr.cmd = AUDIO_RB_CMD_GET_FIFO_DEPTH;
@@ -837,7 +833,7 @@ zx_status_t AudioDriver::ProcessGetFifoDepthResponse(
   req.hdr.cmd = AUDIO_RB_CMD_GET_BUFFER;
   req.hdr.transaction_id = TXID;
   req.min_ring_buffer_frames = static_cast<uint32_t>(min_frames_64);
-  req.notifications_per_ring = 0;
+  req.notifications_per_ring = (kEnablePositionNotifications ? 2 : 0);
 
   zx_status_t res = rb_channel_->Write(&req, sizeof(req));
   if (res != ZX_OK) {
@@ -878,7 +874,7 @@ zx_status_t AudioDriver::ProcessGetBufferResponse(const audio_rb_cmd_get_buffer_
     ring_buffer_state_gen_.Next();
   }
 
-  // We are now configured.  Let our owner know about this important milestone.
+  // We are now Configured. Let our owner know about this important milestone.
   state_ = State::Configured;
   configuration_timeout_ = ZX_TIME_INFINITE;
   SetupCommandTimeout();
@@ -898,9 +894,8 @@ zx_status_t AudioDriver::ProcessStartResponse(const audio_rb_cmd_start_resp_t& r
     return resp.result;
   }
 
-  // Now that we have started up, compute the transformation from clock
-  // monotonic to the ring buffer position (in bytes) Then update the ring
-  // buffer state's transformation and bump the generation counter.
+  // We are almost Started, so compute the translation from clock-monotonic to ring-buffer-position
+  // (in bytes), then update the ring buffer state's transformation and bump the generation counter.
   TimelineFunction func(0, resp.start_time, frames_per_sec_ * bytes_per_frame_, ZX_SEC(1));
   {
     std::lock_guard<std::mutex> lock(ring_buffer_state_lock_);
@@ -910,7 +905,7 @@ zx_status_t AudioDriver::ProcessStartResponse(const audio_rb_cmd_start_resp_t& r
     ring_buffer_state_gen_.Next();
   }
 
-  // We are now started. Let our owner know about this important milestone.
+  // We are now Started. Let our owner know about this important milestone.
   state_ = State::Started;
   configuration_timeout_ = ZX_TIME_INFINITE;
   SetupCommandTimeout();
@@ -930,7 +925,7 @@ zx_status_t AudioDriver::ProcessStopResponse(const audio_rb_cmd_stop_resp_t& res
     return resp.result;
   }
 
-  // We are now stopped.  Let our owner know about this important milestone.
+  // We are now stopped and in Configured state. Let our owner know about this important milestone.
   state_ = State::Configured;
   configuration_timeout_ = ZX_TIME_INFINITE;
   SetupCommandTimeout();
@@ -938,12 +933,37 @@ zx_status_t AudioDriver::ProcessStopResponse(const audio_rb_cmd_stop_resp_t& res
   return ZX_OK;
 }
 
+// Currently we ignore driver-reported position, using the system-internal clock instead. This is
+// benign and can be safely ignored. However, we did not request it, so this may indicate some other
+// problem in the driver state machine. Issue a (debug-only) warning, eat the msg, and continue.
 zx_status_t AudioDriver::ProcessPositionNotify(const audio_rb_position_notify_t& notify) {
-  FXL_DLOG(INFO) << "Unsolicited ring buffer position notification!  Time:"
-                 << zx_clock_get_monotonic() << " Pos:" << notify.ring_buffer_pos;
+  if constexpr (kLogPositionNotifications) {
+    if ((kPositionNotificationInfoInterval > 0) &&
+        (position_notification_count_ % kPositionNotificationInfoInterval == 0)) {
+      AUD_LOG_OBJ(INFO, this) << (kEnablePositionNotifications ? "Notification"
+                                                               : "Unsolicited notification")
+                              << " (1/" << kPositionNotificationInfoInterval
+                              << ") Time:" << notify.monotonic_time << ", Pos:" << std::setw(6)
+                              << notify.ring_buffer_pos;
+    } else if ((kPositionNotificationTraceInterval > 0) &&
+               (position_notification_count_ % kPositionNotificationTraceInterval == 0)) {
+      AUD_VLOG_OBJ(TRACE, this) << (kEnablePositionNotifications ? "Notification"
+                                                                 : "Unsolicited notification")
+                                << " (1/" << kPositionNotificationTraceInterval
+                                << ") Time:" << notify.monotonic_time << ",  Pos:" << std::setw(6)
+                                << notify.ring_buffer_pos;
+    } else if ((kPositionNotificationSpewInterval > 0) &&
+               (position_notification_count_ % kPositionNotificationSpewInterval == 0)) {
+      AUD_VLOG_OBJ(SPEW, this) << (kEnablePositionNotifications ? "Notification"
+                                                                : "Unsolicited notification")
+                               << " (1/" << kPositionNotificationSpewInterval
+                               << ") Time:" << notify.monotonic_time << ", Pos:" << std::setw(6)
+                               << notify.ring_buffer_pos;
+    }
+  }
+  // Even if we don't log them, keep a running count of position notifications since START.
+  ++position_notification_count_;
 
-  // Although this notification was unsolicited and unexpected, we only complain
-  // (and only on debug builds), rather than abort-closing the channel.
   return ZX_OK;
 }
 
@@ -1002,11 +1022,10 @@ zx_status_t AudioDriver::OnDriverInfoFetched(uint32_t info) {
   FXL_DCHECK(state_ == State::MissingDriverInfo);
   fetched_driver_info_ |= info;
 
-  // Have we finished fetching our initial driver info?  If so, cancel the
-  // timeout, transition to the unconfigured state, and let our owner know that
-  // we have finished.
+  // Have we finished fetching our initial driver info? If so, cancel the timeout, transition to
+  // Unconfigured state, and let our owner know that we have finished.
   if ((fetched_driver_info_ & kDriverInfoHasAll) == kDriverInfoHasAll) {
-    // We are done.  Clear the fetch driver info timeout and let our owner know.
+    // We are done. Clear the fetch driver info timeout and let our owner know.
     fetch_driver_info_timeout_ = ZX_TIME_INFINITE;
     state_ = State::Unconfigured;
     SetupCommandTimeout();

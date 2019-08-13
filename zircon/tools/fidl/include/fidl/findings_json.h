@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_FINDINGS_JSON_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_FINDINGS_JSON_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_FINDINGS_JSON_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_FINDINGS_JSON_H_
 
 #include <memory>
 #include <sstream>
@@ -39,8 +39,7 @@ class FindingsJson : public utils::JsonWriter<FindingsJson> {
     Suggestion suggestion;
   };
 
-  explicit FindingsJson(const Findings& findings)
-      : JsonWriter(json_file_), findings_(findings) {}
+  explicit FindingsJson(const Findings& findings) : JsonWriter(json_file_), findings_(findings) {}
 
   ~FindingsJson() = default;
 
@@ -58,4 +57,4 @@ class FindingsJson : public utils::JsonWriter<FindingsJson> {
 
 }  // namespace fidl
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_FINDINGS_JSON_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_FINDINGS_JSON_H_

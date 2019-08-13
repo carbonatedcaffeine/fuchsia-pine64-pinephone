@@ -4,9 +4,10 @@
 
 #include "sensor.h"
 
-#include <ddk/debug.h>
 #include <lib/syslog/global.h>
 #include <zircon/types.h>
+
+#include <ddk/debug.h>
 
 #include "../mali-009/global_regs.h"
 #include "../mali-009/pingpong_regs.h"
@@ -15,10 +16,7 @@ namespace camera {
 
 zx_status_t Sensor::HwInit() {
   // Input port safe stop
-  InputPort_Config3::Get()
-      .ReadFrom(&isp_mmio_)
-      .set_mode_request(0)
-      .WriteTo(&isp_mmio_);
+  InputPort_Config3::Get().ReadFrom(&isp_mmio_).set_mode_request(0).WriteTo(&isp_mmio_);
 
   zx_status_t status = camera_sensor_.SetMode(current_sensor_mode_);
   if (status != ZX_OK) {
@@ -94,10 +92,7 @@ zx_status_t Sensor::SwInit() {
       .WriteTo(&isp_mmio_);
 
   // Input port safe start
-  InputPort_Config3::Get()
-      .ReadFrom(&isp_mmio_)
-      .set_mode_request(1)
-      .WriteTo(&isp_mmio_);
+  InputPort_Config3::Get().ReadFrom(&isp_mmio_).set_mode_request(1).WriteTo(&isp_mmio_);
 
   // Update Bayer Bits
   uint8_t isp_bit_width;
@@ -153,11 +148,10 @@ zx_status_t Sensor::Init() {
   }
 
   size_t actual_modes;
-  status = camera_sensor_.GetSupportedModes((sensor_mode_t*)(&sensor_modes_),
-                                            kNumModes, &actual_modes);
+  status =
+      camera_sensor_.GetSupportedModes((sensor_mode_t*)(&sensor_modes_), kNumModes, &actual_modes);
   if (status != ZX_OK) {
-    FX_LOGF(ERROR, "", "%s: Sensor GetSupportedModes failed %d\n", __func__,
-            status);
+    FX_LOGF(ERROR, "", "%s: Sensor GetSupportedModes failed %d\n", __func__, status);
     return status;
   }
 
@@ -166,8 +160,8 @@ zx_status_t Sensor::Init() {
     return status;
   }
 
-  // Default mode is 0
-  status = SetMode(0);
+  // Default mode is 1
+  status = SetMode(1);
   if (status != ZX_OK) {
     FX_LOGF(ERROR, "", "%s: Sensor SetMode failed %d\n", __func__, status);
     return status;
@@ -195,8 +189,7 @@ zx_status_t Sensor::SetMode(uint8_t mode) {
   return status;
 }
 
-zx_status_t Sensor::GetSupportedModes(sensor_mode_t* out_modes_list,
-                                      size_t modes_count) {
+zx_status_t Sensor::GetSupportedModes(sensor_mode_t* out_modes_list, size_t modes_count) {
   if (out_modes_list == nullptr || modes_count != kNumModes) {
     return ZX_ERR_INVALID_ARGS;
   }
@@ -205,13 +198,9 @@ zx_status_t Sensor::GetSupportedModes(sensor_mode_t* out_modes_list,
   return ZX_OK;
 }
 
-int32_t Sensor::SetAnalogGain(int32_t gain) {
-  return camera_sensor_.SetAnalogGain(gain);
-}
+int32_t Sensor::SetAnalogGain(int32_t gain) { return camera_sensor_.SetAnalogGain(gain); }
 
-int32_t Sensor::SetDigitalGain(int32_t gain) {
-  return camera_sensor_.SetDigitalGain(gain);
-}
+int32_t Sensor::SetDigitalGain(int32_t gain) { return camera_sensor_.SetDigitalGain(gain); }
 
 zx_status_t Sensor::StartStreaming() { return camera_sensor_.StartStreaming(); }
 
@@ -238,12 +227,10 @@ zx_status_t Sensor::GetInfo(sensor_info_t* out_info) {
 }
 
 // static
-fbl::unique_ptr<Sensor> Sensor::Create(
-    ddk::MmioView isp_mmio, ddk::MmioView isp_mmio_local,
-    ddk::CameraSensorProtocolClient camera_sensor) {
+fbl::unique_ptr<Sensor> Sensor::Create(ddk::MmioView isp_mmio, ddk::MmioView isp_mmio_local,
+                                       ddk::CameraSensorProtocolClient camera_sensor) {
   fbl::AllocChecker ac;
-  auto sensor = fbl::make_unique_checked<Sensor>(&ac, isp_mmio, isp_mmio_local,
-                                                 camera_sensor);
+  auto sensor = fbl::make_unique_checked<Sensor>(&ac, isp_mmio, isp_mmio_local, camera_sensor);
   if (!ac.check()) {
     return nullptr;
   }

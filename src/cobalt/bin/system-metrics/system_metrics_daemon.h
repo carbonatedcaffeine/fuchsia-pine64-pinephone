@@ -8,15 +8,15 @@
 #ifndef SRC_COBALT_BIN_SYSTEM_METRICS_SYSTEM_METRICS_DAEMON_H_
 #define SRC_COBALT_BIN_SYSTEM_METRICS_SYSTEM_METRICS_DAEMON_H_
 
-#include <fuchsia/cobalt/cpp/fidl.h>
-#include <lib/async/dispatcher.h>
-#include <lib/sys/cpp/component_context.h>
-
 #include <chrono>
 #include <memory>
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include <fuchsia/cobalt/cpp/fidl.h>
+#include <lib/async/dispatcher.h>
+#include <lib/sys/cpp/component_context.h>
 
 #include "src/cobalt/bin/system-metrics/cpu_stats_fetcher.h"
 #include "src/cobalt/bin/system-metrics/memory_stats_fetcher.h"
@@ -63,6 +63,9 @@ class SystemMetricsDaemon {
 
   void InitializeRootResourceHandle();
 
+  // If the peer has closed the FIDL connection, automatically reconnect.
+  zx_status_t ReinitializeIfPeerClosed(zx_status_t zx_status);
+
   // Calls LogUpPingAndLifeTimeEvents,
   // and then uses the |dispatcher| passed to the constructor to
   // schedule the next round.
@@ -81,6 +84,12 @@ class SystemMetricsDaemon {
   // then uses the |dispatcher| passed to the constructor to schedule
   // the next round.
   void RepeatedlyLogCpuUsage();
+
+  // Check if fetching device temperature is supported, and if successful
+  // start logging temperature.
+  // If it fails, attempt again after 1 minute. Repeat the process
+  // |remaining_attempts| times.
+  void LogTemperatureIfSupported(int remaining_attempts);
 
   // Calls LogTemperature,
   // then uses the |dispatcher| passed to the constructor to schedule
@@ -176,8 +185,12 @@ class SystemMetricsDaemon {
   std::unique_ptr<cobalt::CpuStatsFetcher> cpu_stats_fetcher_;
   std::unique_ptr<cobalt::TemperatureFetcher> temperature_fetcher_;
   std::vector<double> cpu_percentages_;
-  std::unordered_map<uint32_t, uint64_t> temperature_map_;
+  std::unordered_map<int32_t, uint64_t> temperature_map_;
   uint32_t temperature_map_size_ = 0;
+
+ protected:
+  // This function should only be used in test to change temperature fetcher.
+  void SetTemperatureFetcher(std::unique_ptr<cobalt::TemperatureFetcher> fetcher);
 };
 
 #endif  // SRC_COBALT_BIN_SYSTEM_METRICS_SYSTEM_METRICS_DAEMON_H_

@@ -3,10 +3,13 @@
         "binary": "bin/insntrace"
     },
     "sandbox": {
-        "dev": [ "sys/cpu-trace" ],
+        "dev": [
+          "misc",
+          "sys/cpu-trace"
+        ],
         "features": [
           "isolated-persistent-storage",
-          "system-temp"
+          "isolated-temp"
         ]
     }
 }

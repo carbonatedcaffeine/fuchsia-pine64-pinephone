@@ -97,10 +97,10 @@ where
     TraversalPosition: Default + Send,
     GetEntryNames: FnMut(
             TraversalPosition,
-            &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
+            &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
         ) -> (TraversalPosition, Result<(), Status>)
         + Send,
-    GetEntry: FnMut(&str) -> Result<Box<DirectoryEntry + 'entries>, Status> + Send,
+    GetEntry: FnMut(&str) -> Result<Box<dyn DirectoryEntry + 'entries>, Status> + Send,
 {
     lazy_attr_with_watchers(
         DEFAULT_DIRECTORY_PROTECTION_ATTRIBUTES,
@@ -124,10 +124,10 @@ where
     TraversalPosition: Default + Send,
     GetEntryNames: FnMut(
             TraversalPosition,
-            &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
+            &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
         ) -> (TraversalPosition, Result<(), Status>)
         + Send,
-    GetEntry: FnMut(&str) -> Result<Box<DirectoryEntry + 'entries>, Status> + Send,
+    GetEntry: FnMut(&str) -> Result<Box<dyn DirectoryEntry + 'entries>, Status> + Send,
     WatcherEvents: Stream<Item = WatcherEvent> + FusedStream + Unpin + Send,
 {
     lazy_attr_with_watchers(
@@ -152,10 +152,10 @@ where
     TraversalPosition: Default + Send,
     GetEntryNames: FnMut(
             TraversalPosition,
-            &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
+            &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
         ) -> (TraversalPosition, Result<(), Status>)
         + Send,
-    GetEntry: FnMut(&str) -> Result<Box<DirectoryEntry + 'entries>, Status> + Send,
+    GetEntry: FnMut(&str) -> Result<Box<dyn DirectoryEntry + 'entries>, Status> + Send,
 {
     lazy_attr_with_watchers(
         protection_attributes,
@@ -185,10 +185,10 @@ where
     TraversalPosition: Default + Send,
     GetEntryNames: FnMut(
             TraversalPosition,
-            &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
+            &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
         ) -> (TraversalPosition, Result<(), Status>)
         + Send,
-    GetEntry: FnMut(&str) -> Result<Box<DirectoryEntry + 'entries>, Status> + Send,
+    GetEntry: FnMut(&str) -> Result<Box<dyn DirectoryEntry + 'entries>, Status> + Send,
     WatcherEvents: Stream<Item = WatcherEvent> + FusedStream + Unpin + Send,
 {
     Lazy {
@@ -296,10 +296,10 @@ where
     TraversalPosition: Default + Send,
     GetEntryNames: FnMut(
             TraversalPosition,
-            &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
+            &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
         ) -> (TraversalPosition, Result<(), Status>)
         + Send,
-    GetEntry: FnMut(&str) -> Result<Box<DirectoryEntry + 'entries>, Status> + Send,
+    GetEntry: FnMut(&str) -> Result<Box<dyn DirectoryEntry + 'entries>, Status> + Send,
     WatcherEvents: Stream<Item = WatcherEvent> + FusedStream + Unpin + Send,
 {
     /// MODE_PROTECTION_MASK attributes returned by this directory through io.fidl:Node::GetAttr.
@@ -327,7 +327,7 @@ where
     get_entry: GetEntry,
 
     /// Entries that have active connections to them.
-    live_entries: Vec<Box<DirectoryEntry + 'entries>>,
+    live_entries: Vec<Box<dyn DirectoryEntry + 'entries>>,
 
     connections: FuturesUnordered<StreamFuture<DirectoryConnection<TraversalPosition>>>,
 
@@ -362,10 +362,10 @@ where
     TraversalPosition: Default + Send,
     GetEntryNames: FnMut(
             TraversalPosition,
-            &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
+            &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
         ) -> (TraversalPosition, Result<(), Status>)
         + Send,
-    GetEntry: FnMut(&str) -> Result<Box<DirectoryEntry + 'entries>, Status> + Send,
+    GetEntry: FnMut(&str) -> Result<Box<dyn DirectoryEntry + 'entries>, Status> + Send,
     WatcherEvents: Stream<Item = WatcherEvent> + FusedStream + Unpin + Send,
 {
     fn add_connection(&mut self, flags: u32, mode: u32, server_end: ServerEnd<NodeMarker>) {
@@ -533,7 +533,7 @@ where
         responder: R,
     ) -> Result<(), fidl::Error>
     where
-        R: FnOnce(Status, &mut ExactSizeIterator<Item = u8>) -> Result<(), fidl::Error>,
+        R: FnOnce(Status, &mut dyn ExactSizeIterator<Item = u8>) -> Result<(), fidl::Error>,
     {
         let mut buf = Vec::new();
         let mut fit_one = false;
@@ -759,17 +759,17 @@ where
     TraversalPosition: Default + Send,
     GetEntryNames: FnMut(
             TraversalPosition,
-            &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
+            &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
         ) -> (TraversalPosition, Result<(), Status>)
         + Send,
-    GetEntry: FnMut(&str) -> Result<Box<DirectoryEntry + 'entries>, Status> + Send,
+    GetEntry: FnMut(&str) -> Result<Box<dyn DirectoryEntry + 'entries>, Status> + Send,
     WatcherEvents: Stream<Item = WatcherEvent> + FusedStream + Unpin + Send,
 {
     fn open(
         &mut self,
         flags: u32,
         mode: u32,
-        path: &mut Iterator<Item = &str>,
+        path: &mut dyn Iterator<Item = &str>,
         server_end: ServerEnd<NodeMarker>,
     ) {
         let name = match path.next() {
@@ -830,10 +830,10 @@ where
     TraversalPosition: Default + Send,
     GetEntryNames: FnMut(
             TraversalPosition,
-            &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
+            &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
         ) -> (TraversalPosition, Result<(), Status>)
         + Send,
-    GetEntry: FnMut(&str) -> Result<Box<DirectoryEntry + 'entries>, Status> + Send,
+    GetEntry: FnMut(&str) -> Result<Box<dyn DirectoryEntry + 'entries>, Status> + Send,
     WatcherEvents: Stream<Item = WatcherEvent> + FusedStream + Unpin + Send,
 {
 }
@@ -844,10 +844,10 @@ where
     TraversalPosition: Default + Send,
     GetEntryNames: FnMut(
             TraversalPosition,
-            &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
+            &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
         ) -> (TraversalPosition, Result<(), Status>)
         + Send,
-    GetEntry: FnMut(&str) -> Result<Box<DirectoryEntry + 'entries>, Status> + Send,
+    GetEntry: FnMut(&str) -> Result<Box<dyn DirectoryEntry + 'entries>, Status> + Send,
     WatcherEvents: Stream<Item = WatcherEvent> + FusedStream + Unpin + Send,
 {
     type Output = Void;
@@ -874,10 +874,10 @@ where
     TraversalPosition: Default + Send,
     GetEntryNames: FnMut(
             TraversalPosition,
-            &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
+            &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
         ) -> (TraversalPosition, Result<(), Status>)
         + Send,
-    GetEntry: FnMut(&str) -> Result<Box<DirectoryEntry + 'entries>, Status> + Send,
+    GetEntry: FnMut(&str) -> Result<Box<dyn DirectoryEntry + 'entries>, Status> + Send,
     WatcherEvents: Stream<Item = WatcherEvent> + FusedStream + Unpin + Send,
 {
     fn is_terminated(&self) -> bool {
@@ -911,9 +911,9 @@ mod tests {
             test_utils::{run_server_client, DirentsSameInodeBuilder},
             traversal_position::AlphabeticalTraversal,
         },
-        crate::file::simple::read_only,
+        crate::file::simple::{read_only, read_only_static},
         fidl_fuchsia_io::{
-            DirectoryObject, NodeAttributes, DIRENT_TYPE_DIRECTORY, DIRENT_TYPE_FILE, INO_UNKNOWN,
+            NodeAttributes, DIRENT_TYPE_DIRECTORY, DIRENT_TYPE_FILE, INO_UNKNOWN,
             MODE_TYPE_DIRECTORY, OPEN_FLAG_DESCRIBE, OPEN_RIGHT_READABLE, WATCH_MASK_ADDED,
             WATCH_MASK_EXISTING, WATCH_MASK_IDLE, WATCH_MASK_REMOVED,
         },
@@ -950,7 +950,7 @@ mod tests {
         mut entries: Vec<(u8, &'static str)>,
     ) -> impl FnMut(
         AlphabeticalTraversal,
-        &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
+        &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>,
     ) -> (AlphabeticalTraversal, Result<(), Status>) {
         use AlphabeticalTraversal::{Dot, End, Name, Start};
 
@@ -966,7 +966,7 @@ mod tests {
 
         let dot_entry_info = EntryInfo::new(INO_UNKNOWN, DIRENT_TYPE_DIRECTORY);
 
-        move |p, sink: &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>| {
+        move |p, sink: &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>| {
             let mut i = match entries.binary_search_by(|(candidate_pos, _)| candidate_pos.cmp(&p)) {
                 Ok(i) => i + 1,
                 Err(i) => i,
@@ -1009,8 +1009,10 @@ mod tests {
         run_server_client(
             OPEN_RIGHT_READABLE,
             lazy(|_p, _sink| (AlphabeticalTraversal::End, Ok(())), |_name| Err(Status::NOT_FOUND)),
-            async move |root| {
-                assert_close!(root);
+            |root| {
+                async move {
+                    assert_close!(root);
+                }
             },
         );
     }
@@ -1020,20 +1022,22 @@ mod tests {
         run_server_client(
             OPEN_RIGHT_READABLE,
             lazy(|_p, _sink| (AlphabeticalTraversal::End, Ok(())), |_name| Err(Status::NOT_FOUND)),
-            async move |root| {
-                assert_get_attr!(
-                    root,
-                    NodeAttributes {
-                        mode: MODE_TYPE_DIRECTORY | S_IRUSR,
-                        id: INO_UNKNOWN,
-                        content_size: 0,
-                        storage_size: 0,
-                        link_count: 1,
-                        creation_time: 0,
-                        modification_time: 0,
-                    }
-                );
-                assert_close!(root);
+            |root| {
+                async move {
+                    assert_get_attr!(
+                        root,
+                        NodeAttributes {
+                            mode: MODE_TYPE_DIRECTORY | S_IRUSR,
+                            id: INO_UNKNOWN,
+                            content_size: 0,
+                            storage_size: 0,
+                            link_count: 1,
+                            creation_time: 0,
+                            modification_time: 0,
+                        }
+                    );
+                    assert_close!(root);
+                }
             },
         );
     }
@@ -1047,21 +1051,23 @@ mod tests {
                 |_p, _sink| (AlphabeticalTraversal::End, Ok(())),
                 |_name| Err(Status::NOT_FOUND),
             ),
-            async move |root| {
-                assert_get_attr!(
-                    root,
-                    NodeAttributes {
-                        mode: MODE_TYPE_DIRECTORY
-                            | (S_IXOTH | S_IROTH | S_IXGRP | S_IRGRP | S_IXUSR | S_IRUSR),
-                        id: INO_UNKNOWN,
-                        content_size: 0,
-                        storage_size: 0,
-                        link_count: 1,
-                        creation_time: 0,
-                        modification_time: 0,
-                    }
-                );
-                assert_close!(root);
+            |root| {
+                async move {
+                    assert_get_attr!(
+                        root,
+                        NodeAttributes {
+                            mode: MODE_TYPE_DIRECTORY
+                                | (S_IXOTH | S_IROTH | S_IXGRP | S_IRGRP | S_IXUSR | S_IRUSR),
+                            id: INO_UNKNOWN,
+                            content_size: 0,
+                            storage_size: 0,
+                            link_count: 1,
+                            creation_time: 0,
+                            modification_time: 0,
+                        }
+                    );
+                    assert_close!(root);
+                }
             },
         );
     }
@@ -1077,21 +1083,23 @@ mod tests {
         run_server_client(
             OPEN_RIGHT_READABLE,
             lazy(get_entry_names, |_name| Err(Status::NOT_FOUND)),
-            async move |root| {
-                {
-                    let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
-                    // Note that the build_sorted_static_get_entry_names() will sort entries
-                    // alphabetically when returning them, so we see a different order here.
-                    expected
-                        .add(DIRENT_TYPE_DIRECTORY, b".")
-                        .add(DIRENT_TYPE_FILE, b"one")
-                        .add(DIRENT_TYPE_FILE, b"three")
-                        .add(DIRENT_TYPE_FILE, b"two");
+            |root| {
+                async move {
+                    {
+                        let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
+                        // Note that the build_sorted_static_get_entry_names() will sort entries
+                        // alphabetically when returning them, so we see a different order here.
+                        expected
+                            .add(DIRENT_TYPE_DIRECTORY, b".")
+                            .add(DIRENT_TYPE_FILE, b"one")
+                            .add(DIRENT_TYPE_FILE, b"three")
+                            .add(DIRENT_TYPE_FILE, b"two");
 
-                    assert_read_dirents!(root, 1000, expected.into_vec());
+                        assert_read_dirents!(root, 1000, expected.into_vec());
+                    }
+
+                    assert_close!(root);
                 }
-
-                assert_close!(root);
             },
         );
     }
@@ -1107,7 +1115,7 @@ mod tests {
         // Explicit type here is necessary, as rustc seems to be missing the point that
         // `PseudoFile` returned by the `read_only` call implements `DirectoryEntry`.  Yet with an
         // explicit type everything works.  It would be nice to understand why is this happening.
-        let get_entry: &mut (FnMut(&str) -> Result<Box<DirectoryEntry>, Status> + Send) =
+        let get_entry: &mut (dyn FnMut(&str) -> Result<Box<dyn DirectoryEntry>, Status> + Send) =
             &mut |name: &str| {
                 let name = name.to_string();
                 Ok(Box::new(read_only(move || {
@@ -1116,18 +1124,16 @@ mod tests {
                 })))
             };
 
-        run_server_client(
-            OPEN_RIGHT_READABLE,
-            lazy(get_entry_names, get_entry),
-            async move |root| {
+        run_server_client(OPEN_RIGHT_READABLE, lazy(get_entry_names, get_entry), |root| {
+            async move {
                 let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
                 open_as_file_assert_content!(&root, flags, "one", "File one content");
                 open_as_file_assert_content!(&root, flags, "two", "File two content");
                 open_as_file_assert_content!(&root, flags, "three", "File three content");
 
                 assert_close!(root);
-            },
-        );
+            }
+        });
     }
 
     #[test]
@@ -1140,22 +1146,20 @@ mod tests {
         // Explicit type here is necessary, as rustc seems to be missing the point that
         // `PseudoFile` returned by the `read_only` call implements `DirectoryEntry`.  Yet with an
         // explicit type everything works.  It would be nice to understand why is this happening.
-        let get_entry: &mut (FnMut(&str) -> Result<Box<DirectoryEntry>, Status> + Send) =
+        let get_entry: &mut (dyn FnMut(&str) -> Result<Box<dyn DirectoryEntry>, Status> + Send) =
             &mut |name: &str| match name {
                 "etc" => Ok(Box::new(pseudo_directory! {
-                    "fstab" => read_only(|| Ok(b"/dev/fs /".to_vec())),
+                    "fstab" => read_only_static("/dev/fs /"),
                     "ssh" => pseudo_directory! {
-                        "sshd_config" => read_only(|| Ok(b"# Empty".to_vec())),
+                        "sshd_config" => read_only_static("# Empty"),
                     },
                 })),
-                "files" => Ok(Box::new(read_only(|| Ok(b"Content".to_vec())))),
+                "files" => Ok(Box::new(read_only_static("Content"))),
                 _ => Err(Status::NOT_FOUND),
             };
 
-        run_server_client(
-            OPEN_RIGHT_READABLE,
-            lazy(get_entry_names, get_entry),
-            async move |root| {
+        run_server_client(OPEN_RIGHT_READABLE, lazy(get_entry_names, get_entry), |root| {
+            async move {
                 let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
                 {
                     let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
@@ -1194,8 +1198,8 @@ mod tests {
                 open_as_file_assert_content!(&root, flags, "files", "Content");
 
                 assert_close!(root);
-            },
-        );
+            }
+        });
     }
 
     #[test]
@@ -1215,7 +1219,7 @@ mod tests {
                 Two,
             };
             let mut stage = Stage::One;
-            move |p, sink: &mut FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>| {
+            move |p, sink: &mut dyn FnMut(&EntryInfo, &str) -> Result<bool, GetEntryNameSinkError>| {
                 match stage {
                     Stage::One => {
                         let (p, res) = listing1(p, sink);
@@ -1232,34 +1236,36 @@ mod tests {
         run_server_client(
             OPEN_RIGHT_READABLE,
             lazy(get_entry_names, |_name| Err(Status::NOT_FOUND)),
-            async move |root| {
-                {
-                    let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
-                    // Note that the build_sorted_static_get_entry_names() will sort entries
-                    // alphabetically when returning them, so we see a different order here.
-                    expected
-                        .add(DIRENT_TYPE_DIRECTORY, b".")
-                        .add(DIRENT_TYPE_FILE, b"one")
-                        .add(DIRENT_TYPE_FILE, b"two");
+            |root| {
+                async move {
+                    {
+                        let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
+                        // Note that the build_sorted_static_get_entry_names() will sort entries
+                        // alphabetically when returning them, so we see a different order here.
+                        expected
+                            .add(DIRENT_TYPE_DIRECTORY, b".")
+                            .add(DIRENT_TYPE_FILE, b"one")
+                            .add(DIRENT_TYPE_FILE, b"two");
 
-                    assert_read_dirents!(root, 1000, expected.into_vec());
+                        assert_read_dirents!(root, 1000, expected.into_vec());
+                    }
+
+                    assert_rewind!(root);
+
+                    {
+                        let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
+                        // Note that the build_sorted_static_get_entry_names() will sort entries
+                        // alphabetically when returning them, so we see a different order here.
+                        expected
+                            .add(DIRENT_TYPE_DIRECTORY, b".")
+                            .add(DIRENT_TYPE_FILE, b"three")
+                            .add(DIRENT_TYPE_FILE, b"two");
+
+                        assert_read_dirents!(root, 1000, expected.into_vec());
+                    }
+
+                    assert_close!(root);
                 }
-
-                assert_rewind!(root);
-
-                {
-                    let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
-                    // Note that the build_sorted_static_get_entry_names() will sort entries
-                    // alphabetically when returning them, so we see a different order here.
-                    expected
-                        .add(DIRENT_TYPE_DIRECTORY, b".")
-                        .add(DIRENT_TYPE_FILE, b"three")
-                        .add(DIRENT_TYPE_FILE, b"two");
-
-                    assert_read_dirents!(root, 1000, expected.into_vec());
-                }
-
-                assert_close!(root);
             },
         );
     }
@@ -1274,7 +1280,7 @@ mod tests {
         // Explicit type here is necessary, as rustc seems to be missing the point that
         // `PseudoFile` returned by the `read_only` call implements `DirectoryEntry`.  Yet with an
         // explicit type everything works.  It would be nice to understand why is this happening.
-        let get_entry: &mut (FnMut(&str) -> Result<Box<DirectoryEntry>, Status> + Send) = {
+        let get_entry: &mut (dyn FnMut(&str) -> Result<Box<dyn DirectoryEntry>, Status> + Send) = {
             let mut count = 0;
 
             &mut move |name: &str| match name {
@@ -1296,10 +1302,8 @@ mod tests {
             }
         };
 
-        run_server_client(
-            OPEN_RIGHT_READABLE,
-            lazy(get_entry_names, get_entry),
-            async move |root| {
+        run_server_client(OPEN_RIGHT_READABLE, lazy(get_entry_names, get_entry), |root| {
+            async move {
                 let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
 
                 open_as_file_assert_content!(&root, flags, "file1", "Content: 1");
@@ -1309,8 +1313,8 @@ mod tests {
                 open_as_file_assert_content!(&root, flags, "file1", "Content: 23");
 
                 assert_close!(root);
-            },
-        );
+            }
+        });
     }
 
     #[test]
@@ -1325,34 +1329,36 @@ mod tests {
         run_server_client(
             OPEN_RIGHT_READABLE,
             lazy(get_entry_names, |_name| Err(Status::NOT_FOUND)),
-            async move |root| {
-                {
-                    let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
-                    // Entry header is 10 bytes + length of the name in bytes.
-                    // (10 + 1) = 11
-                    expected.add(DIRENT_TYPE_DIRECTORY, b".");
-                    assert_read_dirents!(root, 11, expected.into_vec());
+            |root| {
+                async move {
+                    {
+                        let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
+                        // Entry header is 10 bytes + length of the name in bytes.
+                        // (10 + 1) = 11
+                        expected.add(DIRENT_TYPE_DIRECTORY, b".");
+                        assert_read_dirents!(root, 11, expected.into_vec());
+                    }
+
+                    {
+                        let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
+                        expected
+                            // (10 + 3) = 13
+                            .add(DIRENT_TYPE_DIRECTORY, b"etc")
+                            // 13 + (10 + 5) = 28
+                            .add(DIRENT_TYPE_FILE, b"files");
+                        assert_read_dirents!(root, 28, expected.into_vec());
+                    }
+
+                    {
+                        let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
+                        expected.add(DIRENT_TYPE_FILE, b"more").add(DIRENT_TYPE_FILE, b"uname");
+                        assert_read_dirents!(root, 100, expected.into_vec());
+                    }
+
+                    assert_read_dirents!(root, 100, vec![]);
+
+                    assert_close!(root);
                 }
-
-                {
-                    let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
-                    expected
-                        // (10 + 3) = 13
-                        .add(DIRENT_TYPE_DIRECTORY, b"etc")
-                        // 13 + (10 + 5) = 28
-                        .add(DIRENT_TYPE_FILE, b"files");
-                    assert_read_dirents!(root, 28, expected.into_vec());
-                }
-
-                {
-                    let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
-                    expected.add(DIRENT_TYPE_FILE, b"more").add(DIRENT_TYPE_FILE, b"uname");
-                    assert_read_dirents!(root, 100, expected.into_vec());
-                }
-
-                assert_read_dirents!(root, 100, vec![]);
-
-                assert_close!(root);
             },
         );
     }
@@ -1364,17 +1370,19 @@ mod tests {
         run_server_client(
             OPEN_RIGHT_READABLE,
             lazy(get_entry_names, |_name| Err(Status::NOT_FOUND)),
-            async move |root| {
-                // Entry header is 10 bytes, so this read should not be able to return a single entry.
-                assert_read_dirents_err!(root, 8, Status::BUFFER_TOO_SMALL);
+            |root| {
+                async move {
+                    // Entry header is 10 bytes, so this read should not be able to return a single entry.
+                    assert_read_dirents_err!(root, 8, Status::BUFFER_TOO_SMALL);
 
-                {
-                    let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
-                    expected.add(DIRENT_TYPE_DIRECTORY, b".").add(DIRENT_TYPE_FILE, b"file");
-                    assert_read_dirents!(root, 100, expected.into_vec());
+                    {
+                        let mut expected = DirentsSameInodeBuilder::new(INO_UNKNOWN);
+                        expected.add(DIRENT_TYPE_DIRECTORY, b".").add(DIRENT_TYPE_FILE, b"file");
+                        assert_read_dirents!(root, 100, expected.into_vec());
+                    }
+
+                    assert_close!(root);
                 }
-
-                assert_close!(root);
             },
         );
     }
@@ -1387,15 +1395,17 @@ mod tests {
             |_name| Err(Status::NOT_FOUND),
             watcher_stream,
         );
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let mask =
-                WATCH_MASK_EXISTING | WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
-            let watcher_client = assert_watch!(root, mask);
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let mask =
+                    WATCH_MASK_EXISTING | WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
+                let watcher_client = assert_watch!(root, mask);
 
-            assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
+                assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
 
-            drop(watcher_client);
-            assert_close!(root);
+                drop(watcher_client);
+                assert_close!(root);
+            }
         });
     }
 
@@ -1410,22 +1420,24 @@ mod tests {
         let root =
             lazy_with_watchers(get_entry_names, |_name| Err(Status::NOT_FOUND), watcher_stream);
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let mask =
-                WATCH_MASK_EXISTING | WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
-            let watcher_client = assert_watch!(root, mask);
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let mask =
+                    WATCH_MASK_EXISTING | WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
+                let watcher_client = assert_watch!(root, mask);
 
-            assert_watcher_one_message_watched_events!(
-                watcher_client,
-                { EXISTING, "." },
-                { EXISTING, "one" },
-                { EXISTING, "three" },
-                { EXISTING, "two" },
-            );
-            assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
+                assert_watcher_one_message_watched_events!(
+                    watcher_client,
+                    { EXISTING, "." },
+                    { EXISTING, "one" },
+                    { EXISTING, "three" },
+                    { EXISTING, "two" },
+                );
+                assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
 
-            drop(watcher_client);
-            assert_close!(root);
+                drop(watcher_client);
+                assert_close!(root);
+            }
         });
     }
 
@@ -1440,34 +1452,36 @@ mod tests {
         let root =
             lazy_with_watchers(get_entry_names, |_name| Err(Status::NOT_FOUND), watcher_stream);
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let mask =
-                WATCH_MASK_EXISTING | WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
-            let watcher1_client = assert_watch!(root, mask);
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let mask =
+                    WATCH_MASK_EXISTING | WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
+                let watcher1_client = assert_watch!(root, mask);
 
-            assert_watcher_one_message_watched_events!(
-                watcher1_client,
-                { EXISTING, "." },
-                { EXISTING, "one" },
-                { EXISTING, "three" },
-                { EXISTING, "two" },
-            );
-            assert_watcher_one_message_watched_events!(watcher1_client, { IDLE, vec![] });
+                assert_watcher_one_message_watched_events!(
+                    watcher1_client,
+                    { EXISTING, "." },
+                    { EXISTING, "one" },
+                    { EXISTING, "three" },
+                    { EXISTING, "two" },
+                );
+                assert_watcher_one_message_watched_events!(watcher1_client, { IDLE, vec![] });
 
-            let watcher2_client = assert_watch!(root, mask);
+                let watcher2_client = assert_watch!(root, mask);
 
-            assert_watcher_one_message_watched_events!(
-                watcher2_client,
-                { EXISTING, "." },
-                { EXISTING, "one" },
-                { EXISTING, "three" },
-                { EXISTING, "two" },
-            );
-            assert_watcher_one_message_watched_events!(watcher2_client, { IDLE, vec![] });
+                assert_watcher_one_message_watched_events!(
+                    watcher2_client,
+                    { EXISTING, "." },
+                    { EXISTING, "one" },
+                    { EXISTING, "three" },
+                    { EXISTING, "two" },
+                );
+                assert_watcher_one_message_watched_events!(watcher2_client, { IDLE, vec![] });
 
-            drop(watcher1_client);
-            drop(watcher2_client);
-            assert_close!(root);
+                drop(watcher1_client);
+                drop(watcher2_client);
+                assert_close!(root);
+            }
         });
     }
 
@@ -1482,14 +1496,16 @@ mod tests {
         let root =
             lazy_with_watchers(get_entry_names, |_name| Err(Status::NOT_FOUND), watcher_stream);
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let mask = WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
-            let watcher_client = assert_watch!(root, mask);
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let mask = WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
+                let watcher_client = assert_watch!(root, mask);
 
-            assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
+                assert_watcher_one_message_watched_events!(watcher_client, { IDLE, vec![] });
 
-            drop(watcher_client);
-            assert_close!(root);
+                drop(watcher_client);
+                assert_close!(root);
+            }
         });
     }
 
@@ -1502,26 +1518,31 @@ mod tests {
         let root =
             lazy_with_watchers(get_entry_names, |_name| Err(Status::NOT_FOUND), watcher_stream);
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let mask = WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
-            let watcher_client = assert_watch!(root, mask);
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let mask = WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
+                let watcher_client = assert_watch!(root, mask);
 
-            await!(watcher_sender.send(WatcherEvent::Added(vec!["two".to_string()])))
-                .expect("watcher_sender.send() failed");
+                watcher_sender
+                    .send(WatcherEvent::Added(vec!["two".to_string()]))
+                    .await
+                    .expect("watcher_sender.send() failed");
 
-            assert_watcher_one_message_watched_events!(watcher_client, { ADDED, "two" });
+                assert_watcher_one_message_watched_events!(watcher_client, { ADDED, "two" });
 
-            await!(watcher_sender
-                .send(WatcherEvent::Added(vec!["three".to_string(), "four".to_string()])))
-            .expect("watcher_sender.send() failed");
+                watcher_sender
+                    .send(WatcherEvent::Added(vec!["three".to_string(), "four".to_string()]))
+                    .await
+                    .expect("watcher_sender.send() failed");
 
-            assert_watcher_one_message_watched_events!(
-                watcher_client,
-                { ADDED, "three" },
-                { ADDED, "four" },
-            );
+                assert_watcher_one_message_watched_events!(
+                    watcher_client,
+                    { ADDED, "three" },
+                    { ADDED, "four" },
+                );
 
-            assert_close!(root);
+                assert_close!(root);
+            }
         });
     }
 
@@ -1539,26 +1560,31 @@ mod tests {
         let root =
             lazy_with_watchers(get_entry_names, |_name| Err(Status::NOT_FOUND), watcher_stream);
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let mask = WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
-            let watcher_client = assert_watch!(root, mask);
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let mask = WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
+                let watcher_client = assert_watch!(root, mask);
 
-            await!(watcher_sender.send(WatcherEvent::Removed(vec!["two".to_string()])))
-                .expect("watcher_sender.send() failed");
+                watcher_sender
+                    .send(WatcherEvent::Removed(vec!["two".to_string()]))
+                    .await
+                    .expect("watcher_sender.send() failed");
 
-            assert_watcher_one_message_watched_events!(watcher_client, { REMOVED, "two" });
+                assert_watcher_one_message_watched_events!(watcher_client, { REMOVED, "two" });
 
-            await!(watcher_sender
-                .send(WatcherEvent::Removed(vec!["three".to_string(), "four".to_string()])))
-            .expect("watcher_sender.send() failed");
+                watcher_sender
+                    .send(WatcherEvent::Removed(vec!["three".to_string(), "four".to_string()]))
+                    .await
+                    .expect("watcher_sender.send() failed");
 
-            assert_watcher_one_message_watched_events!(
-                watcher_client,
-                { REMOVED, "three" },
-                { REMOVED, "four" },
-            );
+                assert_watcher_one_message_watched_events!(
+                    watcher_client,
+                    { REMOVED, "three" },
+                    { REMOVED, "four" },
+                );
 
-            assert_close!(root);
+                assert_close!(root);
+            }
         });
     }
 
@@ -1574,11 +1600,13 @@ mod tests {
         let root =
             lazy_with_watchers(get_entry_names, |_name| Err(Status::NOT_FOUND), watcher_stream);
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let mask = WATCH_MASK_EXISTING | WATCH_MASK_IDLE;
-            assert_watch_err!(root, mask, Status::NOT_SUPPORTED);
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let mask = WATCH_MASK_EXISTING | WATCH_MASK_IDLE;
+                assert_watch_err!(root, mask, Status::NOT_SUPPORTED);
 
-            assert_close!(root);
+                assert_close!(root);
+            }
         });
     }
 
@@ -1594,28 +1622,34 @@ mod tests {
         let root =
             lazy_with_watchers(get_entry_names, |_name| Err(Status::NOT_FOUND), watcher_stream);
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let mask = WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
-            let watcher_client = assert_watch!(root, mask);
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let mask = WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
+                let watcher_client = assert_watch!(root, mask);
 
-            await!(watcher_sender.send(WatcherEvent::Added(vec!["four".to_string()])))
-                .expect("watcher_sender.send() failed");
+                watcher_sender
+                    .send(WatcherEvent::Added(vec!["four".to_string()]))
+                    .await
+                    .expect("watcher_sender.send() failed");
 
-            assert_watcher_one_message_watched_events!(watcher_client, { ADDED, "four" });
+                assert_watcher_one_message_watched_events!(watcher_client, { ADDED, "four" });
 
-            watcher_sender.close_channel();
+                watcher_sender.close_channel();
 
-            // We can not just check the watcher channel for been closed, as it takes some number
-            // of operations before all the async stuff will happen.  So, instead, we try to read
-            // it and we should get a PEER_CLOSED error.
-            {
-                let mut buf = MessageBuf::new();
-                let status = await!(watcher_client.recv_msg(&mut buf))
-                    .expect_err("Stream should have been closed");
-                assert_eq!(status, Status::PEER_CLOSED);
+                // We can not just check the watcher channel for been closed, as it takes some number
+                // of operations before all the async stuff will happen.  So, instead, we try to read
+                // it and we should get a PEER_CLOSED error.
+                {
+                    let mut buf = MessageBuf::new();
+                    let status = watcher_client
+                        .recv_msg(&mut buf)
+                        .await
+                        .expect_err("Stream should have been closed");
+                    assert_eq!(status, Status::PEER_CLOSED);
+                }
+
+                assert_close!(root);
             }
-
-            assert_close!(root);
         });
     }
 }

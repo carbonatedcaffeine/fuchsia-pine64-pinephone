@@ -173,19 +173,20 @@ class SystemTimeUpdaterTest : public TestWithEnvironment {
     launch_info.out = sys::CloneFileDescriptor(STDOUT_FILENO);
     launch_info.err = sys::CloneFileDescriptor(STDERR_FILENO);
 
-    fxl::UniqueFD tmp_dir_fd(open("/tmp", O_DIRECTORY | O_RDONLY));
+    fbl::unique_fd tmp_dir_fd(open("/tmp", O_DIRECTORY | O_RDONLY));
     launch_info.flat_namespace = fuchsia::sys::FlatNamespace::New();
     launch_info.flat_namespace->paths.push_back("/tmp");
     launch_info.flat_namespace->directories.push_back(
         fsl::CloneChannelFromFileDescriptor(tmp_dir_fd.get()));
 
+    launch_info.arguments.emplace();
     if (opt_pathname != nullptr) {
-      launch_info.arguments.push_back(StringPrintf("--config=%s", opt_pathname));
+      launch_info.arguments->push_back(StringPrintf("--config=%s", opt_pathname));
     }
 
     // Specify the service path at which to find a fake RTC device.
-    launch_info.arguments.push_back(StringPrintf("--rtc_path=%s", kFakeRtcDevicePath));
-    launch_info.arguments.push_back("--immediate");
+    launch_info.arguments->push_back(StringPrintf("--rtc_path=%s", kFakeRtcDevicePath));
+    launch_info.arguments->push_back("--immediate");
 
     // fuchsia::io::Directory is the directory interface that we expose to the
     // OS. vfs::PseudoDir is the C++ object that implements the

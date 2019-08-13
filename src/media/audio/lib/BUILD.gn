@@ -5,7 +5,15 @@
 group("lib") {
   testonly = true
   deps = [
+    "logging",
     "test",
     "wav_writer",
+  ]
+}
+
+group("tests") {
+  testonly = true
+  deps = [
+    "effects_loader:tests",
   ]
 }

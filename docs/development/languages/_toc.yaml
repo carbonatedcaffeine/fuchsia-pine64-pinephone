@@ -1,0 +1,32 @@
+# Please, read https://fuchsia.dev/fuchsia-src/best-practices/documentation_navigation_toc
+# before making changes to this file, and add a member of the fuchsia.dev
+# team as reviewer.
+toc:
+- title: "Overview"
+  path: /docs/development/languages
+- title: "Linting and formatting"
+  path: /docs/development/languages/lint_and_format.md
+- title: "Supporting new languages"
+  section:
+    - title: "Overview"
+      path: /docs/development/languages/new/README.md
+    - title: "Recommended structure to support Fuchsia"
+      path: /docs/development/languages/new/structure.md
+- title: "C/C++"
+  section:
+  - include: /docs/development/languages/c-cpp/_toc.yaml
+- title: "Dart"
+  section:
+  - include: /docs/development/languages/dart/_toc.yaml
+- title: "FIDL"
+  section:
+  - include: /docs/development/languages/fidl/_toc.yaml
+- title: "Go"
+  section:
+  - include: /docs/development/languages/go/_toc.yaml
+- title: "Python"
+  section:
+  - include: /docs/development/languages/python/_toc.yaml
+- title: "Rust"
+  section:
+  - include: /docs/development/languages/rust/_toc.yaml

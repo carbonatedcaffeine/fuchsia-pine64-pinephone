@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![cfg(test)]
 use crate::indexing::load_module_facet;
 use crate::models::{Action, FuchsiaFulfillment, Parameter};
+use failure::Error;
 use fidl_fuchsia_sys_index::{ComponentIndexMarker, ComponentIndexProxy};
 use fuchsia_component::client::{launch, launcher, App};
 use fuchsia_syslog::macros::*;
-use {failure::Error, fuchsia_async as fasync};
 
 const COMPONENT_INDEX_URL: &str =
     "fuchsia-pkg://fuchsia.com/component_index#meta/component_index.cmx";
@@ -29,7 +28,7 @@ async fn get_components() -> Result<Vec<String>, Error> {
         e
     })?;
     // Empty string returns all components.
-    let index_response = await!(index_service.fuzzy_search("")).map_err(|e| {
+    let index_response = index_service.fuzzy_search("").await.map_err(|e| {
         fx_log_err!("Fuzzy search error from component index: {:?}", e);
         e
     })?;
@@ -41,10 +40,10 @@ async fn get_components() -> Result<Vec<String>, Error> {
 
 // Gets a vector of all actions on the system
 pub async fn get_local_actions() -> Result<Vec<Action>, Error> {
-    let urls = await!(get_components())?;
+    let urls = get_components().await?;
     let mut result = vec![];
     for url in urls {
-        let module_facet = await!(load_module_facet(&url))?;
+        let module_facet = load_module_facet(&url).await?;
         for intent_filter in module_facet.intent_filters.into_iter() {
             // Convert from Indexing to Models
             result.push(Action {
@@ -65,7 +64,7 @@ pub async fn get_local_actions() -> Result<Vec<Action>, Error> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use {super::*, fuchsia_async as fasync};
 
     const TEST_COMPONENT_URL: &str =
         "fuchsia-pkg://fuchsia.com/discovermgr_tests#meta/discovermgr_bin_test.cmx";
@@ -74,8 +73,8 @@ mod test {
     #[fasync::run_singlethreaded(test)]
     async fn test_component_index() -> Result<(), Error> {
         // TODO fix tests -- failing only in CQ
-        let result = await!(get_local_actions()).unwrap_or_else(|e| {
-            eprintln!("Error! {:?}", e);
+        let result = get_local_actions().await.unwrap_or_else(|e| {
+            fx_log_err!("Error! {:?}", e);
             vec![]
         });
         #[allow(unused)]
@@ -86,7 +85,7 @@ mod test {
                 None => false,
             })
             .collect();
-        // assert_eq!(actions.len(), 2, "Expecting to find 2 actions in discovermgr test cmx file");
+        // assert_eq!(actions.len(), 3, "Expecting to find 3 actions in discovermgr test cmx file");
         Ok(())
     }
 }

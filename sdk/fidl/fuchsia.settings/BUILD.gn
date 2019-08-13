@@ -5,8 +5,12 @@
 import("//build/fidl/fidl.gni")
 
 fidl("fuchsia.settings") {
+  sdk_category = "partner"
+
   sources = [
+    "accessibility.fidl",
     "display.fidl",
+    "do_not_disturb.fidl",
     "intl.fidl",
     "settings.fidl",
     "system.fidl",
@@ -14,5 +18,6 @@ fidl("fuchsia.settings") {
 
   public_deps = [
     "//sdk/fidl/fuchsia.intl",
+    "//sdk/fidl/fuchsia.ui.types",
   ]
 }

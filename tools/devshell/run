@@ -14,7 +14,6 @@ set -e
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"/lib/image_build_vars.sh || exit $?
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"/lib/fvm.sh || exit $?
-source "${FUCHSIA_DIR}/buildtools/vars.sh"
 
 for arg in "$@"; do
   if [[ "$arg" = "-h" || "$arg" = "--help" ]]; then
@@ -24,7 +23,7 @@ for arg in "$@"; do
   fi
 done
 
-qemu_dir="${BUILDTOOLS_QEMU_DIR}/bin"
+qemu_dir="${PREBUILT_QEMU_DIR}/bin"
 
 args=(
   -a "${FUCHSIA_ARCH}"
@@ -45,15 +44,13 @@ trap 'rm -rf "$imgdir"' EXIT
 
 kernelzbi="${imgdir}/fuchsia-ssh.zbi"
 args+=(-z "${kernelzbi}")
-"${ZIRCON_TOOLS_DIR}/zbi" -o "${kernelzbi}" "${FUCHSIA_BUILD_DIR}/${IMAGE_ZIRCONA_ZBI}" \
+fx-zbi -o "${kernelzbi}" "${FUCHSIA_BUILD_DIR}/${IMAGE_ZIRCONA_ZBI}" \
   --entry "data/ssh/authorized_keys=${FUCHSIA_DIR}/.ssh/authorized_keys"
 
 if [ -n "$IMAGE_FVM_RAW" ]; then
   fvmimg="${imgdir}/fvm.blk"
   fx-fvm-extend-image "${FUCHSIA_BUILD_DIR}/${IMAGE_FVM_RAW}" $fvmimg
   args+=(-d -D "${fvmimg}" --diskfmt=raw)
-  ARGS+=("-drive" "file=${fvmimg},format=raw,if=none,id=mydisk")
-  ARGS+=("-device" "ich9-ahci,id=ahci" "-device" "ide-drive,drive=mydisk,bus=ahci.0")
 fi
 
 "${FUCHSIA_DIR}/zircon/scripts/run-zircon" "${args[@]}" "$@"

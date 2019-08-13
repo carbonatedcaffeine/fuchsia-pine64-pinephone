@@ -8,7 +8,7 @@
 #include <fuchsia/ui/scenic/cpp/fidl.h>
 #include <lib/fidl/cpp/binding_set.h>
 #include <lib/fidl/cpp/interface_ptr_set.h>
-#include <lib/inspect/inspect.h>
+#include <lib/inspect_deprecated/inspect.h>
 
 #include "garnet/lib/ui/gfx/engine/engine.h"
 #include "garnet/lib/ui/gfx/engine/session.h"
@@ -28,10 +28,11 @@ namespace gfx {
 class SessionHandler : public TempSessionDelegate {
  public:
   SessionHandler(CommandDispatcherContext context, SessionContext session_context,
-                 EventReporter* event_reporter, ErrorReporter* error_reporter,
-                 inspect::Node inspect_node = inspect::Node());
+                 std::shared_ptr<EventReporter> event_reporter,
+                 std::shared_ptr<ErrorReporter> error_reporter,
+                 inspect_deprecated::Node inspect_node = inspect_deprecated::Node());
   // TODO(SCN-1485): along with ~Session(), this ensures that the contents are
-  // properly removed from the scene-graph.  However, it doens't trigger another
+  // properly removed from the scene-graph.  However, it doesn't trigger another
   // frame to show the updated scene-graph.
   ~SessionHandler() = default;
 

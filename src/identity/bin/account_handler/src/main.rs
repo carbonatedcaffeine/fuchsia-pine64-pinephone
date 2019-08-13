@@ -6,9 +6,8 @@
 //! device, and provides access to authentication tokens for Service Provider accounts associated
 //! with the Fuchsia account.
 
-#![deny(warnings)]
 #![deny(missing_docs)]
-#![feature(async_await, await_macro, result_map_or_else)]
+#![feature(async_await)]
 
 mod account;
 mod account_handler;
@@ -61,7 +60,7 @@ fn main() -> Result<(), Error> {
     fs.dir("svc").add_fidl_service(move |stream| {
         let account_handler_clone = Arc::clone(&account_handler);
         fasync::spawn(async move {
-            await!(account_handler_clone.handle_requests_from_stream(stream))
+            account_handler_clone.handle_requests_from_stream(stream).await
                 .unwrap_or_else(|e| error!("Error handling AccountHandlerControl channel {:?}", e))
         });
     });

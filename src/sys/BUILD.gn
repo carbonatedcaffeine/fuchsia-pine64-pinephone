@@ -8,13 +8,20 @@ group("sys") {
     "cmc",
     "component_manager",
     "component_test_runner",
-    "netclock",
+    "timekeeper",
   ]
 }
 
 group("tests") {
   testonly = true
   deps = [
-    "netclock:tests",
+    "cmc:tests",
+    "component_index:tests",
+    "component_manager:tests",
+    "component_manager_for_test:tests",
+    "dash:tests",
+    "lib:tests",
+    "locate:tests",
+    "timekeeper:tests",
   ]
 }

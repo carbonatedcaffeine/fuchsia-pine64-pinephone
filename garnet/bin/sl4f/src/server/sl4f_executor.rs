@@ -24,6 +24,7 @@ use crate::bluetooth::commands::ble_method_to_fidl;
 use crate::bluetooth::commands::bt_control_method_to_fidl;
 use crate::bluetooth::commands::gatt_client_method_to_fidl;
 use crate::bluetooth::commands::gatt_server_method_to_fidl;
+use crate::bluetooth::commands::profile_server_method_to_fidl;
 use crate::file::commands::file_method_to_fidl;
 use crate::logging::commands::logging_method_to_fidl;
 use crate::netstack::commands::netstack_method_to_fidl;
@@ -40,13 +41,15 @@ pub async fn run_fidl_loop(
     const CONCURRENT_REQ_LIMIT: usize = 10; // TODO(CONN-6) figure out a good parallel value for this
 
     let session = &sl4f_session;
-    let handler = async move |request| {
-        await!(handle_request(Arc::clone(session), request)).unwrap();
+    let handler = |request| {
+        async move {
+            handle_request(Arc::clone(session), request).await.unwrap();
+        }
     };
 
     let receiver_fut = receiver.for_each_concurrent(CONCURRENT_REQ_LIMIT, handler);
 
-    await!(receiver_fut);
+    receiver_fut.await;
 }
 
 async fn handle_request(
@@ -59,7 +62,7 @@ async fn handle_request(
             fx_log_info!(tag: "run_fidl_loop",
                          "Received synchronous request: {:?}, {:?}, {:?}, {:?}, {:?}",
                          tx, id, method_type, name, params);
-            match await!(method_to_fidl(method_type, name, params, curr_sl4f_session)) {
+            match method_to_fidl(method_type, name, params, curr_sl4f_session).await {
                 Ok(response) => {
                     let async_response = AsyncResponse::new(Ok(response));
 
@@ -68,7 +71,7 @@ async fn handle_request(
                     let _ = tx.send(async_response);
                 }
                 Err(e) => {
-                    println!("Error returned from calling method_to_fidl {}", e);
+                    fx_log_err!("Error returned from calling method_to_fidl {}", e);
                     let async_response = AsyncResponse::new(Err(e));
 
                     // Ignore any tx sending errors since there is not a recovery path.  The
@@ -89,72 +92,85 @@ async fn method_to_fidl(
 ) -> Result<Value, Error> {
     match FacadeType::from_str(&method_type) {
         FacadeType::AudioFacade => {
-            await!(audio_method_to_fidl(method_name, args, sl4f_session.read().get_audio_facade(),))
+            audio_method_to_fidl(method_name, args, sl4f_session.read().get_audio_facade()).await
         }
         FacadeType::AuthFacade => {
-            await!(auth_method_to_fidl(method_name, args, sl4f_session.read().get_auth_facade(),))
+            auth_method_to_fidl(method_name, args, sl4f_session.read().get_auth_facade()).await
         }
-        FacadeType::BaseManagerFacade => await!(base_manager_method_to_fidl(
-            method_name,
-            args,
-            sl4f_session.read().get_basemgr_facade(),
-        )),
-        FacadeType::BleAdvertiseFacade => await!(ble_advertise_method_to_fidl(
-            method_name,
-            args,
-            sl4f_session.read().get_ble_advertise_facade(),
-        )),
+        FacadeType::BaseManagerFacade => {
+            base_manager_method_to_fidl(method_name, args, sl4f_session.read().get_basemgr_facade())
+                .await
+        }
+        FacadeType::BleAdvertiseFacade => {
+            ble_advertise_method_to_fidl(
+                method_name,
+                args,
+                sl4f_session.read().get_ble_advertise_facade(),
+            )
+            .await
+        }
         FacadeType::Bluetooth => {
-            await!(ble_method_to_fidl(method_name, args, sl4f_session.read().get_bt_facade(),))
+            ble_method_to_fidl(method_name, args, sl4f_session.read().get_bt_facade()).await
         }
-        FacadeType::BluetoothControlFacade => await!(bt_control_method_to_fidl(
-            method_name,
-            args,
-            sl4f_session.read().get_bt_control_facade(),
-        )),
+        FacadeType::BluetoothControlFacade => {
+            bt_control_method_to_fidl(
+                method_name,
+                args,
+                sl4f_session.read().get_bt_control_facade(),
+            )
+            .await
+        }
         FacadeType::FileFacade => {
-            await!(file_method_to_fidl(method_name, args, sl4f_session.read().get_file_facade(),))
+            file_method_to_fidl(method_name, args, sl4f_session.read().get_file_facade()).await
         }
-        FacadeType::GattClientFacade => await!(gatt_client_method_to_fidl(
-            method_name,
-            args,
-            sl4f_session.read().get_gatt_client_facade(),
-        )),
-        FacadeType::GattServerFacade => await!(gatt_server_method_to_fidl(
-            method_name,
-            args,
-            sl4f_session.read().get_gatt_server_facade(),
-        )),
-        FacadeType::LoggingFacade => await!(logging_method_to_fidl(
-            method_name,
-            args,
-            sl4f_session.read().get_logging_facade(),
-        )),
-        FacadeType::NetstackFacade => await!(netstack_method_to_fidl(
-            method_name,
-            args,
-            sl4f_session.read().get_netstack_facade(),
-        )),
-        FacadeType::ScenicFacade => await!(scenic_method_to_fidl(
-            method_name,
-            args,
-            sl4f_session.read().get_scenic_facade(),
-        )),
+        FacadeType::GattClientFacade => {
+            gatt_client_method_to_fidl(
+                method_name,
+                args,
+                sl4f_session.read().get_gatt_client_facade(),
+            )
+            .await
+        }
+        FacadeType::GattServerFacade => {
+            gatt_server_method_to_fidl(
+                method_name,
+                args,
+                sl4f_session.read().get_gatt_server_facade(),
+            )
+            .await
+        }
+        FacadeType::LoggingFacade => {
+            logging_method_to_fidl(method_name, args, sl4f_session.read().get_logging_facade())
+                .await
+        }
+        FacadeType::NetstackFacade => {
+            netstack_method_to_fidl(method_name, args, sl4f_session.read().get_netstack_facade())
+                .await
+        }
+        FacadeType::ProfileServerFacade => {
+            profile_server_method_to_fidl(
+                method_name,
+                args,
+                sl4f_session.read().get_profile_server_facade(),
+            )
+            .await
+        }
+        FacadeType::ScenicFacade => {
+            scenic_method_to_fidl(method_name, args, sl4f_session.read().get_scenic_facade()).await
+        }
         FacadeType::SetUiFacade => {
-            await!(setui_method_to_fidl(method_name, args, sl4f_session.read().get_setui_facade(),))
+            setui_method_to_fidl(method_name, args, sl4f_session.read().get_setui_facade()).await
         }
-        FacadeType::TraceutilFacade => await!(traceutil_method_to_fidl(
-            method_name,
-            args,
-            sl4f_session.read().get_traceutil_facade()
-        )),
-        FacadeType::WebdriverFacade => await!(webdriver_method_to_fidl(
-            method_name,
-            args,
-            sl4f_session.read().get_webdriver_facade(),
-        )),
+        FacadeType::TraceutilFacade => {
+            traceutil_method_to_fidl(method_name, args, sl4f_session.read().get_traceutil_facade())
+                .await
+        }
+        FacadeType::WebdriverFacade => {
+            webdriver_method_to_fidl(method_name, args, sl4f_session.read().get_webdriver_facade())
+                .await
+        }
         FacadeType::Wlan => {
-            await!(wlan_method_to_fidl(method_name, args, sl4f_session.read().get_wlan_facade()))
+            wlan_method_to_fidl(method_name, args, sl4f_session.read().get_wlan_facade()).await
         }
         _ => Err(BTError::new("Invalid FIDL method type").into()),
     }

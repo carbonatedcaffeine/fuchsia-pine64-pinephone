@@ -56,7 +56,7 @@ namespace {
 // We push this through the decoder as our "EndOfStream" marker, and detect it
 // at the output (for now) by its unusual 42x52 resolution during
 // InitializeStream() _and_ the fact that we've queued this marker.  To force
-// this frame to be handled by the decoder we queue kFlushThroughBytes of 0
+// this frame to be handled by the decoder we queue kFlushThroughBytes of 0s
 // after this data.
 //
 // TODO(dustingreen): We don't currently detect the EndOfStream via its stream
@@ -68,11 +68,10 @@ namespace {
 // a format change is real, not just the one immediately before a frame whose
 // stream offset is >= the EndOfStream offset.
 unsigned char new_stream_h264[] = {
-    0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x0a, 0xd9, 0x0c, 0x9e, 0x49,
-    0xf0, 0x11, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x00, 0x03, 0x00, 0x32,
-    0x0f, 0x12, 0x26, 0x48, 0x00, 0x00, 0x00, 0x01, 0x68, 0xcb, 0x83, 0xcb,
-    0x20, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x0a, 0xf2, 0x62, 0x80, 0x00,
-    0xa7, 0xbc, 0x9c, 0x9d, 0x75, 0xd7, 0x5d, 0x75, 0xd7, 0x5d, 0x78};
+    0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x0a, 0xd9, 0x0c, 0x9e, 0x49, 0xf0, 0x11, 0x00,
+    0x00, 0x03, 0x00, 0x01, 0x00, 0x00, 0x03, 0x00, 0x32, 0x0f, 0x12, 0x26, 0x48, 0x00, 0x00,
+    0x00, 0x01, 0x68, 0xcb, 0x83, 0xcb, 0x20, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x0a, 0xf2,
+    0x62, 0x80, 0x00, 0xa7, 0xbc, 0x9c, 0x9d, 0x75, 0xd7, 0x5d, 0x75, 0xd7, 0x5d, 0x78};
 unsigned int new_stream_h264_len = 59;
 
 constexpr uint32_t kFlushThroughBytes = 1024;
@@ -80,8 +79,7 @@ constexpr uint32_t kFlushThroughBytes = 1024;
 constexpr uint32_t kEndOfStreamWidth = 42;
 constexpr uint32_t kEndOfStreamHeight = 52;
 
-static inline constexpr uint32_t make_fourcc(uint8_t a, uint8_t b, uint8_t c,
-                                             uint8_t d) {
+static inline constexpr uint32_t make_fourcc(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
   return (static_cast<uint32_t>(d) << 24) | (static_cast<uint32_t>(c) << 16) |
          (static_cast<uint32_t>(b) << 8) | static_cast<uint32_t>(a);
 }
@@ -98,8 +96,7 @@ constexpr uint32_t kInputPerPacketBufferBytesMax = 4 * 1024 * 1024;
 
 }  // namespace
 
-CodecAdapterH264::CodecAdapterH264(std::mutex& lock,
-                                   CodecAdapterEvents* codec_adapter_events,
+CodecAdapterH264::CodecAdapterH264(std::mutex& lock, CodecAdapterEvents* codec_adapter_events,
                                    DeviceCtx* device)
     : CodecAdapter(lock, codec_adapter_events),
       device_(device),
@@ -110,7 +107,6 @@ CodecAdapterH264::CodecAdapterH264(std::mutex& lock,
 }
 
 CodecAdapterH264::~CodecAdapterH264() {
-  // TODO(dustingreen): Remove the printfs or switch them to VLOG.
   input_processing_loop_.Quit();
   input_processing_loop_.JoinThreads();
   input_processing_loop_.Shutdown();
@@ -119,9 +115,7 @@ CodecAdapterH264::~CodecAdapterH264() {
   // CoreCodecStopStream().
 }
 
-bool CodecAdapterH264::IsCoreCodecRequiringOutputConfigForFormatDetection() {
-  return false;
-}
+bool CodecAdapterH264::IsCoreCodecRequiringOutputConfigForFormatDetection() { return false; }
 
 bool CodecAdapterH264::IsCoreCodecMappedBufferNeeded(CodecPort port) {
   // If protected buffers, then only in-band AnnexB is supported, because in
@@ -187,9 +181,9 @@ void CodecAdapterH264::CoreCodecStartStream() {
     //
     // TODO(dustingreen): Skip this when the buffer isn't map-able.
     io_buffer_cache_flush_invalidate(&frame->buffer, 0,
-                                     frame->stride * frame->height);
+                                     frame->stride * frame->coded_height);
     io_buffer_cache_flush_invalidate(&frame->buffer, frame->uv_plane_offset,
-                                     frame->stride * frame->height / 2);
+                                     frame->stride * frame->coded_height / 2);
 
     const CodecBuffer* buffer = frame->codec_buffer;
     ZX_DEBUG_ASSERT(buffer);
@@ -211,7 +205,7 @@ void CodecAdapterH264::CoreCodecStartStream() {
     packet->SetBuffer(buffer);
 
     packet->SetStartOffset(0);
-    uint64_t total_size_bytes = frame->stride * frame->height * 3 / 2;
+    uint64_t total_size_bytes = frame->stride * frame->coded_height * 3 / 2;
     packet->SetValidLengthBytes(total_size_bytes);
 
     if (frame->has_pts) {
@@ -224,7 +218,8 @@ void CodecAdapterH264::CoreCodecStartStream() {
   });
   decoder->SetInitializeFramesHandler(
       fit::bind_member(this, &CodecAdapterH264::InitializeFramesHandler));
-  decoder->SetErrorHandler([this] { OnCoreCodecFailStream(); });
+  decoder->SetErrorHandler(
+      [this] { OnCoreCodecFailStream(fuchsia::media::StreamError::DECODER_UNKNOWN); });
 
   {  // scope lock
     std::lock_guard<std::mutex> lock(*video_->video_decoder_lock());
@@ -236,8 +231,7 @@ void CodecAdapterH264::CoreCodecStartStream() {
     }
     status = video_->video_decoder()->Initialize();
     if (status != ZX_OK) {
-      events_->onCoreCodecFailCodec(
-          "video_->video_decoder_->Initialize() failed");
+      events_->onCoreCodecFailCodec("video_->video_decoder_->Initialize() failed");
       return;
     }
   }  // ~lock
@@ -258,8 +252,7 @@ void CodecAdapterH264::CoreCodecQueueInputFormatDetails(
   // in the FormatDetails at least optionally, and possibly sizing input
   // buffer constraints and/or other buffers based on that.
 
-  QueueInputItem(
-      CodecInputItem::FormatDetails(per_stream_override_format_details));
+  QueueInputItem(CodecInputItem::FormatDetails(per_stream_override_format_details));
 }
 
 void CodecAdapterH264::CoreCodecQueueInputPacket(CodecPacket* packet) {
@@ -343,8 +336,7 @@ void CodecAdapterH264::CoreCodecStopStream() {
   video_->ClearDecoderInstance();
 }
 
-void CodecAdapterH264::CoreCodecAddBuffer(CodecPort port,
-                                          const CodecBuffer* buffer) {
+void CodecAdapterH264::CoreCodecAddBuffer(CodecPort port, const CodecBuffer* buffer) {
   if (port != kOutputPort) {
     return;
   }
@@ -370,8 +362,7 @@ void CodecAdapterH264::CoreCodecConfigureBuffers(
   // This should prevent any inadvertent dependence by clients on the ordering
   // of packet_index values in the output stream or any assumptions re. the
   // relationship between packet_index and buffer_index.
-  std::shuffle(free_output_packets_.begin(), free_output_packets_.end(),
-               not_for_security_prng_);
+  std::shuffle(free_output_packets_.begin(), free_output_packets_.end(), not_for_security_prng_);
 }
 
 void CodecAdapterH264::CoreCodecRecycleOutputPacket(CodecPacket* packet) {
@@ -436,8 +427,7 @@ void CodecAdapterH264::CoreCodecEnsureBuffersNotConfigured(CodecPort port) {
 
 std::unique_ptr<const fuchsia::media::StreamOutputConstraints>
 CodecAdapterH264::CoreCodecBuildNewOutputConstraints(
-    uint64_t stream_lifetime_ordinal,
-    uint64_t new_output_buffer_constraints_version_ordinal,
+    uint64_t stream_lifetime_ordinal, uint64_t new_output_buffer_constraints_version_ordinal,
     bool buffer_constraints_action_required) {
   // bear.h264 decodes into 320x192 YUV buffers, but the video display
   // dimensions are 320x180.  A the bottom of the buffer only .25 of the last
@@ -476,8 +466,7 @@ CodecAdapterH264::CoreCodecBuildNewOutputConstraints(
   // For the moment, there will be only one StreamOutputConstraints, and it'll
   // need output buffers configured for it.
   ZX_DEBUG_ASSERT(buffer_constraints_action_required);
-  config->set_buffer_constraints_action_required(
-      buffer_constraints_action_required);
+  config->set_buffer_constraints_action_required(buffer_constraints_action_required);
   constraints->set_buffer_constraints_version_ordinal(
       new_output_buffer_constraints_version_ordinal);
 
@@ -485,8 +474,7 @@ CodecAdapterH264::CoreCodecBuildNewOutputConstraints(
   default_settings->set_buffer_lifetime_ordinal(0);
   default_settings->set_buffer_constraints_version_ordinal(
       new_output_buffer_constraints_version_ordinal);
-  default_settings->set_packet_count_for_server(packet_count_total_ -
-                                                kPacketCountForClientForced);
+  default_settings->set_packet_count_for_server(packet_count_total_ - kPacketCountForClientForced);
   default_settings->set_packet_count_for_client(kDefaultPacketCountForClient);
   // Packed NV12 (no extra padding, min UV offset, min stride).
   default_settings->set_per_packet_buffer_bytes(per_packet_buffer_bytes);
@@ -499,14 +487,12 @@ CodecAdapterH264::CoreCodecBuildNewOutputConstraints(
 
   // For the moment, let's just force the client to set this exact number of
   // frames for the codec.
-  constraints->set_packet_count_for_server_min(packet_count_total_ -
-                                               kPacketCountForClientForced);
-  constraints->set_packet_count_for_server_recommended(
-      packet_count_total_ - kPacketCountForClientForced);
-  constraints->set_packet_count_for_server_recommended_max(
-      packet_count_total_ - kPacketCountForClientForced);
-  constraints->set_packet_count_for_server_max(packet_count_total_ -
-                                               kPacketCountForClientForced);
+  constraints->set_packet_count_for_server_min(packet_count_total_ - kPacketCountForClientForced);
+  constraints->set_packet_count_for_server_recommended(packet_count_total_ -
+                                                       kPacketCountForClientForced);
+  constraints->set_packet_count_for_server_recommended_max(packet_count_total_ -
+                                                           kPacketCountForClientForced);
+  constraints->set_packet_count_for_server_max(packet_count_total_ - kPacketCountForClientForced);
 
   constraints->set_packet_count_for_client_min(kPacketCountForClientForced);
   constraints->set_packet_count_for_client_max(kPacketCountForClientForced);
@@ -517,12 +503,10 @@ CodecAdapterH264::CoreCodecBuildNewOutputConstraints(
 
   constraints->set_is_physically_contiguous_required(true);
   ::zx::bti very_temp_kludge_bti;
-  zx_status_t dup_status =
-      ::zx::unowned<::zx::bti>(video_->bti())
-          ->duplicate(ZX_RIGHT_SAME_RIGHTS, &very_temp_kludge_bti);
+  zx_status_t dup_status = ::zx::unowned<::zx::bti>(video_->bti())
+                               ->duplicate(ZX_RIGHT_SAME_RIGHTS, &very_temp_kludge_bti);
   if (dup_status != ZX_OK) {
-    events_->onCoreCodecFailCodec("BTI duplicate failed - status: %d",
-                                  dup_status);
+    events_->onCoreCodecFailCodec("BTI duplicate failed - status: %d", dup_status);
     return nullptr;
   }
   // This is very temporary.  The BufferAllocator should handle this directly,
@@ -534,8 +518,7 @@ CodecAdapterH264::CoreCodecBuildNewOutputConstraints(
 
 fuchsia::sysmem::BufferCollectionConstraints
 CodecAdapterH264::CoreCodecGetBufferCollectionConstraints(
-    CodecPort port,
-    const fuchsia::media::StreamBufferConstraints& stream_buffer_constraints,
+    CodecPort port, const fuchsia::media::StreamBufferConstraints& stream_buffer_constraints,
     const fuchsia::media::StreamBufferPartialSettings& partial_settings) {
   fuchsia::sysmem::BufferCollectionConstraints result;
 
@@ -552,8 +535,8 @@ CodecAdapterH264::CoreCodecGetBufferCollectionConstraints(
 
   ZX_DEBUG_ASSERT(partial_settings.has_packet_count_for_server());
   ZX_DEBUG_ASSERT(partial_settings.has_packet_count_for_client());
-  uint32_t packet_count = partial_settings.packet_count_for_server() +
-                          partial_settings.packet_count_for_client();
+  uint32_t packet_count =
+      partial_settings.packet_count_for_server() + partial_settings.packet_count_for_client();
 
   // For now this is true - when we plumb more flexible buffer count range this
   // will change to account for a range.
@@ -568,8 +551,7 @@ CodecAdapterH264::CoreCodecGetBufferCollectionConstraints(
   // min_buffer_count_for_camping to packet_count_for_server() and the client
   // setting exactly and only min_buffer_count_for_camping to
   // packet_count_for_client().
-  result.min_buffer_count_for_camping =
-      partial_settings.packet_count_for_server();
+  result.min_buffer_count_for_camping = partial_settings.packet_count_for_server();
   // Some slack is nice overall, but avoid having each participant ask for
   // dedicated slack.  Using sysmem the client will ask for it's own buffers for
   // camping and any slack, so the codec doesn't need to ask for any extra on
@@ -603,36 +585,38 @@ CodecAdapterH264::CoreCodecGetBufferCollectionConstraints(
 
   if (port == kOutputPort) {
     result.image_format_constraints_count = 1;
-    fuchsia::sysmem::ImageFormatConstraints& image_constraints =
-        result.image_format_constraints[0];
-    image_constraints.pixel_format.type =
-        fuchsia::sysmem::PixelFormatType::NV12;
+    fuchsia::sysmem::ImageFormatConstraints& image_constraints = result.image_format_constraints[0];
+    image_constraints.pixel_format.type = fuchsia::sysmem::PixelFormatType::NV12;
+    image_constraints.pixel_format.has_format_modifier = true;
+    image_constraints.pixel_format.format_modifier.value = fuchsia::sysmem::FORMAT_MODIFIER_LINEAR;
     // TODO(MTWN-251): confirm that REC709 is always what we want here, or plumb
     // actual YUV color space if it can ever be REC601_*.  Since 2020 and 2100
     // are minimum 10 bits per Y sample and we're outputting NV12, 601 is the
     // only other potential possibility here.
     image_constraints.color_spaces_count = 1;
-    image_constraints.color_space[0].type =
-        fuchsia::sysmem::ColorSpaceType::REC709;
+    image_constraints.color_space[0].type = fuchsia::sysmem::ColorSpaceType::REC709;
 
     // The non-"required_" fields indicate the decoder's ability to potentially
     // output frames at various dimensions as coded in the stream.  Aside from
     // the current stream being somewhere in these bounds, these have nothing to
     // do with the current stream in particular.
     image_constraints.min_coded_width = 16;
-    image_constraints.max_coded_width = 3840;
+    image_constraints.max_coded_width = 4096;
     image_constraints.min_coded_height = 16;
-    // This intentionally isn't the height of a 4k frame.  See
-    // max_coded_width_times_coded_height.  We intentionally constrain the max
-    // dimension in width or height to the width of a 4k frame.  While the HW
-    // might be able to go bigger than that as long as the other dimension is
-    // smaller to compensate, we don't really need to enable any larger than
-    // 4k's width in either dimension, so we don't.
-    image_constraints.max_coded_height = 3840;
+    // This intentionally isn't the _height_ of a 4096x2176 frame, it's
+    // intentionally the _width_ of a 4096x2176 frame assigned to
+    // max_coded_height.
+    //
+    // See max_coded_width_times_coded_height.  We intentionally constrain the
+    // max dimension in width or height to the width of a 4096x2176 frame.
+    // While the HW might be able to go bigger than that as long as the other
+    // dimension is smaller to compensate, we don't really need to enable any
+    // larger than 4096x2176's width in either dimension, so we don't.
+    image_constraints.max_coded_height = 4096;
     image_constraints.min_bytes_per_row = 16;
     // no hard-coded max stride, at least for now
     image_constraints.max_bytes_per_row = 0xFFFFFFFF;
-    image_constraints.max_coded_width_times_coded_height = 3840 * 2160;
+    image_constraints.max_coded_width_times_coded_height = 4096 * 2176;
     image_constraints.layers = 1;
     image_constraints.coded_width_divisor = 16;
     image_constraints.coded_height_divisor = 16;
@@ -676,25 +660,19 @@ CodecAdapterH264::CoreCodecGetBufferCollectionConstraints(
 }
 
 void CodecAdapterH264::CoreCodecSetBufferCollectionInfo(
-    CodecPort port,
-    const fuchsia::sysmem::BufferCollectionInfo_2& buffer_collection_info) {
-  ZX_DEBUG_ASSERT(
-      buffer_collection_info.settings.buffer_settings.is_physically_contiguous);
-  ZX_DEBUG_ASSERT(
-      buffer_collection_info.settings.buffer_settings.coherency_domain ==
-      fuchsia::sysmem::CoherencyDomain::CPU);
+    CodecPort port, const fuchsia::sysmem::BufferCollectionInfo_2& buffer_collection_info) {
+  ZX_DEBUG_ASSERT(buffer_collection_info.settings.buffer_settings.is_physically_contiguous);
+  ZX_DEBUG_ASSERT(buffer_collection_info.settings.buffer_settings.coherency_domain ==
+                  fuchsia::sysmem::CoherencyDomain::CPU);
   if (port == kOutputPort) {
-    ZX_DEBUG_ASSERT(
-        buffer_collection_info.settings.has_image_format_constraints);
-    ZX_DEBUG_ASSERT(buffer_collection_info.settings.image_format_constraints
-                        .pixel_format.type ==
+    ZX_DEBUG_ASSERT(buffer_collection_info.settings.has_image_format_constraints);
+    ZX_DEBUG_ASSERT(buffer_collection_info.settings.image_format_constraints.pixel_format.type ==
                     fuchsia::sysmem::PixelFormatType::NV12);
   }
 }
 
 fuchsia::media::StreamOutputFormat CodecAdapterH264::CoreCodecGetOutputFormat(
-    uint64_t stream_lifetime_ordinal,
-    uint64_t new_output_format_details_version_ordinal) {
+    uint64_t stream_lifetime_ordinal, uint64_t new_output_format_details_version_ordinal) {
   fuchsia::media::StreamOutputFormat result;
   result.set_stream_lifetime_ordinal(stream_lifetime_ordinal);
   result.mutable_format_details()->set_format_details_version_ordinal(
@@ -726,16 +704,14 @@ fuchsia::media::StreamOutputFormat CodecAdapterH264::CoreCodecGetOutputFormat(
   video_uncompressed.pixel_aspect_ratio_width = sar_width_;
   video_uncompressed.pixel_aspect_ratio_height = sar_height_;
 
-  video_uncompressed.image_format.pixel_format.type =
-      fuchsia::sysmem::PixelFormatType::NV12;
+  video_uncompressed.image_format.pixel_format.type = fuchsia::sysmem::PixelFormatType::NV12;
   video_uncompressed.image_format.coded_width = width_;
   video_uncompressed.image_format.coded_height = height_;
   video_uncompressed.image_format.bytes_per_row = min_stride_;
   video_uncompressed.image_format.display_width = display_width_;
   video_uncompressed.image_format.display_height = display_height_;
   video_uncompressed.image_format.layers = 1;
-  video_uncompressed.image_format.color_space.type =
-      fuchsia::sysmem::ColorSpaceType::REC709;
+  video_uncompressed.image_format.color_space.type = fuchsia::sysmem::ColorSpaceType::REC709;
   video_uncompressed.image_format.has_pixel_aspect_ratio = has_sar_;
   video_uncompressed.image_format.pixel_aspect_ratio_width = sar_width_;
   video_uncompressed.image_format.pixel_aspect_ratio_height = sar_height_;
@@ -743,8 +719,7 @@ fuchsia::media::StreamOutputFormat CodecAdapterH264::CoreCodecGetOutputFormat(
   fuchsia::media::VideoFormat video_format;
   video_format.set_uncompressed(std::move(video_uncompressed));
 
-  result.mutable_format_details()->mutable_domain()->set_video(
-      std::move(video_format));
+  result.mutable_format_details()->mutable_domain()->set_video(std::move(video_format));
 
   return result;
 }
@@ -769,11 +744,9 @@ void CodecAdapterH264::CoreCodecMidStreamOutputBufferReConfigFinish() {
     // Now we need to populate the frames_out vector.
     for (uint32_t i = 0; i < all_output_buffers_.size(); i++) {
       ZX_DEBUG_ASSERT(all_output_buffers_[i]->buffer_index() == i);
-      ZX_DEBUG_ASSERT(all_output_buffers_[i]->codec_buffer().buffer_index() ==
-                      i);
+      ZX_DEBUG_ASSERT(all_output_buffers_[i]->codec_buffer().buffer_index() == i);
       frames.emplace_back(CodecFrame{
-          .codec_buffer_spec =
-              fidl::Clone(all_output_buffers_[i]->codec_buffer()),
+          .codec_buffer_spec = fidl::Clone(all_output_buffers_[i]->codec_buffer()),
           .codec_buffer_ptr = all_output_buffers_[i],
       });
     }
@@ -783,16 +756,13 @@ void CodecAdapterH264::CoreCodecMidStreamOutputBufferReConfigFinish() {
   }  // ~lock
   {  // scope lock
     std::lock_guard<std::mutex> lock(*video_->video_decoder_lock());
-    video_->video_decoder()->InitializedFrames(std::move(frames), width, height,
-                                               stride);
+    video_->video_decoder()->InitializedFrames(std::move(frames), width, height, stride);
   }  // ~lock
 }
 
-void CodecAdapterH264::PostSerial(async_dispatcher_t* dispatcher,
-                                  fit::closure to_run) {
+void CodecAdapterH264::PostSerial(async_dispatcher_t* dispatcher, fit::closure to_run) {
   zx_status_t post_result = async::PostTask(dispatcher, std::move(to_run));
-  ZX_ASSERT_MSG(post_result == ZX_OK, "async::PostTask() failed - result: %d\n",
-                post_result);
+  ZX_ASSERT_MSG(post_result == ZX_OK, "async::PostTask() failed - result: %d\n", post_result);
 }
 
 void CodecAdapterH264::PostToInputProcessingThread(fit::closure to_run) {
@@ -813,16 +783,14 @@ void CodecAdapterH264::QueueInputItem(CodecInputItem input_item) {
     input_queue_.emplace_back(std::move(input_item));
   }  // ~lock
   if (is_trigger_needed) {
-    PostToInputProcessingThread(
-        fit::bind_member(this, &CodecAdapterH264::ProcessInput));
+    PostToInputProcessingThread(fit::bind_member(this, &CodecAdapterH264::ProcessInput));
   }
 }
 
 CodecInputItem CodecAdapterH264::DequeueInputItem() {
   {  // scope lock
     std::lock_guard<std::mutex> lock(lock_);
-    if (is_stream_failed_ || is_cancelling_input_processing_ ||
-        input_queue_.empty()) {
+    if (is_stream_failed_ || is_cancelling_input_processing_ || input_queue_.empty()) {
       return CodecInputItem::Invalid();
     }
     CodecInputItem to_ret = std::move(input_queue_.front());
@@ -889,12 +857,10 @@ void CodecAdapterH264::ProcessInput() {
       }
     }
 
-    uint8_t* data =
-        item.packet()->buffer()->buffer_base() + item.packet()->start_offset();
+    uint8_t* data = item.packet()->buffer()->buffer_base() + item.packet()->start_offset();
     uint32_t len = item.packet()->valid_length_bytes();
 
-    video_->pts_manager()->InsertPts(parsed_video_size_,
-                                     item.packet()->has_timestamp_ish(),
+    video_->pts_manager()->InsertPts(parsed_video_size_, item.packet()->has_timestamp_ish(),
                                      item.packet()->timestamp_ish());
 
     // This call is the main reason the current thread exists, as this call can
@@ -989,7 +955,7 @@ bool CodecAdapterH264::ParseAndDeliverCodecOobBytes() {
       // minimum the oob buffer needs to be large enough to contain both the
       // sps_count and pps_count fields, which is a min of 7 bytes.
       if (oob->size() < 7) {
-        OnCoreCodecFailStream();
+        OnCoreCodecFailStream(fuchsia::media::StreamError::INVALID_INPUT_FORMAT_DETAILS);
         return false;
       }
       uint32_t stashed_pseudo_nal_length_bytes = ((*oob)[4] & 0x3) + 1;
@@ -1000,12 +966,12 @@ bool CodecAdapterH264::ParseAndDeliverCodecOobBytes() {
       uint32_t offset = 6;
       for (uint32_t i = 0; i < sps_count; ++i) {
         if (offset + 2 > oob->size()) {
-          OnCoreCodecFailStream();
+          OnCoreCodecFailStream(fuchsia::media::StreamError::INVALID_INPUT_FORMAT_DETAILS);
           return false;
         }
         uint32_t sps_length = (*oob)[offset] * 256 + (*oob)[offset + 1];
         if (offset + 2 + sps_length > oob->size()) {
-          OnCoreCodecFailStream();
+          OnCoreCodecFailStream(fuchsia::media::StreamError::INVALID_INPUT_FORMAT_DETAILS);
           return false;
         }
         if (!ParseVideo(&oob->data()[offset], 2 + sps_length)) {
@@ -1014,18 +980,18 @@ bool CodecAdapterH264::ParseAndDeliverCodecOobBytes() {
         offset += 2 + sps_length;
       }
       if (offset + 1 > oob->size()) {
-        OnCoreCodecFailStream();
+        OnCoreCodecFailStream(fuchsia::media::StreamError::INVALID_INPUT_FORMAT_DETAILS);
         return false;
       }
       uint32_t pps_count = (*oob)[offset++];
       for (uint32_t i = 0; i < pps_count; ++i) {
         if (offset + 2 > oob->size()) {
-          OnCoreCodecFailStream();
+          OnCoreCodecFailStream(fuchsia::media::StreamError::INVALID_INPUT_FORMAT_DETAILS);
           return false;
         }
         uint32_t pps_length = (*oob)[offset] * 256 + (*oob)[offset + 1];
         if (offset + 2 + pps_length > oob->size()) {
-          OnCoreCodecFailStream();
+          OnCoreCodecFailStream(fuchsia::media::StreamError::INVALID_INPUT_FORMAT_DETAILS);
           return false;
         }
         if (!ParseVideo(&oob->data()[offset], 2 + pps_length)) {
@@ -1039,14 +1005,13 @@ bool CodecAdapterH264::ParseAndDeliverCodecOobBytes() {
       return true;
     }
     default:
-      OnCoreCodecFailStream();
+      OnCoreCodecFailStream(fuchsia::media::StreamError::INVALID_INPUT_FORMAT_DETAILS);
       return false;
   }
 }
 
 bool CodecAdapterH264::ParseVideo(const uint8_t* data, uint32_t length) {
-  return is_avcc_ ? ParseVideoAvcc(data, length)
-                  : ParseVideoAnnexB(data, length);
+  return is_avcc_ ? ParseVideoAvcc(data, length) : ParseVideoAnnexB(data, length);
 }
 
 bool CodecAdapterH264::ParseVideoAvcc(const uint8_t* data, uint32_t length) {
@@ -1076,19 +1041,18 @@ bool CodecAdapterH264::ParseVideoAvcc(const uint8_t* data, uint32_t length) {
   uint32_t i = 0;
   while (i < length) {
     if (i + pseudo_nal_length_field_bytes_ > length) {
-      OnCoreCodecFailStream();
+      OnCoreCodecFailStream(fuchsia::media::StreamError::DECODER_UNKNOWN);
       return false;
     }
     // Read pseudo_nal_length field, which is a field which can be 1-4 bytes
     // long because AVCC/avcC.
     uint32_t pseudo_nal_length = 0;
-    for (uint32_t length_byte = 0; length_byte < pseudo_nal_length_field_bytes_;
-         ++length_byte) {
+    for (uint32_t length_byte = 0; length_byte < pseudo_nal_length_field_bytes_; ++length_byte) {
       pseudo_nal_length = pseudo_nal_length * 256 + data[i + length_byte];
     }
     i += pseudo_nal_length_field_bytes_;
     if (i + pseudo_nal_length > length) {
-      OnCoreCodecFailStream();
+      OnCoreCodecFailStream(fuchsia::media::StreamError::DECODER_UNKNOWN);
       return false;
     }
     i += pseudo_nal_length;
@@ -1096,28 +1060,25 @@ bool CodecAdapterH264::ParseVideoAvcc(const uint8_t* data, uint32_t length) {
   }
 
   static constexpr uint32_t kStartCodeBytes = 4;
-  uint32_t local_length = length -
-                          pseudo_nal_count * pseudo_nal_length_field_bytes_ +
+  uint32_t local_length = length - pseudo_nal_count * pseudo_nal_length_field_bytes_ +
                           pseudo_nal_count * kStartCodeBytes;
-  std::unique_ptr<uint8_t[]> local_buffer =
-      std::make_unique<uint8_t[]>(local_length);
+  std::unique_ptr<uint8_t[]> local_buffer = std::make_unique<uint8_t[]>(local_length);
   uint8_t* local_data = local_buffer.get();
 
   i = 0;
   uint32_t o = 0;
   while (i < length) {
     if (i + pseudo_nal_length_field_bytes_ > length) {
-      OnCoreCodecFailStream();
+      OnCoreCodecFailStream(fuchsia::media::StreamError::DECODER_UNKNOWN);
       return false;
     }
     uint32_t pseudo_nal_length = 0;
-    for (uint32_t length_byte = 0; length_byte < pseudo_nal_length_field_bytes_;
-         ++length_byte) {
+    for (uint32_t length_byte = 0; length_byte < pseudo_nal_length_field_bytes_; ++length_byte) {
       pseudo_nal_length = pseudo_nal_length * 256 + data[i + length_byte];
     }
     i += pseudo_nal_length_field_bytes_;
     if (i + pseudo_nal_length > length) {
-      OnCoreCodecFailStream();
+      OnCoreCodecFailStream(fuchsia::media::StreamError::DECODER_UNKNOWN);
       return false;
     }
 
@@ -1150,9 +1111,8 @@ bool CodecAdapterH264::ParseVideoAnnexB(const uint8_t* data, uint32_t length) {
   // bytes present.
   //
   // The data won't be modified by ParseVideo().
-  if (ZX_OK != video_->ParseVideo(
-                   static_cast<void*>(const_cast<uint8_t*>(data)), length)) {
-    OnCoreCodecFailStream();
+  if (ZX_OK != video_->ParseVideo(static_cast<void*>(const_cast<uint8_t*>(data)), length)) {
+    OnCoreCodecFailStream(fuchsia::media::StreamError::DECODER_UNKNOWN);
     return false;
   }
   parsed_video_size_ += length;
@@ -1186,20 +1146,20 @@ bool CodecAdapterH264::ParseVideoAnnexB(const uint8_t* data, uint32_t length) {
 
   if (is_cancelling || ZX_OK != video_->WaitForParsingCompleted(ZX_SEC(10))) {
     video_->CancelParsing();
-    OnCoreCodecFailStream();
+    OnCoreCodecFailStream(fuchsia::media::StreamError::DECODER_UNKNOWN);
     return false;
   }
   return true;
 }
 
-zx_status_t CodecAdapterH264::InitializeFramesHandler(
-    ::zx::bti bti, uint32_t frame_count, uint32_t width, uint32_t height,
-    uint32_t stride, uint32_t display_width, uint32_t display_height,
-    bool has_sar, uint32_t sar_width, uint32_t sar_height) {
+zx_status_t CodecAdapterH264::InitializeFramesHandler(::zx::bti bti, uint32_t frame_count,
+                                                      uint32_t width, uint32_t height,
+                                                      uint32_t stride, uint32_t display_width,
+                                                      uint32_t display_height, bool has_sar,
+                                                      uint32_t sar_width, uint32_t sar_height) {
   // First handle the special case of EndOfStream marker showing up at the
   // output.
-  if (display_width == kEndOfStreamWidth &&
-      display_height == kEndOfStreamHeight) {
+  if (display_width == kEndOfStreamWidth && display_height == kEndOfStreamHeight) {
     bool is_output_end_of_stream = false;
     {  // scope lock
       std::lock_guard<std::mutex> lock(lock_);
@@ -1281,12 +1241,12 @@ zx_status_t CodecAdapterH264::InitializeFramesHandler(
   return ZX_OK;
 }
 
-void CodecAdapterH264::OnCoreCodecFailStream() {
+void CodecAdapterH264::OnCoreCodecFailStream(fuchsia::media::StreamError error) {
   {  // scope lock
     std::lock_guard<std::mutex> lock(lock_);
     is_stream_failed_ = true;
   }
-  events_->onCoreCodecFailStream();
+  events_->onCoreCodecFailStream(error);
 }
 
 CodecPacket* CodecAdapterH264::GetFreePacket() {

@@ -17,8 +17,7 @@
 #include <vector>
 
 int main(int argc, const char** argv) {
-  std::string server_url =
-      "fuchsia-pkg://fuchsia.com/echo_server_llcpp#meta/echo_server_llcpp.cmx";
+  std::string server_url = "fuchsia-pkg://fuchsia.com/echo_server_llcpp#meta/echo_server_llcpp.cmx";
   std::string msg = "hello world";
 
   for (int i = 1; i < argc - 1; ++i) {
@@ -48,20 +47,15 @@ int main(int argc, const char** argv) {
 
   // Using low-level C++ bindings to perform a call
   ::llcpp::fidl::examples::echo::Echo::SyncClient client(std::move(client_end));
-  std::vector<uint8_t> request_buffer(512);
-  std::vector<uint8_t> response_buffer(512);
-  fidl::StringView out_str = {};
-  auto result = client.EchoString(
-      fidl::BytePart(&request_buffer[0], request_buffer.size()),
-      fidl::StringView(msg.size(), &msg[0]),
-      fidl::BytePart(&response_buffer[0], response_buffer.size()), &out_str);
-  if (result.status != ZX_OK) {
-    std::cerr << "Failed to call server: " << result.status << " ("
-              << result.error << ")" << std::endl;
-    return result.status;
+  auto result = client.EchoString(fidl::StringView(msg.size(), &msg[0]));
+  if (result.status() != ZX_OK) {
+    std::cerr << "Failed to call server: " << result.status() << " (" << result.error() << ")"
+              << std::endl;
+    return result.status();
   }
 
-  std::string reply_string(out_str.data(), out_str.size());
+  auto response = result.Unwrap();
+  std::string reply_string(response->response.data(), response->response.size());
   std::cout << "Reply: " << reply_string << std::endl;
 
   return 0;

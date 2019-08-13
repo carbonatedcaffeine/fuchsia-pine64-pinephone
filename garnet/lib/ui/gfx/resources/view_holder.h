@@ -35,7 +35,7 @@ class ViewHolder final : public Node {
   // |Resource|
   void Accept(class ResourceVisitor* visitor) override;
   // |Resource| ViewHolders don't support imports.
-  void AddImport(Import* import) override {}
+  void AddImport(Import* import, ErrorReporter* error_reporter) override {}
   void RemoveImport(Import* import) override {}
 
   // Connection management.  Call once the ViewHolder is created to initiate the
@@ -48,8 +48,17 @@ class ViewHolder final : public Node {
   View* view() const { return view_; }
 
   // ViewProperties management.
-  void SetViewProperties(fuchsia::ui::gfx::ViewProperties props);
+  void SetViewProperties(fuchsia::ui::gfx::ViewProperties props, ErrorReporter* error_reporter);
   const fuchsia::ui::gfx::ViewProperties& GetViewProperties() { return view_properties_; }
+  escher::BoundingBox GetLocalBoundingBox() const;
+
+  // TODO(SCN-1496): Bounding boxes that are rotated by degrees that are not multiples
+  // of 90 will cause the box to grow/shrink. This needs to be accounted for in the
+  // rest of the code.
+  escher::BoundingBox GetWorldBoundingBox() const;
+
+  void set_bounds_color(glm::vec4 bounds_color) { bounds_color_ = bounds_color; }
+  glm::vec4 bounds_color() const { return bounds_color_; }
 
  protected:
   // |Node|
@@ -78,6 +87,9 @@ class ViewHolder final : public Node {
 
   fuchsia::ui::gfx::ViewProperties view_properties_;
   fuchsia::ui::gfx::ViewState view_state_;
+  bool should_render_bounding_box_ = false;
+  glm::vec4 bounds_color_ = glm::vec4(1, 1, 1, 1);
+
   // Event that is signaled when the corresponding View's children are rendered
   // by scenic.
   zx::event render_event_;

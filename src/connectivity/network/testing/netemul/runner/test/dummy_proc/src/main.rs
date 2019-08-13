@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 use {
     failure::{format_err, Error, ResultExt},
@@ -30,6 +30,8 @@ struct Opt {
     event: Option<i32>,
     #[structopt(short = "d")]
     look_at_data: bool,
+    #[structopt(short = "P")]
+    check_path: Option<String>,
     #[structopt(short = "s")]
     service: Option<String>,
     #[structopt(short = "l")]
@@ -52,11 +54,11 @@ impl BusConnection {
     }
 
     pub async fn publish_code(&self, code: i32) -> Result<(), Error> {
-        let () = await!(self.bus.ensure_publish(Event {
+        let () = self.bus.ensure_publish(Event {
             code: Some(code),
             message: None,
             arguments: None,
-        }))?;
+        }).await?;
         Ok(())
     }
 
@@ -74,7 +76,7 @@ impl BusConnection {
             },
             _ => futures::future::ok(None),
         });
-        await!(stream.try_next())?;
+        stream.try_next().await?;
         Ok(())
     }
 
@@ -84,10 +86,10 @@ impl BusConnection {
         wait: Option<i32>,
     ) -> Result<(), Error> {
         if let Some(code) = wait {
-            let () = await!(self.wait_for_event(code))?;
+            let () = self.wait_for_event(code).await?;
         }
         if let Some(code) = publish {
-            let () = await!(self.publish_code(code))?;
+            let () = self.publish_code(code).await?;
         }
         Ok(())
     }
@@ -133,13 +135,20 @@ async fn main() -> Result<(), Error> {
         None
     };
 
+    if let Some(path) = opt.check_path {
+        println!("Checking path existence {}...", &path);
+        if !std::path::Path::new(&path).exists() {
+            return Err(format_err!("{} is not in namespace", &path));
+        }
+    }
+
     if opt.publish != None || opt.event != None {
         // Unwrap the `bus` which should be an error
         // if the test requires publish or event waiting operations.
         let bus = bus.context("Failed to connect to bus")?;
 
         println!("Publishing: {:?} | Waiting for event: {:?}", opt.publish, opt.event);
-        let () = await!(bus.perform_bus_ops(opt.publish, opt.event))?;
+        let () = bus.perform_bus_ops(opt.publish, opt.event).await?;
     }
 
     if opt.fail {

@@ -8,6 +8,7 @@ import("$zx/public/gn/test/zbi_test.gni")
 import("$zx/public/gn/toolchain/c_utils.gni")
 import("$zx/public/gn/toolchain/environment.gni")
 import("$zx/public/gn/toolchain/environment_redirect.gni")
+import("$zx/public/gn/zbi.gni")
 
 # userboot gets its own toolchain for its special build requirements.
 if (current_toolchain == default_toolchain) {
@@ -55,10 +56,7 @@ if (current_toolchain == default_toolchain) {
       "-include",
       rebase_path("$zx/kernel/include/hidden.h", root_build_dir),
     ]
-    defines = [
-      "HIDDEN",
-      "WITH_LZ4_NOALLOC",
-    ]
+    defines = [ "HIDDEN" ]
   }
 
   # This is the output of target ":gen-vdso-syms-ld", below.
@@ -74,6 +72,7 @@ if (current_toolchain == default_toolchain) {
       "start.cc",
       "userboot-elf.cc",
       "util.cc",
+      "zx_panic.cc",
     ]
     defines = [ "ZBI_TEST_SUCCESS_STRING=\"$zbi_test_success_string\"" ]
     configs += [ "$zx/public/gn/config:rodso" ]
@@ -90,10 +89,15 @@ if (current_toolchain == default_toolchain) {
       "$zx/system/ulib/zircon",
       "$zx/system/ulib/zircon-internal",
       "$zx/system/ulib/zx",
-      "$zx/third_party/ulib/lz4",
       "$zx/third_party/ulib/musl/src/string:minimal_str",
       "$zx/third_party/ulib/musl/src/string:stdmem",
     ]
+
+    if (zbi_compression_algorithm == "lz4f") {
+      defines += [ "ZBI_COMPRESSION_MAGIC=kLz4fMagic" ]
+    } else if (zbi_compression_algorithm == "zstd") {
+      defines += [ "ZBI_COMPRESSION_MAGIC=kZstdMagic" ]
+    }
   }
 
   # This generated header lists all the ABI symbols in the vDSO with their

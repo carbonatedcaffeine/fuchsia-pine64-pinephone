@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 #
 # Copyright 2017 The Fuchsia Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -7,7 +7,7 @@
 """Visualizes the output of Zircon's "memgraph" tool.
 
 For usage, see
-https://fuchsia.googlesource.com/fuchsia/+/master/zircon/docs/memory.md#Visualize-memory-usage
+https://fuchsia.googlesource.com/fuchsia/+/master/docs/zircon/memory.md#Visualize-memory-usage
 """
 
 from __future__ import absolute_import
@@ -373,7 +373,7 @@ def build_tree(dataset):
     """Builds a Node tree from a set of memgraph records.
 
     See
-    https://fuchsia.googlesource.com/fuchsia/+/master/zircon/docs/memory.md#Visualize-memory-usage
+    https://fuchsia.googlesource.com/fuchsia/+/master/docs/zircon/memory.md#Visualize-memory-usage
     for an example of generating memgraph JSON data.
 
     Args:

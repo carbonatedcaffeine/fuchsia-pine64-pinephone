@@ -17,21 +17,19 @@
 
 namespace ledger {
 
-ActivePageManagerContainer::ActivePageManagerContainer(std::string ledger_name,
-                                                       storage::PageId page_id,
-                                                       PageUsageListener* page_usage_listener)
+ActivePageManagerContainer::ActivePageManagerContainer(
+    std::string ledger_name, storage::PageId page_id,
+    std::vector<PageUsageListener*> page_usage_listeners)
     : page_id_(page_id),
-      connection_notifier_(std::move(ledger_name), std::move(page_id), page_usage_listener) {}
+      connection_notifier_(std::move(ledger_name), std::move(page_id),
+                           std::move(page_usage_listeners)) {
+  connection_notifier_.set_on_empty([this] { CheckEmpty(); });
+}
 
 ActivePageManagerContainer::~ActivePageManagerContainer() = default;
 
 void ActivePageManagerContainer::set_on_empty(fit::closure on_empty_callback) {
   on_empty_callback_ = std::move(on_empty_callback);
-  connection_notifier_.set_on_empty([this] { CheckEmpty(); });
-  if (active_page_manager_) {
-    active_page_manager_->set_on_empty(
-        [this] { connection_notifier_.UnregisterExternalRequests(); });
-  }
 }
 
 void ActivePageManagerContainer::BindPage(fidl::InterfaceRequest<Page> page_request,

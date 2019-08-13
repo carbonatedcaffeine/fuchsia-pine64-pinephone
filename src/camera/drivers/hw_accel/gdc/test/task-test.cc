@@ -4,20 +4,21 @@
 
 #include "../task.h"
 
-#include <ddk/debug.h>
 #include <fuchsia/sysmem/c/fidl.h>
 #include <lib/fake-bti/bti.h>
 #include <lib/mmio/mmio.h>
 #include <lib/syslog/global.h>
-#include <mock-mmio-reg/mock-mmio-reg.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <zxtest/zxtest.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <utility>
 #include <vector>
+
+#include <ddk/debug.h>
+#include <mock-mmio-reg/mock-mmio-reg.h>
+#include <zxtest/zxtest.h>
 
 #include "../gdc-regs.h"
 #include "../gdc.h"
@@ -174,7 +175,7 @@ TEST_F(TaskTest, InputBufferTest) {
   // Expecting to get error when requesting for invalid index.
   zx_paddr_t addr;
   for (uint32_t i = 0; i < kNumberOfBuffers; i++) {
-    EXPECT_EQ(ZX_OK, task->GetInputBufferPhysAddr(0, &addr));
+    EXPECT_OK(task->GetInputBufferPhysAddr(0, &addr));
   }
 
   EXPECT_EQ(ZX_ERR_INVALID_ARGS, task->GetInputBufferPhysAddr(kNumberOfBuffers, &addr));

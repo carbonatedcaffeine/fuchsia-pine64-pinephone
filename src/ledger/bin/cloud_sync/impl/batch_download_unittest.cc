@@ -41,7 +41,7 @@ class TestPageStorage : public storage::PageStorageEmptyImpl {
       std::vector<storage::PageStorage::CommitIdAndBytes> ids_and_bytes,
       storage::ChangeSource source,
       fit::function<void(ledger::Status, std::vector<storage::CommitId>)> callback) override {
-    ASSERT_EQ(storage::ChangeSource::CLOUD, source);
+    ASSERT_EQ(source, storage::ChangeSource::CLOUD);
     if (should_fail_add_commit_from_sync) {
       async::PostTask(dispatcher_, [callback = std::move(callback)]() {
         callback(ledger::Status::IO_ERROR, {});
@@ -88,7 +88,7 @@ class BatchDownloadTest : public gtest::TestLoopFixture {
 TEST_F(BatchDownloadTest, AddCommit) {
   int done_calls = 0;
   int error_calls = 0;
-  std::vector<cloud_provider::CommitPackEntry> entries;
+  std::vector<cloud_provider::Commit> entries;
   entries.push_back(MakeTestCommit(&encryption_service_, "id1", "content1"));
   BatchDownload batch_download(
       &storage_, &encryption_service_, std::move(entries), MakeToken("42"),
@@ -96,17 +96,17 @@ TEST_F(BatchDownloadTest, AddCommit) {
   batch_download.Start();
 
   RunLoopUntilIdle();
-  EXPECT_EQ(1, done_calls);
-  EXPECT_EQ(0, error_calls);
-  EXPECT_EQ(1u, storage_.received_commits.size());
-  EXPECT_EQ("content1", storage_.received_commits["id1"]);
-  EXPECT_EQ("42", storage_.sync_metadata[kTimestampKey.ToString()]);
+  EXPECT_EQ(done_calls, 1);
+  EXPECT_EQ(error_calls, 0);
+  EXPECT_EQ(storage_.received_commits.size(), 1u);
+  EXPECT_EQ(storage_.received_commits["id1"], "content1");
+  EXPECT_EQ(storage_.sync_metadata[kTimestampKey.ToString()], "42");
 }
 
 TEST_F(BatchDownloadTest, AddMultipleCommits) {
   int done_calls = 0;
   int error_calls = 0;
-  std::vector<cloud_provider::CommitPackEntry> entries;
+  std::vector<cloud_provider::Commit> entries;
   entries.push_back(MakeTestCommit(&encryption_service_, "id1", "content1"));
   entries.push_back(MakeTestCommit(&encryption_service_, "id2", "content2"));
   BatchDownload batch_download(
@@ -115,18 +115,18 @@ TEST_F(BatchDownloadTest, AddMultipleCommits) {
   batch_download.Start();
 
   RunLoopUntilIdle();
-  EXPECT_EQ(1, done_calls);
-  EXPECT_EQ(0, error_calls);
-  EXPECT_EQ(2u, storage_.received_commits.size());
-  EXPECT_EQ("content1", storage_.received_commits["id1"]);
-  EXPECT_EQ("content2", storage_.received_commits["id2"]);
-  EXPECT_EQ("43", storage_.sync_metadata[kTimestampKey.ToString()]);
+  EXPECT_EQ(done_calls, 1);
+  EXPECT_EQ(error_calls, 0);
+  EXPECT_EQ(storage_.received_commits.size(), 2u);
+  EXPECT_EQ(storage_.received_commits["id1"], "content1");
+  EXPECT_EQ(storage_.received_commits["id2"], "content2");
+  EXPECT_EQ(storage_.sync_metadata[kTimestampKey.ToString()], "43");
 }
 
 TEST_F(BatchDownloadTest, FailToAddCommit) {
   int done_calls = 0;
   int error_calls = 0;
-  std::vector<cloud_provider::CommitPackEntry> entries;
+  std::vector<cloud_provider::Commit> entries;
   entries.push_back(MakeTestCommit(&encryption_service_, "id1", "content1"));
   BatchDownload batch_download(
       &storage_, &encryption_service_, std::move(entries), MakeToken("42"),
@@ -135,10 +135,50 @@ TEST_F(BatchDownloadTest, FailToAddCommit) {
   batch_download.Start();
 
   RunLoopUntilIdle();
-  EXPECT_EQ(0, done_calls);
-  EXPECT_EQ(1, error_calls);
+  EXPECT_EQ(done_calls, 0);
+  EXPECT_EQ(error_calls, 1);
   EXPECT_TRUE(storage_.received_commits.empty());
-  EXPECT_EQ(0u, storage_.sync_metadata.count(kTimestampKey.ToString()));
+  EXPECT_EQ(storage_.sync_metadata.count(kTimestampKey.ToString()), 0u);
+}
+
+TEST_F(BatchDownloadTest, MissingId) {
+  int done_calls = 0;
+  int error_calls = 0;
+  std::vector<cloud_provider::Commit> entries;
+  // Upload a commit without id.
+  cloud_provider::Commit commit = MakeTestCommit(&encryption_service_, "id1", "content1");
+  commit.clear_id();
+  entries.push_back(std::move(commit));
+  BatchDownload batch_download(
+      &storage_, &encryption_service_, std::move(entries), MakeToken("42"),
+      [&done_calls] { done_calls++; }, [&error_calls] { error_calls++; });
+  batch_download.Start();
+
+  RunLoopUntilIdle();
+  EXPECT_EQ(done_calls, 0);
+  EXPECT_EQ(error_calls, 1);
+  EXPECT_TRUE(storage_.received_commits.empty());
+  EXPECT_EQ(storage_.sync_metadata.count(kTimestampKey.ToString()), 0u);
+}
+
+TEST_F(BatchDownloadTest, MissingData) {
+  int done_calls = 0;
+  int error_calls = 0;
+  std::vector<cloud_provider::Commit> entries;
+  // Upload a commit without data.
+  cloud_provider::Commit commit = MakeTestCommit(&encryption_service_, "id1", "content1");
+  commit.clear_data();
+  entries.push_back(std::move(commit));
+  BatchDownload batch_download(
+      &storage_, &encryption_service_, std::move(entries), MakeToken("42"),
+      [&done_calls] { done_calls++; }, [&error_calls] { error_calls++; });
+  batch_download.Start();
+
+  RunLoopUntilIdle();
+  EXPECT_EQ(done_calls, 0);
+  EXPECT_EQ(error_calls, 1);
+  EXPECT_TRUE(storage_.received_commits.empty());
+  EXPECT_EQ(storage_.sync_metadata.count(kTimestampKey.ToString()), 0u);
 }
 
 }  // namespace

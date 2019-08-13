@@ -51,15 +51,8 @@ group("fidlext_tests") {
 group("fonts") {
   testonly = true
   public_deps = [
-    "//garnet/bin/fonts:font_provider_tests",
-    "//garnet/packages/prod:fonts",
-  ]
-}
-
-group("libinet") {
-  testonly = true
-  public_deps = [
-    "//garnet/lib/inet:libinet_tests",
+    "//src/fonts",
+    "//src/fonts:tests",
   ]
 }
 
@@ -126,13 +119,6 @@ group("scenic") {
   ]
 }
 
-group("cmc") {
-  testonly = true
-  public_deps = [
-    "//src/sys/cmc:cmc_test($host_toolchain)",
-  ]
-}
-
 group("vfs_cpp") {
   testonly = true
   public_deps = [
@@ -153,6 +139,14 @@ group("network") {
     "//garnet/bin/http:http_service_tests",
     "//garnet/bin/http/tests/manual/mwget",
     "//garnet/packages/prod:network",
+  ]
+}
+
+group("insntrace") {
+  testonly = true
+  public_deps = [
+    "//garnet/bin/insntrace/tests",
+    "//garnet/packages/prod:insntrace",
   ]
 }
 
@@ -177,6 +171,13 @@ group("netcfg_tests") {
   testonly = true
   public_deps = [
     "//garnet/bin/netcfg:netcfg_tests",
+  ]
+}
+
+group("net-cli-tests") {
+  testonly = true
+  public_deps = [
+    "//garnet/bin/net-cli:net-cli-tests",
   ]
 }
 
@@ -208,16 +209,6 @@ group("iquery_golden_test") {
   ]
 }
 
-group("feedback_agent") {
-  testonly = true
-  public_deps = [
-    "//garnet/packages/prod:feedback_agent",
-    "//garnet/packages/prod:scenic",
-    "//garnet/packages/prod:vulkan",
-    "//src/developer/feedback_agent/tests:feedback_agent_tests",
-  ]
-}
-
 group("elflib") {
   testonly = true
   public_deps = [
@@ -235,7 +226,9 @@ group("component_cpp") {
 group("fuzzing") {
   testonly = true
   public_deps = [
+    "//sdk/lib/fidl/cpp/fuzzing:fidl_cpp_fuzzing_tests",
     "//sdk/lib/fuzzing/cpp:fuzz_input_unittests($host_toolchain)",
+    "//sdk/lib/fuzzing/cpp:fuzzing_traits_tests",
   ]
 }
 
@@ -322,6 +315,13 @@ group("go_far_tests") {
   ]
 }
 
+group("sched_tests") {
+  testonly = true
+  public_deps = [
+    "//garnet/bin/sched:tests",
+  ]
+}
+
 group("all") {
   testonly = true
   public_deps = [
@@ -340,7 +340,6 @@ group("all") {
     ":carnelian",
     ":catapult_converter",
     ":chrealm",
-    ":cmc",
     ":cmx",
     ":cobalt_client",
     ":component_cpp",
@@ -348,7 +347,6 @@ group("all") {
     ":containers_cpp",
     ":cpuperf",
     ":cpuperf_provider",
-    ":crashpad",
     ":debug_agent",
     ":debugserver",
     ":device_settings",
@@ -357,7 +355,6 @@ group("all") {
     ":elflib",
     ":escher",
     ":examples",
-    ":feedback_agent",
     ":fidl",
     ":fidl_compatibility_test",
     ":fidl_compatibility_test_bin",
@@ -369,6 +366,7 @@ group("all") {
     ":fidl_llcpp_types_test",
     ":fidlext_tests",
     ":fonts",
+    ":forced_fdr",
     ":fostr",
     ":fsl",
     ":fuchsia_component_test",
@@ -384,16 +382,12 @@ group("all") {
     ":guest",
     ":httpdate_hyper",
     ":image_pipe_swapchain",
-    ":inspect_health_unittests",
-    ":inspect_query_unittests",
-    ":inspect_unittests",
-    ":iquery_golden_test",
+    ":insntrace",
+    ":inspect_tests",
     ":json",
     ":kms",
     ":lib",
     ":libc",
-    ":libinet",
-    ":libinspect_integration_tests",
     ":linux_runner",
     ":log_listener",
     ":logger",
@@ -425,6 +419,7 @@ group("all") {
     ":rust_crates",
     ":scenic",
     ":scenic_cpp",
+    ":sched_tests",
     ":scpi",
     ":setui_client",
     ":setui_service",
@@ -451,21 +446,17 @@ group("all") {
     ":uuid",
     ":vfs_cpp",
     ":virtual_audio",
-    ":virtual_audio_service",
-    ":virtual_audio_util",
     ":vulkan",
     ":wayland",
     ":webpki_roots_fuchsia",
     ":whereiscl",
     ":zircon",
     ":zxdb",
+    "//garnet/bin/perfcompare:tests",
     "//garnet/bin/sshd-host:sshd-host-tests",
     "//garnet/go/src/pm:host_tests",
     "//src/connectivity/network/dhcp:dhcp_tests",
     "//src/connectivity/network/mdns/bundles:tests",
-    "//src/sys/component_index:component_index_tests",
-    "//src/sys/dash:dash_test",
-    "//src/sys/locate:locate_integration_test",
   ]
 }
 
@@ -512,10 +503,29 @@ group("libc") {
   ]
 }
 
+group("inspect_tests") {
+  testonly = true
+  public_deps = [
+    ":inspect_health_unittests",
+    ":inspect_query_unittests",
+    ":inspect_unittests",
+    ":iquery_golden_test",
+    ":libinspect_integration_tests",
+    ":sys_inspect_cpp_tests",
+  ]
+}
+
 group("inspect_unittests") {
   testonly = true
   public_deps = [
     "//garnet/public/lib/inspect_deprecated/tests:inspect_unittests",
+  ]
+}
+
+group("sys_inspect_cpp_tests") {
+  testonly = true
+  public_deps = [
+    "//sdk/lib/sys/inspect/cpp/tests:sys_inspect_cpp_tests",
   ]
 }
 
@@ -536,8 +546,8 @@ group("inspect_query_unittests") {
 group("memory_metrics") {
   testonly = true
   public_deps = [
-    "//src/developer/memory/metrics/tests:memory_metrics_tests",
-    "//src/developer/memory/monitor/tests:memory_monitor_tests",
+    "//src/developer/memory/metrics/tests",
+    "//src/developer/memory/monitor/tests",
   ]
 }
 
@@ -562,6 +572,7 @@ group("netstack") {
     "//src/connectivity/network/netstack/routes:netstack_routes_gotests",
     "//src/connectivity/network/netstack/tests:netstack_manual_tests",
     "//src/connectivity/network/netstack/util:netstack_util_test($host_toolchain)",
+    "//src/connectivity/network/tests:device_name_provider",
     "//src/connectivity/network/tests:netstack_bsdsocket_c_api_test($host_toolchain)",
     "//src/connectivity/network/tests:netstack_c_api_tests",
     "//src/connectivity/network/tests:netstack_external_network_test_client($host_toolchain)",
@@ -578,7 +589,9 @@ group("netstack3") {
 group("fidl") {
   testonly = true
   public_deps = [
+    "//examples/fidl/echo_test/cpp",
     "//garnet/examples/fidl/echo_server_cpp:echo_server_cpp_tests",
+    "//garnet/go/src/fidl:fidlgen_common_test($host_toolchain)",
     "//garnet/go/src/fidl:fidlgen_cpp_ir_test($host_toolchain)",
     "//garnet/go/src/fidl:fidlgen_cpp_overnet_internal_test($host_toolchain)",
     "//garnet/go/src/fidl:fidlgen_cpp_test($host_toolchain)",
@@ -590,12 +603,14 @@ group("fidl") {
     "//garnet/go/src/fidl:fidlgen_syzkaller_ir_test($host_toolchain)",
     "//garnet/go/src/fidl:fidlgen_syzkaller_test($host_toolchain)",
     "//garnet/go/src/fidl:fidlgen_types_test($host_toolchain)",
+    "//garnet/public/lib/fidl/rust/fidl:fidl_test_build($host_toolchain)",
     "//garnet/public/lib/fidl/rust/fidl:rust_fidl_tests",
     "//garnet/tests/fidl-changes",
     "//garnet/tests/fidl-dangerous-identifiers",
     "//sdk/lib/fidl/cpp:fidl_cpp_host_conformance_test($host_toolchain)",
     "//sdk/lib/fidl/cpp:fidl_cpp_host_unittests($host_toolchain)",
     "//sdk/lib/fidl/cpp:fidl_tests",
+    "//sdk/lib/sys/service/cpp:sys_service_tests",
     "//tools/fidl/gidl:gidl_parser_test($host_toolchain)",
   ]
 }
@@ -619,11 +634,13 @@ group("overnet") {
   public_deps = [
     # FIXME(FLK-187, FLK-188): Disabled because of flakes.
     # "//src/connectivity/overnet/examples:overnet_examples_tests",
-    "//src/connectivity/overnet/lib:overnet_fuzzers",
-    "//src/connectivity/overnet/lib:overnet_tests",
-    "//src/connectivity/overnet/lib:overnet_unittests($host_toolchain)",
-    "//src/connectivity/overnet/lib/endpoint/integration_tests:router_endpoint_integration_fuzzer_replay($host_toolchain)",
-    "//src/connectivity/overnet/overnetstack:overnetstack_tests",
+    "//src/connectivity/overnet/deprecated/lib:overnet_fuzzers",
+    "//src/connectivity/overnet/deprecated/lib:overnet_tests",
+    "//src/connectivity/overnet/deprecated/lib:overnet_unittests($host_toolchain)",
+    "//src/connectivity/overnet/deprecated/lib/endpoint/integration_tests:router_endpoint_integration_fuzzer_replay($host_toolchain)",
+    "//src/connectivity/overnet/deprecated/overnetstack:overnetstack_tests",
+    "//src/connectivity/overnet/lib/core:core_test_build($host_toolchain)",
+    "//src/connectivity/overnet/lib/core:overnet-core-tests",
   ]
 }
 
@@ -699,6 +716,7 @@ group("pkg_ctl") {
   public_deps = [
     "//garnet/bin/pkg_ctl:pkg_ctl_tests",
     "//garnet/packages/prod:pkg_ctl",
+    "//garnet/tests/pkgctl:pkgctl-integration-tests",
   ]
 }
 
@@ -804,6 +822,7 @@ group("media") {
   public_deps = [
     ":virtual_audio",
     "//garnet/bin/media/codecs:tests",
+    "//garnet/lib/media/codec_impl:tests",
     "//sdk/lib/media/cpp:media_lib_timeline_tests",
     "//src/media:tests",
     "//src/media/playback/mediaplayer:tests",
@@ -914,16 +933,6 @@ group("timezone") {
   ]
 }
 
-group("crashpad") {
-  testonly = true
-  public_deps = [
-    "//garnet/packages/prod:crashpad_agent",
-    "//garnet/packages/prod:feedback_agent",
-    "//src/developer/crashpad_agent/tests:crashpad_agent_tests",
-    "//third_party/crashpad:crashpad_test",
-  ]
-}
-
 group("scenic_cpp") {
   testonly = true
   public_deps = [
@@ -967,7 +976,6 @@ group("magma") {
     "//garnet/lib/magma/tests:magma_nonhardware_tests",
     "//garnet/lib/magma/tests:tests",
     "//garnet/lib/magma/tests:vulkan-tests",
-    "//garnet/lib/magma/tests_linux:tests_linux",
     "//garnet/packages/prod:vulkan",
   ]
   if (target_cpu == "x64") {
@@ -1069,6 +1077,8 @@ group("runtime") {
     "//garnet/bin/appmgr/integration_tests/mock_runner:appmgr_mock_runner",
     "//garnet/bin/appmgr/integration_tests/mock_runner:fake_component_for_runner",
     "//garnet/bin/appmgr/integration_tests/sandbox/features/build-info:build_info_tests",
+    "//garnet/bin/appmgr/integration_tests/sandbox/features/isolated-temp:has_isolated_temp",
+    "//garnet/bin/appmgr/integration_tests/sandbox/features/isolated-temp:no_isolated_temp",
     "//garnet/bin/appmgr/integration_tests/sandbox/features/shell:has_deprecated_shell",
     "//garnet/bin/appmgr/integration_tests/sandbox/features/shell:no_shell",
     "//garnet/bin/appmgr/integration_tests/sandbox/features/storage",
@@ -1081,11 +1091,6 @@ group("runtime") {
     "//garnet/bin/glob",
     "//garnet/examples/fidl/echo_server_cpp",
     "//garnet/packages/prod:runtime",
-    "//src/sys/component_manager:component_manager_tests",
-    "//src/sys/component_manager/tests:elf_runner_test",
-    "//src/sys/component_manager/tests:hub_integration_test",
-    "//src/sys/component_manager/tests:no_pkg_resolver_test",
-    "//src/sys/component_manager/tests:routing_integration_test",
   ]
 }
 
@@ -1123,20 +1128,6 @@ group("terminal") {
   testonly = true
   public_deps = [
     "//garnet/bin/terminal:tests",
-  ]
-}
-
-group("virtual_audio_service") {
-  testonly = true
-  public_deps = [
-    "//src/media/audio/virtual_audio_service",
-  ]
-}
-
-group("virtual_audio_util") {
-  testonly = true
-  public_deps = [
-    "//src/media/audio/tools/virtual_audio_util",
   ]
 }
 
@@ -1186,13 +1177,11 @@ group("rust_crates") {
     "//garnet/public/rust:rust-crates-tests",
     "//garnet/public/rust/fdio:tests",
     "//garnet/public/rust/fuchsia-async:fuchsia-async-tests",
+    "//garnet/public/rust/fuchsia-bootfs:fuchsia-bootfs-tests",
     "//garnet/public/rust/fuchsia-hyper:fuchsia-hyper-tests",
     "//garnet/public/rust/fuchsia-syslog:fuchsia-syslog-tests",
     "//garnet/public/rust/fuchsia-vfs:fuchsia-vfs-tests",
     "//garnet/public/rust/fuchsia-zircon:fuchsia-zircon-tests",
-    "//src/sys/cmc:cmc_integration_test",
-    "//src/sys/lib/fuchsia_url:fuchsia_url_tests",
-    "//src/sys/lib/fuchsia_url_rewrite:fuchsia_url_rewrite_tests",
   ]
 }
 
@@ -1229,9 +1218,8 @@ group("wayland") {
 group("virtual_audio") {
   testonly = true
   public_deps = [
-    ":virtual_audio_service",
-    ":virtual_audio_util",
     "//garnet/packages/config:virtual_audio",
+    "//src/media/audio/virtual_audio_service",
   ]
 }
 
@@ -1261,6 +1249,7 @@ group("sysmem_connector") {
 group("omaha_client") {
   testonly = true
   public_deps = [
+    "//garnet/bin/fake_channel_writer",
     "//garnet/bin/omaha_client:omaha_client_service_bin_tests",
     "//garnet/lib/rust/omaha_client:omaha_client_lib_tests",
     "//garnet/packages/prod:omaha_client",
@@ -1300,6 +1289,7 @@ group("unicode_utils") {
 group("carnelian") {
   testonly = true
   public_deps = [
+    "//garnet/public/rust/carnelian:carnelian_integration_test",
     "//garnet/public/rust/carnelian:carnelian_tests",
   ]
 }
@@ -1336,5 +1326,12 @@ group("a11y") {
   testonly = true
   public_deps = [
     "//src/ui/a11y/tests:tests",
+  ]
+}
+
+group("forced_fdr") {
+  testonly = true
+  public_deps = [
+    "//garnet/lib/rust/forced_fdr:forced_fdr_tests",
   ]
 }

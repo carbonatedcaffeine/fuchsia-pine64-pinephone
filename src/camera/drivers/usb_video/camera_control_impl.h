@@ -5,11 +5,12 @@
 #ifndef SRC_CAMERA_DRIVERS_USB_VIDEO_CAMERA_CONTROL_IMPL_H_
 #define SRC_CAMERA_DRIVERS_USB_VIDEO_CAMERA_CONTROL_IMPL_H_
 
-#include <fbl/unique_ptr.h>
 #include <fuchsia/camera/cpp/fidl.h>
 #include <lib/async/cpp/wait.h>
 #include <lib/fidl/cpp/binding.h>
 #include <lib/zx/eventpair.h>
+
+#include <fbl/unique_ptr.h>
 
 namespace video {
 namespace usb {
@@ -21,10 +22,8 @@ namespace camera {
 
 class ControlImpl : public fuchsia::camera::Control {
  public:
-  ControlImpl(video::usb::UsbVideoStream* usb_video_stream,
-              fidl::InterfaceRequest<Control> control,
-              async_dispatcher_t* dispatcher,
-              fit::closure on_connection_closed);
+  ControlImpl(video::usb::UsbVideoStream* usb_video_stream, fidl::InterfaceRequest<Control> control,
+              async_dispatcher_t* dispatcher, fit::closure on_connection_closed);
 
   // Sent by the driver to the client when a frame is available for processing,
   // or an error occurred.
@@ -51,8 +50,7 @@ class ControlImpl : public fuchsia::camera::Control {
 
   class StreamImpl : public fuchsia::camera::Stream {
    public:
-    StreamImpl(ControlImpl& owner,
-               fidl::InterfaceRequest<fuchsia::camera::Stream> stream,
+    StreamImpl(ControlImpl& owner, fidl::InterfaceRequest<fuchsia::camera::Stream> stream,
                zx::eventpair stream_token);
 
     ~StreamImpl();
@@ -79,7 +77,7 @@ class ControlImpl : public fuchsia::camera::Control {
 
   fbl::unique_ptr<StreamImpl> stream_;
 
-  fidl::VectorPtr<fuchsia::camera::VideoFormat> formats_;
+  std::vector<fuchsia::camera::VideoFormat> formats_;
 
   ControlImpl(const ControlImpl&) = delete;
   ControlImpl& operator=(const ControlImpl&) = delete;

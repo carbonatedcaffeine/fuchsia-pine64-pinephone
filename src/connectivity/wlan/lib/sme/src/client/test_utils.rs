@@ -5,11 +5,13 @@
 use failure::{bail, format_err};
 use fidl_fuchsia_wlan_common as fidl_common;
 use fidl_fuchsia_wlan_mlme as fidl_mlme;
+use futures::channel::mpsc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use wlan_common::ie::rsn::rsne::RsnCapabilities;
+use wlan_common::ie::write_wpa1_ie;
+use wlan_common::{assert_variant, ie::rsn::rsne::RsnCapabilities};
 use wlan_rsn::rsna::UpdateSink;
 
 use crate::{
@@ -20,7 +22,7 @@ use crate::{
 
 fn fake_bss_description(ssid: Ssid, rsn: Option<Vec<u8>>) -> fidl_mlme::BssDescription {
     fidl_mlme::BssDescription {
-        bssid: [0, 0, 0, 0, 0, 0],
+        bssid: [7, 1, 2, 77, 53, 8],
         ssid,
         bss_type: fidl_mlme::BssTypes::Infrastructure,
         beacon_period: 100,
@@ -64,6 +66,10 @@ pub fn fake_bss_with_bssid(ssid: Ssid, bssid: [u8; 6]) -> fidl_mlme::BssDescript
     fidl_mlme::BssDescription { bssid, ..fake_unprotected_bss_description(ssid) }
 }
 
+pub fn fake_bss_with_rates(ssid: Ssid, basic_rate_set: Vec<u8>) -> fidl_mlme::BssDescription {
+    fidl_mlme::BssDescription { basic_rate_set, ..fake_unprotected_bss_description(ssid) }
+}
+
 pub fn fake_unprotected_bss_description(ssid: Ssid) -> fidl_mlme::BssDescription {
     fake_bss_description(ssid, None)
 }
@@ -71,6 +77,15 @@ pub fn fake_unprotected_bss_description(ssid: Ssid) -> fidl_mlme::BssDescription
 pub fn fake_wep_bss_description(ssid: Ssid) -> fidl_mlme::BssDescription {
     let mut bss = fake_bss_description(ssid, None);
     bss.cap.privacy = true;
+    bss
+}
+
+pub fn fake_wpa1_bss_description(ssid: Ssid) -> fidl_mlme::BssDescription {
+    let mut bss = fake_bss_description(ssid, None);
+    bss.cap.privacy = true;
+    let mut vendor_ies = vec![];
+    write_wpa1_ie(&mut vendor_ies, &make_wpa1_ie()).expect("failed to create wpa1 bss description");
+    bss.vendor_ies = Some(vendor_ies);
     bss
 }
 
@@ -95,12 +110,54 @@ pub fn fake_chan(primary: u8) -> fidl_common::WlanChan {
     fidl_common::WlanChan { primary, cbw: fidl_common::Cbw::Cbw20, secondary80: 0 }
 }
 
-pub fn expect_info_event(info_stream: &mut InfoStream, expected_event: InfoEvent) {
-    if let Ok(Some(e)) = info_stream.try_next() {
-        assert_eq!(e, expected_event);
-    } else {
-        panic!("expect event to InfoSink");
+pub fn fake_scan_request() -> fidl_mlme::ScanRequest {
+    fidl_mlme::ScanRequest {
+        txn_id: 1,
+        bss_type: fidl_mlme::BssTypes::Infrastructure,
+        bssid: [8, 2, 6, 2, 1, 11],
+        ssid: vec![],
+        scan_type: fidl_mlme::ScanTypes::Active,
+        probe_delay: 5,
+        channel_list: Some(vec![11]),
+        min_channel_time: 50,
+        max_channel_time: 50,
+        ssid_list: None,
     }
+}
+
+pub fn expect_info_event(info_stream: &mut InfoStream, expected_event: InfoEvent) {
+    assert_variant!(info_stream.try_next(), Ok(Some(e)) => assert_eq!(e, expected_event));
+}
+
+pub fn create_join_conf(result_code: fidl_mlme::JoinResultCodes) -> fidl_mlme::MlmeEvent {
+    fidl_mlme::MlmeEvent::JoinConf { resp: fidl_mlme::JoinConfirm { result_code } }
+}
+
+pub fn create_auth_conf(
+    bssid: [u8; 6],
+    result_code: fidl_mlme::AuthenticateResultCodes,
+) -> fidl_mlme::MlmeEvent {
+    fidl_mlme::MlmeEvent::AuthenticateConf {
+        resp: fidl_mlme::AuthenticateConfirm {
+            peer_sta_address: bssid,
+            auth_type: fidl_mlme::AuthenticationTypes::OpenSystem,
+            result_code,
+        },
+    }
+}
+
+pub fn create_assoc_conf(result_code: fidl_mlme::AssociateResultCodes) -> fidl_mlme::MlmeEvent {
+    fidl_mlme::MlmeEvent::AssociateConf {
+        resp: fidl_mlme::AssociateConfirm { result_code, association_id: 55 },
+    }
+}
+
+pub fn expect_stream_empty<T>(stream: &mut mpsc::UnboundedReceiver<T>, error_msg: &str) {
+    assert_variant!(
+        stream.try_next(),
+        Ok(None) | Err(..),
+        format!("error, receiver not empty: {}", error_msg)
+    );
 }
 
 pub fn mock_supplicant() -> (MockSupplicant, MockSupplicantController) {
@@ -123,7 +180,7 @@ pub fn mock_supplicant() -> (MockSupplicant, MockSupplicantController) {
     (supplicant, mock)
 }
 
-type Cb = Fn() + Send + 'static;
+type Cb = dyn Fn() + Send + 'static;
 
 pub struct MockSupplicant {
     started: Arc<AtomicBool>,

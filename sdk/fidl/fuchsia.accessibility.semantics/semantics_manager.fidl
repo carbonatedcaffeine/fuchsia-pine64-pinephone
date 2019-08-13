@@ -7,17 +7,37 @@ library fuchsia.accessibility.semantics;
 using fuchsia.math;
 using fuchsia.ui.views;
 
+/// Maximum depth of the semantic tree.
+const uint64 MAX_TREE_DEPTH = 256;
+
+/// Maximum number of children for a node in the semantic tree.
+const uint64 MAX_FAN_OUT = 256;
+
+/// Maximum number of semantic nodes that may be sent in a single update.
+const uint64 MAX_NODES_PER_UPDATE = 2048;
+
+/// Maximum size of a label string, in bytes.
+const uint64 MAX_LABEL_SIZE = 16384;
+
 /// An interface to manage connections with views for the purposes of gathering semantic information
 /// about their current UI state.
 ///
 /// The manager allows clients to register as a semantic provider for their view(s). In return the
 /// semantics manager supplies an interface to update, commit and delete information from the
-/// semantic tree for that view.
+/// semantic tree for that view. If the semantic manager encounters an error, it will close the
+/// channel, delete any associated data and rely on the client to re-register.
 [Discoverable]
 protocol SemanticsManager {
+    // TODO(MI4-2636): This should be removed after clients move to RegisterViewForSemantics.
+    [Transitional]
     RegisterView(fuchsia.ui.views.ViewRef view_ref,
                  SemanticActionListener listener,
                  request<SemanticTree> semantic_tree_request);
+
+    [Transitional]
+    RegisterViewForSemantics(fuchsia.ui.views.ViewRef view_ref,
+                             SemanticListener listener,
+                             request<SemanticTree> semantic_tree_request);
 };
 
 /// Interface to update the semantic tree for a particular view. Nodes can be added, updated or
@@ -25,39 +45,78 @@ protocol SemanticsManager {
 /// for breaking up changes into multiple update and delete calls that conform to these limits. The
 /// commit function must always be called at the end of a full update push to signal the end of an
 /// update.
+///
+/// The client may make several calls to UpdateSemanticNodes(...) or DeleteSemanticNodes(...)
+/// before calling CommitUpdates(), and must wait for the semantics manager to reply to the
+/// CommitUpdates() method to know whether an update has been processed. This allows the client to
+/// break up a set of changes (e.g. a re-computed semantic tree) to the semantic tree into
+/// FIDL-compatible chunks, but commit them all at once.
+///
+/// If the semantics manager ever receives inconsistent state from the client, such as an
+/// invalid tree or unrecognized parent node id, the server will close the channel. The client is
+/// responsible for reconnecting and re-sending its state from scratch.
 protocol SemanticTree {
-    // Commits pending changes to node tree associated with the view using UpdateSemanticNodes and
-    // DeleteSemanticNodes.
+
+    /// Sends new/updated nodes to the root to add to the cache on the next commit.
+    UpdateSemanticNodes(vector<Node>:MAX_NODES_PER_UPDATE nodes);
+
+    /// Tells the root to remove nodes with node_ids from the semantic tree on the next commit.
+    DeleteSemanticNodes(vector<uint32>:MAX_NODES_PER_UPDATE node_ids);
+
+    /// Commits pending changes to node tree associated with the view using UpdateSemanticNodes and
+    /// DeleteSemanticNodes. Commits are processed in the order in which they are sent.
+    /// TODO(MI4-2636): This should be removed after clients move to CommitUpdates().
+    [Transitional]
     Commit();
 
-    // Sends new/updated nodes to the root to add to the cache on the next commit.
-    UpdateSemanticNodes(vector<Node> nodes);
-
-    // Tells the root to remove nodes with node_ids from the semantic tree on the next commit.
-    DeleteSemanticNodes(vector<uint32> node_ids);
+    /// Commits pending changes to node tree associated with the view using UpdateSemanticNodes and
+    /// DeleteSemanticNodes. Updates are processed in the order in which they are received. If the
+    /// committed updates result in an ill-formed tree (for example a missing root node or a cycle)
+    /// the semantic manager will close the channel.
+    [Transitional]
+    CommitUpdates() -> ();
 };
 
 /// Results of hit testing on a view's semantic tree which is implemented by
 /// Runtimes(like Flutter/Chrome) and sent to Accessibility.
 table Hit {
-    // Unique ID that represents the node in a particular UI.
-    // Zero is assumed to be the root node and the only entry point to the tree.
-    // node_id will not be filled when there is no hit.
+    /// Unique ID that represents a node in a particular UI.
+    /// Zero is assumed to be the root node and the only entry point to the tree.
+    /// node_id will not be filled when there is no hit.
     1: uint32 node_id;
 
-    // The ordered list of node id's which represent path from root node to
-    // the hit node.
-    2: vector<uint32> path_from_root;
+    /// The ordered list of node ids which represent path from root node to the hit node.
+    2: vector<uint32>:MAX_TREE_DEPTH path_from_root;
 };
 
 /// A semantic provider is the client-side interface that the manager can use to
 /// ask clients to perform accessibility actions.
+// TODO(MI4-2636): This should be removed after clients move to SemanticListener.
 protocol SemanticActionListener {
-    // Asks the semantics provider to perform an accessibility action on the
-    // node with node id in the front-end.
+    /// Asks the semantics provider to perform an accessibility action on the
+    /// node with node id in the front-end.
+    [Transitional]
     OnAccessibilityActionRequested(uint32 node_id, Action action) -> (bool handled);
 
-    // Asks the semantics provider to perform hit testing and return the result.
+    /// Asks the semantics provider to perform hit testing and return the result.
     [Transitional]
     HitTest(fuchsia.math.PointF local_point) -> (Hit result);
+};
+
+/// A semantic provider is the client-side interface that the manager can use to enable or disable
+/// semantic updates, and to ask clients to perform accessibility actions.
+protocol SemanticListener {
+    /// Asks the semantics provider to perform an accessibility action on the
+    /// node with node id in the front-end.
+    OnAccessibilityActionRequested(uint32 node_id, Action action) -> (bool handled);
+
+    /// Asks the semantics provider to perform hit testing and return the result.
+    [Transitional]
+    HitTest(fuchsia.math.PointF local_point) -> (Hit result);
+
+    /// Callback telling the client whether or not to send updates to the semantic tree.
+    /// The semantics manager will clear all state when this is called with updates_enabled = false.
+    /// When called with updates_enabled = true, the client should sent the full state of the
+    /// current semantic tree.
+    OnSemanticsModeChanged(bool updates_enabled) -> ();
 };

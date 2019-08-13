@@ -7,8 +7,8 @@
 #include <lib/async/default.h>
 
 #include "garnet/lib/ui/gfx/engine/session.h"
+#include "garnet/lib/ui/gfx/util/unwrap.h"
 #include "src/lib/fxl/logging.h"
-#include "src/ui/lib/escher/geometry/bounding_box.h"
 
 namespace scenic_impl {
 namespace gfx {
@@ -61,29 +61,32 @@ void ViewHolder::LinkDisconnected() {
   SendViewDisconnectedEvent();
 }
 
-void ViewHolder::SetViewProperties(fuchsia::ui::gfx::ViewProperties props) {
+// Generates an escher::BoundingBox from the given view properties.
+// TODO(SCN-1495) Create internal ViewProperties type.
+escher::BoundingBox ViewHolder::GetLocalBoundingBox() const {
+  escher::vec3 min =
+      Unwrap(view_properties_.bounding_box.min) + Unwrap(view_properties_.inset_from_min);
+  escher::vec3 max =
+      Unwrap(view_properties_.bounding_box.max) - Unwrap(view_properties_.inset_from_max);
+  FXL_DCHECK(glm::all(glm::lessThan(min, max)));
+  return escher::BoundingBox(min, max);
+}
+
+// Returns the world-space bounding box.
+escher::BoundingBox ViewHolder::GetWorldBoundingBox() const {
+  return GetGlobalTransform() * GetLocalBoundingBox();
+}
+
+void ViewHolder::SetViewProperties(fuchsia::ui::gfx::ViewProperties props,
+                                   ErrorReporter* error_reporter) {
   if (!fidl::Equals(props, view_properties_)) {
     view_properties_ = std::move(props);
-#if SCENIC_ENFORCE_VIEW_BOUND_CLIPPING
     // This code transforms the bounding box given to the view holder
     // into a set of clipping planes on the transform node that will
     // then be applied to all children of this view holder. This is
     // to ensure that all geometry gets clipped to the view bounds and
     // does not extend past its allowed extent.
-
-    fuchsia::ui::gfx::BoundingBox bbox = view_properties_.bounding_box;
-    fuchsia::ui::gfx::vec3 min = bbox.min;
-    fuchsia::ui::gfx::vec3 max = bbox.max;
-
-    glm::vec3 glm_min(min.x, min.y, min.z);
-    glm::vec3 glm_max(max.x, max.y, max.z);
-
-    escher::BoundingBox e_bbox(glm_min, glm_max);
-
-    // TODO(SCN-1471) - Ensure that clipped meshes are not hit
-    // during hit tests.
-    SetClipPlanesFromBBox(e_bbox);
-#endif  // SCENIC_ENFORCE_VIEW_BOUND_CLIPPING
+    SetClipPlanesFromBBox(GetLocalBoundingBox(), error_reporter);
 
     SendViewPropertiesChangedEvent();
   }
@@ -178,19 +181,19 @@ void ViewHolder::SendViewPropertiesChangedEvent() {
   }
   fuchsia::ui::gfx::Event event;
   event.set_view_properties_changed({.view_id = view_->id(), .properties = view_properties_});
-  view_->session()->EnqueueEvent(std::move(event));
+  view_->event_reporter()->EnqueueEvent(std::move(event));
 }
 
 void ViewHolder::SendViewConnectedEvent() {
   fuchsia::ui::gfx::Event event;
   event.set_view_connected({.view_holder_id = id()});
-  session()->EnqueueEvent(std::move(event));
+  event_reporter()->EnqueueEvent(std::move(event));
 }
 
 void ViewHolder::SendViewDisconnectedEvent() {
   fuchsia::ui::gfx::Event event;
   event.set_view_disconnected({.view_holder_id = id()});
-  session()->EnqueueEvent(std::move(event));
+  event_reporter()->EnqueueEvent(std::move(event));
 }
 
 void ViewHolder::SendViewAttachedToSceneEvent() {
@@ -199,7 +202,7 @@ void ViewHolder::SendViewAttachedToSceneEvent() {
   }
   fuchsia::ui::gfx::Event event;
   event.set_view_attached_to_scene({.view_id = view_->id(), .properties = view_properties_});
-  view_->session()->EnqueueEvent(std::move(event));
+  view_->event_reporter()->EnqueueEvent(std::move(event));
 }
 
 void ViewHolder::SendViewDetachedFromSceneEvent() {
@@ -208,13 +211,13 @@ void ViewHolder::SendViewDetachedFromSceneEvent() {
   }
   fuchsia::ui::gfx::Event event;
   event.set_view_detached_from_scene({.view_id = view_->id()});
-  view_->session()->EnqueueEvent(std::move(event));
+  view_->event_reporter()->EnqueueEvent(std::move(event));
 }
 
 void ViewHolder::SendViewStateChangedEvent() {
   fuchsia::ui::gfx::Event event;
   event.set_view_state_changed({.view_holder_id = id(), .state = view_state_});
-  session()->EnqueueEvent(std::move(event));
+  event_reporter()->EnqueueEvent(std::move(event));
 }
 
 }  // namespace gfx

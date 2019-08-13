@@ -3,7 +3,18 @@
 // found in the LICENSE file.
 
 use {
-    crate::model::*,
+    crate::{
+        directory_broker,
+        framework::FrameworkCapability,
+        model::{addable_directory::AddableDirectory, *},
+    },
+    cm_rust::FrameworkCapabilityDecl,
+    fidl::endpoints::{ClientEnd, ServerEnd},
+    fidl_fuchsia_io::DirectoryMarker,
+    fuchsia_async as fasync,
+    fuchsia_vfs_pseudo_fs::directory,
+    fuchsia_vfs_pseudo_fs::directory::entry::DirectoryEntry,
+    fuchsia_zircon as zx,
     futures::{executor::block_on, future::BoxFuture, lock::Mutex, prelude::*},
     std::{cmp::Eq, collections::HashMap, fmt, ops::Deref, pin::Pin, sync::Arc},
 };
@@ -37,7 +48,7 @@ impl Eq for ComponentInstance {}
 impl ComponentInstance {
     pub async fn print(&self) -> String {
         let mut s: String = self.abs_moniker.path().last().map_or("", |m| m.as_str()).to_string();
-        let mut children = await!(self.children.lock());
+        let mut children = self.children.lock().await;
         if children.is_empty() {
             return s;
         }
@@ -54,7 +65,7 @@ impl ComponentInstance {
             if count > 0 {
                 s.push(',');
             }
-            s.push_str(&await!(child.boxed_print()));
+            s.push_str(&child.boxed_print().await);
             count += 1;
         }
         s.push(')');
@@ -105,11 +116,9 @@ impl TestHook {
         realm_state: &'a RealmState,
         _routing_facade: RoutingFacade,
     ) -> Result<(), ModelError> {
-        await!(self.create_instance_if_necessary(realm.abs_moniker.clone()))?;
-        for child_realm in
-            realm_state.child_realms.as_ref().expect("Unable to access child realms.").values()
-        {
-            await!(self.create_instance_if_necessary(child_realm.abs_moniker.clone()))?;
+        self.create_instance_if_necessary(realm.abs_moniker.clone()).await?;
+        for child_realm in realm_state.get_child_realms().values() {
+            self.create_instance_if_necessary(child_realm.abs_moniker.clone()).await?;
         }
         Ok(())
     }
@@ -118,7 +127,7 @@ impl TestHook {
         &self,
         abs_moniker: AbsoluteMoniker,
     ) -> Result<(), ModelError> {
-        let mut instances = await!(self.instances.lock());
+        let mut instances = self.instances.lock().await;
         if let Some(parent_moniker) = abs_moniker.parent() {
             // If the parent isn't available yet then opt_parent_instance will have a value
             // of None.
@@ -133,13 +142,29 @@ impl TestHook {
             instances.insert(abs_moniker.clone(), new_instance.clone());
             // If the parent is available then add this instance as a child to it.
             if let Some(parent_instance) = opt_parent_instance {
-                let mut children = await!(parent_instance.children.lock());
+                let mut children = parent_instance.children.lock().await;
                 let opt_index =
                     children.iter().position(|c| c.abs_moniker == new_instance.abs_moniker);
                 if let Some(index) = opt_index {
                     children.remove(index);
                 }
                 children.push(new_instance.clone());
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn remove_instance(&self, abs_moniker: AbsoluteMoniker) -> Result<(), ModelError> {
+        let mut instances = self.instances.lock().await;
+        if let Some(parent_moniker) = abs_moniker.parent() {
+            instances.remove(&abs_moniker);
+            let parent_instance = instances
+                .get(&parent_moniker)
+                .expect(&format!("parent instance {} not found", parent_moniker));
+            let mut children = parent_instance.children.lock().await;
+            let opt_index = children.iter().position(|c| c.abs_moniker == abs_moniker);
+            if let Some(index) = opt_index {
+                children.remove(index);
             }
         }
         Ok(())
@@ -158,6 +183,150 @@ impl Hook for TestHook {
 
     fn on_add_dynamic_child(&self, realm: Arc<Realm>) -> BoxFuture<Result<(), ModelError>> {
         Box::pin(self.create_instance_if_necessary(realm.abs_moniker.clone()))
+    }
+
+    fn on_remove_dynamic_child(&self, realm: Arc<Realm>) -> BoxFuture<Result<(), ModelError>> {
+        Box::pin(self.remove_instance(realm.abs_moniker.clone()))
+    }
+
+    fn on_route_framework_capability<'a>(
+        &'a self,
+        _realm: Arc<Realm>,
+        _capability_decl: &'a FrameworkCapabilityDecl,
+        capability: Option<Box<dyn FrameworkCapability>>,
+    ) -> BoxFuture<Result<Option<Box<dyn FrameworkCapability>>, ModelError>> {
+        Box::pin(async move { Ok(capability) })
+    }
+}
+
+pub struct HubInjectionTestHook {}
+
+impl HubInjectionTestHook {
+    pub fn new() -> Self {
+        HubInjectionTestHook {}
+    }
+
+    pub async fn on_route_framework_capability_async<'a>(
+        &'a self,
+        realm: Arc<Realm>,
+        capability_decl: &'a FrameworkCapabilityDecl,
+        mut capability: Option<Box<dyn FrameworkCapability>>,
+    ) -> Result<Option<Box<dyn FrameworkCapability>>, ModelError> {
+        // This Hook is about injecting itself between the Hub and the Model.
+        // If the Hub hasn't been installed, then there's nothing to do here.
+        let mut relative_path = match (&capability, capability_decl) {
+            (Some(_), FrameworkCapabilityDecl::Directory(source_path)) => source_path.split(),
+            _ => return Ok(capability),
+        };
+
+        if relative_path.is_empty() || relative_path.remove(0) != "hub" {
+            return Ok(capability);
+        }
+
+        Ok(Some(Box::new(HubInjectionCapability::new(
+            realm.abs_moniker.clone(),
+            relative_path,
+            capability.take().expect("Unable to take original capability."),
+        ))))
+    }
+}
+
+impl Hook for HubInjectionTestHook {
+    fn on_bind_instance<'a>(
+        &'a self,
+        _realm: Arc<Realm>,
+        _realm_state: &'a RealmState,
+        _routing_facade: RoutingFacade,
+    ) -> BoxFuture<Result<(), ModelError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn on_add_dynamic_child(&self, _realm: Arc<Realm>) -> BoxFuture<Result<(), ModelError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn on_remove_dynamic_child(&self, _realm: Arc<Realm>) -> BoxFuture<Result<(), ModelError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn on_route_framework_capability<'a>(
+        &'a self,
+        realm: Arc<Realm>,
+        capability_decl: &'a FrameworkCapabilityDecl,
+        capability: Option<Box<dyn FrameworkCapability>>,
+    ) -> BoxFuture<Result<Option<Box<dyn FrameworkCapability>>, ModelError>> {
+        Box::pin(self.on_route_framework_capability_async(realm, capability_decl, capability))
+    }
+}
+
+struct HubInjectionCapability {
+    abs_moniker: AbsoluteMoniker,
+    relative_path: Vec<String>,
+    intercepted_capability: Box<dyn FrameworkCapability>,
+}
+
+impl HubInjectionCapability {
+    pub fn new(
+        abs_moniker: AbsoluteMoniker,
+        relative_path: Vec<String>,
+        intercepted_capability: Box<dyn FrameworkCapability>,
+    ) -> Self {
+        HubInjectionCapability { abs_moniker, relative_path, intercepted_capability }
+    }
+
+    pub async fn open_async(
+        &self,
+        flags: u32,
+        open_mode: u32,
+        relative_path: String,
+        server_end: zx::Channel,
+    ) -> Result<(), ModelError> {
+        let mut dir_path = self.relative_path.clone();
+        dir_path.append(
+            &mut relative_path
+                .split("/")
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<String>>(),
+        );
+
+        let (client_chan, server_chan) = zx::Channel::create().unwrap();
+        self.intercepted_capability.open(flags, open_mode, String::new(), server_chan).await?;
+
+        let hub_proxy = ClientEnd::<DirectoryMarker>::new(client_chan)
+            .into_proxy()
+            .expect("failed to create directory proxy");
+
+        let mut dir = directory::simple::empty();
+        dir.add_node(
+            "old_hub",
+            directory_broker::DirectoryBroker::from_directory_proxy(hub_proxy),
+            &self.abs_moniker,
+        )?;
+        dir.open(
+            flags,
+            open_mode,
+            &mut dir_path.iter().map(|s| s.as_str()),
+            ServerEnd::new(server_end),
+        );
+
+        fasync::spawn(async move {
+            let _ = dir.await;
+        });
+
+        Ok(())
+    }
+}
+
+impl FrameworkCapability for HubInjectionCapability {
+    fn open(
+        &self,
+        flags: u32,
+        open_mode: u32,
+        relative_path: String,
+        server_chan: zx::Channel,
+    ) -> BoxFuture<Result<(), ModelError>> {
+        Box::pin(self.open_async(flags, open_mode, relative_path, server_chan))
     }
 }
 
@@ -196,47 +365,47 @@ mod tests {
         // is correct.
         {
             let test_hook = TestHook::new();
-            assert!(await!(test_hook.create_instance_if_necessary(a.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(ab.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(ac.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(abd.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(abe.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(acf.clone())).is_ok());
+            assert!(test_hook.create_instance_if_necessary(a.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(ab.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(ac.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(abd.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(abe.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(acf.clone()).await.is_ok());
             assert_eq!("(a(b(d,e),c(f)))", test_hook.print());
         }
 
         // Changing the order of monikers should not affect the output string.
         {
             let test_hook = TestHook::new();
-            assert!(await!(test_hook.create_instance_if_necessary(a.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(ac.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(ab.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(abd.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(abe.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(acf.clone())).is_ok());
+            assert!(test_hook.create_instance_if_necessary(a.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(ac.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(ab.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(abd.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(abe.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(acf.clone()).await.is_ok());
             assert_eq!("(a(b(d,e),c(f)))", test_hook.print());
         }
 
         // Submitting children before parents should still succeed.
         {
             let test_hook = TestHook::new();
-            assert!(await!(test_hook.create_instance_if_necessary(acf.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(abe.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(abd.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(ab.clone())).is_ok());
+            assert!(test_hook.create_instance_if_necessary(acf.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(abe.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(abd.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(ab.clone()).await.is_ok());
             // Model will call create_instance_if_necessary for ab's children again
             // after the call to bind_instance for ab.
-            assert!(await!(test_hook.create_instance_if_necessary(abe.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(abd.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(ac.clone())).is_ok());
+            assert!(test_hook.create_instance_if_necessary(abe.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(abd.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(ac.clone()).await.is_ok());
             // Model will call create_instance_if_necessary for ac's children again
             // after the call to bind_instance for ac.
-            assert!(await!(test_hook.create_instance_if_necessary(acf.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(a.clone())).is_ok());
+            assert!(test_hook.create_instance_if_necessary(acf.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(a.clone()).await.is_ok());
             // Model will call create_instance_if_necessary for a's children again
             // after the call to bind_instance for a.
-            assert!(await!(test_hook.create_instance_if_necessary(ab.clone())).is_ok());
-            assert!(await!(test_hook.create_instance_if_necessary(ac.clone())).is_ok());
+            assert!(test_hook.create_instance_if_necessary(ab.clone()).await.is_ok());
+            assert!(test_hook.create_instance_if_necessary(ac.clone()).await.is_ok());
             assert_eq!("(a(b(d,e),c(f)))", test_hook.print());
         }
     }

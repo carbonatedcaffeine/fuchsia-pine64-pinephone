@@ -6,7 +6,7 @@
 //!
 //! Wire serialization and deserialization functions.
 
-mod messages;
+pub(crate) mod messages;
 mod types;
 
 #[cfg(test)]
@@ -20,15 +20,15 @@ use std::marker::PhantomData;
 use std::mem;
 
 use internet_checksum::Checksum;
+use net_types::ip::Ipv4Addr;
 use packet::{
-    BufferView, InnerPacketBuilder, PacketBuilder, ParsablePacket, ParseMetadata, SerializeBuffer,
+    BufferView, InnerPacketBuilder, PacketBuilder, PacketConstraints, ParsablePacket,
+    ParseMetadata, SerializeBuffer,
 };
 use zerocopy::{AsBytes, ByteSlice, FromBytes, LayoutVerified, Unaligned};
 
 use self::messages::IgmpMessageType;
 use crate::error::ParseError;
-use crate::ip::Ipv4Addr;
-use crate::wire::U16;
 
 /// Trait specifying serialization behavior for IGMP messages.
 ///
@@ -45,7 +45,7 @@ pub(crate) trait MessageType<B> {
     ///
     /// These are the bytes immediately following the checksum bytes in an IGMP
     /// message. Most IGMP messages' `FixedHeader` is an IPv4 address.
-    type FixedHeader: Sized + Clone + FromBytes + AsBytes + Unaligned + Debug;
+    type FixedHeader: Sized + Copy + Clone + FromBytes + AsBytes + Unaligned + Debug;
 
     /// The variable-length body for the message type.
     type VariableBody: Sized;
@@ -117,6 +117,11 @@ impl IgmpMaxRespCode for () {
     fn from_code(code: u8) {}
 }
 
+/// A marker trait for implementers of [`MessageType`]. Only [`MessageType`]s
+/// whose `VariableBody` implements `IgmpNonEmptyBody` (or is `()` for empty
+/// bodies) can be built using [`IgmpPacketBuilder`].
+pub(crate) trait IgmpNonEmptyBody {}
+
 /// A builder for IGMP packets.
 #[derive(Debug)]
 pub(crate) struct IgmpPacketBuilder<B, M: MessageType<B>> {
@@ -143,7 +148,7 @@ impl<B, M: MessageType<B>> IgmpPacketBuilder<B, M> {
 }
 
 impl<B, M: MessageType<B>> IgmpPacketBuilder<B, M> {
-    fn serialize_headers(self, mut headers_buff: &mut [u8], body: &[u8]) {
+    fn serialize_headers(&self, mut headers_buff: &mut [u8], body: &[u8]) {
         use packet::BufferViewMut;
         let mut bytes = &mut headers_buff;
         // SECURITY: Use _zero constructors to ensure we zero memory to prevent
@@ -158,7 +163,7 @@ impl<B, M: MessageType<B>> IgmpPacketBuilder<B, M> {
         *header = self.message_header;
 
         let checksum = IgmpMessage::<B, M>::compute_checksum(&header_prefix, &header.bytes(), body);
-        header_prefix.checksum = U16::new(checksum);
+        header_prefix.checksum = checksum;
     }
 }
 
@@ -169,29 +174,25 @@ impl<B, M: MessageType<B, VariableBody = ()>> InnerPacketBuilder for IgmpPacketB
         mem::size_of::<HeaderPrefix>() + mem::size_of::<M::FixedHeader>()
     }
 
-    fn serialize(self, buffer: &mut [u8]) {
+    fn serialize(&self, buffer: &mut [u8]) {
         self.serialize_headers(buffer, &[]);
     }
 }
 
-impl<B, M: MessageType<B>> PacketBuilder for IgmpPacketBuilder<B, M> {
-    fn header_len(&self) -> usize {
-        mem::size_of::<M::FixedHeader>() + mem::size_of::<HeaderPrefix>()
+impl<B, M: MessageType<B>> PacketBuilder for IgmpPacketBuilder<B, M>
+where
+    M::VariableBody: IgmpNonEmptyBody,
+{
+    fn constraints(&self) -> PacketConstraints {
+        PacketConstraints::new(
+            mem::size_of::<M::FixedHeader>() + mem::size_of::<HeaderPrefix>(),
+            0,
+            0,
+            core::usize::MAX,
+        )
     }
 
-    fn min_body_len(&self) -> usize {
-        0
-    }
-
-    fn max_body_len(&self) -> usize {
-        std::usize::MAX
-    }
-
-    fn footer_len(&self) -> usize {
-        0
-    }
-
-    fn serialize(self, mut buffer: SerializeBuffer) {
+    fn serialize(&self, buffer: &mut SerializeBuffer) {
         let (prefix, message_body, _) = buffer.parts();
         // implements BufferViewMut, giving us take_obj_xxx_zero methods
         self.serialize_headers(prefix, message_body);
@@ -216,7 +217,7 @@ pub(crate) struct HeaderPrefix {
     /// a value *Max Response Time* is performed by the `MaxRespType` type in
     /// the `MessageType` trait.
     max_resp_code: u8,
-    checksum: U16,
+    checksum: [u8; 2],
 }
 
 impl HeaderPrefix {
@@ -253,12 +254,19 @@ impl<B: ByteSlice, M: MessageType<B>> IgmpMessage<B, M> {
 }
 
 impl<B, M: MessageType<B>> IgmpMessage<B, M> {
-    fn compute_checksum(header_prefix: &HeaderPrefix, header: &[u8], body: &[u8]) -> u16 {
+    fn compute_checksum(header_prefix: &HeaderPrefix, header: &[u8], body: &[u8]) -> [u8; 2] {
         let mut c = Checksum::new();
         c.add_bytes(&[header_prefix.msg_type, header_prefix.max_resp_code]);
+        c.add_bytes(&header_prefix.checksum);
         c.add_bytes(header);
         c.add_bytes(body);
         c.checksum()
+    }
+}
+
+impl<B: ByteSlice, M: MessageType<B, FixedHeader = Ipv4Addr>> IgmpMessage<B, M> {
+    pub(crate) fn group_addr(&self) -> Ipv4Addr {
+        *self.header
     }
 }
 
@@ -279,13 +287,12 @@ impl<B: ByteSlice, M: MessageType<B>> ParsablePacket<B, ()> for IgmpMessage<B, M
             .take_obj_front::<M::FixedHeader>()
             .ok_or_else(debug_err_fn!(ParseError::Format, "too few bytes for header"))?;
 
-        let checksum_expect = Self::compute_checksum(&prefix, &header.bytes(), buffer.as_ref());
-        if prefix.checksum.get() != checksum_expect {
+        let checksum = Self::compute_checksum(&prefix, &header.bytes(), buffer.as_ref());
+        if checksum != [0, 0] {
             return debug_err!(
                 Err(ParseError::Checksum),
-                "invalid checksum, expected 0x{:04x}, but got 0x{:04x}",
-                checksum_expect,
-                prefix.checksum.get()
+                "invalid checksum, got 0x{:x?}",
+                prefix.checksum
             );
         }
 
@@ -333,4 +340,128 @@ pub(crate) fn peek_message_type<MessageType: TryFrom<u8>>(
         ))
     })?;
     Ok((msg_type, long_message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ip::{IpProto, Ipv4Option, Ipv4OptionData};
+    use crate::packet::{ParseBuffer, Serializer};
+    use crate::wire::igmp::messages::*;
+    use crate::wire::ipv4::{
+        Ipv4Header, Ipv4Packet, Ipv4PacketBuilder, Ipv4PacketBuilderWithOptions,
+    };
+    use std::fmt::Debug;
+
+    fn serialize_to_bytes<B: ByteSlice + Debug, M: MessageType<B, VariableBody = ()> + Debug>(
+        igmp: &IgmpMessage<B, M>,
+        src_ip: Ipv4Addr,
+        dst_ip: Ipv4Addr,
+    ) -> Vec<u8> {
+        let mut ipv4 = Ipv4PacketBuilder::new(src_ip, dst_ip, 1, IpProto::Igmp);
+        let mut with_options = Ipv4PacketBuilderWithOptions::new(
+            ipv4,
+            &[Ipv4Option { copied: true, data: Ipv4OptionData::RouterAlert { data: 0 } }],
+        )
+        .unwrap();
+
+        igmp.builder()
+            .into_serializer()
+            .encapsulate(with_options)
+            .serialize_vec_outer()
+            .unwrap()
+            .as_ref()
+            .to_vec()
+    }
+
+    fn test_parse_and_serialize<
+        M: for<'a> MessageType<&'a [u8], VariableBody = ()> + Debug,
+        F: for<'a> FnOnce(&Ipv4Packet<&'a [u8]>),
+        G: for<'a> FnOnce(&IgmpMessage<&'a [u8], M>),
+    >(
+        mut pkt: &[u8],
+        check_ip: F,
+        check_igmp: G,
+    ) {
+        let orig_req = &pkt[..];
+
+        let ip = pkt.parse_with::<_, Ipv4Packet<_>>(()).unwrap();
+        let src_ip = ip.src_ip();
+        let dst_ip = ip.dst_ip();
+        check_ip(&ip);
+        let mut req: &[u8] = pkt;
+        let igmp = req.parse_with::<_, IgmpMessage<_, M>>(()).unwrap();
+        check_igmp(&igmp);
+
+        let data = serialize_to_bytes(&igmp, src_ip, dst_ip);
+        assert_eq!(&data[..], orig_req);
+    }
+
+    // The following tests are basically still testing serialization and
+    // parsing of IGMP messages. Besides IGMP messages themselves, the
+    // following tests also test whether the RTRALRT option in the enclosing
+    // IPv4 packet can be parsed/serialized correctly.
+
+    #[test]
+    fn test_parse_and_serialize_igmpv2_report_with_options() {
+        use crate::wire::testdata::igmpv2_membership::report::*;
+        test_parse_and_serialize::<IgmpMembershipReportV2, _, _>(
+            IP_PACKET_BYTES,
+            |ip| {
+                assert_eq!(ip.ttl(), 1);
+                assert_eq!(ip.iter_options().count(), 1);
+                let option = ip.iter_options().nth(0).unwrap();
+                assert!(option.copied);
+                assert_eq!(option.data, Ipv4OptionData::RouterAlert { data: 0 });
+                assert_eq!(ip.header_len(), 24);
+                assert_eq!(ip.src_ip(), SOURCE);
+                assert_eq!(ip.dst_ip(), MULTICAST);
+            },
+            |igmp| {
+                assert_eq!(*igmp.header, MULTICAST);
+            },
+        )
+    }
+
+    #[test]
+    fn test_parse_and_serialize_igmpv2_query_with_options() {
+        use crate::wire::testdata::igmpv2_membership::query::*;
+        test_parse_and_serialize::<IgmpMembershipQueryV2, _, _>(
+            IP_PACKET_BYTES,
+            |ip| {
+                assert_eq!(ip.ttl(), 1);
+                assert_eq!(ip.iter_options().count(), 1);
+                let option = ip.iter_options().nth(0).unwrap();
+                assert!(option.copied);
+                assert_eq!(option.data, Ipv4OptionData::RouterAlert { data: 0 });
+                assert_eq!(ip.header_len(), 24);
+                assert_eq!(ip.src_ip(), SOURCE);
+                assert_eq!(ip.dst_ip(), MULTICAST);
+            },
+            |igmp| {
+                assert_eq!(*igmp.header, MULTICAST);
+            },
+        )
+    }
+
+    #[test]
+    fn test_parse_and_serialize_igmpv2_leave_with_options() {
+        use crate::wire::testdata::igmpv2_membership::leave::*;
+        test_parse_and_serialize::<IgmpLeaveGroup, _, _>(
+            IP_PACKET_BYTES,
+            |ip| {
+                assert_eq!(ip.ttl(), 1);
+                assert_eq!(ip.iter_options().count(), 1);
+                let option = ip.iter_options().nth(0).unwrap();
+                assert!(option.copied);
+                assert_eq!(option.data, Ipv4OptionData::RouterAlert { data: 0 });
+                assert_eq!(ip.header_len(), 24);
+                assert_eq!(ip.src_ip(), SOURCE);
+                assert_eq!(ip.dst_ip(), DESTINATION);
+            },
+            |igmp| {
+                assert_eq!(*igmp.header, MULTICAST);
+            },
+        )
+    }
 }

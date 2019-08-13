@@ -5,6 +5,7 @@
 #include "src/media/audio/audio_core/test/device/virtual_audio_device_test.h"
 
 #include <fuchsia/media/cpp/fidl.h>
+#include <lib/zx/clock.h>
 
 #include <cmath>
 #include <cstring>
@@ -19,28 +20,6 @@ namespace media::audio::test {
 //
 fuchsia::virtualaudio::ControlSyncPtr VirtualAudioDeviceTest::control_sync_;
 AtomicDeviceId VirtualAudioDeviceTest::sequential_devices_;
-
-// VirtualAudioDeviceTest static methods
-//
-// static
-void VirtualAudioDeviceTest::SetControl(fuchsia::virtualaudio::ControlSyncPtr control_sync) {
-  VirtualAudioDeviceTest::control_sync_ = std::move(control_sync);
-}
-
-// static
-void VirtualAudioDeviceTest::ResetVirtualDevices() {
-  uint32_t num_inputs = 1, num_outputs = 1;
-  ASSERT_EQ(control_sync_->GetNumDevices(&num_inputs, &num_outputs), ZX_OK);
-
-  if (num_inputs > 0 || num_outputs > 0) {
-    VirtualAudioDeviceTest::DisableVirtualDevices();
-  }
-
-  ASSERT_EQ(control_sync_->Enable(), ZX_OK);
-}
-
-// static
-void VirtualAudioDeviceTest::DisableVirtualDevices() { ASSERT_EQ(control_sync_->Disable(), ZX_OK); }
 
 // static
 // Generate a unique id array for each virtual device created during the
@@ -63,26 +42,37 @@ void VirtualAudioDeviceTest::PopulateUniqueIdArr(bool is_input, uint8_t* unique_
   unique_id_arr[15] = sequential_value & 0x0FF;
 }
 
+void VirtualAudioDeviceTest::SetUpTestSuite() {
+  AudioDeviceTest::SetUpTestSuite();
+  environment()->ConnectToService(control_sync_.NewRequest());
+  control_sync_->Enable();
+}
+
+void VirtualAudioDeviceTest::TearDownTestSuite() {
+  ASSERT_TRUE(control_sync_.is_bound());
+  control_sync_->Disable();
+  AudioDeviceTest::TearDownTestSuite();
+}
+
 //
 // VirtualAudioDeviceTest implementation
 //
-// TODO(mpuryear): delete preexisting device-settings files, in SetUp?
 void VirtualAudioDeviceTest::SetUp() {
-  VirtualAudioDeviceTest::ResetVirtualDevices();
-
   AudioDeviceTest::SetUp();
 
-  startup_context_->svc()->Connect(input_.NewRequest());
+  environment()->ConnectToService(input_.NewRequest());
   input_.set_error_handler(ErrorHandler());
-  startup_context_->svc()->Connect(input_2_.NewRequest());
+  environment()->ConnectToService(input_2_.NewRequest());
   input_2_.set_error_handler(ErrorHandler());
 
-  startup_context_->svc()->Connect(output_.NewRequest());
+  environment()->ConnectToService(output_.NewRequest());
   output_.set_error_handler(ErrorHandler());
-  startup_context_->svc()->Connect(output_2_.NewRequest());
+  environment()->ConnectToService(output_2_.NewRequest());
   output_2_.set_error_handler(ErrorHandler());
 
-  RetrievePreExistingDevices();
+  // Enable virtual devices and assert there are none that already exist. Any virtual devices that
+  // may exist here would indicate a failure to cleanup from a previous test case.
+  ASSERT_FALSE(HasPreExistingDevices());
 }
 
 void VirtualAudioDeviceTest::TearDown() {
@@ -96,7 +86,27 @@ void VirtualAudioDeviceTest::TearDown() {
   output_.Unbind();
   output_2_.Unbind();
 
+  WaitForVirtualDeviceDepartures();
   AudioDeviceTest::TearDown();
+}
+
+void VirtualAudioDeviceTest::WaitForVirtualDeviceDepartures() {
+  audio_dev_enum_.events().OnDeviceRemoved =
+      CompletionCallback([this](uint64_t token_id) { virtual_device_tokens_.erase(token_id); });
+
+  ExpectCondition([this]() { return error_occurred_ || virtual_device_tokens_.empty(); });
+}
+
+void VirtualAudioDeviceTest::ExpectDeviceAdded(const std::array<uint8_t, 16>& unique_id_arr) {
+  AudioDeviceTest::ExpectDeviceAdded(unique_id_arr);
+
+  virtual_device_tokens_.insert(received_device_.token_id);
+}
+
+void VirtualAudioDeviceTest::ExpectDeviceRemoved(uint64_t remove_token) {
+  AudioDeviceTest::ExpectDeviceRemoved(remove_token);
+
+  virtual_device_tokens_.erase(received_removed_token_);
 }
 
 // Using virtualaudio, validate that device list matches what was added.
@@ -144,7 +154,7 @@ void VirtualAudioDeviceTest::TestGetDevicesAfterAdd(bool is_input) {
   }
   ExpectDeviceAdded(unique_id);
 
-  uint64_t added_token = received_device_.token_id;
+  auto added_token = received_device_.token_id;
 
   uint16_t num_devs = kInvalidDeviceCount;
   audio_dev_enum_->GetDevices(CompletionCallback(
@@ -183,8 +193,7 @@ void VirtualAudioDeviceTest::TestGetDevicesAfterAdd(bool is_input) {
 // Upon exit, received_default_token_ contains the newest device, and
 // received_old_token_ contains the second-newest device.
 void VirtualAudioDeviceTest::AddTwoDevices(bool is_input, bool is_plugged) {
-  zx_time_t now = zx_clock_get_monotonic();
-  uint64_t old_token, new_token;
+  auto now = zx::clock::get_monotonic().get();
 
   std::array<uint8_t, 16> unique_id{0};
   PopulateUniqueIdArr(is_input, unique_id.data());
@@ -193,58 +202,58 @@ void VirtualAudioDeviceTest::AddTwoDevices(bool is_input, bool is_plugged) {
   SetOnDeviceAddedEvent();
   if (is_input) {
     input_->SetUniqueId(unique_id);
-    input_->SetPlugProperties(now - 3, false, false, true);
+    input_->SetPlugProperties(now - ZX_NSEC(3), false, false, true);
 
     input_->Add();
   } else {
     output_->SetUniqueId(unique_id);
-    output_->SetPlugProperties(now - 3, false, false, true);
+    output_->SetPlugProperties(now - ZX_NSEC(3), false, false, true);
 
     output_->Add();
   }
   ExpectDeviceAdded(unique_id);
 
   // Save this for later
-  old_token = received_device_.token_id;
+  auto added_first_token = received_device_.token_id;
 
   PopulateUniqueIdArr(is_input, unique_id.data());
 
   if (is_input) {
     input_2_->SetUniqueId(unique_id);
-    input_2_->SetPlugProperties(now - 2, false, false, true);
+    input_2_->SetPlugProperties(now - ZX_NSEC(2), false, false, true);
 
     input_2_->Add();
   } else {
     output_2_->SetUniqueId(unique_id);
-    output_2_->SetPlugProperties(now - 2, false, false, true);
+    output_2_->SetPlugProperties(now - ZX_NSEC(2), false, false, true);
 
     output_2_->Add();
   }
   ExpectDeviceAdded(unique_id);
 
   // Save this for later
-  new_token = received_device_.token_id;
+  auto added_second_token = received_device_.token_id;
 
   if (is_plugged) {
     // Make sure the default order is correct
     SetOnDefaultDeviceChangedEvent();
     if (is_input) {
-      input_->ChangePlugState(now - 1, true);
+      input_->ChangePlugState(now - ZX_NSEC(1), true);
     } else {
-      output_->ChangePlugState(now - 1, true);
+      output_->ChangePlugState(now - ZX_NSEC(1), true);
     }
-    ExpectDefaultChanged(old_token);
+    ExpectDefaultChanged(added_first_token);
 
     if (is_input) {
       input_2_->ChangePlugState(now, true);
     } else {
       output_2_->ChangePlugState(now, true);
     }
-    ExpectDefaultChanged(new_token);
-    ASSERT_EQ(received_old_token_, old_token);
+    ExpectDefaultChanged(added_second_token);
+    ASSERT_EQ(received_old_token_, added_first_token);
   } else {
-    received_default_token_ = new_token;
-    received_old_token_ = old_token;
+    received_default_token_ = added_second_token;
+    received_old_token_ = added_first_token;
   }
 }
 
@@ -315,7 +324,7 @@ void VirtualAudioDeviceTest::TestGetDevicesAfterUnplug(bool is_input, bool most_
   uint64_t expect_default_token = (most_recent ? received_old_token_ : received_default_token_);
 
   SetOnDefaultDeviceChangedEvent();
-  zx_time_t now = zx_clock_get_monotonic();
+  auto now = zx::clock::get_monotonic().get();
   if (most_recent) {
     if (is_input) {
       input_2_->ChangePlugState(now, false);
@@ -383,14 +392,13 @@ void VirtualAudioDeviceTest::TestGetDefaultDeviceUsingAddGetDevices(bool is_inpu
   }
   ExpectDeviceAdded(unique_id);
 
-  uint64_t expected_token = received_device_.token_id;
+  auto added_token = received_device_.token_id;
 
   RetrieveDefaultDevInfoUsingGetDevices(is_input);
-  ASSERT_EQ(received_device_.token_id, expected_token);
-  // uint64_t expected_token = received_device_.token_id;
+  ASSERT_EQ(received_device_.token_id, added_token);
 
   RetrieveTokenUsingGetDefault(is_input);
-  EXPECT_EQ(received_default_token_, expected_token);
+  EXPECT_EQ(received_default_token_, added_token);
 }
 
 // validate callbacks received and default updated.
@@ -400,11 +408,6 @@ void VirtualAudioDeviceTest::TestGetDefaultDeviceUsingAddGetDevices(bool is_inpu
 //
 // From no-devices, GetDefault should recognize an added device as new default.
 void VirtualAudioDeviceTest::TestGetDefaultDeviceAfterAdd(bool is_input) {
-  if (HasPreExistingDevices()) {
-    FXL_DLOG(INFO) << "Test case requires an environment with no audio devices";
-    return;
-  }
-
   SetOnDefaultDeviceChangedEvent();
   std::array<uint8_t, 16> unique_id{0};
   PopulateUniqueIdArr(is_input, unique_id.data());
@@ -418,7 +421,7 @@ void VirtualAudioDeviceTest::TestGetDefaultDeviceAfterAdd(bool is_input) {
   }
   ExpectDeviceAdded(unique_id);
 
-  uint64_t added_token = received_default_token_;
+  auto added_token = received_default_token_;
 
   RetrieveTokenUsingGetDefault(is_input);
   EXPECT_EQ(received_default_token_, added_token);
@@ -427,16 +430,11 @@ void VirtualAudioDeviceTest::TestGetDefaultDeviceAfterAdd(bool is_input) {
 // From no-devices, adding an unplugged device should not make it the new
 // default.
 void VirtualAudioDeviceTest::TestGetDefaultDeviceAfterUnpluggedAdd(bool is_input) {
-  if (HasPreExistingDevices()) {
-    FXL_DLOG(INFO) << "Test case requires an environment with no audio devices";
-    return;
-  }
-
   SetOnDeviceAddedEvent();
   std::array<uint8_t, 16> unique_id{0};
   PopulateUniqueIdArr(is_input, unique_id.data());
 
-  zx_time_t now = zx_clock_get_monotonic();
+  auto now = zx::clock::get_monotonic().get();
   if (is_input) {
     input_->SetUniqueId(unique_id);
     input_->SetPlugProperties(now, false, false, true);
@@ -450,7 +448,7 @@ void VirtualAudioDeviceTest::TestGetDefaultDeviceAfterUnpluggedAdd(bool is_input
   }
   ExpectDeviceAdded(unique_id);
 
-  uint64_t added_token = received_device_.token_id;
+  auto added_token = received_device_.token_id;
 
   RetrieveTokenUsingGetDefault(is_input);
   EXPECT_NE(received_default_token_, added_token);
@@ -462,6 +460,7 @@ void VirtualAudioDeviceTest::TestGetDefaultDeviceAfterRemove(bool is_input, bool
   uint64_t expect_remove_token = (most_recent ? received_default_token_ : received_old_token_);
   uint64_t expect_default_token = (most_recent ? received_old_token_ : received_default_token_);
 
+  SetOnDeviceRemovedEvent();
   if (most_recent) {
     SetOnDefaultDeviceChangedEvent();
 
@@ -473,9 +472,9 @@ void VirtualAudioDeviceTest::TestGetDefaultDeviceAfterRemove(bool is_input, bool
 
     ExpectDefaultChanged(expect_default_token);
     ASSERT_EQ(received_old_token_, expect_remove_token);
-  } else {
-    SetOnDeviceRemovedEvent();
 
+    ExpectDeviceRemoved(expect_remove_token);
+  } else {
     if (is_input) {
       input_->Remove();
     } else {
@@ -493,7 +492,7 @@ void VirtualAudioDeviceTest::TestGetDefaultDeviceAfterUnplug(bool is_input, bool
   AddTwoDevices(is_input);
   uint64_t expect_default_token = (most_recent ? received_old_token_ : received_default_token_);
 
-  zx_time_t now = zx_clock_get_monotonic();
+  auto now = zx::clock::get_monotonic().get();
   SetOnDefaultDeviceChangedEvent();
   if (most_recent) {
     if (is_input) {
@@ -579,7 +578,7 @@ void VirtualAudioDeviceTest::TestGetDeviceGainAfterAdd(bool is_input) {
 
   ExpectDeviceAdded(unique_id);
 
-  uint64_t added_token = received_device_.token_id;
+  auto added_token = received_device_.token_id;
 
   RetrieveGainInfoUsingGetDevices(added_token);
   EXPECT_EQ(received_gain_info_.gain_db, cur_gain_db);
@@ -650,7 +649,7 @@ void VirtualAudioDeviceTest::TestGetDeviceGainAfterSetDeviceGain(bool is_input) 
   // Receive the OnDeviceAdded callback
   ExpectDeviceAdded(unique_id);
 
-  uint64_t added_token = received_device_.token_id;
+  auto added_token = received_device_.token_id;
 
   // SetDeviceGain to the new values
   fuchsia::media::AudioGainInfo gain_info = {.gain_db = cur_gain_db, .flags = gain_flags};
@@ -722,7 +721,7 @@ void VirtualAudioDeviceTest::TestGetDevicesAfterSetDeviceGain(bool is_input) {
   // Receive the OnDeviceAdded callback
   ExpectDeviceAdded(unique_id);
 
-  uint64_t added_token = received_device_.token_id;
+  auto added_token = received_device_.token_id;
 
   // SetDeviceGain to the new values
   fuchsia::media::AudioGainInfo gain_info = {.gain_db = cur_gain_db, .flags = gain_flags};
@@ -762,6 +761,7 @@ void VirtualAudioDeviceTest::TestOnDeviceAddedAfterAdd(bool is_input, bool is_pl
   std::array<uint8_t, 16> unique_id{0};
   PopulateUniqueIdArr(is_input, unique_id.data());
 
+  auto now = zx::clock::get_monotonic().get();
   if (is_input) {
     input_->SetManufacturer(mfr);
     input_->SetProduct(product);
@@ -769,7 +769,7 @@ void VirtualAudioDeviceTest::TestOnDeviceAddedAfterAdd(bool is_input, bool is_pl
 
     input_->SetGainProperties(min_gain_db, max_gain_db, gain_step_db, cur_gain_db, can_mute,
                               cur_mute, can_agc, cur_agc);
-    input_->SetPlugProperties(zx_clock_get_monotonic(), is_plugged, false, true);
+    input_->SetPlugProperties(now, is_plugged, false, true);
 
     input_->Add();
   } else {
@@ -779,7 +779,7 @@ void VirtualAudioDeviceTest::TestOnDeviceAddedAfterAdd(bool is_input, bool is_pl
 
     output_->SetGainProperties(min_gain_db, max_gain_db, gain_step_db, cur_gain_db, can_mute,
                                cur_mute, can_agc, cur_agc);
-    output_->SetPlugProperties(zx_clock_get_monotonic(), is_plugged, false, true);
+    output_->SetPlugProperties(now, is_plugged, false, true);
 
     output_->Add();
   }
@@ -805,15 +805,15 @@ void VirtualAudioDeviceTest::TestOnDeviceAddedAfterPlug(bool is_input) {
   std::array<uint8_t, 16> unique_id{0};
   PopulateUniqueIdArr(is_input, unique_id.data());
 
-  zx_time_t now = zx_clock_get_monotonic();
+  auto now = zx::clock::get_monotonic().get();
   if (is_input) {
     input_->SetUniqueId(unique_id);
-    input_->SetPlugProperties(now - 1, false, false, true);
+    input_->SetPlugProperties(now - ZX_NSEC(1), false, false, true);
 
     input_->Add();
   } else {
     output_->SetUniqueId(unique_id);
-    output_->SetPlugProperties(now - 1, false, false, true);
+    output_->SetPlugProperties(now - ZX_NSEC(1), false, false, true);
 
     output_->Add();
   }
@@ -834,17 +834,18 @@ void VirtualAudioDeviceTest::TestOnDeviceRemovedAfterRemove(bool is_input, bool 
   std::array<uint8_t, 16> unique_id{0};
   PopulateUniqueIdArr(is_input, unique_id.data());
 
+  auto now = zx::clock::get_monotonic().get();
   if (is_input) {
     input_->SetUniqueId(unique_id);
     if (!is_plugged) {
-      input_->SetPlugProperties(zx_clock_get_monotonic(), false, false, true);
+      input_->SetPlugProperties(now, false, false, true);
     }
 
     input_->Add();
   } else {
     output_->SetUniqueId(unique_id);
     if (!is_plugged) {
-      output_->SetPlugProperties(zx_clock_get_monotonic(), false, false, true);
+      output_->SetPlugProperties(now, false, false, true);
     }
 
     output_->Add();
@@ -852,8 +853,8 @@ void VirtualAudioDeviceTest::TestOnDeviceRemovedAfterRemove(bool is_input, bool 
 
   ExpectDeviceAdded(unique_id);
 
-  uint64_t token = received_device_.token_id;
-  ASSERT_NE(token, ZX_KOID_INVALID);
+  auto added_token = received_device_.token_id;
+  ASSERT_NE(added_token, ZX_KOID_INVALID);
 
   SetOnDeviceRemovedEvent();
 
@@ -863,7 +864,7 @@ void VirtualAudioDeviceTest::TestOnDeviceRemovedAfterRemove(bool is_input, bool 
     output_->Remove();
   }
 
-  ExpectDeviceRemoved(token);
+  ExpectDeviceRemoved(added_token);
 }
 
 void VirtualAudioDeviceTest::TestOnDeviceRemovedAfterUnplug(bool is_input) {
@@ -872,14 +873,15 @@ void VirtualAudioDeviceTest::TestOnDeviceRemovedAfterUnplug(bool is_input) {
   std::array<uint8_t, 16> unique_id{0};
   PopulateUniqueIdArr(is_input, unique_id.data());
 
+  auto now = zx::clock::get_monotonic().get();
   if (is_input) {
     input_->SetUniqueId(unique_id);
-    input_->SetPlugProperties(zx_clock_get_monotonic(), true, false, true);
+    input_->SetPlugProperties(now, true, false, true);
 
     input_->Add();
   } else {
     output_->SetUniqueId(unique_id);
-    output_->SetPlugProperties(zx_clock_get_monotonic(), true, false, true);
+    output_->SetPlugProperties(now, true, false, true);
 
     output_->Add();
   }
@@ -888,7 +890,7 @@ void VirtualAudioDeviceTest::TestOnDeviceRemovedAfterUnplug(bool is_input) {
 
   SetOnDeviceRemovedEvent();
 
-  zx_time_t now = zx_clock_get_monotonic();
+  now = zx::clock::get_monotonic().get();
   if (is_input) {
     input_->ChangePlugState(now, false);
   } else {
@@ -905,11 +907,6 @@ void VirtualAudioDeviceTest::TestOnDeviceRemovedAfterUnplug(bool is_input) {
 // Conditions: first Add, last Remove, subsequent Add, important Remove,
 // unimportant Remove, Add(unplugged), plug change
 void VirtualAudioDeviceTest::TestOnDefaultDeviceChangedAfterAdd(bool is_input) {
-  if (HasPreExistingDevices()) {
-    FXL_DLOG(INFO) << "Test case requires an environment with no audio devices";
-    return;
-  }
-
   SetOnDeviceAddedEvent();
   SetOnDefaultDeviceChangedEvent();
 
@@ -927,9 +924,10 @@ void VirtualAudioDeviceTest::TestOnDefaultDeviceChangedAfterAdd(bool is_input) {
   }
 
   ExpectDeviceAdded(unique_id);
-  ExpectDefaultChanged(received_device_.token_id);
+  auto added_token = received_device_.token_id;
 
-  EXPECT_EQ(received_device_.token_id, received_default_token_);
+  ExpectDefaultChanged(added_token);
+  EXPECT_EQ(received_default_token_, added_token);
   EXPECT_EQ((is_input ? AudioDeviceTest::initial_input_default_
                       : AudioDeviceTest::initial_output_default_),
             received_old_token_);
@@ -951,14 +949,14 @@ void VirtualAudioDeviceTest::TestOnDefaultDeviceChangedAfterPlug(bool is_input, 
   RetrieveTokenUsingGetDefault(is_input);
   uint64_t default_token = received_default_token_;
 
-  zx_time_t now = zx_clock_get_monotonic();
+  auto now = zx::clock::get_monotonic().get();
   SetOnDefaultDeviceChangedEvent();
 
   // We'll say that this first device was plugged just 1 ns ago...
   if (is_input) {
-    input_->ChangePlugState(now - 1, true);
+    input_->ChangePlugState(now - ZX_NSEC(1), true);
   } else {
-    output_->ChangePlugState(now - 1, true);
+    output_->ChangePlugState(now - ZX_NSEC(1), true);
   }
   if (default_token != token1) {
     ExpectDefaultChanged(token1);
@@ -966,7 +964,7 @@ void VirtualAudioDeviceTest::TestOnDefaultDeviceChangedAfterPlug(bool is_input, 
 
   // If this second device is to be Most-Recently-Plugged, make its plugged-time
   // 1 ns after the first -- otherwise make it 1 ns BEFORE the first.
-  zx_time_t plug_time = (most_recent ? now : (now - 2));
+  zx_time_t plug_time = (most_recent ? now : (now - ZX_NSEC(2)));
   if (is_input) {
     input_2_->ChangePlugState(plug_time, true);
   } else {
@@ -988,6 +986,7 @@ void VirtualAudioDeviceTest::TestOnDefaultDeviceChangedAfterRemove(bool is_input
   uint64_t expect_default_token = (most_recent ? received_old_token_ : received_default_token_);
 
   SetOnDefaultDeviceChangedEvent();
+  SetOnDeviceRemovedEvent();
   if (most_recent) {
     if (is_input) {
       input_2_->Remove();
@@ -1003,9 +1002,10 @@ void VirtualAudioDeviceTest::TestOnDefaultDeviceChangedAfterRemove(bool is_input
     } else {
       output_->Remove();
     }
-
-    RunLoopUntilIdle();
   }
+  ExpectDeviceRemoved(expect_remove_token);
+
+  RunLoopUntilIdle();
 }
 
 void VirtualAudioDeviceTest::TestOnDefaultDeviceChangedAfterUnplug(bool is_input,
@@ -1014,7 +1014,7 @@ void VirtualAudioDeviceTest::TestOnDefaultDeviceChangedAfterUnplug(bool is_input
   uint64_t to_unplug_token = (most_recent ? received_default_token_ : received_old_token_);
   uint64_t expect_default_token = (most_recent ? received_old_token_ : received_default_token_);
 
-  zx_time_t now = zx_clock_get_monotonic();
+  auto now = zx::clock::get_monotonic().get();
   SetOnDefaultDeviceChangedEvent();
   if (most_recent) {
     if (is_input) {
@@ -1096,7 +1096,7 @@ void VirtualAudioDeviceTest::TestOnDeviceGainChanged(bool is_input) {
   // Receive the OnDeviceAdded callback
   ExpectDeviceAdded(unique_id);
 
-  uint64_t added_token = received_device_.token_id;
+  auto added_token = received_device_.token_id;
 
   // SetDeviceGain to the new values
   fuchsia::media::AudioGainInfo gain_info = {.gain_db = cur_gain_db, .flags = gain_flags};
@@ -1237,7 +1237,7 @@ TEST_F(VirtualAudioDeviceTest, GetDeviceGainOfRemovedOutput) {
   output_->Add();
   ExpectDeviceAdded(unique_id);
 
-  uint64_t added_token = received_device_.token_id;
+  auto added_token = received_device_.token_id;
 
   SetOnDeviceRemovedEvent();
   output_->Remove();
@@ -1259,14 +1259,14 @@ TEST_F(VirtualAudioDeviceTest, SetDeviceGainOfBadValues) {
   input_->Add();
   ExpectDeviceAdded(unique_id);
 
-  uint64_t in_token = received_device_.token_id;
+  auto added_in_token = received_device_.token_id;
 
   PopulateUniqueIdArr(false, unique_id.data());
   output_->SetUniqueId(unique_id);
   output_->Add();
   ExpectDeviceAdded(unique_id);
 
-  uint64_t out_token = received_device_.token_id;
+  auto added_out_token = received_device_.token_id;
 
   // The explicitly-invalid token_id
   audio_dev_enum_->SetDeviceGain(ZX_KOID_INVALID, {.gain_db = 0.0f, .flags = kGainFlagMask},
@@ -1277,19 +1277,21 @@ TEST_F(VirtualAudioDeviceTest, SetDeviceGainOfBadValues) {
                                  kSetFlagMask);
 
   // An invalid gain_db value
-  audio_dev_enum_->SetDeviceGain(in_token, {.gain_db = NAN, .flags = kGainFlagMask}, kSetFlagMask);
-  audio_dev_enum_->SetDeviceGain(out_token, {.gain_db = NAN, .flags = kGainFlagMask}, kSetFlagMask);
+  audio_dev_enum_->SetDeviceGain(added_in_token, {.gain_db = NAN, .flags = kGainFlagMask},
+                                 kSetFlagMask);
+  audio_dev_enum_->SetDeviceGain(added_out_token, {.gain_db = NAN, .flags = kGainFlagMask},
+                                 kSetFlagMask);
 
   // Invalid gain flags (set bits outside the defined ones)
-  audio_dev_enum_->SetDeviceGain(in_token, {.gain_db = 0.0f, .flags = ~kGainFlagMask},
+  audio_dev_enum_->SetDeviceGain(added_in_token, {.gain_db = 0.0f, .flags = ~kGainFlagMask},
                                  kSetFlagMask);
-  audio_dev_enum_->SetDeviceGain(out_token, {.gain_db = 0.0f, .flags = ~kGainFlagMask},
+  audio_dev_enum_->SetDeviceGain(added_out_token, {.gain_db = 0.0f, .flags = ~kGainFlagMask},
                                  kSetFlagMask);
 
   // Invalid set flags (set bits outside the defined ones)
-  audio_dev_enum_->SetDeviceGain(in_token, {.gain_db = 0.0f, .flags = kGainFlagMask},
+  audio_dev_enum_->SetDeviceGain(added_in_token, {.gain_db = 0.0f, .flags = kGainFlagMask},
                                  ~kSetFlagMask);
-  audio_dev_enum_->SetDeviceGain(out_token, {.gain_db = 0.0f, .flags = kGainFlagMask},
+  audio_dev_enum_->SetDeviceGain(added_out_token, {.gain_db = 0.0f, .flags = kGainFlagMask},
                                  ~kSetFlagMask);
 
   // We should not disconnect.
@@ -1307,17 +1309,17 @@ TEST_F(VirtualAudioDeviceTest, SetDeviceGainOfRemovedInput) {
 
   ExpectDeviceAdded(unique_id);
 
-  uint64_t added_dev_token = received_device_.token_id;
+  auto added_token = received_device_.token_id;
 
   SetOnDeviceRemovedEvent();
   input_->Remove();
 
-  ExpectDeviceRemoved(added_dev_token);
+  ExpectDeviceRemoved(added_token);
 
-  uint64_t removed_dev_token = received_removed_token_;
+  uint64_t removed_token = received_removed_token_;
 
   SetOnDeviceGainChangedEvent();
-  audio_dev_enum_->SetDeviceGain(removed_dev_token, {.gain_db = 0.0f, .flags = 0}, kSetFlagMask);
+  audio_dev_enum_->SetDeviceGain(removed_token, {.gain_db = 0.0f, .flags = 0}, kSetFlagMask);
 
   // We should receive neither callback nor disconnect.
   RunLoopUntilIdle();

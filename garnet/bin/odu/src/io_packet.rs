@@ -10,15 +10,16 @@
 
 use {
     crate::operations::{OperationType, PipelineStages},
+    crate::target::Error,
     std::{
-        io::{Error, Result},
         marker::{Send, Sync},
         ops::Range,
+        result::Result,
         time::Instant,
     },
 };
 
-pub type IoPacketType = Box<IoPacket + Send + Sync>;
+pub type IoPacketType = Box<dyn IoPacket + Send + Sync>;
 
 /// This struct maintains monotonically increasing clock time. Though these fields
 /// are u128, when writing to disk we write u64 nanos which is sufficient to track
@@ -118,13 +119,13 @@ pub trait IoPacket: IoPacketClone {
     fn generate_verify_io(&mut self);
 
     /// Returns result of the IO command
-    fn get_error(&self) -> Result<()>;
+    fn get_error(&self) -> Result<(), Error>;
 
     /// Sets error on a IoPacket
     fn set_error(&mut self, error: Error);
 
     /// Verify the completed IO packet
-    fn verify(&mut self, verify_io: &IoPacket) -> bool;
+    fn verify(&mut self, verify_io: &dyn IoPacket) -> bool;
 
     /// Returns pointer to mutable buffer
     fn buffer_mut(&mut self) -> &mut Vec<u8>;

@@ -6,8 +6,12 @@
     },
     "expose": [
         {
-            "service": "/svc/fidl.examples.routing.echo.Echo",
+            "legacy_service": "/svc/fidl.examples.routing.echo.Echo",
             "from": "self",
+        },
+        {
+            "directory": "/hub",
+            "from": "framework",
         },
     ],
 }

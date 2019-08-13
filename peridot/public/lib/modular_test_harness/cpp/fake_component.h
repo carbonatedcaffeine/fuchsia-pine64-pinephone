@@ -27,7 +27,7 @@ class FakeComponent : public fuchsia::modular::Lifecycle {
 
   // Returns a binder function that initializes members, dispatches OnCreate()
   // and wires OnDestroy() to the InterceptedComponent.OnKill event.
-  TestHarnessBuilder::OnNewComponentHandler GetOnCreateHandler();
+  modular_testing::TestHarnessBuilder::OnNewComponentHandler GetOnCreateHandler();
 
   // Returns true if the component was launched by the component manager and
   // has not yet been destroyed.
@@ -42,8 +42,8 @@ class FakeComponent : public fuchsia::modular::Lifecycle {
   // documentation for fuchsia.sys.TerminationReason for more details.
   //
   // Requires: is_running()
-  void Exit(int64_t exit_code, fuchsia::sys::TerminationReason reason =
-                                   fuchsia::sys::TerminationReason::EXITED);
+  void Exit(int64_t exit_code,
+            fuchsia::sys::TerminationReason reason = fuchsia::sys::TerminationReason::EXITED);
 
  protected:
   // Called when the component is created.  The directory handles for "/svc" in

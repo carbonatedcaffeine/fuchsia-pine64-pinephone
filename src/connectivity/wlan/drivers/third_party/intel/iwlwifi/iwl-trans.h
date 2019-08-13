@@ -36,6 +36,8 @@
 #ifndef SRC_CONNECTIVITY_WLAN_DRIVERS_THIRD_PARTY_INTEL_IWLWIFI_IWL_TRANS_H_
 #define SRC_CONNECTIVITY_WLAN_DRIVERS_THIRD_PARTY_INTEL_IWLWIFI_IWL_TRANS_H_
 
+#include <ddk/io-buffer.h>
+
 #include "src/connectivity/wlan/drivers/third_party/intel/iwlwifi/fw/img.h"
 #include "src/connectivity/wlan/drivers/third_party/intel/iwlwifi/iwl-config.h"
 #include "src/connectivity/wlan/drivers/third_party/intel/iwlwifi/iwl-debug.h"
@@ -236,16 +238,13 @@ static inline void iwl_free_resp(struct iwl_host_cmd* cmd) {
 
 struct iwl_rx_cmd_buffer {
   struct page* _page;
+  io_buffer_t _io_buf;
   int _offset;
   bool _page_stolen;
-  uint32_t _rx_page_order;
-  unsigned int truesize;
   uint8_t status;
 };
 
-static inline void* rxb_addr(struct iwl_rx_cmd_buffer* r) {
-  return (void*)((unsigned long)page_address(r->_page) + r->_offset);
-}
+static inline void* rxb_addr(struct iwl_rx_cmd_buffer* r) { return io_buffer_virt(&r->_io_buf); }
 
 static inline int rxb_offset(struct iwl_rx_cmd_buffer* r) { return r->_offset; }
 
@@ -318,24 +317,21 @@ enum iwl_trans_status {
   STATUS_TRANS_DEAD,
 };
 
-#if 0   // NEEDS_PORTING
-static inline int
-iwl_trans_get_rb_size_order(enum iwl_amsdu_size rb_size) {
-    switch (rb_size) {
+static inline size_t iwl_trans_get_rb_size(enum iwl_amsdu_size rb_size) {
+  switch (rb_size) {
     case IWL_AMSDU_2K:
-        return get_order(2 * 1024);
+      return 2 * 1024;
     case IWL_AMSDU_4K:
-        return get_order(4 * 1024);
+      return 4 * 1024;
     case IWL_AMSDU_8K:
-        return get_order(8 * 1024);
+      return 8 * 1024;
     case IWL_AMSDU_12K:
-        return get_order(12 * 1024);
+      return 12 * 1024;
     default:
-        WARN_ON(1);
-        return -1;
-    }
+      WARN_ON(1);
+      return 0;
+  }
 }
-#endif  // NEEDS_PORTING
 
 struct iwl_hcmd_names {
   uint8_t cmd_id;
@@ -515,39 +511,41 @@ struct iwl_trans_rxq_dma_data {
  *  of the trans debugfs
  */
 struct iwl_trans_ops {
-  int (*start_hw)(struct iwl_trans* iwl_trans, bool low_power);
+  zx_status_t (*start_hw)(struct iwl_trans* iwl_trans, bool low_power);
   void (*op_mode_leave)(struct iwl_trans* iwl_trans);
 #if IS_ENABLED(CPTCFG_IWLXVT)
   int (*start_fw_dbg)(struct iwl_trans* trans, const struct fw_img* fw, bool run_in_rfkill,
                       uint32_t fw_dbg_flags);
   int (*test_mode_cmd)(struct iwl_trans* trans, bool enable);
 #endif
-  int (*start_fw)(struct iwl_trans* trans, const struct fw_img* fw, bool run_in_rfkill);
+  zx_status_t (*start_fw)(struct iwl_trans* trans, const struct fw_img* fw, bool run_in_rfkill);
   void (*fw_alive)(struct iwl_trans* trans, uint32_t scd_addr);
   void (*stop_device)(struct iwl_trans* trans, bool low_power);
 
   void (*d3_suspend)(struct iwl_trans* trans, bool test, bool reset);
-  int (*d3_resume)(struct iwl_trans* trans, enum iwl_d3_status* status, bool test, bool reset);
+  zx_status_t (*d3_resume)(struct iwl_trans* trans, enum iwl_d3_status* status, bool test,
+                           bool reset);
 
-  int (*send_cmd)(struct iwl_trans* trans, struct iwl_host_cmd* cmd);
+  zx_status_t (*send_cmd)(struct iwl_trans* trans, struct iwl_host_cmd* cmd);
 
-  int (*tx)(struct iwl_trans* trans, struct sk_buff* skb, struct iwl_device_cmd* dev_cmd,
-            int queue);
+  zx_status_t (*tx)(struct iwl_trans* trans, struct sk_buff* skb, struct iwl_device_cmd* dev_cmd,
+                    int queue);
   void (*reclaim)(struct iwl_trans* trans, int queue, int ssn, struct sk_buff_head* skbs);
 
   bool (*txq_enable)(struct iwl_trans* trans, int queue, uint16_t ssn,
                      const struct iwl_trans_txq_scd_cfg* cfg, unsigned int queue_wdg_timeout);
   void (*txq_disable)(struct iwl_trans* trans, int queue, bool configure_scd);
   /* 22000 functions */
-  int (*txq_alloc)(struct iwl_trans* trans, __le16 flags, uint8_t sta_id, uint8_t tid, int cmd_id,
-                   int size, unsigned int queue_wdg_timeout);
+  zx_status_t (*txq_alloc)(struct iwl_trans* trans, __le16 flags, uint8_t sta_id, uint8_t tid,
+                           int cmd_id, int size, unsigned int queue_wdg_timeout);
   void (*txq_free)(struct iwl_trans* trans, int queue);
-  int (*rxq_dma_data)(struct iwl_trans* trans, int queue, struct iwl_trans_rxq_dma_data* data);
+  zx_status_t (*rxq_dma_data)(struct iwl_trans* trans, int queue,
+                              struct iwl_trans_rxq_dma_data* data);
 
   void (*txq_set_shared_mode)(struct iwl_trans* trans, uint32_t txq_id, bool shared);
 
-  int (*wait_tx_queues_empty)(struct iwl_trans* trans, uint32_t txq_bm);
-  int (*wait_txq_empty)(struct iwl_trans* trans, int queue);
+  zx_status_t (*wait_tx_queues_empty)(struct iwl_trans* trans, uint32_t txq_bm);
+  zx_status_t (*wait_txq_empty)(struct iwl_trans* trans, int queue);
   void (*freeze_txq_timer)(struct iwl_trans* trans, unsigned long txqs, bool freeze);
   void (*block_txq_ptrs)(struct iwl_trans* trans, bool block);
 
@@ -556,8 +554,8 @@ struct iwl_trans_ops {
   uint32_t (*read32)(struct iwl_trans* trans, uint32_t ofs);
   uint32_t (*read_prph)(struct iwl_trans* trans, uint32_t ofs);
   void (*write_prph)(struct iwl_trans* trans, uint32_t ofs, uint32_t val);
-  int (*read_mem)(struct iwl_trans* trans, uint32_t addr, void* buf, int dwords);
-  int (*write_mem)(struct iwl_trans* trans, uint32_t addr, const void* buf, int dwords);
+  zx_status_t (*read_mem)(struct iwl_trans* trans, uint32_t addr, void* buf, int dwords);
+  zx_status_t (*write_mem)(struct iwl_trans* trans, uint32_t addr, const void* buf, int dwords);
   void (*configure)(struct iwl_trans* trans, const struct iwl_trans_config* trans_cfg);
   void (*set_pmi)(struct iwl_trans* trans, bool state);
   void (*sw_reset)(struct iwl_trans* trans);
@@ -566,7 +564,7 @@ struct iwl_trans_ops {
   void (*set_bits_mask)(struct iwl_trans* trans, uint32_t reg, uint32_t mask, uint32_t value);
   void (*ref)(struct iwl_trans* trans);
   void (*unref)(struct iwl_trans* trans);
-  int (*suspend)(struct iwl_trans* trans);
+  zx_status_t (*suspend)(struct iwl_trans* trans);
   void (*resume)(struct iwl_trans* trans);
 
   struct iwl_trans_dump_data* (*dump_data)(struct iwl_trans* trans, uint32_t dump_mask);
@@ -688,6 +686,7 @@ struct iwl_dram_data {
  * @rx_mpdu_cmd_hdr_size: used for tracing, amount of data before the
  *  start of the 802.11 header in the @rx_mpdu_cmd
  * @dflt_pwr_limit: default power limit fetched from the platform (ACPI)
+ * @to_load_firmware: this trans has firmware to load. For sim-trans, this should be false.
  * @dbg_dest_tlv: points to the destination TLV for debug
  * @dbg_conf_tlv: array of pointers to configuration TLVs for debug
  * @dbg_trigger_tlv: array of pointers to triggers TLVs for debug
@@ -744,6 +743,7 @@ struct iwl_trans {
 
   bool external_ini_loaded;
   bool ini_valid;
+  bool to_load_firmware;
 
   const struct iwl_fw_dbg_dest_tlv_v1* dbg_dest_tlv;
   const struct iwl_fw_dbg_conf_tlv* dbg_conf_tlv[FW_DBG_CONF_MAX];

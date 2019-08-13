@@ -47,7 +47,7 @@ std::unique_ptr<Field> StringType::Decode(MessageDecoder* decoder, std::string_v
 
   // Don't need to check return value because the effects of returning false are
   // dealt with in DecodeNullable.
-  result->DecodeNullable(decoder, offset);
+  result->DecodeNullable(decoder, offset, string_length);
   return result;
 }
 
@@ -72,7 +72,7 @@ std::unique_ptr<Field> TableType::Decode(MessageDecoder* decoder, std::string_vi
   offset += sizeof(size);
 
   auto result = std::make_unique<TableField>(name, this, table_, size);
-  if (result->DecodeNullable(decoder, offset)) {
+  if (result->DecodeNullable(decoder, offset, size * 2 * sizeof(uint64_t))) {
     if (result->is_null()) {
       FXL_LOG(ERROR) << "invalid null value for table pointer";
     }
@@ -150,7 +150,7 @@ std::unique_ptr<Field> VectorType::Decode(MessageDecoder* decoder, std::string_v
 
   // Don't need to check return value because the effects of returning false are
   // dealt with in DecodeNullable.
-  result->DecodeNullable(decoder, offset);
+  result->DecodeNullable(decoder, offset, size * component_type_->InlineSize());
   return result;
 }
 
@@ -167,12 +167,17 @@ std::unique_ptr<Field> HandleType::Decode(MessageDecoder* decoder, std::string_v
   decoder->GetValueAt(offset, &handle);
   if ((handle != FIDL_HANDLE_ABSENT) && (handle != FIDL_HANDLE_PRESENT)) {
     FXL_LOG(ERROR) << "invalid value <" << std::hex << handle << std::dec << "> for handle";
-    return std::make_unique<HandleField>(name, this, FIDL_HANDLE_ABSENT);
+    handle = FIDL_HANDLE_ABSENT;
   }
-  if (handle != FIDL_HANDLE_ABSENT) {
-    handle = decoder->GetNextHandle();
+  zx_handle_info_t handle_info;
+  if (handle == FIDL_HANDLE_ABSENT) {
+    handle_info.handle = FIDL_HANDLE_ABSENT;
+    handle_info.type = ZX_OBJ_TYPE_NONE;
+    handle_info.rights = 0;
+  } else {
+    handle_info = decoder->GetNextHandle();
   }
-  return std::make_unique<HandleField>(name, this, handle);
+  return std::make_unique<HandleField>(name, this, handle_info);
 }
 
 std::unique_ptr<Type> Type::ScalarTypeFromName(const std::string& type_name, size_t inline_size) {

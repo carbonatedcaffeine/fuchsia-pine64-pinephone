@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 # Copyright 2016 The Fuchsia Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -29,6 +29,7 @@ ROOT_PUBSPECS = [
 # project.
 PROJECT_DEPENDENCIES = [
     'sdk/testing/sl4f/client',
+    'src/testing',
     'topaz/public/dart/widgets',
     'topaz/public/dart',
     'topaz/public/lib',

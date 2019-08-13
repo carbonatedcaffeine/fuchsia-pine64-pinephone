@@ -53,10 +53,9 @@ bool WriteFile(const std::string& path, const char* data, ssize_t size) {
   return WriteFileAt(AT_FDCWD, path, data, size);
 }
 
-bool WriteFileAt(int dirfd, const std::string& path, const char* data,
-                 ssize_t size) {
-  fxl::UniqueFD fd(HANDLE_EINTR(openat(
-      dirfd, path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, FILE_CREATE_MODE)));
+bool WriteFileAt(int dirfd, const std::string& path, const char* data, ssize_t size) {
+  fbl::unique_fd fd(
+      HANDLE_EINTR(openat(dirfd, path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, FILE_CREATE_MODE)));
   if (!fd.is_valid())
     return false;
   return fxl::WriteFileDescriptor(fd.get(), data, size);
@@ -90,20 +89,19 @@ bool ReadFileDescriptorToString(int fd, std::string* result) {
   return ReadFileDescriptor(fd, result);
 }
 
-bool ReadFileToStringAt(int dirfd, const std::string& path,
-                        std::string* result) {
-  fxl::UniqueFD fd(openat(dirfd, path.c_str(), O_RDONLY));
+bool ReadFileToStringAt(int dirfd, const std::string& path, std::string* result) {
+  fbl::unique_fd fd(openat(dirfd, path.c_str(), O_RDONLY));
   return ReadFileDescriptor(fd.get(), result);
 }
 
 bool ReadFileToVector(const std::string& path, std::vector<uint8_t>* result) {
-  fxl::UniqueFD fd(open(path.c_str(), O_RDONLY | BINARY_MODE));
+  fbl::unique_fd fd(open(path.c_str(), O_RDONLY | BINARY_MODE));
   return ReadFileDescriptor(fd.get(), result);
 }
 
 std::pair<uint8_t*, intptr_t> ReadFileToBytes(const std::string& path) {
   std::pair<uint8_t*, intptr_t> failure_pair{nullptr, -1};
-  fxl::UniqueFD fd(open(path.c_str(), O_RDONLY | BINARY_MODE));
+  fbl::unique_fd fd(open(path.c_str(), O_RDONLY | BINARY_MODE));
   if (!fd.is_valid())
     return failure_pair;
   return ReadFileDescriptorToBytes(fd.get());

@@ -75,14 +75,9 @@ bool CobaltTestApp::RunTests() {
   TRY_TEST(TestLogCobaltEvent(&logger_));
   TRY_TEST(DoChannelFilteringTests());
 
-  // TODO(pesk): Count generated observations only for reports in the test
-  // registry and turn local aggregation tests back on. (Currently these tests
-  // are failing due to observations generated for cobalt-internal reports.)
-  /*
   if (!DoLocalAggregationTests(kEventAggregatorBackfillDays)) {
     return false;
   }
-  */
 
   return true;
 }
@@ -105,74 +100,68 @@ bool CobaltTestApp::DoChannelFilteringTests() {
 
 bool CobaltTestApp::DoLocalAggregationTests(const size_t backfill_days) {
   CONNECT_AND_TRY_TEST(
-      TestLogEventWithAggregation(&logger_, clock_.get(), &cobalt_controller_,
-                                  backfill_days),
+      TestLogEventWithAggregation(&logger_, clock_.get(), &cobalt_controller_, backfill_days),
       backfill_days);
   CONNECT_AND_TRY_TEST(
-      TestLogEventCountWithAggregation(&logger_, clock_.get(),
-                                       &cobalt_controller_, backfill_days),
+      TestLogEventCountWithAggregation(&logger_, clock_.get(), &cobalt_controller_, backfill_days),
       backfill_days);
   CONNECT_AND_TRY_TEST(
-      TestLogElapsedTimeWithAggregation(&logger_, clock_.get(),
-                                        &cobalt_controller_, backfill_days),
+      TestLogElapsedTimeWithAggregation(&logger_, clock_.get(), &cobalt_controller_, backfill_days),
       backfill_days);
   return true;
 }
 
-void CobaltTestApp::Connect(uint32_t schedule_interval_seconds,
-                            uint32_t min_interval_seconds,
+void CobaltTestApp::Connect(uint32_t schedule_interval_seconds, uint32_t min_interval_seconds,
                             size_t event_aggregator_backfill_days,
-                            bool start_event_aggregator_worker,
-                            uint32_t initial_interval_seconds) {
+                            bool start_event_aggregator_worker, uint32_t initial_interval_seconds) {
   controller_.Unbind();
   fidl::InterfaceHandle<fuchsia::io::Directory> directory;
   fuchsia::sys::LaunchInfo launch_info;
   launch_info.url = "fuchsia-pkg://fuchsia.com/cobalt#meta/cobalt.cmx";
   launch_info.directory_request = directory.NewRequest().TakeChannel();
+  launch_info.arguments.emplace();
   {
     std::ostringstream stream;
     stream << "--schedule_interval_seconds=" << schedule_interval_seconds;
-    launch_info.arguments.push_back(stream.str());
+    launch_info.arguments->push_back(stream.str());
   }
 
   if (initial_interval_seconds > 0) {
     std::ostringstream stream;
     stream << "--initial_interval_seconds=" << initial_interval_seconds;
-    launch_info.arguments.push_back(stream.str());
+    launch_info.arguments->push_back(stream.str());
   }
 
   {
     std::ostringstream stream;
     stream << "--min_interval_seconds=" << min_interval_seconds;
-    launch_info.arguments.push_back(stream.str());
+    launch_info.arguments->push_back(stream.str());
   }
 
   {
     std::ostringstream stream;
-    stream << "--event_aggregator_backfill_days="
-           << event_aggregator_backfill_days;
-    launch_info.arguments.push_back(stream.str());
+    stream << "--event_aggregator_backfill_days=" << event_aggregator_backfill_days;
+    launch_info.arguments->push_back(stream.str());
   }
 
   {
     std::ostringstream stream;
     stream << "--start_event_aggregator_worker="
            << (start_event_aggregator_worker ? "true" : "false");
-    launch_info.arguments.push_back(stream.str());
+    launch_info.arguments->push_back(stream.str());
   }
 
   {
     std::ostringstream stream;
     stream << "--verbose=" << fxl::GetVlogVerbosity();
-    launch_info.arguments.push_back(stream.str());
+    launch_info.arguments->push_back(stream.str());
   }
 
   fuchsia::sys::LauncherPtr launcher;
   context_->svc()->Connect(launcher.NewRequest());
   launcher->CreateComponent(std::move(launch_info), controller_.NewRequest());
   controller_.set_error_handler([](zx_status_t status) {
-    FX_LOGS(ERROR)
-        << "Connection error from CobaltTestApp to Cobalt FIDL Service.";
+    FX_LOGS(ERROR) << "Connection error from CobaltTestApp to Cobalt FIDL Service.";
   });
 
   sys::ServiceDirectory services(std::move(directory));
@@ -183,18 +172,16 @@ void CobaltTestApp::Connect(uint32_t schedule_interval_seconds,
   fuchsia::cobalt::Status status = fuchsia::cobalt::Status::INTERNAL_ERROR;
 
   std::string project_name =
-      (test_for_prober_ ? cobalt_prober_registry::kProjectName
-                        : cobalt_registry::kProjectName);
+      (test_for_prober_ ? cobalt_prober_registry::kProjectName : cobalt_registry::kProjectName);
   FX_LOGS(INFO) << "Test app is logging for the " << project_name << " project";
-  logger_factory->CreateLoggerFromProjectName(
-      project_name, fuchsia::cobalt::ReleaseStage::DEBUG,
-      logger_.logger_.NewRequest(), &status);
+  logger_factory->CreateLoggerFromProjectName(project_name, fuchsia::cobalt::ReleaseStage::DEBUG,
+                                              logger_.logger_.NewRequest(), &status);
   FXL_CHECK(status == fuchsia::cobalt::Status::OK)
       << "CreateLogger() => " << StatusToString(status);
 
-  logger_factory->CreateLoggerSimpleFromProjectName(
-      project_name, fuchsia::cobalt::ReleaseStage::DEBUG,
-      logger_.logger_simple_.NewRequest(), &status);
+  logger_factory->CreateLoggerSimpleFromProjectName(project_name,
+                                                    fuchsia::cobalt::ReleaseStage::DEBUG,
+                                                    logger_.logger_simple_.NewRequest(), &status);
   FXL_CHECK(status == fuchsia::cobalt::Status::OK)
       << "CreateLoggerSimple() => " << StatusToString(status);
 

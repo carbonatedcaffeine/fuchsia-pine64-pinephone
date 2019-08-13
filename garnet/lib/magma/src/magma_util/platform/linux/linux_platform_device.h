@@ -2,54 +2,68 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_PLATFORM_DEVICE_H
-#define ZIRCON_PLATFORM_DEVICE_H
+#ifndef LINUX_PLATFORM_DEVICE_H
+#define LINUX_PLATFORM_DEVICE_H
 
-#include "platform_device.h"
-
-#include "linux_platform_mmio.h"
 #include <magma_util/macros.h>
+
+#include "linux_platform_handle.h"
+#include "linux_platform_mmio.h"
+#include "platform_device.h"
 
 namespace magma {
 
 class LinuxPlatformDevice : public PlatformDevice {
-public:
-    LinuxPlatformDevice(int file_descriptor) : fd_(file_descriptor) {}
+ public:
+  LinuxPlatformDevice(LinuxPlatformHandle handle) : handle_(handle.release()) {}
 
-    void* GetDeviceHandle() override { return reinterpret_cast<void*>(static_cast<intptr_t>(fd_)); }
+  // Don't close the handle because we don't own it.
+  ~LinuxPlatformDevice() { handle_.release(); }
 
-    std::unique_ptr<PlatformHandle> GetSchedulerProfile(Priority priority,
-                                                        const char* name) const override
-    {
-        return DRETP(nullptr, "GetSchedulerProfile not implemented");
-    }
+  int fd() { return handle_.get(); }
 
-    std::unique_ptr<PlatformHandle> GetBusTransactionInitiator() const override { return nullptr; }
+  void* GetDeviceHandle() override { return reinterpret_cast<void*>(fd()); }
 
-    Status LoadFirmware(const char* filename, std::unique_ptr<PlatformBuffer>* firmware_out,
-                        uint64_t* size_out) const override
-    {
-        return DRET_MSG(MAGMA_STATUS_UNIMPLEMENTED, "LoadFirmware not implemented");
-    }
+  std::unique_ptr<PlatformHandle> GetSchedulerProfile(Priority priority,
+                                                      const char* name) const override {
+    return DRETP(nullptr, "GetSchedulerProfile not implemented");
+  }
 
-    std::unique_ptr<PlatformMmio> CpuMapMmio(unsigned int index,
-                                             PlatformMmio::CachePolicy cache_policy) override;
+  std::unique_ptr<PlatformHandle> GetBusTransactionInitiator() const override;
 
-    std::unique_ptr<PlatformInterrupt> RegisterInterrupt(unsigned int index) override
-    {
-        return DRETP(nullptr, "RegisterInterrupt not implemented");
-    }
+  std::unique_ptr<PlatformHandle> GetIommuConnector() const override;
 
-private:
-    enum class MagmaGetParamKey {
-        kRegisterSize = 10,
-    };
+  Status LoadFirmware(const char* filename, std::unique_ptr<PlatformBuffer>* firmware_out,
+                      uint64_t* size_out) const override;
 
-    bool MagmaGetParam(MagmaGetParamKey key, uint64_t* value_out);
+  std::unique_ptr<PlatformMmio> CpuMapMmio(unsigned int index,
+                                           PlatformMmio::CachePolicy cache_policy) override;
 
-    int fd_;
+  std::unique_ptr<PlatformInterrupt> RegisterInterrupt(unsigned int index) override {
+    return DRETP(nullptr, "RegisterInterrupt not implemented");
+  }
+
+  static bool UdmabufCreate(int udmabuf_fd, int mem_fd, uint64_t page_start_index,
+                            uint64_t page_count, int* dma_buf_fd_out);
+
+  enum class MagmaGetParamKey {
+    kRegisterSize = 10,
+    kChipId = 11,
+  };
+
+  static bool MagmaGetParam(int device_fd, MagmaGetParamKey key, uint64_t* value_out);
+
+  static bool MagmaMapPageRangeBus(int device_fd, int dma_buf_fd, uint64_t start_page_index,
+                                   uint64_t page_count, uint64_t* token_out,
+                                   uint64_t* bus_addr_out);
+
+  // Maps if |map| is true; unmaps otherwise
+  static bool MagmaMapGpu(int device_fd, bool map, uint64_t gpu_addr, uint32_t token);
+
+ private:
+  LinuxPlatformHandle handle_;
 };
 
-} // namespace magma
+}  // namespace magma
 
-#endif // ZIRCON_PLATFORM_DEVICE_H
+#endif  // ZIRCON_PLATFORM_DEVICE_H

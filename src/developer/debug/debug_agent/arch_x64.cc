@@ -213,7 +213,7 @@ zx_status_t ArchProvider::WriteRegisters(const debug_ipc::RegisterCategory& cat,
       if (res != ZX_OK)
         return res;
 
-      // Ovewrite the values.
+      // Overwrite the values.
       res = WriteGeneralRegisters(cat.registers, &regs);
       if (res != ZX_OK)
         return res;
@@ -267,8 +267,8 @@ debug_ipc::NotifyException::Type DetermineHWException(
       return debug_ipc::NotifyException::Type::kWatchpoint;
   }
 
-  FXL_NOTREACHED();
-  return debug_ipc::NotifyException::Type::kNone;
+  // This is a HW breakpoint not set by us.
+  return debug_ipc::NotifyException::Type::kHardware;
 }
 
 }  // namespace

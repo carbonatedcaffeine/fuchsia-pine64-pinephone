@@ -16,7 +16,7 @@ class TriggerTest : public modular::testing::TestHarnessFixture {
   void SetUp() override {
     // Intercept |fake_module_|
     fake_module_ = std::make_unique<modular::testing::FakeModule>();
-    fake_module_url_ = modular::testing::GenerateFakeUrl();
+    fake_module_url_ = modular_testing::TestHarnessBuilder::GenerateFakeUrl();
     builder_.InterceptComponent(
         fake_module_->GetOnCreateHandler(),
         {.url = fake_module_url_,
@@ -24,7 +24,7 @@ class TriggerTest : public modular::testing::TestHarnessFixture {
 
     // Intercept |fake_agent_|
     fake_agent_ = std::make_unique<modular::testing::FakeAgent>();
-    fake_agent_url_ = modular::testing::GenerateFakeUrl();
+    fake_agent_url_ = modular_testing::TestHarnessBuilder::GenerateFakeUrl();
     builder_.InterceptComponent(
         fake_agent_->GetOnCreateHandler(),
         {.url = fake_agent_url_,
@@ -44,7 +44,7 @@ class TriggerTest : public modular::testing::TestHarnessFixture {
     RunLoopUntil([&] { return fake_agent_->is_running(); });
   }
 
-  modular::testing::TestHarnessBuilder builder_;
+  modular_testing::TestHarnessBuilder builder_;
   std::unique_ptr<modular::testing::FakeModule> fake_module_;
   std::unique_ptr<modular::testing::FakeAgent> fake_agent_;
   std::string fake_module_url_;
@@ -62,7 +62,6 @@ TEST_F(TriggerTest, AgentWakesUpOnNewMessage) {
   fuchsia::modular::TaskInfo task_info;
   task_info.task_id = "message_queue_message";
   task_info.trigger_condition.set_message_on_queue("Trigger Queue");
-  task_info.persistent = true;
 
   bool schedule_task_complete = false;
   fake_agent_->agent_context()->ScheduleTaskWithCompletion(
@@ -110,13 +109,12 @@ TEST_F(TriggerTest, AgentWakesUpOnExplicitMessageQueueDelete) {
   bool schedule_task_complete = false;
   std::string explicit_msg_queue_token;
   explicit_msg_queue->GetToken([&](fidl::StringPtr token) {
-    explicit_msg_queue_token = token;
+    explicit_msg_queue_token = token.value_or("");
 
     // Schedule a task to process a message queue deletion.
     fuchsia::modular::TaskInfo task_info;
-    task_info.task_id = token;
-    task_info.trigger_condition.set_queue_deleted(token);
-    task_info.persistent = true;
+    task_info.task_id = token.value_or("");
+    task_info.trigger_condition.set_queue_deleted(token.value_or(""));
     fake_agent_->agent_context()->ScheduleTaskWithCompletion(
         std::move(task_info), [&](bool finished) { schedule_task_complete = finished; });
   });
@@ -165,7 +163,6 @@ TEST_F(TriggerTest, AgentWakesUpOnImplicitMessageQueueDelete) {
     fuchsia::modular::TaskInfo task_info;
     task_info.task_id = token;
     task_info.trigger_condition.set_queue_deleted(token);
-    task_info.persistent = true;
     fake_agent_->agent_context()->ScheduleTaskWithCompletion(
         std::move(task_info), [&](bool finished) { schedule_task_complete = finished; });
   });

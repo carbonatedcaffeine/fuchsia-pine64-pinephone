@@ -18,7 +18,7 @@ class SetLinkValueCommandRunnerTest : public testing::TestWithSessionStorage {
     testing::TestWithSessionStorage::SetUp();
     session_storage_ = MakeSessionStorage("page");
     runner_ = MakeRunner();
-    story_id_ = CreateStory(session_storage_.get());
+    story_id_ = CreateStory(session_storage_.get()).value_or("");
     story_storage_ = GetStoryStorage(session_storage_.get(), story_id_);
   }
 
@@ -27,14 +27,13 @@ class SetLinkValueCommandRunnerTest : public testing::TestWithSessionStorage {
     return std::make_unique<SetLinkValueCommandRunner>();
   }
 
-  fuchsia::modular::StoryCommand MakeSetLinkValueCommand(
-      const std::string& path_name, const std::string& value) {
+  fuchsia::modular::StoryCommand MakeSetLinkValueCommand(const std::string& path_name,
+                                                         const std::string& value) {
     fsl::SizedVmo vmo;
     fsl::VmoFromString(value, &vmo);
     fuchsia::modular::SetLinkValue set_link_value;
     set_link_value.path = MakeLinkPath(path_name);
-    set_link_value.value =
-        std::make_unique<fuchsia::mem::Buffer>(std::move(vmo).ToTransport());
+    set_link_value.value = std::make_unique<fuchsia::mem::Buffer>(std::move(vmo).ToTransport());
     fuchsia::modular::StoryCommand command;
     command.set_set_link_value(std::move(set_link_value));
     return command;
@@ -55,8 +54,7 @@ TEST_F(SetLinkValueCommandRunnerTest, Execute) {
   auto command = MakeSetLinkValueCommand("link", "10");
   runner_->Execute(story_id_, story_storage_.get(), std::move(command),
                    [&](fuchsia::modular::ExecuteResult result) {
-                     EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK,
-                               result.status);
+                     EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK, result.status);
                      done = true;
                    });
   RunLoopUntil([&] { return done; });
@@ -69,8 +67,7 @@ TEST_F(SetLinkValueCommandRunnerTest, Execute) {
   auto command2 = MakeSetLinkValueCommand("link", "20");
   runner_->Execute(story_id_, story_storage_.get(), std::move(command2),
                    [&](fuchsia::modular::ExecuteResult result) {
-                     EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK,
-                               result.status);
+                     EXPECT_EQ(fuchsia::modular::ExecuteStatus::OK, result.status);
                      done = true;
                    });
   RunLoopUntil([&] { return done; });

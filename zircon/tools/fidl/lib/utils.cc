@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <fidl/utils.h>
-
 #include <regex>
+
+#include <fidl/utils.h>
 
 namespace fidl {
 namespace utils {
@@ -199,8 +199,7 @@ bool OnlyWhitespaceChanged(const std::string& unformatted_input,
   formatted.erase(formatted_end, formatted.end());
 
   std::string unformatted(unformatted_input);
-  auto unformatted_end =
-      std::remove_if(unformatted.begin(), unformatted.end(), isspace);
+  auto unformatted_end = std::remove_if(unformatted.begin(), unformatted.end(), isspace);
   unformatted.erase(unformatted_end, unformatted.end());
 
   return formatted == unformatted;

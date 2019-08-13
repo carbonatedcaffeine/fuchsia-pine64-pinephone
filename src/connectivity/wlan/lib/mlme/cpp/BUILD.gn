@@ -97,7 +97,6 @@ source_set("mlme") {
 
   public_deps = [
     "//garnet/lib/wlan/protocol",
-    "//garnet/public/lib/svc/cpp",
     "//garnet/public/lib/timekeeper",
     "//garnet/public/lib/timekeeper:system",
     "//sdk/fidl/fuchsia.wlan.mlme",
@@ -106,8 +105,10 @@ source_set("mlme") {
     "//src/connectivity/wlan/lib/mlme/rust/c-binding:wlan-mlme-c",
     "//zircon/public/banjo/ddk.hw.wlan.ieee80211",
     "//zircon/public/banjo/ddk.hw.wlan.wlaninfo",
+    "//zircon/public/lib/operation",
     "//zircon/public/lib/bitmap",
     "//zircon/public/lib/fbl",
+    "//zircon/public/lib/fdio",
     "//zircon/public/lib/zx",
   ]
 

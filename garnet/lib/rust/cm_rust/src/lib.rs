@@ -7,7 +7,7 @@ use {
     failure::Fail,
     fidl_fuchsia_data as fdata, fidl_fuchsia_sys2 as fsys,
     std::collections::HashMap,
-    std::convert::{From, TryFrom, TryInto},
+    std::convert::{TryFrom, TryInto},
     std::fmt,
 };
 
@@ -215,78 +215,31 @@ impl Clone for ComponentDecl {
 }
 
 impl ComponentDecl {
-    /// Returns the `ExposeDecl` that exposes `capability`, if it exists.
-    pub fn find_expose_source<'a>(&'a self, capability: &Capability) -> Option<&'a ExposeDecl> {
-        self.exposes.iter().find(|&e| match (capability, e) {
-            (Capability::Service(p), ExposeDecl::Service(d)) => d.target_path == *p,
-            (Capability::Directory(p), ExposeDecl::Directory(d)) => d.target_path == *p,
-            _ => false,
-        })
-    }
-
-    /// Returns the `OfferDecl` that offers `capability` to `child_name`, if it exists.
-    // TODO: Expose the `moniker` module in its own crate. Then this function can take a
-    // `ChildMoniker`.
-    pub fn find_offer_source<'a>(
-        &'a self,
-        capability: &Capability,
-        child_name: &str,
-        collection: Option<&str>,
-    ) -> Option<&'a OfferDecl> {
-        self.offers.iter().find(|&offer| match (capability, offer) {
-            (Capability::Service(p), OfferDecl::Service(d)) => {
-                Self::is_capability_match(child_name, collection, p, &d.target, &d.target_path)
-            }
-            (Capability::Directory(p), OfferDecl::Directory(d)) => {
-                Self::is_capability_match(child_name, collection, p, &d.target, &d.target_path)
-            }
-            (Capability::Storage(type_), OfferDecl::Storage(s)) => {
-                // The types must match
-                &s.type_() == type_ &&
-                    // and the child/collection names must match
-                    match (s.target(),collection) {
-                        (OfferTarget::Child(target_child_name), None) =>
-                            target_child_name == child_name,
-                        (OfferTarget::Collection(target_collection_name), Some(collection)) =>
-                            target_collection_name == collection,
-                        _ => false
-                    }
-            }
-            _ => false,
-        })
-    }
-
+    /// Returns the `StorageDecl` corresponding to `storage_name`.
     pub fn find_storage_source<'a>(&'a self, storage_name: &str) -> Option<&'a StorageDecl> {
         self.storage.iter().find(|s| &s.name == storage_name)
     }
 
-    fn is_capability_match(
-        child_name: &str,
-        collection: Option<&str>,
-        path: &CapabilityPath,
-        target: &OfferTarget,
-        target_path: &CapabilityPath,
-    ) -> bool {
-        match target {
-            OfferTarget::Child(target_child_name) => match collection {
-                Some(_) => false,
-                None => target_path == path && target_child_name == child_name,
-            },
-            OfferTarget::Collection(target_collection_name) => match collection {
-                Some(collection) => target_path == path && target_collection_name == collection,
-                None => false,
-            },
-        }
+    /// Returns the `CollectionDecl` corresponding to `collection_name`.
+    pub fn find_collection<'a>(&'a self, collection_name: &str) -> Option<&'a CollectionDecl> {
+        self.collections.iter().find(|c| c.name == collection_name)
     }
 }
 
 fidl_into_enum!(UseDecl, UseDecl, fsys::UseDecl, fsys::UseDecl,
                 {
                     Service(UseServiceDecl),
+                    LegacyService(UseLegacyServiceDecl),
                     Directory(UseDirectoryDecl),
                     Storage(UseStorageDecl),
                 });
 fidl_into_struct!(UseServiceDecl, UseServiceDecl, fsys::UseServiceDecl, fsys::UseServiceDecl,
+                  {
+                      source: UseSource,
+                      source_path: CapabilityPath,
+                      target_path: CapabilityPath,
+                  });
+fidl_into_struct!(UseLegacyServiceDecl, UseLegacyServiceDecl, fsys::UseLegacyServiceDecl, fsys::UseLegacyServiceDecl,
                   {
                       source: UseSource,
                       source_path: CapabilityPath,
@@ -303,10 +256,18 @@ fidl_into_struct!(UseDirectoryDecl, UseDirectoryDecl, fsys::UseDirectoryDecl,
 fidl_into_enum!(ExposeDecl, ExposeDecl, fsys::ExposeDecl, fsys::ExposeDecl,
                 {
                     Service(ExposeServiceDecl),
+                    LegacyService(ExposeLegacyServiceDecl),
                     Directory(ExposeDirectoryDecl),
                 });
 fidl_into_struct!(ExposeServiceDecl, ExposeServiceDecl, fsys::ExposeServiceDecl,
                   fsys::ExposeServiceDecl,
+                  {
+                      source: ExposeSource,
+                      source_path: CapabilityPath,
+                      target_path: CapabilityPath,
+                  });
+fidl_into_struct!(ExposeLegacyServiceDecl, ExposeLegacyServiceDecl, fsys::ExposeLegacyServiceDecl,
+                  fsys::ExposeLegacyServiceDecl,
                   {
                       source: ExposeSource,
                       source_path: CapabilityPath,
@@ -325,16 +286,25 @@ fidl_into_struct!(StorageDecl, StorageDecl, fsys::StorageDecl,
                   {
                       name: String,
                       source_path: CapabilityPath,
-                      source: OfferDirectorySource,
+                      source: StorageDirectorySource,
                   });
 fidl_into_enum!(OfferDecl, OfferDecl, fsys::OfferDecl, fsys::OfferDecl,
                 {
                     Service(OfferServiceDecl),
+                    LegacyService(OfferLegacyServiceDecl),
                     Directory(OfferDirectoryDecl),
                     Storage(OfferStorageDecl),
                 });
 fidl_into_struct!(OfferServiceDecl, OfferServiceDecl, fsys::OfferServiceDecl,
                   fsys::OfferServiceDecl,
+                  {
+                      source: OfferServiceSource,
+                      source_path: CapabilityPath,
+                      target: OfferTarget,
+                      target_path: CapabilityPath,
+                  });
+fidl_into_struct!(OfferLegacyServiceDecl, OfferLegacyServiceDecl, fsys::OfferLegacyServiceDecl,
+                  fsys::OfferLegacyServiceDecl,
                   {
                       source: OfferServiceSource,
                       source_path: CapabilityPath,
@@ -424,6 +394,71 @@ impl TryFrom<&str> for CapabilityPath {
     }
 }
 
+// Describes the type of framework capability and its source path.
+pub enum FrameworkCapabilityDecl {
+    Service(CapabilityPath),
+    LegacyService(CapabilityPath),
+    Directory(CapabilityPath),
+}
+
+impl FrameworkCapabilityDecl {
+    pub fn path(&self) -> &CapabilityPath {
+        match self {
+            FrameworkCapabilityDecl::Service(source_path) => &source_path,
+            FrameworkCapabilityDecl::LegacyService(source_path) => &source_path,
+            FrameworkCapabilityDecl::Directory(source_path) => &source_path,
+        }
+    }
+}
+
+impl TryFrom<&UseDecl> for FrameworkCapabilityDecl {
+    type Error = Error;
+    fn try_from(decl: &UseDecl) -> Result<Self, Self::Error> {
+        match decl {
+            UseDecl::Service(s) if s.source == UseSource::Framework => {
+                Ok(FrameworkCapabilityDecl::Service(s.source_path.clone()))
+            }
+            UseDecl::LegacyService(s) if s.source == UseSource::Framework => {
+                Ok(FrameworkCapabilityDecl::LegacyService(s.source_path.clone()))
+            }
+            UseDecl::Directory(d) if d.source == UseSource::Framework => {
+                Ok(FrameworkCapabilityDecl::Directory(d.source_path.clone()))
+            }
+            _ => {
+                return Err(Error::InvalidFrameworkCapability {});
+            }
+        }
+    }
+}
+
+impl TryFrom<&OfferDecl> for FrameworkCapabilityDecl {
+    type Error = Error;
+    fn try_from(decl: &OfferDecl) -> Result<Self, Self::Error> {
+        match decl {
+            OfferDecl::Directory(d) if d.source == OfferDirectorySource::Framework => {
+                Ok(FrameworkCapabilityDecl::Directory(d.source_path.clone()))
+            }
+            _ => {
+                return Err(Error::InvalidFrameworkCapability {});
+            }
+        }
+    }
+}
+
+impl TryFrom<&ExposeDecl> for FrameworkCapabilityDecl {
+    type Error = Error;
+    fn try_from(decl: &ExposeDecl) -> Result<Self, Self::Error> {
+        match decl {
+            ExposeDecl::Directory(d) if d.source == ExposeSource::Framework => {
+                Ok(FrameworkCapabilityDecl::Directory(d.source_path.clone()))
+            }
+            _ => {
+                return Err(Error::InvalidFrameworkCapability {});
+            }
+        }
+    }
+}
+
 impl fmt::Display for CapabilityPath {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if &self.dirname == "/" {
@@ -489,117 +524,6 @@ fn from_fidl_dict(dict: fdata::Dictionary) -> HashMap<String, Value> {
     dict.entries.into_iter().map(|e| (e.key, e.value.fidl_into_native())).collect()
 }
 
-/// Generic container for any capability type. Doesn't map onto any fidl declaration, but useful as
-/// an intermediate representation.
-// TODO: `Capability` tries to merge representations for `use`, `offer`, and `expose`, and as such
-// obscures the differences between them and loses information. Consider removing this type in
-// favor of using `UseDecl`, `ExposeDecl`, and `OfferDecl` directly.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Capability {
-    Service(CapabilityPath),
-    Directory(CapabilityPath),
-    Storage(fsys::StorageType),
-}
-
-impl Capability {
-    pub fn path(&self) -> Option<&CapabilityPath> {
-        match self {
-            Capability::Service(s) => Some(s),
-            Capability::Directory(d) => Some(d),
-            Capability::Storage(_) => None,
-        }
-    }
-}
-
-impl fmt::Display for Capability {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Capability::Service(s) => write!(f, "service at {}", s),
-            Capability::Directory(d) => write!(f, "directory at {}", d),
-            Capability::Storage(fsys::StorageType::Data) => write!(f, "data storage"),
-            Capability::Storage(fsys::StorageType::Cache) => write!(f, "cache storage"),
-            Capability::Storage(fsys::StorageType::Meta) => write!(f, "meta storage"),
-        }
-    }
-}
-
-impl From<UseDecl> for Capability {
-    fn from(d: UseDecl) -> Self {
-        match d {
-            UseDecl::Service(d) => d.into(),
-            UseDecl::Directory(d) => d.into(),
-            UseDecl::Storage(s) => s.into(),
-        }
-    }
-}
-
-impl From<UseServiceDecl> for Capability {
-    fn from(d: UseServiceDecl) -> Self {
-        Capability::Service(d.source_path)
-    }
-}
-
-impl From<UseDirectoryDecl> for Capability {
-    fn from(d: UseDirectoryDecl) -> Self {
-        Capability::Directory(d.source_path)
-    }
-}
-
-impl From<UseStorageDecl> for Capability {
-    fn from(d: UseStorageDecl) -> Self {
-        Capability::Storage(d.type_())
-    }
-}
-
-impl From<ExposeDecl> for Capability {
-    fn from(d: ExposeDecl) -> Self {
-        match d {
-            ExposeDecl::Service(d) => d.into(),
-            ExposeDecl::Directory(d) => d.into(),
-        }
-    }
-}
-
-impl From<ExposeServiceDecl> for Capability {
-    fn from(d: ExposeServiceDecl) -> Self {
-        Capability::Service(d.source_path)
-    }
-}
-
-impl From<ExposeDirectoryDecl> for Capability {
-    fn from(d: ExposeDirectoryDecl) -> Self {
-        Capability::Directory(d.source_path)
-    }
-}
-
-impl From<OfferDecl> for Capability {
-    fn from(d: OfferDecl) -> Self {
-        match d {
-            OfferDecl::Service(d) => d.into(),
-            OfferDecl::Directory(d) => d.into(),
-            OfferDecl::Storage(d) => d.into(),
-        }
-    }
-}
-
-impl From<OfferServiceDecl> for Capability {
-    fn from(d: OfferServiceDecl) -> Self {
-        Capability::Service(d.source_path)
-    }
-}
-
-impl From<OfferDirectoryDecl> for Capability {
-    fn from(d: OfferDirectoryDecl) -> Self {
-        Capability::Directory(d.source_path)
-    }
-}
-
-impl From<OfferStorageDecl> for Capability {
-    fn from(d: OfferStorageDecl) -> Self {
-        Capability::Storage(d.type_())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum UseStorageDecl {
     Data(CapabilityPath),
@@ -640,11 +564,19 @@ impl NativeIntoFidl<fsys::UseStorageDecl> for UseStorageDecl {
 }
 
 impl UseStorageDecl {
-    fn type_(&self) -> fsys::StorageType {
+    pub fn type_(&self) -> fsys::StorageType {
         match self {
             UseStorageDecl::Data(_) => fsys::StorageType::Data,
             UseStorageDecl::Cache(_) => fsys::StorageType::Cache,
             UseStorageDecl::Meta => fsys::StorageType::Meta,
+        }
+    }
+
+    pub fn path<'a>(&'a self) -> Option<&'a CapabilityPath> {
+        match self {
+            UseStorageDecl::Data(p) => Some(p),
+            UseStorageDecl::Cache(p) => Some(p),
+            UseStorageDecl::Meta => None,
         }
     }
 }
@@ -752,13 +684,15 @@ impl NativeIntoFidl<Option<fsys::Ref>> for UseSource {
 pub enum ExposeSource {
     Self_,
     Child(String),
+    Framework,
 }
 
 impl FidlIntoNative<ExposeSource> for Option<fsys::Ref> {
     fn fidl_into_native(self) -> ExposeSource {
         match self.unwrap() {
             fsys::Ref::Self_(_) => ExposeSource::Self_,
-            fsys::Ref::Child(c) => ExposeSource::Child(c.name.unwrap()),
+            fsys::Ref::Child(c) => ExposeSource::Child(c.name),
+            fsys::Ref::Framework(_) => ExposeSource::Framework,
             _ => panic!("invalid ExposeSource variant"),
         }
     }
@@ -769,8 +703,9 @@ impl NativeIntoFidl<Option<fsys::Ref>> for ExposeSource {
         Some(match self {
             ExposeSource::Self_ => fsys::Ref::Self_(fsys::SelfRef {}),
             ExposeSource::Child(child_name) => {
-                fsys::Ref::Child(fsys::ChildRef { name: Some(child_name), collection: None })
+                fsys::Ref::Child(fsys::ChildRef { name: child_name, collection: None })
             }
+            ExposeSource::Framework => fsys::Ref::Framework(fsys::FrameworkRef {}),
         })
     }
 }
@@ -787,7 +722,7 @@ impl FidlIntoNative<OfferServiceSource> for Option<fsys::Ref> {
         match self.unwrap() {
             fsys::Ref::Realm(_) => OfferServiceSource::Realm,
             fsys::Ref::Self_(_) => OfferServiceSource::Self_,
-            fsys::Ref::Child(c) => OfferServiceSource::Child(c.name.unwrap()),
+            fsys::Ref::Child(c) => OfferServiceSource::Child(c.name),
             _ => panic!("invalid OfferServiceSource variant"),
         }
     }
@@ -799,7 +734,37 @@ impl NativeIntoFidl<Option<fsys::Ref>> for OfferServiceSource {
             OfferServiceSource::Realm => fsys::Ref::Realm(fsys::RealmRef {}),
             OfferServiceSource::Self_ => fsys::Ref::Self_(fsys::SelfRef {}),
             OfferServiceSource::Child(child_name) => {
-                fsys::Ref::Child(fsys::ChildRef { name: Some(child_name), collection: None })
+                fsys::Ref::Child(fsys::ChildRef { name: child_name, collection: None })
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StorageDirectorySource {
+    Realm,
+    Self_,
+    Child(String),
+}
+
+impl FidlIntoNative<StorageDirectorySource> for Option<fsys::Ref> {
+    fn fidl_into_native(self) -> StorageDirectorySource {
+        match self.unwrap() {
+            fsys::Ref::Realm(_) => StorageDirectorySource::Realm,
+            fsys::Ref::Self_(_) => StorageDirectorySource::Self_,
+            fsys::Ref::Child(c) => StorageDirectorySource::Child(c.name),
+            _ => panic!("invalid OfferDirectorySource variant"),
+        }
+    }
+}
+
+impl NativeIntoFidl<Option<fsys::Ref>> for StorageDirectorySource {
+    fn native_into_fidl(self) -> Option<fsys::Ref> {
+        Some(match self {
+            StorageDirectorySource::Realm => fsys::Ref::Realm(fsys::RealmRef {}),
+            StorageDirectorySource::Self_ => fsys::Ref::Self_(fsys::SelfRef {}),
+            StorageDirectorySource::Child(child_name) => {
+                fsys::Ref::Child(fsys::ChildRef { name: child_name, collection: None })
             }
         })
     }
@@ -809,6 +774,7 @@ impl NativeIntoFidl<Option<fsys::Ref>> for OfferServiceSource {
 pub enum OfferDirectorySource {
     Realm,
     Self_,
+    Framework,
     Child(String),
 }
 
@@ -817,7 +783,8 @@ impl FidlIntoNative<OfferDirectorySource> for Option<fsys::Ref> {
         match self.unwrap() {
             fsys::Ref::Realm(_) => OfferDirectorySource::Realm,
             fsys::Ref::Self_(_) => OfferDirectorySource::Self_,
-            fsys::Ref::Child(c) => OfferDirectorySource::Child(c.name.unwrap()),
+            fsys::Ref::Framework(_) => OfferDirectorySource::Framework,
+            fsys::Ref::Child(c) => OfferDirectorySource::Child(c.name),
             _ => panic!("invalid OfferDirectorySource variant"),
         }
     }
@@ -828,8 +795,9 @@ impl NativeIntoFidl<Option<fsys::Ref>> for OfferDirectorySource {
         Some(match self {
             OfferDirectorySource::Realm => fsys::Ref::Realm(fsys::RealmRef {}),
             OfferDirectorySource::Self_ => fsys::Ref::Self_(fsys::SelfRef {}),
+            OfferDirectorySource::Framework => fsys::Ref::Framework(fsys::FrameworkRef {}),
             OfferDirectorySource::Child(child_name) => {
-                fsys::Ref::Child(fsys::ChildRef { name: Some(child_name), collection: None })
+                fsys::Ref::Child(fsys::ChildRef { name: child_name, collection: None })
             }
         })
     }
@@ -845,7 +813,7 @@ impl FidlIntoNative<OfferStorageSource> for Option<fsys::Ref> {
     fn fidl_into_native(self) -> OfferStorageSource {
         match self.unwrap() {
             fsys::Ref::Realm(_) => OfferStorageSource::Realm,
-            fsys::Ref::Storage(c) => OfferStorageSource::Storage(c.name.unwrap()),
+            fsys::Ref::Storage(c) => OfferStorageSource::Storage(c.name),
             _ => panic!("invalid OfferStorageSource variant"),
         }
     }
@@ -855,9 +823,7 @@ impl NativeIntoFidl<Option<fsys::Ref>> for OfferStorageSource {
     fn native_into_fidl(self) -> Option<fsys::Ref> {
         Some(match self {
             OfferStorageSource::Realm => fsys::Ref::Realm(fsys::RealmRef {}),
-            OfferStorageSource::Storage(name) => {
-                fsys::Ref::Storage(fsys::StorageRef { name: Some(name) })
-            }
+            OfferStorageSource::Storage(name) => fsys::Ref::Storage(fsys::StorageRef { name }),
         })
     }
 }
@@ -871,8 +837,8 @@ pub enum OfferTarget {
 impl FidlIntoNative<OfferTarget> for fsys::Ref {
     fn fidl_into_native(self) -> OfferTarget {
         match self {
-            fsys::Ref::Child(c) => OfferTarget::Child(c.name.unwrap()),
-            fsys::Ref::Collection(c) => OfferTarget::Collection(c.name.unwrap()),
+            fsys::Ref::Child(c) => OfferTarget::Child(c.name),
+            fsys::Ref::Collection(c) => OfferTarget::Collection(c.name),
             _ => panic!("invalid OfferTarget variant"),
         }
     }
@@ -882,10 +848,10 @@ impl NativeIntoFidl<fsys::Ref> for OfferTarget {
     fn native_into_fidl(self) -> fsys::Ref {
         match self {
             OfferTarget::Child(child_name) => {
-                fsys::Ref::Child(fsys::ChildRef { name: Some(child_name), collection: None })
+                fsys::Ref::Child(fsys::ChildRef { name: child_name, collection: None })
             }
             OfferTarget::Collection(collection_name) => {
-                fsys::Ref::Collection(fsys::CollectionRef { name: Some(collection_name) })
+                fsys::Ref::Collection(fsys::CollectionRef { name: collection_name })
             }
         }
     }
@@ -933,37 +899,13 @@ pub enum Error {
     },
     #[fail(display = "Invalid capability path: {}", raw)]
     InvalidCapabilityPath { raw: String },
+    #[fail(display = "Invalid framework capability.")]
+    InvalidFrameworkCapability {},
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    macro_rules! test_from {
-        (
-            $(
-                $test_name:ident => {
-                    input = $input:expr,
-                    result = $result:expr,
-                },
-            )+
-        ) => {
-            $(
-                #[test]
-                fn $test_name() {
-                    test_from_helper($input, $result);
-                }
-            )+
-        }
-    }
-
-    fn test_from_helper<T, U>(input: Vec<T>, result: Vec<U>)
-    where
-        U: From<T> + std::cmp::PartialEq + std::fmt::Debug,
-    {
-        let res: Vec<U> = input.into_iter().map(|e| e.into()).collect();
-        assert_eq!(res, result);
-    }
 
     macro_rules! test_try_from_decl {
         (
@@ -1109,6 +1051,11 @@ mod tests {
                        source_path: Some("/svc/netstack".to_string()),
                        target_path: Some("/svc/mynetstack".to_string()),
                    }),
+                   fsys::UseDecl::LegacyService(fsys::UseLegacyServiceDecl {
+                       source: Some(fsys::Ref::Realm(fsys::RealmRef {})),
+                       source_path: Some("/svc/legacy_netstack".to_string()),
+                       target_path: Some("/svc/legacy_mynetstack".to_string()),
+                   }),
                    fsys::UseDecl::Directory(fsys::UseDirectoryDecl {
                        source: Some(fsys::Ref::Framework(fsys::FrameworkRef {})),
                        source_path: Some("/data/dir".to_string()),
@@ -1126,15 +1073,23 @@ mod tests {
                exposes: Some(vec![
                    fsys::ExposeDecl::Service(fsys::ExposeServiceDecl {
                        source: Some(fsys::Ref::Child(fsys::ChildRef {
-                           name: Some("netstack".to_string()),
+                           name: "netstack".to_string(),
                            collection: None,
                        })),
                        source_path: Some("/svc/netstack".to_string()),
                        target_path: Some("/svc/mynetstack".to_string()),
                    }),
+                   fsys::ExposeDecl::LegacyService(fsys::ExposeLegacyServiceDecl {
+                       source: Some(fsys::Ref::Child(fsys::ChildRef {
+                           name: "netstack".to_string(),
+                           collection: None,
+                       })),
+                       source_path: Some("/svc/legacy_netstack".to_string()),
+                       target_path: Some("/svc/legacy_mynetstack".to_string()),
+                   }),
                    fsys::ExposeDecl::Directory(fsys::ExposeDirectoryDecl {
                        source: Some(fsys::Ref::Child(fsys::ChildRef {
-                           name: Some("netstack".to_string()),
+                           name: "netstack".to_string(),
                            collection: None,
                        })),
                        source_path: Some("/data/dir".to_string()),
@@ -1147,27 +1102,38 @@ mod tests {
                        source_path: Some("/svc/netstack".to_string()),
                        target: Some(fsys::Ref::Child(
                           fsys::ChildRef {
-                              name: Some("echo".to_string()),
+                              name: "echo".to_string(),
                               collection: None,
                           }
                        )),
                        target_path: Some("/svc/mynetstack".to_string()),
                    }),
+                   fsys::OfferDecl::LegacyService(fsys::OfferLegacyServiceDecl {
+                       source: Some(fsys::Ref::Realm(fsys::RealmRef {})),
+                       source_path: Some("/svc/legacy_netstack".to_string()),
+                       target: Some(fsys::Ref::Child(
+                          fsys::ChildRef {
+                              name: "echo".to_string(),
+                              collection: None,
+                          }
+                       )),
+                       target_path: Some("/svc/legacy_mynetstack".to_string()),
+                   }),
                    fsys::OfferDecl::Directory(fsys::OfferDirectoryDecl {
                        source: Some(fsys::Ref::Realm(fsys::RealmRef {})),
                        source_path: Some("/data/dir".to_string()),
                        target: Some(fsys::Ref::Collection(
-                           fsys::CollectionRef { name: Some("modular".to_string()) }
+                           fsys::CollectionRef { name: "modular".to_string() }
                        )),
                        target_path: Some("/data".to_string()),
                    }),
                    fsys::OfferDecl::Storage(fsys::OfferStorageDecl {
                        type_: Some(fsys::StorageType::Cache),
                        source: Some(fsys::Ref::Storage(fsys::StorageRef {
-                           name: Some("memfs".to_string()),
+                           name: "memfs".to_string(),
                        })),
                        target: Some(fsys::Ref::Collection(
-                           fsys::CollectionRef { name: Some("modular".to_string()) }
+                           fsys::CollectionRef { name: "modular".to_string() }
                        )),
                    }),
                ]),
@@ -1223,6 +1189,11 @@ mod tests {
                             source_path: "/svc/netstack".try_into().unwrap(),
                             target_path: "/svc/mynetstack".try_into().unwrap(),
                         }),
+                        UseDecl::LegacyService(UseLegacyServiceDecl {
+                            source: UseSource::Realm,
+                            source_path: "/svc/legacy_netstack".try_into().unwrap(),
+                            target_path: "/svc/legacy_mynetstack".try_into().unwrap(),
+                        }),
                         UseDecl::Directory(UseDirectoryDecl {
                             source: UseSource::Framework,
                             source_path: "/data/dir".try_into().unwrap(),
@@ -1237,6 +1208,11 @@ mod tests {
                             source_path: "/svc/netstack".try_into().unwrap(),
                             target_path: "/svc/mynetstack".try_into().unwrap(),
                         }),
+                        ExposeDecl::LegacyService(ExposeLegacyServiceDecl {
+                            source: ExposeSource::Child("netstack".to_string()),
+                            source_path: "/svc/legacy_netstack".try_into().unwrap(),
+                            target_path: "/svc/legacy_mynetstack".try_into().unwrap(),
+                        }),
                         ExposeDecl::Directory(ExposeDirectoryDecl {
                             source: ExposeSource::Child("netstack".to_string()),
                             source_path: "/data/dir".try_into().unwrap(),
@@ -1249,6 +1225,12 @@ mod tests {
                             source_path: "/svc/netstack".try_into().unwrap(),
                             target: OfferTarget::Child("echo".to_string()),
                             target_path: "/svc/mynetstack".try_into().unwrap(),
+                        }),
+                        OfferDecl::LegacyService(OfferLegacyServiceDecl {
+                            source: OfferServiceSource::Realm,
+                            source_path: "/svc/legacy_netstack".try_into().unwrap(),
+                            target: OfferTarget::Child("echo".to_string()),
+                            target_path: "/svc/legacy_mynetstack".try_into().unwrap(),
                         }),
                         OfferDecl::Directory(OfferDirectoryDecl {
                             source: OfferDirectorySource::Realm,
@@ -1295,7 +1277,7 @@ mod tests {
                         StorageDecl {
                             name: "memfs".to_string(),
                             source_path: "/memfs".try_into().unwrap(),
-                            source: OfferDirectorySource::Realm,
+                            source: StorageDirectorySource::Realm,
                         },
                     ],
                 }
@@ -1341,87 +1323,21 @@ mod tests {
         },
     }
 
-    test_from! {
-        from_use_capability => {
-            input = vec![
-                UseDecl::Service(UseServiceDecl {
-                    source: UseSource::Realm,
-                    source_path: CapabilityPath::try_from("/foo/bar").unwrap(),
-                    target_path: CapabilityPath::try_from("/blah").unwrap(),
-                }),
-                UseDecl::Directory(UseDirectoryDecl {
-                    source: UseSource::Realm,
-                    source_path: CapabilityPath::try_from("/foo/bar").unwrap(),
-                    target_path: CapabilityPath::try_from("/blah").unwrap(),
-                }),
-                UseDecl::Storage(UseStorageDecl::Cache(CapabilityPath::try_from("/blah").unwrap())),
-            ],
-            result = vec![
-                Capability::Service(CapabilityPath::try_from("/foo/bar").unwrap()),
-                Capability::Directory(CapabilityPath::try_from("/foo/bar").unwrap()),
-                Capability::Storage(fsys::StorageType::Cache),
-            ],
-        },
-        from_expose_capability => {
-            input = vec![
-                ExposeDecl::Service(ExposeServiceDecl {
-                    source: ExposeSource::Self_,
-                    source_path: CapabilityPath::try_from("/foo/bar").unwrap(),
-                    target_path: CapabilityPath::try_from("/blah").unwrap(),
-                }),
-                ExposeDecl::Directory(ExposeDirectoryDecl {
-                    source: ExposeSource::Self_,
-                    source_path: CapabilityPath::try_from("/foo/bar").unwrap(),
-                    target_path: CapabilityPath::try_from("/blah").unwrap(),
-                }),
-            ],
-            result = vec![
-                Capability::Service(CapabilityPath::try_from("/foo/bar").unwrap()),
-                Capability::Directory(CapabilityPath::try_from("/foo/bar").unwrap()),
-            ],
-        },
-        from_offer_capability => {
-            input = vec![
-                OfferDecl::Service(OfferServiceDecl {
-                    source: OfferServiceSource::Self_,
-                    source_path: CapabilityPath::try_from("/foo/bar").unwrap(),
-                    target: OfferTarget::Child("child".to_string()),
-                    target_path: CapabilityPath::try_from("/blah").unwrap(),
-                }),
-                OfferDecl::Directory(OfferDirectoryDecl {
-                    source: OfferDirectorySource::Self_,
-                    source_path: CapabilityPath::try_from("/foo/bar").unwrap(),
-                    target: OfferTarget::Child("child".to_string()),
-                    target_path: CapabilityPath::try_from("/blah").unwrap(),
-                }),
-                OfferDecl::Storage(OfferStorageDecl::Cache(
-                    OfferStorage {
-                        source: OfferStorageSource::Realm,
-                        target: OfferTarget::Child("child".to_string()),
-                    }
-                )),
-            ],
-            result = vec![
-                Capability::Service(CapabilityPath::try_from("/foo/bar").unwrap()),
-                Capability::Directory(CapabilityPath::try_from("/foo/bar").unwrap()),
-                Capability::Storage(fsys::StorageType::Cache),
-            ],
-        },
-    }
-
     test_fidl_into_and_from! {
         fidl_into_and_from_expose_source => {
             input = vec![
                 Some(fsys::Ref::Self_(fsys::SelfRef {})),
                 Some(fsys::Ref::Child(fsys::ChildRef {
-                    name: Some("foo".to_string()),
+                    name: "foo".to_string(),
                     collection: None,
                 })),
+                Some(fsys::Ref::Framework(fsys::FrameworkRef {})),
             ],
             input_type = Option<fsys::Ref>,
             result = vec![
                 ExposeSource::Self_,
                 ExposeSource::Child("foo".to_string()),
+                ExposeSource::Framework,
             ],
             result_type = ExposeSource,
         },
@@ -1430,7 +1346,7 @@ mod tests {
                 Some(fsys::Ref::Realm(fsys::RealmRef {})),
                 Some(fsys::Ref::Self_(fsys::SelfRef {})),
                 Some(fsys::Ref::Child(fsys::ChildRef {
-                    name: Some("foo".to_string()),
+                    name: "foo".to_string(),
                     collection: None,
                 })),
             ],
@@ -1446,8 +1362,9 @@ mod tests {
             input = vec![
                 Some(fsys::Ref::Realm(fsys::RealmRef {})),
                 Some(fsys::Ref::Self_(fsys::SelfRef {})),
+                Some(fsys::Ref::Framework(fsys::FrameworkRef {})),
                 Some(fsys::Ref::Child(fsys::ChildRef {
-                    name: Some("foo".to_string()),
+                    name: "foo".to_string(),
                     collection: None,
                 })),
             ],
@@ -1455,6 +1372,7 @@ mod tests {
             result = vec![
                 OfferDirectorySource::Realm,
                 OfferDirectorySource::Self_,
+                OfferDirectorySource::Framework,
                 OfferDirectorySource::Child("foo".to_string()),
             ],
             result_type = OfferDirectorySource,
@@ -1463,7 +1381,7 @@ mod tests {
             input = vec![
                 Some(fsys::Ref::Realm(fsys::RealmRef {})),
                 Some(fsys::Ref::Storage(fsys::StorageRef {
-                    name: Some("foo".to_string()),
+                    name: "foo".to_string(),
                 })),
             ],
             input_type = Option<fsys::Ref>,
@@ -1484,7 +1402,7 @@ mod tests {
                     name: Some("minfs".to_string()),
                     source_path: Some("/minfs".to_string()),
                     source: Some(fsys::Ref::Child(fsys::ChildRef {
-                        name: Some("foo".to_string()),
+                        name: "foo".to_string(),
                         collection: None,
                     })),
                 },
@@ -1494,12 +1412,12 @@ mod tests {
                 StorageDecl {
                     name: "minfs".to_string(),
                     source_path: CapabilityPath::try_from("/minfs").unwrap(),
-                    source: OfferDirectorySource::Realm,
+                    source: StorageDirectorySource::Realm,
                 },
                 StorageDecl {
                     name: "minfs".to_string(),
                     source_path: CapabilityPath::try_from("/minfs").unwrap(),
-                    source: OfferDirectorySource::Child("foo".to_string()),
+                    source: StorageDirectorySource::Child("foo".to_string()),
                 },
             ],
             result_type = StorageDecl,

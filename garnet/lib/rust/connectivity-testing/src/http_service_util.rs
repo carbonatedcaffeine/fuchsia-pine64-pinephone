@@ -11,9 +11,9 @@ use {
     futures::io::{AllowStdIo, AsyncReadExt},
 };
 
-pub fn create_url_request(url_string: String) -> http::UrlRequest {
+pub fn create_url_request<S: ToString>(url_string: S) -> http::UrlRequest {
     http::UrlRequest {
-        url: url_string,
+        url: url_string.to_string(),
         method: String::from("GET"),
         headers: None,
         body: None,
@@ -46,13 +46,13 @@ pub async fn fetch_and_discard_url(
 
     let loader_proxy = http::UrlLoaderProxy::new(proxy);
     let start_time = zx::Time::get(zx::ClockId::Monotonic);
-    let response = await!(loader_proxy.start(&mut url_request))?;
+    let response = loader_proxy.start(&mut url_request).await?;
 
     if let Some(e) = response.error {
         bail!("UrlLoaderProxy error - code:{} ({})", e.code, e.description.unwrap_or("".into()))
     }
 
-    let mut socket = match response.body.map(|x| *x) {
+    let socket = match response.body.map(|x| *x) {
         Some(http::UrlBody::Stream(s)) => fasync::Socket::from_socket(s)?,
         _ => {
             bail!("failed to read UrlBody from the stream - error: {}", zx::Status::BAD_STATE);
@@ -61,7 +61,7 @@ pub async fn fetch_and_discard_url(
 
     // discard the bytes
     let mut stdio_sink = AllowStdIo::new(::std::io::sink());
-    let bytes_received = await!(socket.copy_into(&mut stdio_sink))?;
+    let bytes_received = socket.copy_into(&mut stdio_sink).await?;
     let stop_time = zx::Time::get(zx::ClockId::Monotonic);
 
     let time_nanos = (stop_time - start_time).into_nanos() as u64;

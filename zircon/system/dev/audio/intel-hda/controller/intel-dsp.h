@@ -5,6 +5,12 @@
 #ifndef ZIRCON_SYSTEM_DEV_AUDIO_INTEL_HDA_CONTROLLER_INTEL_DSP_H_
 #define ZIRCON_SYSTEM_DEV_AUDIO_INTEL_HDA_CONTROLLER_INTEL_DSP_H_
 
+#include <lib/fzl/vmo-mapper.h>
+#include <limits.h>
+#include <stdint.h>
+#include <string.h>
+#include <threads.h>
+
 #include <ddk/binding.h>
 #include <ddk/device.h>
 #include <ddk/protocol/intelhda/codec.h>
@@ -13,18 +19,15 @@
 #include <intel-hda/utils/intel-audio-dsp-ipc.h>
 #include <intel-hda/utils/intel-hda-registers.h>
 #include <intel-hda/utils/nhlt.h>
+#include <intel-hda/utils/status.h>
 #include <intel-hda/utils/utils.h>
-#include <lib/fzl/vmo-mapper.h>
-#include <limits.h>
-#include <stdint.h>
-#include <string.h>
-#include <threads.h>
 
 #include "debug-logging.h"
 #include "intel-dsp-ipc.h"
 #include "intel-dsp-stream.h"
 #include "intel-dsp-topology.h"
 #include "intel-hda-stream.h"
+#include "nhlt.h"
 
 namespace audio {
 namespace intel_hda {
@@ -36,7 +39,7 @@ class IntelDsp : public codecs::IntelHDACodecDriverBase {
   IntelDsp(IntelHDAController* controller, hda_pp_registers_t* pp_regs);
   ~IntelDsp();
 
-  zx_status_t Init(zx_device_t* dsp_dev);
+  Status Init(zx_device_t* dsp_dev);
 
   const char* log_prefix() const { return log_prefix_; }
 
@@ -69,8 +72,8 @@ class IntelDsp : public codecs::IntelHDACodecDriverBase {
   adsp_registers_t* regs() const;
   adsp_fw_registers_t* fw_regs() const;
 
-  zx_status_t SetupDspDevice();
-  zx_status_t ParseNhlt();
+  Status SetupDspDevice();
+  Status ParseNhlt();
 
   int InitThread();
 
@@ -121,7 +124,6 @@ class IntelDsp : public codecs::IntelHDACodecDriverBase {
 
   // Debug
   void DumpRegs();
-  void DumpNhlt(const nhlt_table_t* table, size_t length);
   void DumpFirmwareConfig(const TLVHeader* config, size_t length);
   void DumpHardwareConfig(const TLVHeader* config, size_t length);
   void DumpModulesInfo(const ModuleEntry* info, uint32_t count);
@@ -174,23 +176,7 @@ class IntelDsp : public codecs::IntelHDACodecDriverBase {
   Mailbox mailbox_in_;
   Mailbox mailbox_out_;
 
-  // NHLT buffer.
-  uint8_t nhlt_buf_[PAGE_SIZE];
-
-  // I2S config
-  struct I2SConfig {
-    I2SConfig(uint8_t bid, uint8_t dir, const formats_config_t* f)
-        : valid(true), bus_id(bid), direction(dir), formats(f) {}
-    I2SConfig() = default;
-
-    bool valid = false;
-    uint8_t bus_id = 0;
-    uint8_t direction = 0;
-
-    const formats_config_t* formats = nullptr;
-  };
-  static constexpr size_t I2S_CONFIG_MAX = 8;
-  I2SConfig i2s_configs_[I2S_CONFIG_MAX];
+  std::unique_ptr<Nhlt> nhlt_;
 
   // Module IDs
   enum Module {

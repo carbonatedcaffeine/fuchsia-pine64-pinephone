@@ -1,8 +1,27 @@
 # Fuchsia Build Information
 
-We collection metrics and error reports from devices in a few ways: Cobalt, feedback reports, crashpad crashes, manual reports from developers and QA.  Interpreting these signals requires knowing where they are generated from to varying levels of detail.  This document describes the places where version information about the system are stored for use in these types of reports.  Note that this information only applies to the base system - dynamically or ephemerally added software will not be included here.
+Metrics and error reports are collected from devices in several ways:
+Cobalt, feedback reports, crashpad crashes, manual reports from developers
+and QA.  Interpreting these signals requires knowing where they are generated
+from to varying levels of detail.  This document describes the places where
+version information about the system are stored for use in these types of
+reports.  Note that this information only applies to the base system -
+dynamically or ephemerally added software will not be included here.
 
-To access this data, add the feature "build-info" to the [component manifest][component-manifest] of the component that needs to read these fields.
+
+To view this data via the commandline, you can use `fx shell`. For example:
+
+```sh
+fx shell cat /config/build-info/latest-commit-date
+```
+
+To access this data at runtime, add the feature "build-info" to the
+[component manifest][component-manifest] of the component that needs to
+read these fields.  For example:
+
+```
+{% includecode gerrit_repo="fuchsia/fuchsia" gerrit_path="src/developer/crashpad_agent/tests/meta/crashpad_agent_unittest.cmx" indented_block="\"sandbox\": {" highlight="2,3" %}
+```
 
 
 ## Product
@@ -45,7 +64,7 @@ Jiri snapshot of the most recent ‘jiri update’
 ## Kernel version
 
 ### Location
-Stored in vDSO.  Accessed through [`zx_system_get_version`]( /zircon/docs/syscalls/system_get_version.md)
+Stored in vDSO.  Accessed through [`zx_system_get_version`]( /docs/zircon/syscalls/system_get_version.md)
 
 ### Description
 Zircon revision computed during the kernel build process.

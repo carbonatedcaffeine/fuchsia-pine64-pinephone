@@ -2,16 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <lib/syslog/global.h>
 #include <lib/ui/scenic/cpp/commands.h>
 #include <lib/ui/scenic/cpp/session.h>
-#include <stdio.h>
 #include <zircon/assert.h>
 
 namespace scenic {
 
-constexpr size_t kCommandsPerMessage =
-    (ZX_CHANNEL_MAX_MSG_BYTES - sizeof(fidl_message_header_t) - sizeof(fidl_vector_t)) /
-    sizeof(fuchsia::ui::scenic::Command);
+// Don't batch commands - enqueue every command as its own message. This is a workaround
+// for FL-258, where commands were getting corrupted. The commands are still batched
+// and processed per-Present() on the Scenic side.
+// TODO(SCN-1522) Once FL-258 is fixed, either batch commands or move away from
+// command-union pattern.
+constexpr size_t kCommandsPerMessage = 1u;
 
 SessionPtrAndListenerRequest CreateScenicSessionPtrAndListenerRequest(
     fuchsia::ui::scenic::Scenic* scenic) {
@@ -102,6 +105,10 @@ void Session::Present(uint64_t presentation_time, PresentCallback callback) {
                     std::move(callback));
 }
 
+void Session::Present(zx::time presentation_time, PresentCallback callback) {
+  Present(presentation_time.get(), std::move(callback));
+}
+
 void Session::Unbind() {
   ZX_DEBUG_ASSERT(session_);
   ZX_DEBUG_ASSERT(!session_handle_);
@@ -117,9 +124,7 @@ void Session::Rebind() {
 }
 
 void Session::OnScenicError(std::string error) {
-  // TODO(SCN-903): replace fprintf with SDK-approved logging mechanism.  Also
-  // remove "#include <stdio.h>".
-  fprintf(stderr, "Session error: %s", error.c_str());
+  FX_LOGF(ERROR, nullptr, "Scenic Session in client: %s", error.c_str());
 }
 
 void Session::OnScenicEvent(std::vector<fuchsia::ui::scenic::Event> events) {

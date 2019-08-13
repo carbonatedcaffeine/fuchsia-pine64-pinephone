@@ -49,7 +49,7 @@
       "methods": [
         {
           "ordinal": 1061382220,
-          "generated_ordinal": 1061382220,
+          "generated_ordinal": 4558601923455877120,
           "name": "Method",
           "location": {
             "filename": "garnet/go/src/fidl/compiler/backend/typestest/doc_comments.test.fidl",
@@ -67,11 +67,13 @@
           "maybe_request_size": 16,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": false,
-          "has_response": false
+          "experimental_maybe_request_has_flexible_envelope": false,
+          "has_response": false,
+          "is_composed": false
         },
         {
           "ordinal": 325918733,
-          "generated_ordinal": 325918733,
+          "generated_ordinal": 1399810299388755968,
           "name": "OnEvent",
           "location": {
             "filename": "garnet/go/src/fidl/compiler/backend/typestest/doc_comments.test.fidl",
@@ -89,11 +91,14 @@
           "maybe_response": [],
           "maybe_response_size": 16,
           "maybe_response_alignment": 8,
-          "maybe_response_has_padding": false
+          "maybe_response_has_padding": false,
+          "experimental_maybe_response_has_flexible_envelope": false,
+          "is_composed": false
         }
       ]
     }
   ],
+  "service_declarations": [],
   "struct_declarations": [
     {
       "name": "test.name/Struct",

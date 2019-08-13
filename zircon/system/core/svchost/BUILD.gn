@@ -6,13 +6,15 @@ library("crashsvc") {
   sources = [
     "crashsvc.cc",
   ]
+
   deps = [
-    "$zx/system/fidl/fuchsia-crash:c",
+    "$zx/system/fidl/fuchsia-exception:llcpp",
     "$zx/system/ulib/backtrace-request:utils",
     "$zx/system/ulib/fbl",
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/inspector",
   ]
+
   public_deps = [
     "$zx/system/ulib/zx",
   ]
@@ -26,13 +28,16 @@ executable("svchost") {
   deps = [
     ":crashsvc",
     "$zx/system/fidl/fuchsia-boot:c",
+    "$zx/system/fidl/fuchsia-device:c",
     "$zx/system/fidl/fuchsia-device-manager:c",
     "$zx/system/fidl/fuchsia-fshost:c",
     "$zx/system/fidl/fuchsia-io:c",
+    "$zx/system/fidl/fuchsia-kernel:c",
     "$zx/system/fidl/fuchsia-logger:c",
     "$zx/system/fidl/fuchsia-mem:c",
     "$zx/system/fidl/fuchsia-net:llcpp",
     "$zx/system/fidl/fuchsia-paver:c",
+    "$zx/system/fidl/fuchsia-posix-socket:llcpp",
     "$zx/system/fidl/fuchsia-process:c",
     "$zx/system/fidl/fuchsia-scheduler:c",
     "$zx/system/fidl/fuchsia-sysmem:c",
@@ -40,6 +45,7 @@ executable("svchost") {
     "$zx/system/ulib/async-loop:async-loop-cpp",
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/fs",
+    "$zx/system/ulib/kcounter",
     "$zx/system/ulib/kernel-debug",
     "$zx/system/ulib/kernel-mexec",
     "$zx/system/ulib/logger",
@@ -59,10 +65,11 @@ test("crashsvc-test") {
   deps = [
     ":crashsvc",
     "$zx/system/fidl/fuchsia-crash:c",
+    "$zx/system/fidl/fuchsia-exception:llcpp",
     "$zx/system/ulib/async:async-cpp",
     "$zx/system/ulib/async-loop:async-loop-cpp",
     "$zx/system/ulib/fdio",
-    "$zx/system/ulib/fidl-async",
+    "$zx/system/ulib/fidl-async:fidl-async-cpp",
     "$zx/system/ulib/fs",
     "$zx/system/ulib/mini-process",
     "$zx/system/ulib/zxtest",

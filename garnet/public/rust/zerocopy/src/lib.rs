@@ -8,7 +8,8 @@
 //! parsing and serialization by allowing zero-copy conversion to/from byte
 //! slices.
 //!
-//! This is enabled by three core marker traits:
+//! This is enabled by three core marker traits, each of which can be derived
+//! (e.g., `#[derive(FromBytes)]`):
 //! - [`FromBytes`] indicates that a type may safely be converted from an
 //!   arbitrary byte sequence
 //! - [`AsBytes`] indicates that a type may safely be converted *to* a byte
@@ -17,6 +18,9 @@
 //!
 //! Types which implement a subset of these traits can then be converted to/from
 //! byte sequences with little to no runtime overhead.
+//!
+//! Note that these traits are ignorant of byte order. For byte order-aware
+//! types, see the [`byteorder`] module.
 
 #![cfg_attr(not(test), no_std)]
 #![recursion_limit = "2048"]
@@ -71,7 +75,7 @@ macro_rules! impl_for_composite_types {
 // implement an unsafe trait for all signed and unsigned primitive types
 macro_rules! impl_for_primitives {
     ($trait:ident) => (
-        impl_for_primitives!(@inner $trait, u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, usize, isize);
+        impl_for_primitives!(@inner $trait, u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, usize, isize, f32, f64);
     );
     (@inner $trait:ident, $type:ty) => (
         unsafe impl $trait for $type {
@@ -114,6 +118,9 @@ macro_rules! impl_for_array_sizes {
 /// `FromBytes` types can safely be deserialized from an untrusted sequence of
 /// bytes because any byte sequence corresponds to a valid instance of the type.
 ///
+/// `FromBytes` is ignorant of byte order. For byte order-aware types, see the
+/// [`byteorder`] module.
+///
 /// # Safety
 ///
 /// If `T: FromBytes`, then unsafe code may assume that it is sound to treat any
@@ -155,6 +162,26 @@ pub unsafe trait FromBytes {
 /// - Structs with internal padding
 /// - Unions in which not all variants have the same length
 ///
+/// `AsBytes` is ignorant of byte order. For byte order-aware types, see the
+/// [`byteorder`] module.
+///
+/// # Custom Derive Errors
+///
+/// Due to the way that the custom derive for `AsBytes` is implemented, you may
+/// get an error like this:
+///
+/// ```text
+/// error[E0080]: evaluation of constant value failed
+///   --> lib.rs:1:10
+///    |
+///  1 | #[derive(AsBytes)]
+///    |          ^^^^^^^ attempt to divide by zero
+/// ```
+///
+/// This error means that the type being annotated has padding bytes, which is
+/// illegal for `AsBytes` types. Consider either adding explicit struct fields
+/// where those padding bytes would be or using `#[repr(packed)]`.
+///
 /// # Safety
 ///
 /// If `T: AsBytes`, then unsafe code may assume that it is sound to treat any
@@ -168,7 +195,7 @@ pub unsafe trait FromBytes {
 ///   - It must have a defined representation (`repr(C)`, `repr(transparent)`,
 ///     or `repr(packed)`).
 ///   - All of its fields must be `AsBytes`
-///   - Its layout must have no inter-field padding. This is always true for
+///   - Its layout must have no padding. This is always true for
 ///     `repr(transparent)` and `repr(packed)`. For `repr(C)`, see the layout
 ///     algorithm described in the [Rust Reference].
 /// - If the type is an enum:

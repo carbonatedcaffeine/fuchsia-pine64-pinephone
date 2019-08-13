@@ -4,7 +4,7 @@
 
 #include <fuchsia/media/cpp/fidl.h>
 
-#include "src/media/audio/lib/test/audio_core_test_base.h"
+#include "src/media/audio/lib/test/hermetic_audio_test.h"
 
 namespace media::audio::test {
 
@@ -12,7 +12,7 @@ namespace media::audio::test {
 // AudioCapturerTest
 //
 // This set of tests verifies asynchronous usage of AudioCapturer.
-class AudioCapturerTest : public AudioCoreTestBase {
+class AudioCapturerTest : public HermeticAudioCoreTest {
  protected:
   void SetUp() override;
   void TearDown() override;
@@ -28,7 +28,7 @@ class AudioCapturerTest : public AudioCoreTestBase {
 // AudioCapturerTest implementation
 //
 void AudioCapturerTest::SetUp() {
-  AudioCoreTestBase::SetUp();
+  HermeticAudioCoreTest::SetUp();
 
   audio_core_->CreateAudioCapturer(false, audio_capturer_.NewRequest());
   audio_capturer_.set_error_handler(ErrorHandler());
@@ -40,11 +40,11 @@ void AudioCapturerTest::TearDown() {
   EXPECT_EQ(bound_capturer_expected_, audio_capturer_.is_bound());
   audio_capturer_.Unbind();
 
-  AudioCoreTestBase::TearDown();
+  HermeticAudioCoreTest::TearDown();
 }
 
 void AudioCapturerTest::SetNegativeExpectations() {
-  AudioCoreTestBase::SetNegativeExpectations();
+  HermeticAudioCoreTest::SetNegativeExpectations();
   bound_capturer_expected_ = false;
 }
 

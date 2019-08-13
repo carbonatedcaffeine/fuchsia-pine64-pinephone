@@ -8,11 +8,12 @@
 #include <lib/async/cpp/wait.h>
 #include <lib/fit/function.h>
 #include <lib/zx/event.h>
+#include <stdint.h>
+#include <zircon/status.h>
+
 #include <src/lib/fxl/command_line.h>
 #include <src/lib/fxl/log_settings_command_line.h>
 #include <src/lib/fxl/logging.h>
-#include <stdint.h>
-#include <zircon/status.h>
 
 namespace simple_camera {
 
@@ -59,9 +60,8 @@ class BufferFence {
   static std::unique_ptr<BufferFence> Create(uint32_t index);
 
   // This function is called when the release fence is signalled
-  void OnReleaseFenceSignalled(async_dispatcher_t* dispatcher,
-                               async::WaitBase* wait, zx_status_t status,
-                               const zx_packet_signal* signal);
+  void OnReleaseFenceSignalled(async_dispatcher_t* dispatcher, async::WaitBase* wait,
+                               zx_status_t status, const zx_packet_signal* signal);
 
   // Set a handler function that will be called whenever the release fence
   // is signalled.
@@ -72,8 +72,7 @@ class BufferFence {
  private:
   uint32_t index_;
   BufferCallback release_fence_callback_;
-  async::WaitMethod<BufferFence, &BufferFence::OnReleaseFenceSignalled>
-      release_fence_waiter_{this};
+  async::WaitMethod<BufferFence, &BufferFence::OnReleaseFenceSignalled> release_fence_waiter_{this};
 
   BufferFence();
 

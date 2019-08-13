@@ -4,6 +4,7 @@
 
 #include <fuchsia/ui/scenic/cpp/fidl.h>
 #include <lib/async/cpp/time.h>
+#include <lib/zx/clock.h>
 #include <lib/zx/eventpair.h>
 
 #include <memory>
@@ -81,7 +82,7 @@ void CreateClient(scenic::Session* session, zx::eventpair view_token, scenic::En
 
   scenic::ShapeNode shape(session);
   shape.SetTranslation(2, 2, 0);  // Center the shape within the View.
-  root_node->AddPart(shape);
+  root_node->AddChild(shape);
 
   scenic::Rectangle rec(session, 5, 5);  // Simple; no real GPU work.
   shape.SetShape(rec);

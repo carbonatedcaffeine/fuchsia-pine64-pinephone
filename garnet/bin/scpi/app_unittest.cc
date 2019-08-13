@@ -16,9 +16,7 @@ using namespace fuchsia::scpi;
 
 class AppTest : public gtest::TestLoopFixture {
  protected:
-  AppTest() : app_(std::make_unique<App>(context_provider_.TakeContext())) {
-    app_->Start();
-  }
+  AppTest() : app_(std::make_unique<App>(context_provider_.TakeContext())) { app_->Start(); }
 
   SystemControllerPtr GetSystemController() {
     SystemControllerPtr system_controller;
@@ -49,10 +47,10 @@ TEST_F(AppTest, GetDvfsInfo) {
 TEST_F(AppTest, GetSystemStatus) {
   SystemControllerPtr scpi_ = GetSystemController();
   Status st;
-  int temp;
+  float temp;
   scpi_->GetSystemStatus([&](Status err, SystemStatus sys_status) {
     st = err;
-    temp = sys_status.temperature;
+    temp = sys_status.temperature_celsius;
   });
   RunLoopUntilIdle();
   EXPECT_EQ(fuchsia::scpi::Status::OK, st);

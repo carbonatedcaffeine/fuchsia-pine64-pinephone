@@ -1,0 +1,27 @@
+# Copyright 2019 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//garnet/lib/magma/gnbuild/magma.gni")
+
+executable("vk_timer_query") {
+  testonly = true
+  output_name = "vk_timer_query_tests"
+
+  sources = [
+    "main.cc",
+  ]
+
+  deps = [
+    "$magma_build_root/include:magma_abi",
+    "$magma_build_root/src/magma_util",
+    "$magma_build_root/src/magma_util/platform:semaphore",
+    "../vkreadback:vkreadback_src",
+    "//sdk/fidl/fuchsia.gpu.magma:fuchsia.gpu.magma_c",
+    "//src/lib/fxl/test:test_settings",
+    "//third_party/googletest:gtest",
+    "//zircon/public/lib/fdio",
+  ]
+
+  deps += [ "//src/graphics/lib/vulkan" ]
+}

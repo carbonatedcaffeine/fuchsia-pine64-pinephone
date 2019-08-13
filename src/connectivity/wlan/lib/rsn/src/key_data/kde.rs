@@ -5,11 +5,14 @@
 use super::Element;
 use crate::ProtectionInfo;
 use bitfield::bitfield;
-use nom::IResult::{Done, Incomplete};
-use nom::{call, do_parse, eof, error_position, map, named, named_args, take, try_parse};
-use nom::{le_u8, IResult, Needed};
-use wlan_common::appendable::{Appendable, BufferTooSmall};
-use wlan_common::organization::Oui;
+use nom::error::ErrorKind;
+use nom::number::streaming::le_u8;
+use nom::{call, do_parse, eof, map, named, named_args, take, try_parse, IResult};
+use wlan_common::{
+    appendable::{Appendable, BufferTooSmall},
+    ie::write_wpa1_ie,
+    organization::Oui,
+};
 
 pub const TYPE: u8 = 0xDD;
 const PADDING_DATA_LEN: u8 = 0;
@@ -99,7 +102,7 @@ impl Gtk {
 pub fn parse(i0: &[u8]) -> IResult<&[u8], Element> {
     // Check whether parsing is finished.
     if i0.len() <= 1 {
-        return Done(&i0[i0.len()..], Element::Padding);
+        return Ok((&i0[i0.len()..], Element::Padding));
     }
 
     // Check whether the remaining data is padding.
@@ -112,16 +115,16 @@ pub fn parse(i0: &[u8]) -> IResult<&[u8], Element> {
     let (i1, hdr) = try_parse!(i0, call!(parse_header));
     let (i2, bytes) = try_parse!(i1, take!(hdr.data_len()));
     if hdr.oui != Oui::DOT11 {
-        return Done(i2, Element::UnsupportedKde(hdr));
+        return Ok((i2, Element::UnsupportedKde(hdr)));
     }
 
     // Once the header was validated, read the KDE data.
     match hdr.data_type {
         GTK_DATA_TYPE => {
             let (_, gtk) = try_parse!(bytes, call!(parse_gtk, hdr.data_len()));
-            Done(i2, Element::Gtk(hdr, gtk))
+            Ok((i2, Element::Gtk(hdr, gtk)))
         }
-        _ => Done(i2, Element::UnsupportedKde(hdr)),
+        _ => Ok((i2, Element::UnsupportedKde(hdr))),
     }
 }
 
@@ -136,14 +139,13 @@ named!(parse_header<&[u8], Header>,
 );
 
 fn parse_padding(input: &[u8]) -> IResult<&[u8], Element> {
-    for i in 0..input.len() {
-        if input[i] != 0 {
-            // This should return an error but nom's many0 does only fail when the inner parser
-            // returns Incomplete.
-            return Incomplete(Needed::Size(input.len()));
-        }
+    if input.iter().all(|&x| x == 0) {
+        Ok((&[], Element::Padding))
+    } else {
+        // Return ErrorKind::Eof to indicate that we expected that the remaining input should have
+        // been all padding bytes.
+        Err(nom::Err::Error((input, ErrorKind::Eof)))
     }
-    Done(&input[input.len()..], Element::Padding)
 }
 
 named_args!(parse_gtk(data_len: usize) <Gtk>,
@@ -176,7 +178,7 @@ impl<A: Appendable> Writer<A> {
     pub fn write_protection(&mut self, protection: &ProtectionInfo) -> Result<(), BufferTooSmall> {
         match protection {
             ProtectionInfo::Rsne(rsne) => rsne.write_into(&mut self.buf),
-            ProtectionInfo::LegacyWpa(_wpa) => unimplemented!(),
+            ProtectionInfo::LegacyWpa(wpa) => write_wpa1_ie(&mut self.buf, wpa),
         }
     }
 
@@ -234,7 +236,7 @@ impl<A: Appendable> Writer<A> {
 mod tests {
     use super::*;
     use crate::key_data::extract_elements;
-    use wlan_common::test_utils::FixedSizedTestBuffer;
+    use wlan_common::{assert_variant, test_utils::FixedSizedTestBuffer};
 
     fn write_and_extract_padding(gtk_len: usize) -> Vec<u8> {
         let mut w = Writer::new(vec![]);
@@ -317,18 +319,11 @@ mod tests {
         let mut elements = result.unwrap();
         assert_eq!(elements.len(), 2);
 
-        match elements.remove(0) {
-            Element::Gtk(hdr, kde) => {
-                assert_eq!(hdr, Header { type_: 0xDD, len: 11, oui: Oui::DOT11, data_type: 1 });
-                assert_eq!(kde, Gtk { info: GtkInfo(6), gtk: vec![24; 5] });
-            }
-            other => panic!("unexpected KDE: {:?}", other),
-        }
-
-        match elements.remove(0) {
-            Element::Padding => (),
-            other => panic!("unexpected KDE: {:?}", other),
-        }
+        assert_variant!(elements.remove(0), Element::Gtk(hdr, kde) => {
+            assert_eq!(hdr, Header { type_: 0xDD, len: 11, oui: Oui::DOT11, data_type: 1 });
+            assert_eq!(kde, Gtk { info: GtkInfo(6), gtk: vec![24; 5] });
+        });
+        assert_variant!(elements.remove(0), Element::Padding);
     }
 
     #[test]

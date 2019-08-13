@@ -4,6 +4,8 @@
 
 #include "interception_workflow.h"
 
+#include <cstring>
+#include <regex>
 #include <string>
 #include <thread>
 
@@ -20,6 +22,7 @@
 // on CQ in a way I can't repro locally.
 #undef __TA_REQUIRES
 
+#include "tools/fidlcat/lib/decode_options.h"
 #include "tools/fidlcat/lib/syscall_decoder_dispatcher.h"
 
 namespace fidlcat {
@@ -55,6 +58,7 @@ void InterceptingThreadObserver::OnThreadStopped(
     zxdb::BreakpointSettings settings = bp_ptr->GetSettings();
     if (settings.location.type == zxdb::InputLocation::Type::kSymbol &&
         settings.location.symbol.components().size() == 1u) {
+      threads_in_error_.erase(thread->GetKoid());
       for (auto& syscall : workflow_->syscall_decoder_dispatcher()->syscalls()) {
         if (settings.location.symbol.components()[0].name() == syscall->breakpoint_name()) {
           workflow_->syscall_decoder_dispatcher()->DecodeSyscall(this, thread, syscall.get());
@@ -67,7 +71,11 @@ void InterceptingThreadObserver::OnThreadStopped(
       return;
     }
   }
-  FXL_LOG(INFO) << "Internal error: Thread stopped on exception with no breakpoint set";
+  if (threads_in_error_.find(thread->GetKoid()) == threads_in_error_.end()) {
+    FXL_LOG(INFO) << "Internal error: Thread " << thread->GetKoid()
+                  << " stopped on exception with no breakpoint set";
+    threads_in_error_.emplace(thread->GetKoid());
+  }
   thread->Continue();
 }
 
@@ -94,6 +102,7 @@ void InterceptingTargetObserver::DidCreateProcess(zxdb::Target* target, zxdb::Pr
 
 void InterceptingTargetObserver::WillDestroyProcess(zxdb::Target* target, zxdb::Process* process,
                                                     DestroyReason reason, int exit_code) {
+  workflow_->configured_processes().erase(process->GetKoid());
   std::string action;
   switch (reason) {
     case zxdb::TargetObserver::DestroyReason::kExit:
@@ -341,23 +350,50 @@ void InterceptionWorkflow::Launch(const std::vector<std::string>& command, KoidF
 }
 
 void InterceptionWorkflow::SetBreakpoints(zxdb::Target* target) {
+  if (configured_processes_.find(target->GetProcess()->GetKoid()) != configured_processes_.end()) {
+    return;
+  }
+  configured_processes_.emplace(target->GetProcess()->GetKoid());
   for (auto& syscall : syscall_decoder_dispatcher()->syscalls()) {
-    zxdb::BreakpointSettings settings;
-    settings.enabled = true;
-    settings.stop_mode = zxdb::BreakpointSettings::StopMode::kThread;
-    settings.type = debug_ipc::BreakpointType::kSoftware;
-    settings.location.symbol = zxdb::Identifier(syscall->breakpoint_name());
-    settings.location.type = zxdb::InputLocation::Type::kSymbol;
-    settings.scope = zxdb::BreakpointSettings::Scope::kTarget;
-    settings.scope_target = target;
-
-    zxdb::Breakpoint* breakpoint = session_->system().CreateNewBreakpoint();
-
-    breakpoint->SetSettings(settings, [](const zxdb::Err& err) {
-      if (!err.ok()) {
-        FXL_LOG(INFO) << "Error in setting breakpoints: " << err.msg();
+    bool put_breakpoint = true;
+    if (!syscall_decoder_dispatcher()->decode_options().syscall_filters.empty()) {
+      put_breakpoint = false;
+      for (const auto& syscall_filter :
+           syscall_decoder_dispatcher()->decode_options().syscall_filters) {
+        if (regex_match(syscall->name(), syscall_filter)) {
+          put_breakpoint = true;
+          break;
+        }
       }
-    });
+    }
+    if (put_breakpoint) {
+      for (const auto& syscall_filter :
+           syscall_decoder_dispatcher()->decode_options().exclude_syscall_filters) {
+        if (regex_match(syscall->name(), syscall_filter)) {
+          put_breakpoint = false;
+          break;
+        }
+      }
+      if (put_breakpoint) {
+        zxdb::BreakpointSettings settings;
+        settings.enabled = true;
+        settings.name = syscall->name();
+        settings.stop_mode = zxdb::BreakpointSettings::StopMode::kThread;
+        settings.type = debug_ipc::BreakpointType::kSoftware;
+        settings.location.symbol = zxdb::Identifier(syscall->breakpoint_name());
+        settings.location.type = zxdb::InputLocation::Type::kSymbol;
+        settings.scope = zxdb::BreakpointSettings::Scope::kTarget;
+        settings.scope_target = target;
+
+        zxdb::Breakpoint* breakpoint = session_->system().CreateNewBreakpoint();
+
+        breakpoint->SetSettings(settings, [](const zxdb::Err& err) {
+          if (!err.ok()) {
+            FXL_LOG(INFO) << "Error in setting breakpoints: " << err.msg();
+          }
+        });
+      }
+    }
   }
 }
 

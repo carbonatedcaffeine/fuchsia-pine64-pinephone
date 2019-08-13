@@ -15,7 +15,7 @@ use {
     fidl_fuchsia_sys2 as fsys, fuchsia_async as fasync, fuchsia_vfs_pseudo_fs as fvfs,
     fuchsia_vfs_pseudo_fs::directory::entry::DirectoryEntry,
     fuchsia_zircon as zx,
-    futures::future::{AbortHandle, Abortable, FutureObj},
+    futures::future::{AbortHandle, Abortable, BoxFuture},
     log::*,
     std::{collections::HashMap, iter},
 };
@@ -87,8 +87,11 @@ impl IncomingNamespace {
                         abs_moniker.clone(),
                     )?;
                 }
-                cm_rust::UseDecl::Service(_) => {
+                cm_rust::UseDecl::LegacyService(_) => {
                     Self::add_service_use(&mut svc_dirs, use_, model.clone(), abs_moniker.clone())?;
+                }
+                cm_rust::UseDecl::Service(_) => {
+                    return Err(ModelError::unsupported("Service capability"))
                 }
                 cm_rust::UseDecl::Storage(_) => {
                     Self::add_storage_use(
@@ -132,7 +135,7 @@ impl IncomingNamespace {
     /// terminates.
     fn add_directory_use(
         ns: &mut fsys::ComponentNamespace,
-        waiters: &mut Vec<FutureObj<()>>,
+        waiters: &mut Vec<BoxFuture<()>>,
         use_: &UseDecl,
         model: Model,
         abs_moniker: AbsoluteMoniker,
@@ -146,7 +149,7 @@ impl IncomingNamespace {
     /// terminates.
     fn add_storage_use(
         ns: &mut fsys::ComponentNamespace,
-        waiters: &mut Vec<FutureObj<()>>,
+        waiters: &mut Vec<BoxFuture<()>>,
         use_: &UseDecl,
         model: Model,
         abs_moniker: AbsoluteMoniker,
@@ -156,7 +159,7 @@ impl IncomingNamespace {
 
     fn add_directory_helper(
         ns: &mut fsys::ComponentNamespace,
-        waiters: &mut Vec<FutureObj<()>>,
+        waiters: &mut Vec<BoxFuture<()>>,
         use_: &UseDecl,
         model: Model,
         abs_moniker: AbsoluteMoniker,
@@ -167,8 +170,9 @@ impl IncomingNamespace {
                 UseStorageDecl::Data(p) => p.to_string(),
                 UseStorageDecl::Cache(p) => p.to_string(),
                 UseStorageDecl::Meta => {
-                    error!("meta is currently unsupported!");
-                    return Err(ModelError::unsupported("meta storage capabilities"));
+                    // Meta storage capabilities are handled in model::model, as these are capabilities
+                    // used by the framework itself and not given to components directly.
+                    return Ok(());
                 }
             },
             _ => {
@@ -183,21 +187,24 @@ impl IncomingNamespace {
             let server_end = fasync::Channel::from_channel(server_end.into_channel())
                 .expect("failed to convert server_end into async channel");
             let on_signal_fut = fasync::OnSignals::new(&server_end, zx::Signals::CHANNEL_READABLE);
-            await!(on_signal_fut).unwrap();
+            on_signal_fut.await.unwrap();
             // Route this capability to the right component
-            let res = await!(route_use_capability(
+            let flags = OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE;
+            let res = route_use_capability(
                 &model,
+                flags,
                 MODE_TYPE_DIRECTORY,
+                String::new(),
                 &use_,
                 abs_moniker.clone(),
-                server_end.into_zx_channel()
-            ));
+                server_end.into_zx_channel(),
+            ).await;
             if let Err(e) = res {
                 error!("failed to route storage for component {}: {:?}", abs_moniker, e);
             }
         };
 
-        waiters.push(FutureObj::new(Box::new(route_on_usage)));
+        waiters.push(Box::pin(route_on_usage));
         ns.paths.push(target_path);
         ns.directories.push(client_end);
         Ok(())
@@ -207,7 +214,7 @@ impl IncomingNamespace {
     /// the abort handles to the IncomingNamespace.
     fn start_directory_waiters(
         &mut self,
-        directory_waiters: Vec<FutureObj<'static, ()>>,
+        directory_waiters: Vec<BoxFuture<'static, ()>>,
     ) -> Result<(), ModelError> {
         for waiter in directory_waiters {
             let (abort_handle, abort_registration) = AbortHandle::new_pair();
@@ -216,10 +223,10 @@ impl IncomingNamespace {
 
             // The future for a directory waiter will only terminate once the directory channel is
             // first used, so we must start up a new task here to run the future instead of calling
-            // await on it directly. This is wrapped in an async move {await!();}` block to drop
+            // await on it directly. This is wrapped in an async move {.await;}` block to drop
             // the unused return value.
             fasync::spawn(async move {
-                let _ = await!(future);
+                let _ = future.await;
             });
         }
         Ok(())
@@ -234,28 +241,30 @@ impl IncomingNamespace {
         abs_moniker: AbsoluteMoniker,
     ) -> Result<(), ModelError> {
         let use_service = match use_ {
-            UseDecl::Service(s) => s,
+            UseDecl::LegacyService(s) => s,
             _ => {
                 panic!("not a service capability");
             }
         };
         let use_ = use_.clone();
         let route_open_fn = Box::new(
-            move |_flags: u32,
+            move |flags: u32,
                   mode: u32,
-                  _relative_path: String,
+                  relative_path: String,
                   server_end: ServerEnd<NodeMarker>| {
                 let use_ = use_.clone();
                 let model = model.clone();
                 let abs_moniker = abs_moniker.clone();
                 fasync::spawn(async move {
-                    let res = await!(route_use_capability(
+                    let res = route_use_capability(
                         &model,
+                        flags,
                         mode,
+                        relative_path,
                         &use_,
                         abs_moniker.clone(),
-                        server_end.into_channel()
-                    ));
+                        server_end.into_channel(),
+                    ).await;
                     if let Err(e) = res {
                         error!("failed to route service for component {}: {:?}", abs_moniker, e);
                     }
@@ -300,9 +309,9 @@ impl IncomingNamespace {
 
             // The future for a pseudo directory will never terminate, so we must start up a new
             // task here to run the future instead of calling await on it directly. This is
-            // wrapped in an async move {await!();}` block like to drop the unused return value.
+            // wrapped in an async move {.await;}` block like to drop the unused return value.
             fasync::spawn(async move {
-                let _ = await!(future);
+                let _ = future.await;
             });
 
             ns.paths.push(target_dir_path.as_str().to_string());

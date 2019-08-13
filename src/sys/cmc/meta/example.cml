@@ -8,6 +8,10 @@
       "service": "/fonts/CoolFonts",
       "as": "/svc/fuchsia.fonts.Provider",
     },
+    {
+      "legacy_service": "/fonts/LegacyCoolFonts",
+      "as": "/svc/fuchsia.fonts.LegacyProvider",
+    },
   ],
   "expose": [
     {
@@ -18,6 +22,15 @@
   "offer": [
     {
       "service": "/svc/fuchsia.logger.Log",
+      "from": "#logger",
+      "to": [
+        {
+          "dest": "#modular",
+        },
+      ],
+    },
+    {
+      "legacy_service": "/svc/fuchsia.logger.LegacyLog",
       "from": "#logger",
       "to": [
         {

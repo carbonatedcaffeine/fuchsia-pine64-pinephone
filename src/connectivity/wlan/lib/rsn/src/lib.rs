@@ -2,9 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(test)]
-#![feature(drain_filter)]
-#![deny(warnings)]
+#![cfg_attr(feature = "benchmarks", feature(test))]
 // Remove once Cipher and AKM *_bits() were replaced with *_len() calls.
 #![allow(deprecated)]
 
@@ -19,7 +17,6 @@ pub mod key;
 mod key_data;
 mod keywrap;
 pub mod rsna;
-mod state_machine;
 
 use crate::key::exchange::{
     self,
@@ -52,8 +49,8 @@ pub enum ProtectionInfo {
 }
 
 impl Supplicant {
-    /// WPA2-PSK CCMP-128 Supplicant which supports 4-Way- and Group-Key Handshakes.
-    pub fn new_wpa2psk_ccmp128(
+    /// WPA personal supplicant which supports 4-Way- and Group-Key Handshakes.
+    pub fn new_wpa_personal(
         nonce_rdr: Arc<nonce::NonceReader>,
         psk: psk::Psk,
         s_addr: [u8; 6],
@@ -232,7 +229,7 @@ pub enum Error {
     )]
     InvaidKeyDataLength(usize),
     #[fail(display = "invalid key data; error code: {:?}", _0)]
-    InvalidKeyData(nom::IError),
+    InvalidKeyData(nom::error::ErrorKind),
     #[fail(display = "unknown authentication method")]
     UnknownAuthenticationMethod,
     #[fail(display = "no AKM negotiated")]

@@ -9,6 +9,7 @@ source_set("fshost-registry") {
     "vnode.cc",
   ]
   public_deps = [
+    ":metrics",
     "$zx/system/fidl/fuchsia-fshost:c",
     "$zx/system/ulib/async-loop:async-loop-cpp",
     "$zx/system/ulib/fit",
@@ -28,14 +29,31 @@ source_set("fshost-registry") {
   ]
 }
 
+source_set("metrics") {
+  sources = [
+    "metrics.cc",
+    "metrics.h",
+  ]
+  public_deps = [
+    "$zx/system/ulib/cobalt-client:headers",
+    "$zx/system/ulib/fs/metrics:metrics-cobalt",
+  ]
+  deps = [
+    "$zx/system/ulib/cobalt-client",
+    "$zx/system/ulib/fs/metrics:metrics-cobalt",
+  ]
+}
+
 source_set("block-watcher") {
   sources = [
     "block-device.cc",
     "block-watcher.cc",
+    "encrypted-volume.cc",
     "filesystem-mounter.cc",
     "pkgfs-launcher.cc",
   ]
   public_deps = [
+    ":metrics",
     "$zx/system/fidl/fuchsia-fshost:c",
     "$zx/system/ulib/async-loop:async-loop-cpp",
     "$zx/system/ulib/fit",
@@ -74,8 +92,10 @@ executable("fshost") {
   deps = [
     ":block-watcher",
     ":fshost-registry",
-    "$zx/system/ulib/bootdata",
+    ":metrics",
+    "$zx/system/ulib/cobalt-client",
     "$zx/system/ulib/fs-management",
+    "$zx/system/ulib/hermetic-decompressor",
     "$zx/system/ulib/loader-service",
     "$zx/system/ulib/ramdevice-client",
   ]
@@ -88,6 +108,23 @@ test("fshost-test") {
   ]
   deps = [
     ":fshost-registry",
+    ":metrics",
+    "$zx/system/ulib/cobalt-client",
+    "$zx/system/ulib/cobalt-client:in-memory-logger",
+    "$zx/system/ulib/zxtest",
+  ]
+}
+
+test("fshost-metrics-test") {
+  test_group = "ddk"
+  sources = [
+    "metrics-test.cc",
+  ]
+  deps = [
+    ":metrics",
+    "$zx/system/ulib/cobalt-client:in-memory-logger",
+    "$zx/system/ulib/fdio",
+    "$zx/system/ulib/fs/metrics:metrics-cobalt",
     "$zx/system/ulib/zxtest",
   ]
 }
@@ -100,7 +137,10 @@ test("block-watcher-test") {
   ]
   deps = [
     ":block-watcher",
+    "$zx/system/ulib/cobalt-client:in-memory-logger",
     "$zx/system/ulib/fs-management",
+    "$zx/system/ulib/fs/metrics:metrics-cobalt",
+    "$zx/system/ulib/minfs",
     "$zx/system/ulib/ramdevice-client",
     "$zx/system/ulib/zxtest",
   ]

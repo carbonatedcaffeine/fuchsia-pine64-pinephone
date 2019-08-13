@@ -4,6 +4,8 @@
 
 #include "use_video_decoder.h"
 
+#include "in_stream_peeker.h"
+
 #include <garnet/lib/media/raw_video_writer/raw_video_writer.h>
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/fidl/cpp/clone.h>
@@ -11,6 +13,7 @@
 #include <lib/media/codec_impl/fourcc.h>
 #include <lib/media/test/codec_client.h>
 #include <lib/media/test/frame_sink.h>
+#include <lib/media/test/one_shot_event.h>
 #include <src/lib/fxl/arraysize.h>
 #include <src/lib/fxl/logging.h>
 #include <stdint.h>
@@ -18,11 +21,12 @@
 
 #include <thread>
 
+#include "lib/zx/time.h"
 #include "util.h"
 
 namespace {
 
-constexpr bool kRawVideoWriterEnabled = true;
+constexpr zx::duration kReadDeadlineDuration = zx::sec(30);
 
 // This example only has one stream_lifetime_ordinal which is 1.
 //
@@ -49,8 +53,7 @@ constexpr uint8_t kShortStartCodeArray[] = {0x00, 0x00, 0x01};
 // *start_code_size_bytes will have length of the start code in bytes when the
 // function returns true - unchanged otherwise.  Normally this would be 3 or 4,
 // but a 0 is possible if readable_bytes is 0.
-bool is_start_code(uint8_t* ptr, size_t readable_bytes,
-                   size_t* start_code_size_bytes_out) {
+bool is_start_code(uint8_t* ptr, size_t readable_bytes, size_t* start_code_size_bytes_out) {
   if (readable_bytes == 0) {
     *start_code_size_bytes_out = 0;
     return true;
@@ -75,8 +78,7 @@ bool is_start_code(uint8_t* ptr, size_t readable_bytes,
 uint8_t GetNalUnitType(const uint8_t* nal_unit) {
   // Also works with 4-byte startcodes.
   static const uint8_t start_code[3] = {0, 0, 1};
-  uint8_t* next_start = static_cast<uint8_t*>(memmem(nal_unit, 5, start_code,
-                                                     sizeof(start_code))) +
+  uint8_t* next_start = static_cast<uint8_t*>(memmem(nal_unit, 5, start_code, sizeof(start_code))) +
                         sizeof(start_code);
   return *next_start & 0xf;
 }
@@ -106,22 +108,30 @@ enum class Format {
 
 }  // namespace
 
-void QueueH264Frames(CodecClient* codec_client, uint8_t* input_bytes,
-                     size_t input_size) {
+// Payload data for bear.h264 is 00 00 00 01 start code before each NAL, with
+// SPS / PPS NALs and also frame NALs.  We deliver to Codec NAL-by-NAL without
+// the start code.
+//
+// Since the .h264 file has SPS + PPS NALs in addition to frame NALs, we don't
+// use oob_bytes for this stream.
+//
+// TODO(dustingreen): Determine for .mp4 or similar which don't have SPS / PPS
+// in band whether .mp4 provides ongoing OOB data, or just at the start, and
+// document in codec.fidl how that's to be handled.
+void QueueH264Frames(CodecClient* codec_client, InStreamPeeker* in_stream) {
   // We assign fake PTS values starting at 0 partly to verify that 0 is
   // treated as a valid PTS.
   uint64_t input_frame_pts_counter = 0;
   // Raw .h264 has start code 00 00 01 or 00 00 00 01 before each NAL, and
   // the start codes don't alias in the middle of NALs, so we just scan
   // for NALs and send them in to the decoder.
-  auto queue_access_unit = [&codec_client, &input_frame_pts_counter](
-                               uint8_t* bytes, size_t byte_count) {
+  auto queue_access_unit = [&codec_client, &input_frame_pts_counter](uint8_t* bytes,
+                                                                     size_t byte_count) {
     size_t bytes_so_far = 0;
     // printf("queuing offset: %ld byte_count: %zu\n", bytes -
     // input_bytes.get(), byte_count);
     while (bytes_so_far != byte_count) {
-      std::unique_ptr<fuchsia::media::Packet> packet =
-          codec_client->BlockingGetFreeInputPacket();
+      std::unique_ptr<fuchsia::media::Packet> packet = codec_client->BlockingGetFreeInputPacket();
 
       if (!packet->has_header()) {
         Exit("broken server sent packet without header");
@@ -134,8 +144,7 @@ void QueueH264Frames(CodecClient* codec_client, uint8_t* input_bytes,
       // For input we do buffer_index == packet_index.
       const CodecBuffer& buffer =
           codec_client->GetInputBufferByIndex(packet->header().packet_index());
-      size_t bytes_to_copy =
-          std::min(byte_count - bytes_so_far, buffer.size_bytes());
+      size_t bytes_to_copy = std::min(byte_count - bytes_so_far, buffer.size_bytes());
       packet->set_stream_lifetime_ordinal(kStreamLifetimeOrdinal);
       packet->set_start_offset(0);
       packet->set_valid_length_bytes(bytes_to_copy);
@@ -148,19 +157,32 @@ void QueueH264Frames(CodecClient* codec_client, uint8_t* input_bytes,
       }
 
       packet->set_start_access_unit(bytes_so_far == 0);
-      packet->set_known_end_access_unit(bytes_so_far + bytes_to_copy ==
-                                        byte_count);
+      packet->set_known_end_access_unit(bytes_so_far + bytes_to_copy == byte_count);
       memcpy(buffer.base(), bytes + bytes_so_far, bytes_to_copy);
       codec_client->QueueInputPacket(std::move(packet));
       bytes_so_far += bytes_to_copy;
     }
   };
-  for (size_t i = 0; i < input_size;) {
+
+  // Let caller-provided in_stream drive how far ahead we peek.  If it's not far
+  // enough to find a start code or the EOS, then we'll error out.
+  uint32_t max_peek_bytes = in_stream->max_peek_bytes();
+  while (true) {
     // Until clang-tidy correctly interprets Exit(), this "= 0" satisfies it.
     size_t start_code_size_bytes = 0;
-    if (!is_start_code(&input_bytes[i], input_size - i,
-                       &start_code_size_bytes)) {
-      if (i == 0) {
+    uint32_t actual_peek_bytes;
+    uint8_t* peek;
+    zx_status_t status = in_stream->PeekBytes(
+        max_peek_bytes, &actual_peek_bytes, &peek,
+        zx::deadline_after(kReadDeadlineDuration));
+    ZX_ASSERT(status == ZX_OK);
+    if (actual_peek_bytes == 0) {
+      // Out of input.  Not an error.  No more input AUs.
+      ZX_DEBUG_ASSERT(in_stream->eos_position_known() && in_stream->cursor_position() == in_stream->eos_position());
+      break;
+    }
+    if (!is_start_code(&peek[0], actual_peek_bytes, &start_code_size_bytes)) {
+      if (in_stream->cursor_position() == 0) {
         Exit(
             "Didn't find a start code at the start of the file, and this "
             "example doesn't scan forward (for now).");
@@ -170,29 +192,31 @@ void QueueH264Frames(CodecClient* codec_client, uint8_t* input_bytes,
             "NAL length not a start code.");
       }
     }
-    if (i + start_code_size_bytes == input_size) {
+    if (in_stream->eos_position_known() &&
+        in_stream->cursor_position() + start_code_size_bytes == in_stream->eos_position()) {
       Exit("Start code at end of file unexpected");
     }
-    size_t nal_start_offset = i + start_code_size_bytes;
-    // Scan for end of NAL.  The end of NAL can be because we're out of
+    size_t nal_start_offset = start_code_size_bytes;
+    // Scan for end of NAL.  The end of NAL can be because we're out of peeked
     // data, or because we hit another start code.
     size_t find_end_iter = nal_start_offset;
     size_t ignore_start_code_size_bytes;
-    while (find_end_iter <= input_size &&
-           !is_start_code(&input_bytes[find_end_iter],
-                          input_size - find_end_iter,
+    while (find_end_iter <= actual_peek_bytes &&
+           !is_start_code(&peek[find_end_iter],
+                          actual_peek_bytes - find_end_iter,
                           &ignore_start_code_size_bytes)) {
       find_end_iter++;
     }
-    FXL_DCHECK(find_end_iter <= input_size);
+    ZX_DEBUG_ASSERT(find_end_iter <= actual_peek_bytes);
     if (find_end_iter == nal_start_offset) {
       Exit("Two adjacent start codes unexpected.");
     }
-    FXL_DCHECK(find_end_iter > nal_start_offset);
+    ZX_DEBUG_ASSERT(find_end_iter > nal_start_offset);
     size_t nal_length = find_end_iter - nal_start_offset;
-    queue_access_unit(&input_bytes[i], start_code_size_bytes + nal_length);
+    queue_access_unit(&peek[0], start_code_size_bytes + nal_length);
+
     // start code + NAL payload
-    i += start_code_size_bytes + nal_length;
+    in_stream->TossPeekedBytes(start_code_size_bytes + nal_length);
   }
 
   // Send through QueueInputEndOfStream().
@@ -202,46 +226,93 @@ void QueueH264Frames(CodecClient* codec_client, uint8_t* input_bytes,
   codec_client->FlushEndOfStreamAndCloseStream(kStreamLifetimeOrdinal);
   // input thread done
 }
-void QueueVp9Frames(CodecClient* codec_client, uint8_t* input_bytes,
-                    size_t input_size) {
+
+void QueueVp9Frames(CodecClient* codec_client, InStreamPeeker* in_stream) {
   uint64_t input_frame_pts_counter = 0;
-  auto queue_access_unit = [&codec_client, &input_frame_pts_counter](
-                               uint8_t* bytes, size_t byte_count) {
+  auto queue_access_unit = [&codec_client, in_stream, &input_frame_pts_counter](
+      size_t byte_count) {
     std::unique_ptr<fuchsia::media::Packet> packet =
         codec_client->BlockingGetFreeInputPacket();
     ZX_ASSERT(packet->has_header());
     ZX_ASSERT(packet->header().has_packet_index());
-    // For input we do buffer_index == packet_index.
     const CodecBuffer& buffer =
-        codec_client->GetInputBufferByIndex(packet->header().packet_index());
+        codec_client->GetInputBufferByIndex(packet->buffer_index());
     // VP9 decoder doesn't yet support splitting access units into multiple
     // packets.
-    FXL_DCHECK(byte_count <= buffer.size_bytes());
+    ZX_ASSERT(byte_count <= buffer.size_bytes());
     packet->set_stream_lifetime_ordinal(kStreamLifetimeOrdinal);
     packet->set_start_offset(0);
     packet->set_valid_length_bytes(byte_count);
 
-    packet->set_timestamp_ish(input_frame_pts_counter++);
-
-    packet->set_start_access_unit(true);
-    packet->set_known_end_access_unit(true);
-    memcpy(buffer.base(), bytes, byte_count);
-    codec_client->QueueInputPacket(std::move(packet));
-  };
-  IvfHeader* header = (IvfHeader*)&input_bytes[0];
-  for (size_t i = header->header_length; i < input_size;) {
-    if (i + sizeof(IvfFrameHeader) > input_size)
-      Exit("Frame header truncated.");
-    IvfFrameHeader* frame_header = (IvfFrameHeader*)&input_bytes[i];
-    if (i + sizeof(IvfFrameHeader) + frame_header->size_bytes > input_size)
-      Exit("Frame truncated.");
     // We don't use frame_header->presentation_timestamp, because we want to
     // send through frame index in timestamp_ish field instead, for consistency
     // with .h264 files which don't have timestamps in them, and so tests can
     // assume frame index as timestamp_ish on output.
-    queue_access_unit(&input_bytes[i + sizeof(IvfFrameHeader)],
-                      frame_header->size_bytes);
-    i += sizeof(IvfFrameHeader) + frame_header->size_bytes;
+    packet->set_timestamp_ish(input_frame_pts_counter++);
+
+    packet->set_start_access_unit(true);
+    packet->set_known_end_access_unit(true);
+    uint32_t actual_bytes_read;
+    zx_status_t status = in_stream->ReadBytesComplete(
+        byte_count,
+        &actual_bytes_read,
+        buffer.base(),
+        zx::deadline_after(kReadDeadlineDuration));
+    ZX_ASSERT(status == ZX_OK);
+    if (actual_bytes_read < byte_count) {
+      Exit("Frame truncated.");
+    }
+    ZX_DEBUG_ASSERT(actual_bytes_read == byte_count);
+    codec_client->QueueInputPacket(std::move(packet));
+  };
+  IvfHeader header;
+  uint32_t actual_bytes_read;
+  zx_status_t status = in_stream->ReadBytesComplete(
+      sizeof(header),
+      &actual_bytes_read,
+      reinterpret_cast<uint8_t*>(&header),
+      zx::deadline_after(kReadDeadlineDuration));
+  // This could fail if a remote-source stream breaks.
+  ZX_ASSERT(status == ZX_OK);
+  // This could fail if the input is too short.
+  ZX_ASSERT(actual_bytes_read == sizeof(header));
+  size_t remaining_header_length =
+      header.header_length - sizeof(header);
+  // We're not interested in any remaining portion of the header, but we should
+  // skip the rest of the header, if any.
+  if (remaining_header_length) {
+    uint8_t toss_buffer[1024];
+    while (remaining_header_length != 0) {
+      uint32_t bytes_to_read = std::min(sizeof(toss_buffer), remaining_header_length);
+      uint32_t actual_bytes_read;
+      status = in_stream->ReadBytesComplete(
+        bytes_to_read,
+        &actual_bytes_read,
+        &toss_buffer[0],
+        zx::deadline_after(kReadDeadlineDuration));
+      ZX_ASSERT(status == ZX_OK);
+      ZX_ASSERT(actual_bytes_read == bytes_to_read);
+      remaining_header_length -= actual_bytes_read;
+    }
+  }
+  ZX_DEBUG_ASSERT(!remaining_header_length);
+  while (true) {
+    IvfFrameHeader frame_header;
+    status = in_stream->ReadBytesComplete(
+        sizeof(frame_header),
+        &actual_bytes_read,
+        reinterpret_cast<uint8_t*>(&frame_header),
+        zx::deadline_after(kReadDeadlineDuration));
+    ZX_ASSERT(status == ZX_OK);
+    if (actual_bytes_read == 0) {
+      // No more frames.  That's fine.
+      break;
+    }
+    if (actual_bytes_read < sizeof(frame_header)) {
+      Exit("Frame header truncated.");
+    }
+    ZX_DEBUG_ASSERT(actual_bytes_read == sizeof(frame_header));
+    queue_access_unit(frame_header.size_bytes);
   }
 
   // Send through QueueInputEndOfStream().
@@ -253,36 +324,19 @@ void QueueVp9Frames(CodecClient* codec_client, uint8_t* input_bytes,
 }
 
 static void use_video_decoder(
-    async::Loop* main_loop, fuchsia::mediacodec::CodecFactoryPtr codec_factory,
-    fidl::InterfaceHandle<fuchsia::sysmem::Allocator> sysmem, Format format,
-    const std::string& input_file, const std::string& output_file,
-    uint8_t md_out[SHA256_DIGEST_LENGTH],
-    std::vector<std::pair<bool, uint64_t>>* timestamps_out, uint32_t* fourcc,
-    FrameSink* frame_sink) {
-  VLOGF("use_h264_decoder()\n");
-  FXL_DCHECK(!timestamps_out || timestamps_out->empty());
-  memset(md_out, 0, SHA256_DIGEST_LENGTH);
-  async::Loop loop(&kAsyncLoopConfigNoAttachToThread);
-  loop.StartThread("use_video_decoder_loop");
-
-  // payload data for bear.h264 is 00 00 00 01 start code before each NAL, with
-  // SPS / PPS NALs and also frame NALs.  We deliver to Codec NAL-by-NAL without
-  // the start code, since the Codec packet
-  VLOGF("reading h264 file...\n");
-  size_t input_size;
-  std::unique_ptr<uint8_t[]> input_bytes =
-      read_whole_file(input_file.c_str(), &input_size);
-  VLOGF("done reading h264 file.\n");
-
-  // Since the .h264 file has SPS + PPS NALs in addition to frame NALs, we don't
-  // use oob_bytes for this stream.
-  //
-  // TODO(dustingreen): Determine for .mp4 or similar which don't have SPS / PPS
-  // in band whether .mp4 provides ongoing OOB data, or just at the start, and
-  // document in codec.fidl how that's to be handled.
+    async::Loop* fidl_loop,
+    thrd_t fidl_thread,
+    fuchsia::mediacodec::CodecFactoryPtr codec_factory,
+    fidl::InterfaceHandle<fuchsia::sysmem::Allocator> sysmem,
+    InStreamPeeker* in_stream, Format format,
+    uint64_t min_output_buffer_size,
+    FrameSink* frame_sink,
+    EmitFrame emit_frame) {
+  VLOGF("use_video_decoder()\n");
 
   VLOGF("before CodecClient::CodecClient()...\n");
-  CodecClient codec_client(&loop, std::move(sysmem));
+  CodecClient codec_client(fidl_loop, fidl_thread, std::move(sysmem));
+  codec_client.SetMinOutputBufferSize(min_output_buffer_size);
 
   const char* mime_type;
   switch (format) {
@@ -296,7 +350,7 @@ static void use_video_decoder(
   }
 
   async::PostTask(
-      main_loop->dispatcher(),
+      fidl_loop->dispatcher(),
       [&codec_factory, codec_client_request = codec_client.GetTheRequestOnce(),
        mime_type]() mutable {
         VLOGF("before codec_factory->CreateDecoder() (async)\n");
@@ -324,39 +378,27 @@ static void use_video_decoder(
   // Unbind() is only safe to call on the interfaces's dispatcher thread.  We
   // also want to block the current thread until this is done, to avoid
   // codec_factory potentially disappearing before this posted work finishes.
-  std::mutex unbind_mutex;
-  std::condition_variable unbind_done_condition;
-  bool unbind_done = false;
+  OneShotEvent unbind_done_event;
   async::PostTask(
-      main_loop->dispatcher(),
-      [&codec_factory, &unbind_mutex, &unbind_done, &unbind_done_condition] {
+      fidl_loop->dispatcher(),
+      [&codec_factory, &unbind_done_event] {
         codec_factory.Unbind();
-        {  // scope lock
-          std::lock_guard<std::mutex> lock(unbind_mutex);
-          unbind_done = true;
-        }  // ~lock
-        unbind_done_condition.notify_all();
-        // All of codec_factory, unbind_mutex, unbind_done,
-        // unbind_done_condition are potentially gone by this point.
+        unbind_done_event.Signal();
+        // codec_factory and unbind_done_event are potentially gone by this
+        // point.
       });
-  {  // scope lock
-    std::unique_lock<std::mutex> lock(unbind_mutex);
-    while (!unbind_done) {
-      unbind_done_condition.wait(lock);
-    }
-  }  // ~lock
-  FXL_DCHECK(unbind_done);
+  unbind_done_event.Wait();
 
   VLOGF("before starting in_thread...\n");
   std::unique_ptr<std::thread> in_thread = std::make_unique<std::thread>(
-      [&codec_client, &input_bytes, input_size, format]() {
+      [&codec_client, in_stream, format]() {
         switch (format) {
           case Format::kH264:
-            QueueH264Frames(&codec_client, input_bytes.get(), input_size);
+            QueueH264Frames(&codec_client, in_stream);
             break;
 
           case Format::kVp9:
-            QueueVp9Frames(&codec_client, input_bytes.get(), input_size);
+            QueueVp9Frames(&codec_client, in_stream);
             break;
         }
       });
@@ -366,29 +408,17 @@ static void use_video_decoder(
   // codec_client outlives the thread (and for separate reasons below, all the
   // frame_sink activity started by out_thread).
   std::unique_ptr<std::thread> out_thread = std::make_unique<
-      std::thread>([main_loop, &codec_client, output_file, md_out,
-                    &timestamps_out, &fourcc, frame_sink]() {
-    // The codec_client lock_ is not held for long durations in here, which is
-    // good since we're using this thread to do things like write to an output
-    // file.
-    media::RawVideoWriter<kRawVideoWriterEnabled> raw_video_writer(
-        output_file.c_str());
-    SHA256_CTX sha256_ctx;
-    SHA256_Init(&sha256_ctx);
+      std::thread>([fidl_loop, &codec_client, frame_sink, &emit_frame]() {
     // We allow the server to send multiple output constraint updates if it
     // wants; see implementation of BlockingGetEmittedOutput() which will hide
     // multiple constraint updates before the first packet from this code.  In
     // contrast we assert if the server sends multiple format updates with no
     // packets in between since that's not compliant with the protocol rules.
-    //
-    // In this example, we only deal with one output format once we start seeing
-    // stream output data show up, since our raw_video_writer is only really
-    // meant to store one format per file.
-    std::shared_ptr<const fuchsia::media::StreamOutputFormat> stream_format;
+    std::shared_ptr<const fuchsia::media::StreamOutputFormat>
+        prev_stream_format;
     const fuchsia::media::VideoUncompressedFormat* raw = nullptr;
     while (true) {
-      std::unique_ptr<CodecOutput> output =
-          codec_client.BlockingGetEmittedOutput();
+      std::unique_ptr<CodecOutput> output = codec_client.BlockingGetEmittedOutput();
       if (output->stream_lifetime_ordinal() != kStreamLifetimeOrdinal) {
         Exit(
             "server emitted a stream_lifetime_ordinal that client didn't set "
@@ -409,17 +439,15 @@ static void use_video_decoder(
 
       // cleanup can run on any thread, and codec_client.RecycleOutputPacket()
       // is ok with that.  In addition, cleanup can run after codec_client is
-      // gone, since we don't block return from use_h264_decoder() on Scenic
+      // gone, since we don't block return from use_video_decoder() on Scenic
       // actually freeing up all previously-queued frames.
       auto cleanup =
-          fit::defer([&codec_client,
-                      packet_header = fidl::Clone(packet.header())]() mutable {
+          fit::defer([&codec_client, packet_header = fidl::Clone(packet.header())]() mutable {
             // Using an auto call for this helps avoid losing track of the
             // output_buffer.
             codec_client.RecycleOutputPacket(std::move(packet_header));
           });
-      std::shared_ptr<const fuchsia::media::StreamOutputFormat> format =
-          output->format();
+      std::shared_ptr<const fuchsia::media::StreamOutputFormat> format = output->format();
 
       if (!packet.has_buffer_index()) {
         // The server should not generate any empty packets.
@@ -432,22 +460,17 @@ static void use_video_decoder(
           codec_client.GetOutputBufferByIndex(packet.buffer_index());
 
       ZX_ASSERT(
-          !stream_format ||
-          (stream_format->has_format_details() &&
-           stream_format->format_details().format_details_version_ordinal()));
-      if (stream_format &&
-          (!format->has_format_details() ||
-           !format->format_details().has_format_details_version_ordinal() ||
-           format->format_details().format_details_version_ordinal() !=
-               stream_format->format_details()
-                   .format_details_version_ordinal())) {
-        Exit(
-            "codec server unexpectedly changed output format mid-stream - "
-            "unexpected for this stream");
+          !prev_stream_format ||
+          (prev_stream_format->has_format_details() &&
+           prev_stream_format->format_details().format_details_version_ordinal()));
+      if (!format->has_format_details()) {
+        Exit("!format->has_format_details()");
+      }
+      if (!format->format_details().has_format_details_version_ordinal()) {
+        Exit("!format->format_details().has_format_details_version_ordinal()");
       }
 
-      if (!packet.has_valid_length_bytes() ||
-          packet.valid_length_bytes() == 0) {
+      if (!packet.has_valid_length_bytes() || packet.valid_length_bytes() == 0) {
         // The server should not generate any empty packets.
         Exit("broken server sent empty packet");
       }
@@ -459,18 +482,17 @@ static void use_video_decoder(
 
       // We have a non-empty packet of the stream.
 
-      if (!stream_format) {
+      if (!prev_stream_format || prev_stream_format.get() != format.get()) {
         // Every output has a format.  This happens exactly once.
-        stream_format = format;
+        prev_stream_format = format;
 
         ZX_ASSERT(format->format_details().has_domain());
 
-        if (!stream_format->has_format_details()) {
+        if (!format->has_format_details()) {
           Exit("!format_details");
         }
 
-        const fuchsia::media::FormatDetails& format_details =
-            stream_format->format_details();
+        const fuchsia::media::FormatDetails& format_details = format->format_details();
         if (!format_details.has_domain()) {
           Exit("!format.domain");
         }
@@ -478,37 +500,29 @@ static void use_video_decoder(
         if (!format_details.domain().is_video()) {
           Exit("!format.domain.is_video()");
         }
-        const fuchsia::media::VideoFormat& video_format =
-            format_details.domain().video();
+        const fuchsia::media::VideoFormat& video_format = format_details.domain().video();
         if (!video_format.is_uncompressed()) {
           Exit("!video.is_uncompressed()");
         }
 
         raw = &video_format.uncompressed();
-        if (fourcc) {
-          *fourcc = raw->fourcc;
-        }
         switch (raw->fourcc) {
           case make_fourcc('N', 'V', '1', '2'): {
-            size_t y_size =
-                raw->primary_height_pixels * raw->primary_line_stride_bytes;
+            size_t y_size = raw->primary_height_pixels * raw->primary_line_stride_bytes;
             if (raw->secondary_start_offset < y_size) {
               Exit("raw.secondary_start_offset < y_size");
             }
             // NV12 requires UV be same line stride as Y.
-            size_t total_size =
-                raw->secondary_start_offset +
-                raw->primary_height_pixels / 2 * raw->primary_line_stride_bytes;
+            size_t total_size = raw->secondary_start_offset +
+                                raw->primary_height_pixels / 2 * raw->primary_line_stride_bytes;
             if (packet.valid_length_bytes() < total_size) {
               Exit("packet.valid_length_bytes < total_size");
             }
             break;
           }
           case make_fourcc('Y', 'V', '1', '2'): {
-            size_t y_size =
-                raw->primary_height_pixels * raw->primary_line_stride_bytes;
-            size_t v_size =
-                raw->secondary_height_pixels * raw->secondary_line_stride_bytes;
+            size_t y_size = raw->primary_height_pixels * raw->primary_line_stride_bytes;
+            size_t v_size = raw->secondary_height_pixels * raw->secondary_line_stride_bytes;
             size_t u_size = v_size;
             size_t total_size = y_size + u_size + v_size;
 
@@ -529,98 +543,93 @@ static void use_video_decoder(
             Exit("fourcc != NV12 && fourcc != YV12");
         }
       }
-      if (!frame_sink) {
-        SHA256_Update_VideoParameters(&sha256_ctx, *raw);
-      }
 
-      if (!output_file.empty()) {
-        switch (raw->fourcc) {
-          case make_fourcc('N', 'V', '1', '2'):
-            raw_video_writer.WriteNv12(
-                raw->primary_width_pixels, raw->primary_height_pixels,
-                raw->primary_line_stride_bytes,
-                buffer.base() + packet.start_offset() +
-                    raw->primary_start_offset,
-                raw->secondary_start_offset - raw->primary_start_offset);
-            break;
-          default:
-            Exit("write to file only implemented for NV12");
-        }
-      }
-
-      // PTS values are separately verified by use_h264_decoder_test since it'll
-      // be nice to know separately if they're broken and how vs. frame format
-      // and frame pixel data being broken, especially if there's just one
-      // broken run that can't easily be reproduced.
-      if (timestamps_out) {
-        timestamps_out->emplace_back(std::make_pair(
-            packet.has_timestamp_ish(),
-            packet.has_timestamp_ish() ? packet.timestamp_ish() : 0));
-      }
-
-      if (!frame_sink) {
+      if (emit_frame) {
+        // i420_bytes is in I420 format - Y plane first, then U plane, then V
+        // plane.  The U and V planes are half size in both directions.  Each
+        // plane is 8 bits per sample.
+        uint32_t i420_stride = fbl::round_up(raw->primary_display_width_pixels, 2u);
+        // When width is odd, we want a chroma sample for the right-most luma. 
+        uint32_t uv_width = (raw->primary_display_width_pixels + 1) / 2;
+        // When height is odd, we want a chroma sample for the bottom-most luma.
+        uint32_t uv_height = (raw->primary_display_height_pixels + 1) / 2;
+        uint32_t uv_stride = i420_stride / 2;
+        std::unique_ptr<uint8_t[]> i420_bytes = std::make_unique<uint8_t[]>(
+            i420_stride * raw->primary_display_height_pixels + uv_stride * uv_height * 2);
         switch (raw->fourcc) {
           case make_fourcc('N', 'V', '1', '2'): {
             // Y
             uint8_t* y_src = buffer.base() + packet.start_offset() +
                              raw->primary_start_offset;
-            for (uint32_t y_iter = 0; y_iter < raw->primary_height_pixels;
+            uint8_t* y_dst = i420_bytes.get();
+            for (uint32_t y_iter = 0; y_iter < raw->primary_display_height_pixels;
                  y_iter++) {
-              SHA256_Update(&sha256_ctx, y_src, raw->primary_width_pixels);
+              memcpy(y_dst, y_src, raw->primary_display_width_pixels);
               y_src += raw->primary_line_stride_bytes;
+              y_dst += i420_stride;
             }
             // UV
             uint8_t* uv_src = buffer.base() + packet.start_offset() +
                               raw->secondary_start_offset;
-            for (uint32_t uv_iter = 0; uv_iter < raw->primary_height_pixels / 2;
-                 uv_iter++) {
-              // NV12 requires eacy UV line be same width as a Y line, and
-              // same stride as a Y line.
-              SHA256_Update(&sha256_ctx, uv_src, raw->primary_width_pixels);
+            uint8_t* u_dst_line = y_dst;
+            uint8_t* v_dst_line = u_dst_line + uv_stride * uv_height;
+            for (uint32_t uv_iter = 0; uv_iter < uv_height; uv_iter++) {
+              uint8_t* u_dst = u_dst_line;
+              uint8_t* v_dst = v_dst_line;
+              for (uint32_t uv_line_iter = 0; uv_line_iter < uv_width; ++uv_line_iter) {
+                *u_dst++ = uv_src[uv_line_iter * 2];
+                *v_dst++ = uv_src[uv_line_iter * 2 + 1];
+              }
               uv_src += raw->primary_line_stride_bytes;
+              u_dst_line += uv_stride;
+              v_dst_line += uv_stride;
             }
             break;
           }
           case make_fourcc('Y', 'V', '1', '2'): {
             // Y
-            SHA256_Update_VideoPlane(
-                &sha256_ctx,
-                /*start=*/buffer.base() + packet.start_offset() +
-                    raw->primary_start_offset,
-                raw->primary_width_pixels, raw->primary_line_stride_bytes,
-                raw->primary_height_pixels);
-
-            // V
-            SHA256_Update_VideoPlane(
-                &sha256_ctx,
-                /*start=*/buffer.base() + packet.start_offset() +
-                    raw->secondary_start_offset,
-                raw->secondary_width_pixels, raw->secondary_line_stride_bytes,
-                raw->secondary_height_pixels);
-
-            // U
-            SHA256_Update_VideoPlane(
-                &sha256_ctx,
-                /*start=*/buffer.base() + packet.start_offset() +
-                    raw->tertiary_start_offset,
-                raw->secondary_width_pixels, raw->secondary_line_stride_bytes,
-                raw->secondary_height_pixels);
-
+            uint8_t* y_src = buffer.base() + packet.start_offset() + raw->primary_start_offset;
+            uint8_t* y_dst = i420_bytes.get();
+            for (uint32_t y_iter = 0; y_iter < raw->primary_display_height_pixels; y_iter++) {
+              memcpy(y_dst, y_src, raw->primary_display_width_pixels);
+              y_src += raw->primary_line_stride_bytes;
+              y_dst += i420_stride;
+            }
+            // UV
+            uint8_t* v_src = buffer.base() + packet.start_offset() + raw->primary_start_offset +
+                raw->primary_line_stride_bytes * raw->primary_height_pixels;
+            uint8_t* u_src = v_src + (raw->primary_line_stride_bytes / 2) * (raw->primary_height_pixels / 2);
+            uint8_t* u_dst = y_dst;
+            uint8_t* v_dst = u_dst + uv_stride * uv_height;
+            for (uint32_t uv_iter = 0; uv_iter < uv_height; uv_iter++) {
+              memcpy(u_dst, u_src, uv_width);
+              memcpy(v_dst, v_src, uv_width);
+              u_dst += uv_stride;
+              v_dst += uv_stride;
+              u_src += raw->primary_line_stride_bytes / 2;
+              v_src += raw->primary_line_stride_bytes / 2;
+            }
             break;
           }
           default:
-            Exit("SHA frame hashing only implemented for NV12 and YV12");
+            Exit("Feeding EmitFrame not yet implemented for fourcc: %s", fourcc_to_string(raw->fourcc).c_str());
         }
+        emit_frame(
+          i420_bytes.get(),
+          raw->primary_display_width_pixels,
+          raw->primary_display_height_pixels,
+          i420_stride,
+          packet.has_timestamp_ish(),
+          packet.has_timestamp_ish() ? packet.timestamp_ish() : 0);
       }
 
       if (frame_sink) {
         async::PostTask(
-            main_loop->dispatcher(),
+            fidl_loop->dispatcher(),
             [frame_sink,
              image_id = packet.header().packet_index() + kFirstValidImageId,
              &vmo = buffer.vmo(),
-             vmo_offset = buffer.vmo_offset() + packet.start_offset() +
-                          raw->primary_start_offset,
+             vmo_offset = buffer.vmo_offset() + packet.start_offset() + raw->primary_start_offset,
              format, cleanup = std::move(cleanup)]() mutable {
               frame_sink->PutFrame(image_id, vmo, vmo_offset, format,
                                    [cleanup = std::move(cleanup)] {
@@ -637,9 +646,7 @@ static void use_video_decoder(
       // If we didn't std::move(cleanup) before here, then ~cleanup runs here.
     }
   end_of_output:;
-    if (!SHA256_Final(md_out, &sha256_ctx)) {
-      assert(false);
-    }
+    VLOGF("output thread done\n");
     // output thread done
     // ~raw_video_writer
   });
@@ -671,30 +678,11 @@ static void use_video_decoder(
   //     by the time use_h264_decoder() returns, given use_h264_decoder()'s role
   //     as an overall sequencer.
   if (frame_sink) {
-    // TODO(dustingreen): Make this less hacky - currently we sleep 10 seconds
-    // to give Scenic a chance to display anything.  Despite this, we don't see
-    // many frames displayed - TBD why not (it's not the cost of SW-based
-    // YUV-to-RGB conversion, since removing most of that cost doesn't change
-    // # of frames displayed).
-    FXL_LOG(INFO) << "sleeping 10 seconds...";
-    zx_nanosleep(zx_deadline_after(ZX_SEC(10)));
-    FXL_LOG(INFO) << "done sleeping.";
-
-    std::mutex frames_done_lock;
-    bool frames_done = false;
-    std::condition_variable frames_done_condition;
-    fit::closure on_frames_returned = [&frames_done_lock, &frames_done,
-                                       &frames_done_condition] {
-      {  // scope lock
-        std::lock_guard<std::mutex> lock(frames_done_lock);
-        frames_done = true;
-        // The notify while still under the lock prevents any possibility of
-        // frames_done_condition being gone too soon.
-        frames_done_condition.notify_all();
-        // Don't touch the captures beyond this point.
-      }  // ~lock
+    OneShotEvent frames_done_event;
+    fit::closure on_frames_returned = [&frames_done_event] {
+      frames_done_event.Signal();
     };
-    async::PostTask(main_loop->dispatcher(),
+    async::PostTask(fidl_loop->dispatcher(),
                     [frame_sink, on_frames_returned =
                                      std::move(on_frames_returned)]() mutable {
                       frame_sink->PutEndOfStreamThenWaitForFramesReturnedAsync(
@@ -703,12 +691,7 @@ static void use_video_decoder(
     // The just-posted wait will set frames_done using the main_loop_'s thread,
     // which is not this thread.
     FXL_LOG(INFO) << "waiting for all frames to be returned from Scenic...";
-    {  // scope lock
-      std::unique_lock<std::mutex> lock(frames_done_lock);
-      while (!frames_done) {
-        frames_done_condition.wait(lock);
-      }
-    }  // ~lock
+    frames_done_event.Wait(zx::deadline_after(zx::sec(30)));
     FXL_LOG(INFO) << "all frames have been returned from Scenic";
     // Now we know that there are zero frames in frame_sink, including zero
     // frame cleanup(s) in-flight (in the sense of a pending/running cleanup
@@ -716,82 +699,39 @@ static void use_video_decoder(
     // via codec_client can still be in flight.  See below.)
   }
 
-  // Because CodecClient posted work to the loop which captured the CodecClient
-  // as "this", it's important that we ensure that all such work is done trying
-  // to run before we delete CodecClient.  We need to know that the work posted
-  // using PostSerial() won't be trying to touch the channel or pointers that
-  // are owned by CodecClient before we close the channel or destruct
-  // CodecClient (which happens before ~loop).
-  //
-  // We call loop.Quit();loop.JoinThreads(); before codec_client.Stop() because
-  // there can be at least a RecycleOutputPacket() still working its way toward
-  // the Codec (via the loop) at this point, so doing
-  // loop.Quit();loop.JoinThreads(); first avoids potential FIDL message send
-  // errors.  We're done decoding so we don't care whether any remaining queued
-  // messages toward the codec actually reach the codec.
-  //
-  // We use loop.Quit();loop.JoinThreads(); instead of loop.Shutdown() because
-  // we don't want the Shutdown() side-effect of failing the channel bindings.
-  // The Shutdown() will happen later.
-  //
-  // By ensuring that the loop is done running code before closing the channel
-  // (or loop.Shutdown()), we can close the channel cleanly and avoid mitigation
-  // of expected normal channel closure (or loop.Shutdown()) in any code that
-  // runs on the loop.  This way, unexpected channel failure is the only case to
-  // worry about.
-  VLOGF("before loop.Quit()\n");
-  loop.Quit();
-  VLOGF("before loop.JoinThreads()...\n");
-  loop.JoinThreads();
-  VLOGF("after loop.JoinThreads()\n");
-
   // Close the channels explicitly (just so we can more easily print messages
   // before and after vs. ~codec_client).
   VLOGF("before codec_client stop...\n");
   codec_client.Stop();
   VLOGF("after codec_client stop.\n");
 
-  // loop.Shutdown() the rest of the way explicitly (just so we can more easily
-  // print messages before and after vs. ~loop).  If we did this before
-  // codec_client.Stop() it would cause the channel bindings to fail because
-  // async waits are failed as cancelled during Shutdown().
-  VLOGF("before loop.Shutdown()...\n");
-  loop.Shutdown();
-  VLOGF("after loop.Shutdown()\n");
-
-  // The FIDL loop isn't running any more and the channels are closed.  There
-  // are no other threads left that were started by this function.  We can just
-  // delete stuff now.
-
   // success
   // ~codec_client
-  // ~loop
-  // ~codec_factory
   return;
 }
 
-void use_h264_decoder(async::Loop* main_loop,
+void use_h264_decoder(async::Loop* fidl_loop,
+                      thrd_t fidl_thread,
                       fuchsia::mediacodec::CodecFactoryPtr codec_factory,
                       fidl::InterfaceHandle<fuchsia::sysmem::Allocator> sysmem,
-                      const std::string& input_file,
-                      const std::string& output_file,
-                      uint8_t md_out[SHA256_DIGEST_LENGTH],
-                      std::vector<std::pair<bool, uint64_t>>* timestamps_out,
-                      uint32_t* fourcc, FrameSink* frame_sink) {
-  use_video_decoder(main_loop, std::move(codec_factory), std::move(sysmem),
-                    Format::kH264, input_file, output_file, md_out,
-                    timestamps_out, fourcc, frame_sink);
+                      InStreamPeeker* in_stream,
+                      uint64_t min_output_buffer_size,
+                      FrameSink* frame_sink,
+                      EmitFrame emit_frame) {
+  use_video_decoder(fidl_loop, fidl_thread, std::move(codec_factory), std::move(sysmem),
+                    in_stream, Format::kH264, min_output_buffer_size,
+                    frame_sink, std::move(emit_frame));
 }
 
-void use_vp9_decoder(async::Loop* main_loop,
+void use_vp9_decoder(async::Loop* fidl_loop,
+                     thrd_t fidl_thread,
                      fuchsia::mediacodec::CodecFactoryPtr codec_factory,
                      fidl::InterfaceHandle<fuchsia::sysmem::Allocator> sysmem,
-                     const std::string& input_file,
-                     const std::string& output_file,
-                     uint8_t md_out[SHA256_DIGEST_LENGTH],
-                     std::vector<std::pair<bool, uint64_t>>* timestamps_out,
-                     uint32_t* fourcc, FrameSink* frame_sink) {
-  use_video_decoder(main_loop, std::move(codec_factory), std::move(sysmem),
-                    Format::kVp9, input_file, output_file, md_out,
-                    timestamps_out, fourcc, frame_sink);
+                     InStreamPeeker* in_stream,
+                     uint64_t min_output_buffer_size,
+                     FrameSink* frame_sink,
+                     EmitFrame emit_frame) {
+  use_video_decoder(fidl_loop, fidl_thread, std::move(codec_factory), std::move(sysmem),
+                    in_stream, Format::kVp9, min_output_buffer_size,
+                    frame_sink, std::move(emit_frame));
 }

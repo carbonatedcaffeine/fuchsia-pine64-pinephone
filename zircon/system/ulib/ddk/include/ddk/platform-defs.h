@@ -34,7 +34,7 @@ __BEGIN_CDECLS
 #define PDEV_DID_HID_BUTTONS        19  // HID Buttons
 #define PDEV_DID_MUSB_PERIPHERAL    20  // MUSB in peripheral role
 #define PDEV_DID_MUSB_HOST          21  // MUSB in host role
-#define PDEV_DID_DUMMY_DISPLAY      22  // Dummy display
+#define PDEV_DID_FAKE_DISPLAY       22  // Dummy display
 #define PDEV_DID_FOCALTOUCH         23  // FocalTech touch device
 #define PDEV_DID_LITE_ON_ALS        24  // Lite-On ambient light sensor
 #define PDEV_DID_BOSCH_BMA253       25  // Bosch BMA253 acceleration sensor
@@ -45,6 +45,9 @@ __BEGIN_CDECLS
 #define PDEV_DID_DW_DSI             30  // Designware DSI
 #define PDEV_DID_USB_XHCI_COMPOSITE 31  // XHCI USB Controller, as a composite device
 #define PDEV_DID_SSD1306            32  // Oled Display
+#define PDEV_DID_CAMERA_CONTROLLER  33  // Camera Controller
+#define PDEV_DID_CADENCE_HPNFC      34  // Cadence NAND Flash controller
+#define PDEV_DID_OT_RADIO           35  // OpenThread radio
 
 // QEMU emulator
 #define PDEV_VID_QEMU               1
@@ -183,10 +186,15 @@ __BEGIN_CDECLS
 // Texas Instruments
 #define PDEV_VID_TI                 16
 #define PDEV_PID_TI_LP8556          1
+#define PDEV_PID_TI_LP5018          2
+#define PDEV_PID_TI_LP5024          3
+#define PDEV_PID_TI_LP5030          4
+#define PDEV_PID_TI_LP5036          5
 #define PDEV_DID_TI_BACKLIGHT       1
 #define PDEV_DID_TI_TAS5805         2
 #define PDEV_DID_TI_TAS5782         3
 #define PDEV_DID_TI_TAS2770         4
+#define PDEV_DID_TI_LED             5
 
 // Test
 #define PDEV_VID_TEST               17
@@ -215,17 +223,25 @@ __BEGIN_CDECLS
 #define PDEV_DID_TEST_AUDIO_CODEC   12
 #define PDEV_DID_TEST_DDKFIDL       13
 #define PDEV_DID_TEST_VCAM_FACTORY  14
+#define PDEV_DID_TEST_COMPOSITE_1   15
+#define PDEV_DID_TEST_COMPOSITE_2   16
+#define PDEV_DID_TEST_GDC           17
 
 // ARM
 #define PDEV_VID_ARM                18
 #define PDEV_PID_ISP                1
 #define PDEV_PID_GDC                2
+// TODO(CAM-138): This is a temporary hack. Remove when new driver validated.
+#define PDEV_PID_ISP_BARE_METAL     3
 #define PDEV_DID_ARM_MALI_IV009     1
 #define PDEV_DID_ARM_MALI_IV010     2
 
 // Qualcomm
 #define PDEV_VID_QUALCOMM           19
 #define PDEV_PID_QUALCOMM_MSM8X53    1
+#define PDEV_PID_QUALCOMM_MSM8998    2
+#define PDEV_PID_QUALCOMM_MSM8150    3
+
 #define PDEV_DID_QUALCOMM_GPIO       1
 #define PDEV_DID_QUALCOMM_PIL        2
 #define PDEV_DID_QUALCOMM_SDC1       3
@@ -244,13 +260,12 @@ __BEGIN_CDECLS
 // Maxim
 #define PDEV_VID_MAXIM              21
 #define PDEV_DID_MAXIM_MAX98373      1
-// clang-format on
 
 // Nordic
-#define PDEV_VID_NORDIC             21
+#define PDEV_VID_NORDIC             22
 #define PDEV_PID_NORDIC_NRF52840     1
 #define PDEV_DID_NORDIC_THREAD       1
-
+// clang-format on
 
 __END_CDECLS
 

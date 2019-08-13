@@ -9,9 +9,8 @@
 #include <unordered_set>
 
 #include "src/connectivity/bluetooth/core/bt-host/common/log.h"
-#include "src/connectivity/bluetooth/core/bt-host/common/uuid.h"
-#include "src/connectivity/bluetooth/core/bt-host/gap/advertising_data.h"
 #include "src/connectivity/bluetooth/core/bt-host/gap/discovery_filter.h"
+#include "src/lib/fxl/strings/split_string.h"
 #include "src/lib/fxl/strings/string_number_conversions.h"
 
 using fuchsia::bluetooth::Bool;
@@ -21,6 +20,7 @@ using fuchsia::bluetooth::Int8;
 using fuchsia::bluetooth::Status;
 
 namespace fble = fuchsia::bluetooth::le;
+namespace fbt = fuchsia::bluetooth;
 namespace fctrl = fuchsia::bluetooth::control;
 namespace fhost = fuchsia::bluetooth::host;
 
@@ -45,8 +45,7 @@ fctrl::TechnologyType TechnologyTypeToFidl(bt::gap::TechnologyType type) {
   return fctrl::TechnologyType::DUAL_MODE;
 }
 
-bt::sm::SecurityProperties SecurityPropsFromFidl(
-    const fctrl::SecurityProperties& sec_prop) {
+bt::sm::SecurityProperties SecurityPropsFromFidl(const fctrl::SecurityProperties& sec_prop) {
   auto level = bt::sm::SecurityLevel::kEncrypted;
   if (sec_prop.authenticated) {
     level = bt::sm::SecurityLevel::kAuthenticated;
@@ -55,8 +54,7 @@ bt::sm::SecurityProperties SecurityPropsFromFidl(
                                     sec_prop.secure_connections);
 }
 
-fctrl::SecurityProperties SecurityPropsToFidl(
-    const bt::sm::SecurityProperties& sec_prop) {
+fctrl::SecurityProperties SecurityPropsToFidl(const bt::sm::SecurityProperties& sec_prop) {
   fctrl::SecurityProperties result;
   result.authenticated = sec_prop.authenticated();
   result.secure_connections = sec_prop.secure_connections();
@@ -64,8 +62,7 @@ fctrl::SecurityProperties SecurityPropsToFidl(
   return result;
 }
 
-bt::DeviceAddress::Type BondingAddrTypeFromFidl(
-    const fctrl::AddressType& type) {
+bt::DeviceAddress::Type BondingAddrTypeFromFidl(const fctrl::AddressType& type) {
   switch (type) {
     case fctrl::AddressType::LE_RANDOM:
       return bt::DeviceAddress::Type::kLERandom;
@@ -91,8 +88,7 @@ fctrl::AddressType BondingAddrTypeToFidl(bt::DeviceAddress::Type type) {
     default:
       // Anonymous is not a valid address type to use for bonding, so we treat
       // that as a programming error.
-      ZX_PANIC("invalid address type for bonding: %u",
-               static_cast<unsigned int>(type));
+      ZX_PANIC("invalid address type for bonding: %u", static_cast<unsigned int>(type));
       break;
   }
   return fctrl::AddressType::BREDR;
@@ -131,11 +127,31 @@ fctrl::RemoteKey KeyToFidl(const bt::sm::Key& key) {
 
 std::optional<bt::PeerId> PeerIdFromString(const std::string& id) {
   uint64_t value;
-  if (!fxl::StringToNumberWithError<decltype(value)>(id, &value,
-                                                     fxl::Base::k16)) {
+  if (!fxl::StringToNumberWithError<decltype(value)>(id, &value, fxl::Base::k16)) {
     return std::nullopt;
   }
   return bt::PeerId(value);
+}
+
+std::optional<bt::DeviceAddressBytes> AddressBytesFromString(const std::string& addr) {
+  if (addr.size() != 17)
+    return std::nullopt;
+
+  auto split = fxl::SplitString(fxl::StringView(addr.data(), addr.size()), ":",
+                                fxl::kKeepWhitespace, fxl::kSplitWantAll);
+  if (split.size() != 6)
+    return std::nullopt;
+
+  std::array<uint8_t, 6> bytes;
+  size_t index = 5;
+  for (const auto& octet_str : split) {
+    uint8_t octet;
+    if (!fxl::StringToNumberWithError<uint8_t>(octet_str, &octet, fxl::Base::k16))
+      return std::nullopt;
+    bytes[index--] = octet;
+  }
+
+  return bt::DeviceAddressBytes(bytes);
 }
 
 ErrorCode HostErrorToFidl(bt::HostError host_error) {
@@ -171,10 +187,19 @@ Status NewFidlError(ErrorCode error_code, std::string description) {
   return status;
 }
 
+bt::UUID UuidFromFidl(const fuchsia::bluetooth::Uuid& input) {
+  bt::UUID output;
+  // Conversion must always succeed given the defined size of |input|.
+  static_assert(sizeof(input.value) == 16, "FIDL UUID definition malformed!");
+  bool status =
+      bt::UUID::FromBytes(bt::BufferView(input.value.data(), input.value.size()), &output);
+  ZX_ASSERT_MSG(status, "expected UUID conversion from FIDL to succeed!");
+  return output;
+}
+
 bt::sm::IOCapability IoCapabilityFromFidl(fctrl::InputCapabilityType input,
                                           fctrl::OutputCapabilityType output) {
-  if (input == fctrl::InputCapabilityType::NONE &&
-      output == fctrl::OutputCapabilityType::NONE) {
+  if (input == fctrl::InputCapabilityType::NONE && output == fctrl::OutputCapabilityType::NONE) {
     return bt::sm::IOCapability::kNoInputNoOutput;
   } else if (input == fctrl::InputCapabilityType::KEYBOARD &&
              output == fctrl::OutputCapabilityType::DISPLAY) {
@@ -194,8 +219,11 @@ bt::sm::IOCapability IoCapabilityFromFidl(fctrl::InputCapabilityType input,
 
 bt::sm::PairingData PairingDataFromFidl(const fctrl::LEData& data) {
   bt::sm::PairingData result;
-  result.identity_address = bt::DeviceAddress(
-      BondingAddrTypeFromFidl(data.address_type), data.address);
+
+  auto addr = AddressBytesFromString(data.address);
+  ZX_ASSERT(addr);
+  result.identity_address = bt::DeviceAddress(BondingAddrTypeFromFidl(data.address_type), *addr);
+
   if (data.ltk) {
     result.ltk = LtkFromFidl(*data.ltk);
   }
@@ -262,8 +290,7 @@ fctrl::RemoteDevice NewRemoteDevice(const bt::gap::Peer& peer) {
   if (peer.le()) {
     bt::gap::AdvertisingData adv_data;
 
-    if (!bt::gap::AdvertisingData::FromBytes(peer.le()->advertising_data(),
-                                             &adv_data)) {
+    if (!bt::gap::AdvertisingData::FromBytes(peer.le()->advertising_data(), &adv_data)) {
       return fidl_device;
     }
 
@@ -271,8 +298,7 @@ fctrl::RemoteDevice NewRemoteDevice(const bt::gap::Peer& peer) {
       fidl_device.service_uuids.push_back(uuid.ToString());
     }
     if (adv_data.appearance()) {
-      fidl_device.appearance =
-          static_cast<fctrl::Appearance>(le16toh(*adv_data.appearance()));
+      fidl_device.appearance = static_cast<fctrl::Appearance>(le16toh(*adv_data.appearance()));
     }
     if (adv_data.tx_power()) {
       auto fidl_tx_power = Int8::New();
@@ -290,8 +316,7 @@ fctrl::RemoteDevicePtr NewRemoteDevicePtr(const bt::gap::Peer& peer) {
   return fidl_device;
 }
 
-fctrl::BondingData NewBondingData(const bt::gap::Adapter& adapter,
-                                  const bt::gap::Peer& peer) {
+fctrl::BondingData NewBondingData(const bt::gap::Adapter& adapter, const bt::gap::Peer& peer) {
   fctrl::BondingData out_data;
   out_data.identifier = peer.identifier().ToString();
   out_data.local_address = adapter.state().controller_address().ToString();
@@ -305,8 +330,7 @@ fctrl::BondingData NewBondingData(const bt::gap::Adapter& adapter,
     out_data.le = fctrl::LEData::New();
 
     const auto& le_data = *peer.le()->bond_data();
-    const auto& identity =
-        le_data.identity_address ? *le_data.identity_address : peer.address();
+    const auto& identity = le_data.identity_address ? *le_data.identity_address : peer.address();
     out_data.le->address = identity.value().ToString();
     out_data.le->address_type = BondingAddrTypeToFidl(identity.type());
 
@@ -417,12 +441,11 @@ bool PopulateDiscoveryFilter(const fble::ScanFilter& fidl_filter,
   }
 
   if (fidl_filter.manufacturer_identifier) {
-    out_filter->set_manufacturer_code(
-        fidl_filter.manufacturer_identifier->value);
+    out_filter->set_manufacturer_code(fidl_filter.manufacturer_identifier->value);
   }
 
-  if (fidl_filter.name_substring && !fidl_filter.name_substring.get().empty()) {
-    out_filter->set_name_substring(fidl_filter.name_substring.get());
+  if (fidl_filter.name_substring && !fidl_filter.name_substring.value_or("").empty()) {
+    out_filter->set_name_substring(fidl_filter.name_substring.value_or(""));
   }
 
   if (fidl_filter.max_path_loss) {
@@ -432,15 +455,136 @@ bool PopulateDiscoveryFilter(const fble::ScanFilter& fidl_filter,
   return true;
 }
 
+bt::gap::AdvertisingInterval AdvertisingIntervalFromFidl(fble::AdvertisingModeHint mode_hint) {
+  switch (mode_hint) {
+    case fble::AdvertisingModeHint::VERY_FAST:
+      return bt::gap::AdvertisingInterval::FAST1;
+    case fble::AdvertisingModeHint::FAST:
+      return bt::gap::AdvertisingInterval::FAST2;
+    case fble::AdvertisingModeHint::SLOW:
+      return bt::gap::AdvertisingInterval::SLOW;
+  }
+  return bt::gap::AdvertisingInterval::SLOW;
+}
+
+bt::gap::AdvertisingData AdvertisingDataFromFidl(const fble::AdvertisingData& input) {
+  bt::gap::AdvertisingData output;
+
+  if (input.has_name()) {
+    output.SetLocalName(input.name());
+  }
+  if (input.has_appearance()) {
+    output.SetAppearance(static_cast<uint16_t>(input.appearance()));
+  }
+  if (input.has_tx_power_level()) {
+    output.SetTxPower(input.tx_power_level());
+  }
+  if (input.has_service_uuids()) {
+    for (const auto& uuid : input.service_uuids()) {
+      output.AddServiceUuid(UuidFromFidl(uuid));
+    }
+  }
+  if (input.has_service_data()) {
+    for (const auto& entry : input.service_data()) {
+      bt::UUID uuid = UuidFromFidl(entry.uuid);
+      bt::BufferView data(entry.data);
+      output.SetServiceData(uuid, data);
+    }
+  }
+  if (input.has_manufacturer_data()) {
+    for (const auto& entry : input.manufacturer_data()) {
+      bt::BufferView data(entry.data);
+      output.SetManufacturerData(entry.company_id, data);
+    }
+  }
+  if (input.has_uris()) {
+    for (const auto& uri : input.uris()) {
+      output.AddURI(uri);
+    }
+  }
+
+  return output;
+}
+
+fble::AdvertisingData AdvertisingDataToFidl(const bt::gap::AdvertisingData& input) {
+  fble::AdvertisingData output;
+
+  if (input.local_name()) {
+    output.set_name(*input.local_name());
+  }
+  if (input.appearance()) {
+    output.set_appearance(static_cast<fbt::Appearance>(*input.appearance()));
+  }
+  if (input.tx_power()) {
+    output.set_tx_power_level(*input.tx_power());
+  }
+  if (!input.service_uuids().empty()) {
+    std::vector<fbt::Uuid> uuids;
+    for (const auto& uuid : input.service_uuids()) {
+      uuids.push_back(fbt::Uuid{uuid.value()});
+    }
+    output.set_service_uuids(std::move(uuids));
+  }
+  if (!input.service_data_uuids().empty()) {
+    std::vector<fble::ServiceData> entries;
+    for (const auto& uuid : input.service_data_uuids()) {
+      auto data = input.service_data(uuid);
+      fble::ServiceData entry{fbt::Uuid{uuid.value()}, data.ToVector()};
+      entries.push_back(std::move(entry));
+    }
+    output.set_service_data(std::move(entries));
+  }
+  if (!input.manufacturer_data_ids().empty()) {
+    std::vector<fble::ManufacturerData> entries;
+    for (const auto& id : input.manufacturer_data_ids()) {
+      auto data = input.manufacturer_data(id);
+      fble::ManufacturerData entry{id, data.ToVector()};
+      entries.push_back(std::move(entry));
+    }
+    output.set_manufacturer_data(std::move(entries));
+  }
+  if (!input.uris().empty()) {
+    std::vector<std::string> uris;
+    for (const auto& uri : input.uris()) {
+      uris.push_back(uri);
+    }
+    output.set_uris(std::move(uris));
+  }
+
+  return output;
+}
+
+fble::Peer PeerToFidlLe(const bt::gap::Peer& peer) {
+  ZX_ASSERT(peer.le());
+
+  fble::Peer output;
+  output.set_id(fbt::PeerId{peer.identifier().value()});
+  output.set_connectable(peer.connectable());
+
+  if (peer.rssi() != bt::hci::kRSSIInvalid) {
+    output.set_rssi(peer.rssi());
+  }
+
+  if (peer.le()->advertising_data().size() != 0u) {
+    // We populate |output|'s AdvertisingData field if we can parse the payload. We leave it blank
+    // otherwise.
+    bt::gap::AdvertisingData unpacked;
+    if (bt::gap::AdvertisingData::FromBytes(peer.le()->advertising_data(), &unpacked)) {
+      output.set_advertising_data(fidl_helpers::AdvertisingDataToFidl(unpacked));
+    }
+  }
+
+  return output;
+}
+
 }  // namespace fidl_helpers
 }  // namespace bthost
 
 // static
-fidl::VectorPtr<uint8_t>
-fidl::TypeConverter<fidl::VectorPtr<uint8_t>, bt::ByteBuffer>::Convert(
+std::vector<uint8_t> fidl::TypeConverter<std::vector<uint8_t>, bt::ByteBuffer>::Convert(
     const bt::ByteBuffer& from) {
-  auto to = fidl::VectorPtr<uint8_t>::New(from.size());
-  bt::MutableBufferView view(to->data(), to->size());
+  std::vector<uint8_t> to(from.size());
+  bt::MutableBufferView view(to.data(), to.size());
   view.Write(from);
   return to;
 }

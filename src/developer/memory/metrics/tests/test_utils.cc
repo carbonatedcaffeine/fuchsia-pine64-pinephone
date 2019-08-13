@@ -29,8 +29,8 @@ class MockOS : public OS {
 
   zx_status_t GetProcesses(
       fit::function<zx_status_t(int, zx_handle_t, zx_koid_t, zx_koid_t)> cb) override {
-    auto const& r = responses_.get_processes.at(i_get_processes_++);
-    for (auto const& c : r.callbacks) {
+    const auto& r = responses_.get_processes.at(i_get_processes_++);
+    for (const auto& c : r.callbacks) {
       auto ret = cb(c.depth, c.handle, c.koid, c.parent_koid);
       if (ret != ZX_OK) {
         return ret;
@@ -41,7 +41,7 @@ class MockOS : public OS {
 
   zx_status_t GetProperty(zx_handle_t handle, uint32_t property, void* value,
                           size_t name_len) override {
-    auto const& r = responses_.get_property.at(i_get_property_++);
+    const auto& r = responses_.get_property.at(i_get_property_++);
     EXPECT_EQ(r.handle, handle);
     EXPECT_EQ(r.property, property);
     auto len = std::min(name_len, r.value_len);
@@ -51,7 +51,7 @@ class MockOS : public OS {
 
   zx_status_t GetInfo(zx_handle_t handle, uint32_t topic, void* buffer, size_t buffer_size,
                       size_t* actual, size_t* avail) override {
-    auto const& r = responses_.get_info.at(i_get_info_++);
+    const auto& r = responses_.get_info.at(i_get_info_++);
     EXPECT_EQ(r.handle, handle);
     EXPECT_EQ(r.topic, topic);
     size_t num_copied = 0;
@@ -81,10 +81,10 @@ class MockOS : public OS {
 void TestUtils::CreateCapture(memory::Capture& capture, const CaptureTemplate& t) {
   capture.time_ = t.time;
   capture.kmem_ = t.kmem;
-  for (auto vmo : t.vmos) {
+  for (const auto& vmo : t.vmos) {
     capture.koid_to_vmo_.emplace(vmo.koid, vmo);
   }
-  for (auto process : t.processes) {
+  for (const auto& process : t.processes) {
     capture.koid_to_process_.emplace(process.koid, process);
   }
 }
@@ -103,6 +103,13 @@ zx_status_t TestUtils::GetCapture(Capture& capture, CaptureLevel level, const Os
   zx_status_t ret = Capture::GetCaptureState(state, os);
   EXPECT_EQ(ZX_OK, ret);
   return Capture::GetCapture(capture, state, level, os);
+}
+
+zx_status_t CaptureSupplier::GetCapture(Capture& capture, CaptureLevel level) {
+  auto& t = templates_.at(index_);
+  t.time = index_++;
+  TestUtils::CreateCapture(capture, t);
+  return ZX_OK;
 }
 
 }  // namespace memory

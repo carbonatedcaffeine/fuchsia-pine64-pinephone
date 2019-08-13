@@ -21,77 +21,88 @@ namespace ramdevice_client {
 class RamNand;
 
 class RamNandCtl : public fbl::RefCounted<RamNandCtl> {
-public:
-    // Creates an isolated devmgr and spawns a ram_nand_ctl device in it.
-    static zx_status_t Create(fbl::RefPtr<RamNandCtl>* out);
+ public:
+  // Creates an isolated devmgr and spawns a ram_nand_ctl device in it.
+  static zx_status_t Create(fbl::RefPtr<RamNandCtl>* out);
 
-    ~RamNandCtl() = default;
+  ~RamNandCtl() = default;
 
-    const fbl::unique_fd& fd() { return ctl_; }
-    const fbl::unique_fd& devfs_root() { return devmgr_.devfs_root(); }
+  const fbl::unique_fd& fd() { return ctl_; }
+  const fbl::unique_fd& devfs_root() { return devmgr_.devfs_root(); }
 
-private:
-    RamNandCtl(devmgr_integration_test::IsolatedDevmgr devmgr,
-               fbl::unique_fd ctl)
-        : devmgr_(std::move(devmgr)), ctl_(std::move(ctl)) {}
+ private:
+  RamNandCtl(devmgr_integration_test::IsolatedDevmgr devmgr, fbl::unique_fd ctl)
+      : devmgr_(std::move(devmgr)), ctl_(std::move(ctl)) {}
 
-    devmgr_integration_test::IsolatedDevmgr devmgr_;
-    fbl::unique_fd ctl_;
+  devmgr_integration_test::IsolatedDevmgr devmgr_;
+  fbl::unique_fd ctl_;
 };
 
 class RamNand {
-public:
-    // Creates a ram_nand under ram_nand_ctl running under the main devmgr.
-    static zx_status_t Create(const fuchsia_hardware_nand_RamNandInfo* config,
-                              std::optional<RamNand>* out);
+ public:
+  static constexpr char kBasePath[] = "/dev/misc/nand-ctl";
 
-    // Creates a ram_nand device underneath the ram_nand_ctl.
-    static zx_status_t Create(fbl::RefPtr<RamNandCtl> ctl,
-                              const fuchsia_hardware_nand_RamNandInfo* config,
-                              std::optional<RamNand>* out);
+  // Creates a ram_nand under ram_nand_ctl running under the main devmgr.
+  static zx_status_t Create(const fuchsia_hardware_nand_RamNandInfo* config,
+                            std::optional<RamNand>* out);
 
-    // Creates a ram_nand_ctl device and then a ram_device underneath.
-    static zx_status_t CreateIsolated(const fuchsia_hardware_nand_RamNandInfo* config,
-                                      std::optional<RamNand>* out);
+  // Creates a ram_nand device underneath the ram_nand_ctl.
+  static zx_status_t Create(fbl::RefPtr<RamNandCtl> ctl,
+                            const fuchsia_hardware_nand_RamNandInfo* config,
+                            std::optional<RamNand>* out);
 
-    // Not copyable.
-    RamNand(const RamNand&) = delete;
-    RamNand& operator=(const RamNand&) = delete;
+  // Creates a ram_nand_ctl device and then a ram_device underneath.
+  static zx_status_t CreateIsolated(const fuchsia_hardware_nand_RamNandInfo* config,
+                                    std::optional<RamNand>* out);
 
-    // Movable.
-    RamNand(RamNand&&) = default;
-    RamNand& operator=(RamNand&&) = default;
+  // Not copyable.
+  RamNand(const RamNand&) = delete;
+  RamNand& operator=(const RamNand&) = delete;
 
-    ~RamNand();
+  // Movable.
+  RamNand(RamNand&&) = default;
+  RamNand& operator=(RamNand&&) = default;
 
-    // Don't unbind in destructor.
-    void NoUnbind() { unbind = false; }
+  ~RamNand();
 
-    const fbl::unique_fd& fd() { return fd_; }
-    const char* path() {
-        if (path_) {
-            return path_->c_str();
-        }
-        return nullptr;
+  // Don't unbind in destructor.
+  void NoUnbind() { unbind = false; }
+
+  const fbl::unique_fd& fd() { return fd_; }
+  const char* path() {
+    if (path_) {
+      return path_->c_str();
     }
+    return nullptr;
+  }
 
-    const fbl::unique_fd& devfs_root() { return parent_->devfs_root(); }
+  const char* filename() {
+    if (filename_) {
+      return filename_->c_str();
+    }
+    return nullptr;
+  }
 
-private:
-    RamNand(fbl::unique_fd fd, fbl::RefPtr<RamNandCtl> ctl)
-        : fd_(std::move(fd)), path_(std::nullopt), parent_(ctl) {}
+  const fbl::unique_fd& devfs_root() { return parent_->devfs_root(); }
 
-    RamNand(fbl::unique_fd fd, fbl::String path)
-        : fd_(std::move(fd)), path_(path), parent_(nullptr) {}
+ private:
+  RamNand(fbl::unique_fd fd, fbl::RefPtr<RamNandCtl> ctl)
+      : fd_(std::move(fd)), path_(std::nullopt), filename_(std::nullopt), parent_(ctl) {}
 
-    fbl::unique_fd fd_;
-    bool unbind = true;
+  RamNand(fbl::unique_fd fd, fbl::String path, fbl::String filename)
+      : fd_(std::move(fd)), path_(path), filename_(filename), parent_(nullptr) {}
 
-    // Only valid if not spawned in an isolated devmgr.
-    std::optional<fbl::String> path_;
+  fbl::unique_fd fd_;
+  bool unbind = true;
 
-    // Optional parent if spawned in an isolated devmgr.
-    fbl::RefPtr<RamNandCtl> parent_;
+  // Only valid if not spawned in an isolated devmgr.
+  std::optional<fbl::String> path_;
+
+  // Only valid if not spawned in an isolated devmgr.
+  std::optional<fbl::String> filename_;
+
+  // Optional parent if spawned in an isolated devmgr.
+  fbl::RefPtr<RamNandCtl> parent_;
 };
 
-} // namespace ramdevice_client
+}  // namespace ramdevice_client

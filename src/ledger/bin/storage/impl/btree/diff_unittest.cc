@@ -7,6 +7,7 @@
 #include <lib/callback/capture.h>
 #include <lib/callback/set_when_called.h>
 
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "src/ledger/bin/environment/environment.h"
 #include "src/ledger/bin/storage/fake/fake_page_storage.h"
@@ -19,6 +20,9 @@
 namespace storage {
 namespace btree {
 namespace {
+
+using ::testing::SizeIs;
+
 std::unique_ptr<Entry> CreateEntryPtr(std::string key, ObjectIdentifier object_identifier,
                                       KeyPriority priority) {
   auto e = std::make_unique<Entry>();
@@ -75,13 +79,14 @@ TEST_F(DiffTest, ForEachDiff) {
   ObjectIdentifier base_root_identifier = CreateTree(base_changes);
 
   std::vector<EntryChange> other_changes;
-  // Update value for key1.
-  other_changes.push_back(EntryChange{Entry{"key1", object_identifier, KeyPriority::LAZY}, false});
+  // Update value for key01.
+  other_changes.push_back(
+      EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY, EntryId()}, false});
   // Add entry key255.
   other_changes.push_back(
-      EntryChange{Entry{"key255", object_identifier, KeyPriority::LAZY}, false});
+      EntryChange{Entry{"key255", object_identifier, KeyPriority::LAZY, EntryId()}, false});
   // Remove entry key40.
-  other_changes.push_back(EntryChange{Entry{"key40", {}, KeyPriority::LAZY}, true});
+  other_changes.push_back(EntryChange{Entry{"key40", {}, KeyPriority::LAZY, EntryId()}, true});
   ObjectIdentifier other_root_identifier;
   ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, other_changes, &other_root_identifier));
 
@@ -90,14 +95,15 @@ TEST_F(DiffTest, ForEachDiff) {
   Status status;
   size_t current_change = 0;
   ForEachDiff(
-      environment_.coroutine_service(), &fake_storage_, base_root_identifier, other_root_identifier,
-      "",
+      environment_.coroutine_service(), &fake_storage_,
+      {base_root_identifier, PageStorage::Location::Local()},
+      {other_root_identifier, PageStorage::Location::Local()}, "",
       [&other_changes, &current_change](EntryChange e) {
-        EXPECT_EQ(other_changes[current_change].deleted, e.deleted);
+        EXPECT_EQ(e.deleted, other_changes[current_change].deleted);
         if (e.deleted) {
-          EXPECT_EQ(other_changes[current_change].entry.key, e.entry.key);
+          EXPECT_EQ(e.entry.key, other_changes[current_change].entry.key);
         } else {
-          EXPECT_EQ(other_changes[current_change].entry, e.entry);
+          EXPECT_EQ(e.entry, other_changes[current_change].entry);
         }
         ++current_change;
         return true;
@@ -105,8 +111,8 @@ TEST_F(DiffTest, ForEachDiff) {
       callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(other_changes.size(), current_change);
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(current_change, other_changes.size());
 }
 
 TEST_F(DiffTest, ForEachDiffWithMinKey) {
@@ -136,30 +142,32 @@ TEST_F(DiffTest, ForEachDiffWithMinKey) {
   // ForEachDiff with a "key0" as min_key should return both changes.
   size_t current_change = 0;
   ForEachDiff(
-      environment_.coroutine_service(), &fake_storage_, base_root_identifier, other_root_identifier,
-      "key0",
+      environment_.coroutine_service(), &fake_storage_,
+      {base_root_identifier, PageStorage::Location::Local()},
+      {other_root_identifier, PageStorage::Location::Local()}, "key0",
       [&changes, &current_change](EntryChange e) {
-        EXPECT_EQ(changes[current_change++].entry, e.entry);
+        EXPECT_EQ(e.entry, changes[current_change++].entry);
         return true;
       },
       callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(changes.size(), current_change);
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(current_change, changes.size());
 
   // With "key60" as min_key, only key75 should be returned.
   ForEachDiff(
-      environment_.coroutine_service(), &fake_storage_, base_root_identifier, other_root_identifier,
-      "key60",
+      environment_.coroutine_service(), &fake_storage_,
+      {base_root_identifier, PageStorage::Location::Local()},
+      {other_root_identifier, PageStorage::Location::Local()}, "key60",
       [&changes](EntryChange e) {
-        EXPECT_EQ(changes[1].entry, e.entry);
+        EXPECT_EQ(e.entry, changes[1].entry);
         return true;
       },
       callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
 }
 
 TEST_F(DiffTest, ForEachDiffWithMinKeySkipNodes) {
@@ -185,16 +193,17 @@ TEST_F(DiffTest, ForEachDiffWithMinKeySkipNodes) {
   ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, changes, &other_root_identifier));
 
   ForEachDiff(
-      environment_.coroutine_service(), &fake_storage_, base_root_identifier, other_root_identifier,
-      "key01",
+      environment_.coroutine_service(), &fake_storage_,
+      {base_root_identifier, PageStorage::Location::Local()},
+      {other_root_identifier, PageStorage::Location::Local()}, "key01",
       [&changes](EntryChange e) {
-        EXPECT_EQ(changes[0].entry, e.entry);
+        EXPECT_EQ(e.entry, changes[0].entry);
         return true;
       },
       callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
 }
 
 TEST_F(DiffTest, ForEachDiffPriorityChange) {
@@ -205,8 +214,8 @@ TEST_F(DiffTest, ForEachDiffPriorityChange) {
 
   std::vector<EntryChange> other_changes;
   // Update priority for a key.
-  other_changes.push_back(
-      EntryChange{Entry{base_entry.key, base_entry.object_identifier, KeyPriority::LAZY}, false});
+  other_changes.push_back(EntryChange{
+      Entry{base_entry.key, base_entry.object_identifier, KeyPriority::LAZY, EntryId()}, false});
 
   bool called;
   Status status;
@@ -217,8 +226,9 @@ TEST_F(DiffTest, ForEachDiffPriorityChange) {
   size_t change_count = 0;
   EntryChange actual_change;
   ForEachDiff(
-      environment_.coroutine_service(), &fake_storage_, base_root_identifier, other_root_identifier,
-      "",
+      environment_.coroutine_service(), &fake_storage_,
+      {base_root_identifier, PageStorage::Location::Local()},
+      {other_root_identifier, PageStorage::Location::Local()}, "",
       [&actual_change, &change_count](EntryChange e) {
         actual_change = e;
         ++change_count;
@@ -227,12 +237,114 @@ TEST_F(DiffTest, ForEachDiffPriorityChange) {
       callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(1u, change_count);
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(change_count, 1u);
   EXPECT_FALSE(actual_change.deleted);
-  EXPECT_EQ(base_entry.key, actual_change.entry.key);
-  EXPECT_EQ(base_entry.object_identifier, actual_change.entry.object_identifier);
-  EXPECT_EQ(KeyPriority::LAZY, actual_change.entry.priority);
+  EXPECT_EQ(actual_change.entry.key, base_entry.key);
+  EXPECT_EQ(actual_change.entry.object_identifier, base_entry.object_identifier);
+  EXPECT_EQ(actual_change.entry.priority, KeyPriority::LAZY);
+}
+
+TEST_F(DiffTest, ForEachTwoWayDiff) {
+  // Construct a tree with 50 entries ("key00" to "key49").
+  std::unique_ptr<const Object> object;
+  ASSERT_TRUE(AddObject("new_value", &object));
+  ObjectIdentifier object_identifier = object->GetIdentifier();
+
+  std::vector<EntryChange> base_changes;
+  ASSERT_TRUE(CreateEntryChanges(50, &base_changes));
+  ObjectIdentifier base_root_identifier = CreateTree(base_changes);
+
+  std::vector<EntryChange> other_changes;
+  // Update value for key01.
+  other_changes.push_back(
+      EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY, EntryId()}, false});
+  // Add entry key255.
+  other_changes.push_back(
+      EntryChange{Entry{"key255", object_identifier, KeyPriority::LAZY, EntryId()}, false});
+  // Remove entry key40.
+  other_changes.push_back(EntryChange{Entry{"key40", {}, KeyPriority::LAZY, EntryId()}, true});
+  ObjectIdentifier other_root_identifier;
+  ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, other_changes, &other_root_identifier));
+
+  // ForEachTwoWayDiff should return all changes just applied.
+  bool called;
+  Status status;
+  std::vector<TwoWayChange> found_changes;
+  ForEachTwoWayDiff(
+      environment_.coroutine_service(), &fake_storage_,
+      {base_root_identifier, PageStorage::Location::Local()},
+      {other_root_identifier, PageStorage::Location::Local()}, "",
+      [&found_changes](TwoWayChange e) {
+        found_changes.push_back(std::move(e));
+        return true;
+      },
+      callback::Capture(callback::SetWhenCalled(&called), &status));
+  RunLoopFor(kSufficientDelay);
+  EXPECT_TRUE(called);
+  ASSERT_EQ(status, Status::OK);
+
+  EXPECT_THAT(found_changes, SizeIs(other_changes.size()));
+
+  // Updating key01 was the first change.
+  ASSERT_NE(found_changes[0].base, nullptr);
+  EXPECT_EQ(*found_changes[0].base, base_changes[1].entry);
+  ASSERT_NE(found_changes[0].target, nullptr);
+  EXPECT_EQ(*found_changes[0].target, other_changes[0].entry);
+
+  // Inserting key255 was the second change:
+  EXPECT_EQ(found_changes[1].base, nullptr);
+  ASSERT_NE(found_changes[1].target, nullptr);
+  EXPECT_EQ(*(found_changes[1].target), other_changes[1].entry);
+
+  // Removing key40 was the last change:
+  ASSERT_NE(found_changes[2].base, nullptr);
+  EXPECT_EQ(*(found_changes[2].base), base_changes[40].entry);
+  EXPECT_EQ(found_changes[2].target, nullptr);
+}
+
+TEST_F(DiffTest, ForEachTwoWayDiffMinKey) {
+  // Expected base tree layout (XX is key "keyXX"):
+  //                     [50]
+  //                   /     \
+  //       [03, 07, 30]      [65, 76]
+  //     /
+  // [01, 02]
+  std::vector<EntryChange> base_entries;
+  ASSERT_TRUE(CreateEntryChanges(std::vector<size_t>({1, 2, 3, 7, 30, 50, 65, 76}), &base_entries));
+  // Expected other tree layout (XX is key "keyXX"):
+  //               [50, 75]
+  //             /    |    \
+  //    [03, 07, 30] [65]  [76]
+  //     /           /
+  // [01, 02]      [51]
+  std::vector<EntryChange> changes;
+  ASSERT_TRUE(CreateEntryChanges(std::vector<size_t>({51, 75}), &changes));
+
+  bool called;
+  Status status;
+  ObjectIdentifier base_root_identifier = CreateTree(base_entries);
+  ObjectIdentifier other_root_identifier;
+  ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, changes, &other_root_identifier));
+
+  // ForEachTwoWayDiff with "key60" as min_key, only key75 should be returned.
+  int change_count = 0;
+  ForEachTwoWayDiff(
+      environment_.coroutine_service(), &fake_storage_,
+      {base_root_identifier, PageStorage::Location::Local()},
+      {other_root_identifier, PageStorage::Location::Local()}, "key60",
+      [&change_count, &changes](TwoWayChange e) {
+        change_count++;
+        EXPECT_EQ(e.base, nullptr);
+        EXPECT_NE(e.target, nullptr);
+        EXPECT_EQ(*e.target, changes[1].entry);
+        return true;
+      },
+      callback::Capture(callback::SetWhenCalled(&called), &status));
+  RunLoopFor(kSufficientDelay);
+  EXPECT_EQ(change_count, 1);
+  EXPECT_TRUE(called);
+  ASSERT_EQ(status, Status::OK);
 }
 
 TEST_F(DiffTest, ForEachThreeWayDiff) {
@@ -250,12 +362,14 @@ TEST_F(DiffTest, ForEachThreeWayDiff) {
 
   // Left tree.
   std::vector<EntryChange> left_changes;
-  // Update value for key1.
-  left_changes.push_back(EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY}, false});
+  // Update value for key01.
+  left_changes.push_back(
+      EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY, EntryId()}, false});
   // Add entry key255.
-  left_changes.push_back(EntryChange{Entry{"key255", object_identifier, KeyPriority::LAZY}, false});
+  left_changes.push_back(
+      EntryChange{Entry{"key255", object_identifier, KeyPriority::LAZY, EntryId()}, false});
   // Remove entry key40.
-  left_changes.push_back(EntryChange{Entry{"key40", {}, KeyPriority::LAZY}, true});
+  left_changes.push_back(EntryChange{Entry{"key40", {}, KeyPriority::LAZY, EntryId()}, true});
 
   ObjectIdentifier left_root_identifier;
   ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, left_changes, &left_root_identifier));
@@ -265,14 +379,15 @@ TEST_F(DiffTest, ForEachThreeWayDiff) {
   ASSERT_TRUE(AddObject("change2", &object2));
   ObjectIdentifier object_identifier2 = object2->GetIdentifier();
   std::vector<EntryChange> right_changes;
-  // Update to same value for key1.
-  right_changes.push_back(EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY}, false});
+  // Update to same value for key01.
+  right_changes.push_back(
+      EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY, EntryId()}, false});
   // Update to different value for key2
   right_changes.push_back(
-      EntryChange{Entry{"key02", object_identifier2, KeyPriority::LAZY}, false});
+      EntryChange{Entry{"key02", object_identifier2, KeyPriority::LAZY, EntryId()}, false});
   // Add entry key258.
   right_changes.push_back(
-      EntryChange{Entry{"key258", object_identifier, KeyPriority::LAZY}, false});
+      EntryChange{Entry{"key258", object_identifier, KeyPriority::LAZY, EntryId()}, false});
 
   ObjectIdentifier right_root_identifier;
   ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, right_changes, &right_root_identifier));
@@ -300,22 +415,24 @@ TEST_F(DiffTest, ForEachThreeWayDiff) {
   Status status;
   unsigned int current_change = 0;
   ForEachThreeWayDiff(
-      environment_.coroutine_service(), &fake_storage_, base_root_identifier, left_root_identifier,
-      right_root_identifier, "",
+      environment_.coroutine_service(), &fake_storage_,
+      {base_root_identifier, PageStorage::Location::Local()},
+      {left_root_identifier, PageStorage::Location::Local()},
+      {right_root_identifier, PageStorage::Location::Local()}, "",
       [&expected_three_way_changes, &current_change](ThreeWayChange e) {
         EXPECT_LT(current_change, expected_three_way_changes.size());
         if (current_change >= expected_three_way_changes.size()) {
           return false;
         }
-        EXPECT_EQ(expected_three_way_changes[current_change], e);
+        EXPECT_EQ(e, expected_three_way_changes[current_change]);
         current_change++;
         return true;
       },
       callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(current_change, expected_three_way_changes.size());
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(expected_three_way_changes.size(), current_change);
 }
 
 TEST_F(DiffTest, ForEachThreeWayDiffMinKey) {
@@ -333,12 +450,14 @@ TEST_F(DiffTest, ForEachThreeWayDiffMinKey) {
 
   // Left tree.
   std::vector<EntryChange> left_changes;
-  // Update value for key1.
-  left_changes.push_back(EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY}, false});
+  // Update value for key01.
+  left_changes.push_back(
+      EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY, EntryId()}, false});
   // Add entry key255.
-  left_changes.push_back(EntryChange{Entry{"key255", object_identifier, KeyPriority::LAZY}, false});
+  left_changes.push_back(
+      EntryChange{Entry{"key255", object_identifier, KeyPriority::LAZY, EntryId()}, false});
   // Remove entry key40.
-  left_changes.push_back(EntryChange{Entry{"key40", {}, KeyPriority::LAZY}, true});
+  left_changes.push_back(EntryChange{Entry{"key40", {}, KeyPriority::LAZY, EntryId()}, true});
 
   ObjectIdentifier left_root_identifier;
   ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, left_changes, &left_root_identifier));
@@ -348,14 +467,15 @@ TEST_F(DiffTest, ForEachThreeWayDiffMinKey) {
   ASSERT_TRUE(AddObject("change2", &object2));
   ObjectIdentifier object_identifier2 = object2->GetIdentifier();
   std::vector<EntryChange> right_changes;
-  // Update to same value for key1.
-  right_changes.push_back(EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY}, false});
-  // Update to different value for key2
+  // Update to same value for key01.
   right_changes.push_back(
-      EntryChange{Entry{"key02", object_identifier2, KeyPriority::LAZY}, false});
+      EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY, EntryId()}, false});
+  // Update to different value for key02
+  right_changes.push_back(
+      EntryChange{Entry{"key02", object_identifier2, KeyPriority::LAZY, EntryId()}, false});
   // Add entry key258.
   right_changes.push_back(
-      EntryChange{Entry{"key258", object_identifier, KeyPriority::LAZY}, false});
+      EntryChange{Entry{"key258", object_identifier, KeyPriority::LAZY, EntryId()}, false});
 
   ObjectIdentifier right_root_identifier;
   ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, right_changes, &right_root_identifier));
@@ -372,22 +492,24 @@ TEST_F(DiffTest, ForEachThreeWayDiffMinKey) {
   Status status;
   unsigned int current_change = 0;
   ForEachThreeWayDiff(
-      environment_.coroutine_service(), &fake_storage_, base_root_identifier, left_root_identifier,
-      right_root_identifier, "key257",
+      environment_.coroutine_service(), &fake_storage_,
+      {base_root_identifier, PageStorage::Location::Local()},
+      {left_root_identifier, PageStorage::Location::Local()},
+      {right_root_identifier, PageStorage::Location::Local()}, "key257",
       [&expected_three_way_changes, &current_change](ThreeWayChange e) {
         EXPECT_LT(current_change, expected_three_way_changes.size());
         if (current_change >= expected_three_way_changes.size()) {
           return false;
         }
-        EXPECT_EQ(expected_three_way_changes[current_change], e);
+        EXPECT_EQ(e, expected_three_way_changes[current_change]);
         current_change++;
         return true;
       },
       callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(current_change, expected_three_way_changes.size());
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(expected_three_way_changes.size(), current_change);
 }
 
 TEST_F(DiffTest, ForEachThreeWayDiffNoDiff) {
@@ -405,12 +527,14 @@ TEST_F(DiffTest, ForEachThreeWayDiffNoDiff) {
 
   // Left tree.
   std::vector<EntryChange> left_changes;
-  // Update value for key1.
-  left_changes.push_back(EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY}, false});
+  // Update value for key01.
+  left_changes.push_back(
+      EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY, EntryId()}, false});
   // Add entry key255.
-  left_changes.push_back(EntryChange{Entry{"key255", object_identifier, KeyPriority::LAZY}, false});
+  left_changes.push_back(
+      EntryChange{Entry{"key255", object_identifier, KeyPriority::LAZY, EntryId()}, false});
   // Remove entry key40.
-  left_changes.push_back(EntryChange{Entry{"key40", {}, KeyPriority::LAZY}, true});
+  left_changes.push_back(EntryChange{Entry{"key40", {}, KeyPriority::LAZY, EntryId()}, true});
 
   ObjectIdentifier left_root_identifier;
   ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, left_changes, &left_root_identifier));
@@ -420,14 +544,15 @@ TEST_F(DiffTest, ForEachThreeWayDiffNoDiff) {
   ASSERT_TRUE(AddObject("change2", &object2));
   ObjectIdentifier object_identifier2 = object2->GetIdentifier();
   std::vector<EntryChange> right_changes;
-  // Update to same value for key1.
-  right_changes.push_back(EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY}, false});
+  // Update to same value for key01.
+  right_changes.push_back(
+      EntryChange{Entry{"key01", object_identifier, KeyPriority::LAZY, EntryId()}, false});
   // Update to different value for key2
   right_changes.push_back(
-      EntryChange{Entry{"key02", object_identifier2, KeyPriority::LAZY}, false});
+      EntryChange{Entry{"key02", object_identifier2, KeyPriority::LAZY, EntryId()}, false});
   // Add entry key258.
   right_changes.push_back(
-      EntryChange{Entry{"key258", object_identifier, KeyPriority::LAZY}, false});
+      EntryChange{Entry{"key258", object_identifier, KeyPriority::LAZY, EntryId()}, false});
 
   ObjectIdentifier right_root_identifier;
   ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, right_changes, &right_root_identifier));
@@ -436,8 +561,10 @@ TEST_F(DiffTest, ForEachThreeWayDiffNoDiff) {
   Status status;
   // No change is expected.
   ForEachThreeWayDiff(
-      environment_.coroutine_service(), &fake_storage_, base_root_identifier, left_root_identifier,
-      right_root_identifier, "key5",
+      environment_.coroutine_service(), &fake_storage_,
+      {base_root_identifier, PageStorage::Location::Local()},
+      {left_root_identifier, PageStorage::Location::Local()},
+      {right_root_identifier, PageStorage::Location::Local()}, "key5",
       [](ThreeWayChange e) {
         ADD_FAILURE();
         return true;
@@ -445,7 +572,7 @@ TEST_F(DiffTest, ForEachThreeWayDiffNoDiff) {
       callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
 }
 
 TEST_F(DiffTest, ForEachThreeWayNoBaseChange) {
@@ -466,9 +593,9 @@ TEST_F(DiffTest, ForEachThreeWayNoBaseChange) {
   // Left tree.
   std::vector<EntryChange> left_changes;
   left_changes.push_back(
-      EntryChange{Entry{"key01", object1_identifier, KeyPriority::EAGER}, false});
+      EntryChange{Entry{"key01", object1_identifier, KeyPriority::EAGER, EntryId()}, false});
   left_changes.push_back(
-      EntryChange{Entry{"key03", object3_identifier, KeyPriority::EAGER}, false});
+      EntryChange{Entry{"key03", object3_identifier, KeyPriority::EAGER, EntryId()}, false});
 
   ObjectIdentifier left_root_identifier;
   ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, left_changes, &left_root_identifier));
@@ -476,9 +603,9 @@ TEST_F(DiffTest, ForEachThreeWayNoBaseChange) {
   // Right tree.
   std::vector<EntryChange> right_changes;
   right_changes.push_back(
-      EntryChange{Entry{"key02", object2_identifier, KeyPriority::EAGER}, false});
+      EntryChange{Entry{"key02", object2_identifier, KeyPriority::EAGER, EntryId()}, false});
   right_changes.push_back(
-      EntryChange{Entry{"key04", object4_identifier, KeyPriority::EAGER}, false});
+      EntryChange{Entry{"key04", object4_identifier, KeyPriority::EAGER, EntryId()}, false});
 
   ObjectIdentifier right_root_identifier;
   ASSERT_TRUE(CreateTreeFromChanges(base_root_identifier, right_changes, &right_root_identifier));
@@ -501,22 +628,24 @@ TEST_F(DiffTest, ForEachThreeWayNoBaseChange) {
   Status status;
   unsigned int current_change = 0;
   ForEachThreeWayDiff(
-      environment_.coroutine_service(), &fake_storage_, base_root_identifier, left_root_identifier,
-      right_root_identifier, "",
+      environment_.coroutine_service(), &fake_storage_,
+      {base_root_identifier, PageStorage::Location::Local()},
+      {left_root_identifier, PageStorage::Location::Local()},
+      {right_root_identifier, PageStorage::Location::Local()}, "",
       [&expected_three_way_changes, &current_change](ThreeWayChange e) {
         EXPECT_LT(current_change, expected_three_way_changes.size());
         if (current_change >= expected_three_way_changes.size()) {
           return false;
         }
-        EXPECT_EQ(expected_three_way_changes[current_change], e);
+        EXPECT_EQ(e, expected_three_way_changes[current_change]);
         current_change++;
         return true;
       },
       callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(current_change, expected_three_way_changes.size());
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(expected_three_way_changes.size(), current_change);
 }
 
 }  // namespace

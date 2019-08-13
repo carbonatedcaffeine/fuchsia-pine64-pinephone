@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_FLAT_AST_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_FLAT_AST_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_FLAT_AST_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_FLAT_AST_H_
 
 #include <assert.h>
 #include <lib/fit/function.h>
@@ -24,6 +24,7 @@
 #include "error_reporter.h"
 #include "raw_ast.h"
 #include "type_shape.h"
+#include "types.h"
 #include "virtual_source_file.h"
 
 // TODO(FIDL-487, ZX-3415): Decide if all cases of NumericConstantValue::Convert() are safe.
@@ -55,12 +56,16 @@ std::string LibraryName(const Library* library, std::string_view separator);
 // struct name).
 struct Name final {
   Name(const Library* library, const SourceLocation name)
-     : library_(library), name_(name) {}
+      : library_(library), name_(name), member_name_(std::nullopt) {}
+
+  Name(const Library* library, const SourceLocation name, const std::string member)
+      : library_(library), name_(name), member_name_(member) {}
 
   Name(const Library* library, const std::string& name)
-     : library_(library), name_(name) {}
+      : library_(library), name_(name), member_name_(std::nullopt) {}
 
   Name(Name&&) = default;
+  Name(const Name&) = default;
   Name& operator=(Name&&) = default;
 
   const Library* library() const { return library_; }
@@ -77,14 +82,28 @@ struct Name final {
       return std::get<SourceLocation>(name_).data();
     }
   }
+  const std::string name_full() const {
+    auto name = std::string(name_part());
+    if (member_name_.has_value()) {
+      name.append(".");
+      name.append(member_name_.value());
+    }
+    return name;
+  }
+  const std::optional<std::string> member_name() const { return member_name_; }
+  const Name memberless_name() const {
+    if (!member_name_) {
+      return *this;
+    }
+    return Name(library_, name_, std::nullopt);
+  }
 
   bool operator==(const Name& other) const {
     // can't use the library name yet, not necesserily compiled!
     auto library_ptr = reinterpret_cast<uintptr_t>(library_);
     auto other_library_ptr = reinterpret_cast<uintptr_t>(other.library_);
-    if (library_ptr != other_library_ptr)
-      return false;
-    return name_part() == other.name_part();
+    return (library_ptr == other_library_ptr) && name_part() == other.name_part() &&
+           member_name_ == other.member_name_;
   }
   bool operator!=(const Name& other) const { return !operator==(other); }
 
@@ -94,14 +113,22 @@ struct Name final {
     auto other_library_ptr = reinterpret_cast<uintptr_t>(other.library_);
     if (library_ptr != other_library_ptr)
       return library_ptr < other_library_ptr;
-    return name_part() < other.name_part();
+    if (name_part() != other.name_part())
+      return name_part() < other.name_part();
+    return member_name_ < other.member_name_;
   }
 
  private:
   using AnonymousName = std::string;
 
+  Name(const Library* library, const std::variant<SourceLocation, AnonymousName>& name,
+       std::optional<std::string> member_name)
+      : library_(library), name_(name), member_name_(member_name) {}
+
   const Library* library_ = nullptr;
   std::variant<SourceLocation, AnonymousName> name_;
+  // TODO(FIDL-705): Either a source location, or an anonymous member should be allowed.
+  std::optional<std::string> member_name_;
 };
 
 struct ConstantValue {
@@ -127,8 +154,7 @@ struct ConstantValue {
   const Kind kind;
 
  protected:
-  explicit ConstantValue(Kind kind)
-      : kind(kind) {}
+  explicit ConstantValue(Kind kind) : kind(kind) {}
 };
 
 template <typename ValueType>
@@ -136,8 +162,7 @@ struct NumericConstantValue final : ConstantValue {
   static_assert(std::is_arithmetic<ValueType>::value && !std::is_same<ValueType, bool>::value,
                 "NumericConstantValue can only be used with a numeric ValueType!");
 
-  NumericConstantValue(ValueType value)
-      : ConstantValue(GetKind()), value(value) {}
+  NumericConstantValue(ValueType value) : ConstantValue(GetKind()), value(value) {}
 
   operator ValueType() const { return value; }
 
@@ -254,8 +279,8 @@ struct NumericConstantValue final : ConstantValue {
       }
       case Kind::kFloat32: {
         if (!std::is_floating_point<ValueType>::value ||
-            value < std::numeric_limits<float>::lowest() ||
-            value > std::numeric_limits<float>::max()) {
+            static_cast<float>(value) < std::numeric_limits<float>::lowest() ||
+            static_cast<float>(value) > std::numeric_limits<float>::max()) {
           return false;
         }
         *out_value = std::make_unique<NumericConstantValue<float>>(static_cast<float>(value));
@@ -263,8 +288,8 @@ struct NumericConstantValue final : ConstantValue {
       }
       case Kind::kFloat64: {
         if (!std::is_floating_point<ValueType>::value ||
-            value < std::numeric_limits<double>::lowest() ||
-            value > std::numeric_limits<double>::max()) {
+            static_cast<double>(value) < std::numeric_limits<double>::lowest() ||
+            static_cast<double>(value) > std::numeric_limits<double>::max()) {
           return false;
         }
         *out_value = std::make_unique<NumericConstantValue<double>>(static_cast<double>(value));
@@ -314,8 +339,7 @@ struct NumericConstantValue final : ConstantValue {
 using Size = NumericConstantValue<uint32_t>;
 
 struct BoolConstantValue final : ConstantValue {
-  BoolConstantValue(bool value)
-      : ConstantValue(ConstantValue::Kind::kBool), value(value) {}
+  BoolConstantValue(bool value) : ConstantValue(ConstantValue::Kind::kBool), value(value) {}
 
   operator bool() const { return value; }
 
@@ -378,8 +402,7 @@ struct Constant {
     kSynthesized,
   };
 
-  explicit Constant(Kind kind)
-      : kind(kind), value_(nullptr) {}
+  explicit Constant(Kind kind) : kind(kind), value_(nullptr) {}
 
   bool IsResolved() const { return value_ != nullptr; }
 
@@ -401,8 +424,7 @@ struct Constant {
 };
 
 struct IdentifierConstant final : Constant {
-  explicit IdentifierConstant(Name name)
-      : Constant(Kind::kIdentifier), name(std::move(name)) {}
+  explicit IdentifierConstant(Name name) : Constant(Kind::kIdentifier), name(std::move(name)) {}
 
   const Name name;
 };
@@ -429,6 +451,7 @@ struct Decl {
     kConst,
     kEnum,
     kProtocol,
+    kService,
     kStruct,
     kTable,
     kUnion,
@@ -498,8 +521,7 @@ struct Type {
     bool IsLessThan() const { return result_ < 0; }
 
    private:
-    Comparison(int result)
-        : result_(result) {}
+    Comparison(int result) : result_(result) {}
 
     const int result_ = 0;
   };
@@ -602,7 +624,7 @@ struct PrimitiveType final : public Type {
 
   static TypeShape Shape(types::PrimitiveSubtype subtype);
 
-private:
+ private:
   static uint32_t SubtypeSize(types::PrimitiveSubtype subtype);
 };
 
@@ -657,8 +679,7 @@ struct TypeConstructor final {
 };
 
 struct Using final {
-  Using(Name name, const PrimitiveType* type)
-      : name(std::move(name)), type(type) {}
+  Using(Name name, const PrimitiveType* type) : name(std::move(name)), type(type) {}
 
   const Name name;
   const PrimitiveType* type;
@@ -685,14 +706,17 @@ struct Enum final : public TypeDecl {
   };
 
   Enum(std::unique_ptr<raw::AttributeList> attributes, Name name,
-       std::unique_ptr<TypeConstructor> subtype_ctor, std::vector<Member> members)
+       std::unique_ptr<TypeConstructor> subtype_ctor, std::vector<Member> members,
+       types::Strictness strictness)
       : TypeDecl(Kind::kEnum, std::move(attributes), std::move(name)),
         subtype_ctor(std::move(subtype_ctor)),
-        members(std::move(members)) {}
+        members(std::move(members)),
+        strictness(strictness) {}
 
   // Set during construction.
   std::unique_ptr<TypeConstructor> subtype_ctor;
   std::vector<Member> members;
+  const types::Strictness strictness;
 
   // Set during compilation.
   const PrimitiveType* type = nullptr;
@@ -709,17 +733,40 @@ struct Bits final : public TypeDecl {
   };
 
   Bits(std::unique_ptr<raw::AttributeList> attributes, Name name,
-       std::unique_ptr<TypeConstructor> subtype_ctor, std::vector<Member> members)
+       std::unique_ptr<TypeConstructor> subtype_ctor, std::vector<Member> members,
+       types::Strictness strictness)
       : TypeDecl(Kind::kBits, std::move(attributes), std::move(name)),
         subtype_ctor(std::move(subtype_ctor)),
-        members(std::move(members)) {}
+        members(std::move(members)),
+        strictness(strictness) {}
 
   // Set during construction.
   std::unique_ptr<TypeConstructor> subtype_ctor;
   std::vector<Member> members;
+  const types::Strictness strictness;
 
   // Set during compilation.
   uint64_t mask = 0;
+};
+
+struct Service final : public TypeDecl {
+  struct Member {
+    Member(std::unique_ptr<TypeConstructor> type_ctor, SourceLocation name,
+           std::unique_ptr<raw::AttributeList> attributes)
+        : type_ctor(std::move(type_ctor)),
+          name(std::move(name)),
+          attributes(std::move(attributes)) {}
+
+    std::unique_ptr<TypeConstructor> type_ctor;
+    SourceLocation name;
+    std::unique_ptr<raw::AttributeList> attributes;
+  };
+
+  Service(std::unique_ptr<raw::AttributeList> attributes, Name name, std::vector<Member> members)
+      : TypeDecl(Kind::kService, std::move(attributes), std::move(name)),
+        members(std::move(members)) {}
+
+  std::vector<Member> members;
 };
 
 struct Struct final : public TypeDecl {
@@ -781,13 +828,17 @@ struct Table final : public TypeDecl {
     std::unique_ptr<Used> maybe_used;
   };
 
-  Table(std::unique_ptr<raw::AttributeList> attributes, Name name, std::vector<Member> members)
+  Table(std::unique_ptr<raw::AttributeList> attributes, Name name, std::vector<Member> members,
+        types::Strictness strictness)
       : TypeDecl(Kind::kTable, std::move(attributes), std::move(name)),
-        members(std::move(members)) {}
+        members(std::move(members)),
+        strictness(strictness) {}
 
   std::vector<Member> members;
+  const types::Strictness strictness;
 
-  static TypeShape Shape(std::vector<TypeShape*>* fields, uint32_t extra_handles = 0u);
+  static TypeShape Shape(std::vector<TypeShape*>* fields, types::Strictness strictness,
+                         uint32_t extra_handles = 0u);
 };
 
 struct Union final : public TypeDecl {
@@ -839,7 +890,8 @@ struct XUnion final : public TypeDecl {
   std::vector<Member> members;
   const types::Strictness strictness;
 
-  static TypeShape Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles = 0u);
+  static TypeShape Shape(std::vector<FieldShape*>* fields, types::Strictness strictness,
+                         uint32_t extra_handles = 0u);
 };
 
 struct Protocol final : public TypeDecl {
@@ -877,7 +929,7 @@ struct Protocol final : public TypeDecl {
   // are owned by the corresponding composed_protocols.
   struct MethodWithInfo {
     MethodWithInfo(const Method* method, bool is_composed)
-      : method(method), is_composed(is_composed) {}
+        : method(method), is_composed(is_composed) {}
     const Method* method;
     const bool is_composed;
   };
@@ -955,8 +1007,7 @@ class TypeTemplate {
 // the same type.
 class Typespace {
  public:
-  explicit Typespace(ErrorReporter* error_reporter)
-      : error_reporter_(error_reporter) {}
+  explicit Typespace(ErrorReporter* error_reporter) : error_reporter_(error_reporter) {}
 
   bool Create(const flat::Name& name, const Type* arg_type,
               const std::optional<types::HandleSubtype>& handle_subtype, const Size* size,
@@ -1011,6 +1062,8 @@ class AttributeSchema {
     kProtocolDecl,
     kLibrary,
     kMethod,
+    kServiceDecl,
+    kServiceMember,
     kStructDecl,
     kStructMember,
     kTableDecl,
@@ -1080,6 +1133,9 @@ class Dependencies {
   bool Register(const SourceLocation& location, std::string_view filename, Library* dep_library,
                 const std::unique_ptr<raw::Identifier>& maybe_alias);
 
+  // Returns true if this dependency set contains a library with the given name and filename.
+  bool Contains(std::string_view filename, const std::vector<std::string_view>& name);
+
   // Looks up a dependent library by |filename| and |name|, and marks it as
   // used.
   bool LookupAndUse(std::string_view filename, const std::vector<std::string_view>& name,
@@ -1124,6 +1180,7 @@ class Library {
 
   const std::vector<std::string_view>& name() const { return library_name_; }
   const std::vector<std::string>& errors() const { return error_reporter_->errors(); }
+  const raw::AttributeList* attributes() const { return attributes_.get(); }
 
  private:
   bool Fail(std::string_view message);
@@ -1171,6 +1228,7 @@ class Library {
                             bool anonymous, Struct** out_struct_decl);
   bool CreateMethodResult(const Name& protocol_name, raw::ProtocolMethod* method,
                           Struct* in_response, Struct** out_response);
+  bool ConsumeServiceDeclaration(std::unique_ptr<raw::ServiceDeclaration> service_decl);
   bool ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration);
   bool ConsumeTableDeclaration(std::unique_ptr<raw::TableDeclaration> table_declaration);
   bool ConsumeUnionDeclaration(std::unique_ptr<raw::UnionDeclaration> union_declaration);
@@ -1182,21 +1240,15 @@ class Library {
   std::unique_ptr<TypeConstructor> IdentifierTypeForDecl(const Decl* decl,
                                                          types::Nullability nullability);
 
-  // Given a const declaration of the form
-  //     const type foo = name;
-  // return the declaration corresponding to name.
-  Decl* LookupConstant(const TypeConstructor* type_ctor, const Name& name);
-
   bool DeclDependencies(Decl* decl, std::set<Decl*>* out_edges);
 
   bool SortDeclarations();
-
-  bool CompileLibraryName();
 
   bool CompileBits(Bits* bits_declaration);
   bool CompileConst(Const* const_declaration);
   bool CompileEnum(Enum* enum_declaration);
   bool CompileProtocol(Protocol* protocol_declaration);
+  bool CompileService(Service* service_decl);
   bool CompileStruct(Struct* struct_declaration);
   bool CompileTable(Table* table_declaration);
   bool CompileUnion(Union* union_declaration);
@@ -1246,6 +1298,7 @@ class Library {
   std::vector<std::unique_ptr<Const>> const_declarations_;
   std::vector<std::unique_ptr<Enum>> enum_declarations_;
   std::vector<std::unique_ptr<Protocol>> protocol_declarations_;
+  std::vector<std::unique_ptr<Service>> service_declarations_;
   std::vector<std::unique_ptr<Struct>> struct_declarations_;
   std::vector<std::unique_ptr<Table>> table_declarations_;
   std::vector<std::unique_ptr<Union>> union_declarations_;
@@ -1287,4 +1340,4 @@ class Library {
 #pragma clang diagnostic pop
 #endif
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_FLAT_AST_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_FLAT_AST_H_

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_TEMPLATE_STRING_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_TEMPLATE_STRING_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_TEMPLATE_STRING_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_TEMPLATE_STRING_H_
 
 #include <map>
 #include <string>
@@ -26,12 +26,10 @@ using Substitutions = std::map<std::string, std::string>;
 //   });
 class TemplateString {
  public:
-  TemplateString(std::string str)
-      : str_(str) {}
+  TemplateString(std::string str) : str_(str) {}
 
   // Constructs an empty template.
-  TemplateString()
-      : TemplateString("") {}
+  TemplateString() : TemplateString("") {}
 
   // Returns true if the template string is not empty.
   explicit operator bool() const { return str_.size() > 0; }
@@ -59,4 +57,4 @@ class TemplateString {
 
 }  // namespace fidl
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_TEMPLATE_STRING_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_TEMPLATE_STRING_H_

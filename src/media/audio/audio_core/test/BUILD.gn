@@ -4,12 +4,13 @@
 
 import("//build/test.gni")
 import("//build/test/test_package.gni")
-import("//build/testing/environments.gni")
+import("//src/media/audio/hardware.gni")
 
 group("test") {
   testonly = true
   deps = [
     ":audio_core_inspect_tests",
+    ":audio_device_service_tests",
     ":audio_device_tests",
     ":audio_fidl_tests",
     ":audio_pipeline_tests",
@@ -50,6 +51,40 @@ test("audio_core_inspect_tests_bin") {
   ]
 }
 
+test_package("audio_device_service_tests") {
+  deps = [
+    ":audio_device_service_tests_bin",
+  ]
+
+  tests = [
+    {
+      name = "audio_device_service_tests"
+      environments = basic_envs
+    },
+  ]
+}
+
+executable("audio_device_service_tests_bin") {
+  testonly = true
+  output_name = "audio_device_service_tests"
+
+  sources = [
+    "service/audio_device_service_test.cc",
+    "service/audio_device_service_test.h",
+  ]
+
+  deps = [
+    "//garnet/public/lib/fostr",
+    "//garnet/public/lib/fostr/fidl/fuchsia.media",
+    "//sdk/fidl/fuchsia.media",
+    "//sdk/fidl/fuchsia.virtualaudio",
+    "//src/lib/fxl/test:gtest_main",
+    "//src/lib/fxl/test:test_settings",
+    "//src/media/audio/lib/test:hermetic_audio_test",
+    "//src/media/audio/lib/test:message_transceiver",
+  ]
+}
+
 test_package("audio_device_tests") {
   deps = [
     ":audio_device_tests_bin",
@@ -68,7 +103,6 @@ executable("audio_device_tests_bin") {
   output_name = "audio_device_tests"
 
   sources = [
-    "device/audio_device_main.cc",
     "device/audio_device_test.cc",
     "device/audio_device_test.h",
     "device/virtual_audio_device_test.cc",
@@ -79,8 +113,8 @@ executable("audio_device_tests_bin") {
   deps = [
     "//sdk/fidl/fuchsia.media",
     "//sdk/fidl/fuchsia.virtualaudio",
-    "//src/lib/fxl/test:test_settings",
-    "//src/media/audio/lib/test",
+    "//src/lib/fxl/test:gtest_main",
+    "//src/media/audio/lib/test:hermetic_audio_test",
   ]
 }
 
@@ -103,7 +137,6 @@ executable("audio_fidl_tests_bin") {
 
   sources = [
     "fidl/audio_capturer_test.cc",
-    "fidl/audio_fidl_main.cc",
     "fidl/audio_renderer_sync_test.cc",
     "fidl/audio_renderer_test.cc",
     "fidl/audio_sync_test.cc",
@@ -114,8 +147,8 @@ executable("audio_fidl_tests_bin") {
 
   deps = [
     "//sdk/fidl/fuchsia.media",
-    "//src/lib/fxl/test:test_settings",
-    "//src/media/audio/lib/test",
+    "//src/lib/fxl/test:gtest_main",
+    "//src/media/audio/lib/test:hermetic_audio_test",
   ]
 }
 
@@ -127,7 +160,9 @@ test_package("audio_pipeline_tests") {
   tests = [
     {
       name = "audio_pipeline_tests"
-      environments = basic_envs
+
+      # This (effectively real-time) test must be run on real hardware.
+      environments = hardware_envs
     },
   ]
 }
@@ -137,7 +172,6 @@ executable("audio_pipeline_tests_bin") {
   output_name = "audio_pipeline_tests"
 
   sources = [
-    "pipeline/audio_pipeline_main.cc",
     "pipeline/audio_pipeline_test.cc",
     "pipeline/audio_pipeline_test.h",
   ]
@@ -146,8 +180,9 @@ executable("audio_pipeline_tests_bin") {
     "//sdk/fidl/fuchsia.media",
     "//sdk/fidl/fuchsia.virtualaudio",
     "//sdk/lib/media/cpp:no_converters",
-    "//src/lib/fxl/test:test_settings",
-    "//src/media/audio/lib/test",
+    "//src/lib/fxl/test:gtest_main",
+    "//src/media/audio/lib/logging",
+    "//src/media/audio/lib/test:hermetic_audio_test",
     "//zircon/public/lib/fzl",
   ]
 }

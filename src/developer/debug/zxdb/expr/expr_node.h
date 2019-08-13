@@ -5,10 +5,10 @@
 #ifndef SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_NODE_H_
 #define SRC_DEVELOPER_DEBUG_ZXDB_EXPR_EXPR_NODE_H_
 
-#include <functional>
 #include <iosfwd>
 #include <memory>
 
+#include "lib/fit/function.h"
 #include "src/developer/debug/zxdb/expr/cast.h"
 #include "src/developer/debug/zxdb/expr/expr_token.h"
 #include "src/developer/debug/zxdb/expr/expr_value.h"
@@ -39,7 +39,7 @@ class UnaryOpExprNode;
 // Represents one node in the abstract syntax tree.
 class ExprNode : public fxl::RefCountedThreadSafe<ExprNode> {
  public:
-  using EvalCallback = std::function<void(const Err& err, ExprValue value)>;
+  using EvalCallback = fit::callback<void(const Err& err, ExprValue value)>;
 
   ExprNode() = default;
   virtual ~ExprNode() = default;
@@ -140,9 +140,6 @@ class ArrayAccessExprNode : public ExprNode {
   static Err InnerValueToOffset(fxl::RefPtr<EvalContext> context, const ExprValue& inner,
                                 int64_t* offset);
 
-  static void DoAccess(fxl::RefPtr<EvalContext> context, ExprValue left, int64_t offset,
-                       EvalCallback cb);
-
   fxl::RefPtr<ExprNode> left_;
   fxl::RefPtr<ExprNode> inner_;
 };
@@ -214,19 +211,37 @@ class FunctionCallExprNode : public ExprNode {
   void Eval(fxl::RefPtr<EvalContext> context, EvalCallback cb) const override;
   void Print(std::ostream& out, int indent) const override;
 
-  const ParsedIdentifier& name() const { return name_; }
+  const fxl::RefPtr<ExprNode>& call() const { return call_; }
   const std::vector<fxl::RefPtr<ExprNode>>& args() const { return args_; }
+
+  // Returns true if the given ExprNode is valid for the "call" of a function.
+  static bool IsValidCall(const fxl::RefPtr<ExprNode>& call);
 
  private:
   FRIEND_REF_COUNTED_THREAD_SAFE(FunctionCallExprNode);
   FRIEND_MAKE_REF_COUNTED(FunctionCallExprNode);
 
   FunctionCallExprNode();
-  FunctionCallExprNode(ParsedIdentifier name, std::vector<fxl::RefPtr<ExprNode>> args)
-      : name_(std::move(name)), args_(std::move(args)) {}
+  explicit FunctionCallExprNode(fxl::RefPtr<ExprNode> call,
+                                std::vector<fxl::RefPtr<ExprNode>> args = {})
+      : call_(std::move(call)), args_(std::move(args)) {}
   ~FunctionCallExprNode() override = default;
 
-  ParsedIdentifier name_;
+  // Backend to evaluate a member function call on the given base object. For example,
+  // "object.fn_name()".
+  //
+  // This assumes no function parameters (it's currently used for the PrettyType getters only).
+  //
+  // The second version handle the "->" case where the object should be a pointer.
+  static void EvalMemberCall(fxl::RefPtr<EvalContext> context, const ExprValue& object,
+                             const std::string& fn_name, EvalCallback cb);
+  static void EvalMemberPtrCall(fxl::RefPtr<EvalContext> context, const ExprValue& object_ptr,
+                                const std::string& fn_name, EvalCallback cb);
+
+  // This will either be an IdentifierExprNode which gives the function name, or a
+  // MemberAccessExprNode which gives an object and the function name.
+  fxl::RefPtr<ExprNode> call_;
+
   std::vector<fxl::RefPtr<ExprNode>> args_;
 };
 

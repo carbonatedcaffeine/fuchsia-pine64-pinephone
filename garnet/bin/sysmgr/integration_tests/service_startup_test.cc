@@ -25,7 +25,7 @@ TEST_F(TestSysmgr, ServiceStartup) {
   zx::channel h1, h2;
   ASSERT_EQ(ZX_OK, zx::channel::create(0, &h1, &h2));
 
-  fidl::VectorPtr<std::string> sysmgr_args;
+  std::vector<std::string> sysmgr_args;
   // When auto_update_packages=true, this tests that the presence of amber
   // in the sys environment allows component loading to succeed. It should work
   // with a mocked amber.
@@ -48,21 +48,17 @@ TEST_F(TestSysmgr, ServiceStartup) {
 
   // Make fidl.examples.echo.Echo from our own environment available in appmgr's
   // root realm.
-  fuchsia::sys::ServiceListPtr root_realm_services(
-      new fuchsia::sys::ServiceList);
-  root_realm_services->names =
-      std::vector<std::string>{fidl::examples::echo::Echo::Name_};
-  root_realm_services->host_directory =
-      environment_services->CloneChannel().TakeChannel();
+  fuchsia::sys::ServiceListPtr root_realm_services(new fuchsia::sys::ServiceList);
+  root_realm_services->names = std::vector<std::string>{fidl::examples::echo::Echo::Name_};
+  root_realm_services->host_directory = environment_services->CloneChannel().TakeChannel();
 
-  component::AppmgrArgs args{
-      .pa_directory_request = h2.release(),
-      .root_realm_services = std::move(root_realm_services),
-      .environment_services = std::move(environment_services),
-      .sysmgr_url = "fuchsia-pkg://fuchsia.com/sysmgr#meta/sysmgr.cmx",
-      .sysmgr_args = std::move(sysmgr_args),
-      .run_virtual_console = false,
-      .retry_sysmgr_crash = false};
+  component::AppmgrArgs args{.pa_directory_request = h2.release(),
+                             .root_realm_services = std::move(root_realm_services),
+                             .environment_services = std::move(environment_services),
+                             .sysmgr_url = "fuchsia-pkg://fuchsia.com/sysmgr#meta/sysmgr.cmx",
+                             .sysmgr_args = std::move(sysmgr_args),
+                             .run_virtual_console = false,
+                             .retry_sysmgr_crash = false};
   component::Appmgr appmgr(dispatcher(), std::move(args));
 
   // h1 is connected to h2, which is injected above as appmgr's
@@ -72,8 +68,7 @@ TEST_F(TestSysmgr, ServiceStartup) {
   // sysmgr_svc ends up being a directory with all services in the sys realm.
   zx::channel svc_client, svc_server;
   ASSERT_EQ(ZX_OK, zx::channel::create(0, &svc_client, &svc_server));
-  ASSERT_EQ(ZX_OK,
-            fdio_service_connect_at(h1.get(), "svc", svc_server.release()));
+  ASSERT_EQ(ZX_OK, fdio_service_connect_at(h1.get(), "svc", svc_server.release()));
   sys::ServiceDirectory sysmgr_svc(std::move(svc_client));
 
   bool received_response = false;
@@ -83,7 +78,7 @@ TEST_F(TestSysmgr, ServiceStartup) {
 
   interface_ptr->Ping([&](fidl::StringPtr r) {
     received_response = true;
-    response = r;
+    response = r.value_or("");
   });
   RunLoopUntil([&] { return received_response; });
   EXPECT_EQ("test_sysmgr_service_startup", response);
@@ -95,7 +90,7 @@ TEST_F(TestSysmgr, ServiceStartup) {
 
   echo_ptr->EchoString(echo_msg, [&](fidl::StringPtr r) {
     received_response = true;
-    response = r;
+    response = r.value_or("");
   });
   RunLoopUntil([&] { return received_response; });
   EXPECT_EQ(echo_msg, response);

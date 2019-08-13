@@ -5,13 +5,13 @@
 // These tests ensure the zircon libc can talk to netstack.
 // No network connection is required, only a running netstack binary.
 
-#include <fuchsia/net/c/fidl.h>
+#include <thread>
+
+#include <fuchsia/posix/socket/cpp/fidl.h>
 #include <lib/fdio/fd.h>
 #include <lib/sync/completion.h>
 #include <zircon/status.h>
 #include <zircon/syscalls.h>
-
-#include <thread>
 
 #include "gtest/gtest.h"
 #include "util.h"
@@ -41,12 +41,10 @@ TEST(NetStreamTest, BlockingAcceptWriteNoClose) {
         break;
       }
     }
-    ASSERT_EQ(ret, 0) << "bind failed: " << strerror(errno)
-                      << " port: " << port;
+    ASSERT_EQ(ret, 0) << "bind failed: " << strerror(errno) << " port: " << port;
 
     socklen_t addrlen = sizeof(addr);
-    ASSERT_EQ(getsockname(acptfd, (struct sockaddr*)&addr, &addrlen), 0)
-        << strerror(errno);
+    ASSERT_EQ(getsockname(acptfd, (struct sockaddr*)&addr, &addrlen), 0) << strerror(errno);
     ASSERT_EQ(addrlen, sizeof(addr));
 
     // remember the assigned port and use it for the next bind.
@@ -95,24 +93,65 @@ TEST(NetStreamTest, RaceClose) {
 
   sync_completion_t completion;
 
+  fuchsia::posix::socket::Control_SyncProxy control((zx::channel(handle)));
+
   std::vector<std::thread> workers;
   for (int i = 0; i < 10; i++) {
-    workers.push_back(std::thread([&handle, &completion]() {
+    workers.push_back(std::thread([&control, &completion]() {
       zx_status_t status = sync_completion_wait(&completion, ZX_TIME_INFINITE);
       ASSERT_EQ(status, ZX_OK) << zx_status_get_string(status);
 
-      int16_t out_code;
-      status = fuchsia_net_SocketControlClose(handle, &out_code);
-      if (status == ZX_OK) {
-        EXPECT_EQ(out_code, 0) << strerror(out_code);
+      zx_status_t io_status = control.Close(&status);
+      if (io_status == ZX_OK) {
+        EXPECT_EQ(status, ZX_OK) << zx_status_get_string(status);
       } else {
-        EXPECT_EQ(status, ZX_ERR_PEER_CLOSED) << zx_status_get_string(status);
+        EXPECT_EQ(io_status, ZX_ERR_PEER_CLOSED) << zx_status_get_string(io_status);
       }
     }));
   }
 
   sync_completion_signal(&completion);
 
-  std::for_each(workers.begin(), workers.end(),
-                std::mem_fn(&std::thread::join));
+  std::for_each(workers.begin(), workers.end(), std::mem_fn(&std::thread::join));
+}
+
+TEST(SocketTest, CloseZXSocketOnClose) {
+  int fd;
+  ASSERT_GE(fd = socket(AF_INET, SOCK_STREAM, 0), 0) << strerror(errno);
+
+  zx_handle_t handle;
+  zx_status_t status;
+  ASSERT_EQ(status = fdio_fd_transfer(fd, &handle), ZX_OK) << zx_status_get_string(status);
+
+  fuchsia::posix::socket::Control_SyncProxy control((zx::channel(handle)));
+
+  fuchsia::io::NodeInfo node_info;
+  ASSERT_EQ(status = control.Describe(&node_info), ZX_OK) << zx_status_get_string(status);
+  ASSERT_EQ(node_info.Which(), fuchsia::io::NodeInfo::Tag::kSocket);
+
+  zx_signals_t observed;
+  ASSERT_EQ(status = node_info.socket().socket.wait_one(ZX_SOCKET_WRITABLE,
+                                                        zx::time::infinite_past(), &observed),
+            ZX_OK)
+      << zx_status_get_string(status);
+  ASSERT_EQ(status = zx::unowned_channel(handle)->wait_one(ZX_CHANNEL_WRITABLE,
+                                                           zx::time::infinite_past(), &observed),
+            ZX_OK)
+      << zx_status_get_string(status);
+
+  zx_status_t io_status;
+  ASSERT_EQ(io_status = control.Close(&status), ZX_OK) << zx_status_get_string(status);
+  ASSERT_EQ(status, ZX_OK) << zx_status_get_string(status);
+
+  ASSERT_EQ(status = node_info.socket().socket.wait_one(ZX_SOCKET_PEER_CLOSED,
+                                                        zx::time::infinite_past(), &observed),
+            ZX_OK)
+      << zx_status_get_string(status);
+  // Give a generous timeout for the channel to close; the channel closing is inherently
+  // asynchronous with respect to the `Close` FIDL call above (since its return must come over the
+  // channel).
+  ASSERT_EQ(status = zx::unowned_channel(handle)->wait_one(
+                ZX_CHANNEL_PEER_CLOSED, zx::deadline_after(zx::sec(5)), &observed),
+            ZX_OK)
+      << zx_status_get_string(status);
 }

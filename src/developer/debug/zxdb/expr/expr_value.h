@@ -9,6 +9,7 @@
 
 #include <vector>
 
+#include "src/developer/debug/zxdb/common/err_or.h"
 #include "src/developer/debug/zxdb/expr/expr_value_source.h"
 #include "src/developer/debug/zxdb/symbols/type.h"
 #include "src/lib/fxl/memory/ref_ptr.h"
@@ -19,24 +20,39 @@ class Err;
 class EvalContext;
 class Type;
 
-// Holds a value for an expression. This could be the value of a variable in
-// memory (e.g. the value of "a" when you type "print a"), or it could be
-// a temporary that the debugger has computed as part of an expression.
+// Holds a value for an expression. This could be the value of a variable in memory (e.g. the value
+// of "a" when you type "print a"), or it could be a temporary that the debugger has computed as
+// part of an expression.
 class ExprValue {
  public:
   ExprValue();
 
-  // Constructs a value from the corresponding C++ value. A Type will be
-  // created to represent the value.
-  explicit ExprValue(bool value);
-  explicit ExprValue(int8_t value);
-  explicit ExprValue(uint8_t value);
-  explicit ExprValue(int16_t value);
-  explicit ExprValue(uint16_t value);
-  explicit ExprValue(int32_t value);
-  explicit ExprValue(uint32_t value);
-  explicit ExprValue(int64_t value);
-  explicit ExprValue(uint64_t value);
+  // Constructs a value from the corresponding C++ value of the given size.
+  //
+  // If the type is null, a type matching the corresponding C++ parameter name ("int32_t", etc.)
+  // will be created to represent the value (this is useful for tests).
+  explicit ExprValue(bool value, fxl::RefPtr<Type> type = fxl::RefPtr<Type>(),
+                     const ExprValueSource& source = ExprValueSource());
+  explicit ExprValue(int8_t value, fxl::RefPtr<Type> type = fxl::RefPtr<Type>(),
+                     const ExprValueSource& source = ExprValueSource());
+  explicit ExprValue(uint8_t value, fxl::RefPtr<Type> type = fxl::RefPtr<Type>(),
+                     const ExprValueSource& source = ExprValueSource());
+  explicit ExprValue(int16_t value, fxl::RefPtr<Type> type = fxl::RefPtr<Type>(),
+                     const ExprValueSource& source = ExprValueSource());
+  explicit ExprValue(uint16_t value, fxl::RefPtr<Type> type = fxl::RefPtr<Type>(),
+                     const ExprValueSource& source = ExprValueSource());
+  explicit ExprValue(int32_t value, fxl::RefPtr<Type> type = fxl::RefPtr<Type>(),
+                     const ExprValueSource& source = ExprValueSource());
+  explicit ExprValue(uint32_t value, fxl::RefPtr<Type> type = fxl::RefPtr<Type>(),
+                     const ExprValueSource& source = ExprValueSource());
+  explicit ExprValue(int64_t value, fxl::RefPtr<Type> type = fxl::RefPtr<Type>(),
+                     const ExprValueSource& source = ExprValueSource());
+  explicit ExprValue(uint64_t value, fxl::RefPtr<Type> type = fxl::RefPtr<Type>(),
+                     const ExprValueSource& source = ExprValueSource());
+  explicit ExprValue(float value, fxl::RefPtr<Type> type = fxl::RefPtr<Type>(),
+                     const ExprValueSource& source = ExprValueSource());
+  explicit ExprValue(double value, fxl::RefPtr<Type> type = fxl::RefPtr<Type>(),
+                     const ExprValueSource& source = ExprValueSource());
 
   // Full constructor. This takes the type and stores it assuming the type
   // is good. Prefer the other version when possible unless you're sure the
@@ -84,20 +100,20 @@ class ExprValue {
   template <typename T>
   T GetAs() const;
 
-  // Gets the result as a [u]int64_t, promoting all shorter values to the
-  // longer ones. If the data size is empty or greater than 64 bits it will
-  // return an error.
+  // Gets the result as the given 64-bit value, promoting all shorter values to the longer ones. If
+  // the data size is empty or greater than 64 bits it will return an error.
   Err PromoteTo64(int64_t* output) const;
   Err PromoteTo64(uint64_t* output) const;
 
-  // Gets the result as a double. This will convert floats and doubles to
-  // doubles.
+  // Gets the result as a double. This will convert floats and doubles to doubles. It will not
+  // convert ints to floating point.
   Err PromoteToDouble(double* output) const;
 
  private:
-  // Internal constructor for the primitive types that constructs an on-the-fly
-  // type definition for the built-in type.
-  ExprValue(int base_type, const char* type_name, void* data, uint32_t data_size);
+  // Internal constructor for the primitive types. It uses the given |type| if given, otherwise they
+  // construct an on-the-fly type definition for the built-in type with the given parameters.
+  ExprValue(fxl::RefPtr<Type> optional_type, int base_type, const char* type_name, void* data,
+            uint32_t data_size);
 
   // Application-defined type from the symbols.
   fxl::RefPtr<Type> type_;
@@ -136,6 +152,9 @@ float ExprValue::GetAs<float>() const;
 
 template <>
 double ExprValue::GetAs<double>() const;
+
+using ErrOrValue = ErrOr<ExprValue>;
+using ErrOrValueVector = ErrOr<std::vector<ExprValue>>;
 
 }  // namespace zxdb
 

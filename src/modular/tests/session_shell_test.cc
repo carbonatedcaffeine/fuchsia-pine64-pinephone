@@ -35,7 +35,7 @@ class SessionShellTest : public modular::testing::TestHarnessFixture {
   // Not done in SetUp() or the constructor to let the test reader know that
   // this is happening. Also, certain tests may want to change this flow.
   void RunHarnessAndInterceptSessionShell() {
-    modular::testing::TestHarnessBuilder builder;
+    modular_testing::TestHarnessBuilder builder;
     builder.InterceptSessionShell(fake_session_shell_.GetOnCreateHandler(),
                                   {.sandbox_services = {"fuchsia.modular.SessionShellContext",
                                                         "fuchsia.modular.PuppetMaster"}});
@@ -152,7 +152,8 @@ TEST_F(SessionShellTest, StartAndStopStoryWithExtraInfoMod) {
   const std::string initial_json = R"({"created-with-info": true})";
   ASSERT_TRUE(fsl::VmoFromString(initial_json, &vmo));
   param.data.set_json(std::move(vmo).ToTransport());
-  add_mod.intent.parameters.push_back(std::move(param));
+  add_mod.intent.parameters.emplace();
+  add_mod.intent.parameters->push_back(std::move(param));
 
   StoryCommand command;
   command.set_add_mod(std::move(add_mod));

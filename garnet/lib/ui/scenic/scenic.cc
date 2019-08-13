@@ -11,7 +11,7 @@
 
 namespace scenic_impl {
 
-Scenic::Scenic(sys::ComponentContext* app_context, inspect::Node inspect_node,
+Scenic::Scenic(sys::ComponentContext* app_context, inspect_deprecated::Node inspect_node,
                fit::closure quit_callback)
     : app_context_(app_context),
       quit_callback_(std::move(quit_callback)),
@@ -27,16 +27,12 @@ Scenic::Scenic(sys::ComponentContext* app_context, inspect::Node inspect_node,
 
 Scenic::~Scenic() = default;
 
-void Scenic::OnSystemInitialized(System* system) {
-  size_t num_erased = uninitialized_systems_.erase(system);
-  FXL_CHECK(num_erased == 1);
-
-  if (uninitialized_systems_.empty()) {
-    for (auto& closure : run_after_all_systems_initialized_) {
-      closure();
-    }
-    run_after_all_systems_initialized_.clear();
+void Scenic::SetInitialized() {
+  initialized_ = true;
+  for (auto& closure : run_after_initialized_) {
+    closure();
   }
+  run_after_initialized_.clear();
 }
 
 void Scenic::CloseSession(Session* session) {
@@ -50,17 +46,20 @@ void Scenic::CloseSession(Session* session) {
   }
 }
 
+void Scenic::RunAfterInitialized(fit::closure closure) {
+  if (initialized_) {
+    closure();
+  } else {
+    run_after_initialized_.push_back(std::move(closure));
+  }
+}
+
 void Scenic::CreateSession(::fidl::InterfaceRequest<fuchsia::ui::scenic::Session> session_request,
                            ::fidl::InterfaceHandle<fuchsia::ui::scenic::SessionListener> listener) {
-  if (uninitialized_systems_.empty()) {
+  RunAfterInitialized([this, session_request = std::move(session_request),
+                       listener = std::move(listener)]() mutable {
     CreateSessionImmediately(std::move(session_request), std::move(listener));
-  } else {
-    run_after_all_systems_initialized_.push_back([this,
-                                                  session_request = std::move(session_request),
-                                                  listener = std::move(listener)]() mutable {
-      CreateSessionImmediately(std::move(session_request), std::move(listener));
-    });
-  }
+  });
 }
 
 void Scenic::CreateSessionImmediately(
@@ -83,25 +82,40 @@ void Scenic::CreateSessionImmediately(
 }
 
 void Scenic::GetDisplayInfo(fuchsia::ui::scenic::Scenic::GetDisplayInfoCallback callback) {
-  FXL_DCHECK(systems_[System::kGfx]);
-  TempSystemDelegate* delegate =
-      reinterpret_cast<TempSystemDelegate*>(systems_[System::kGfx].get());
-  delegate->GetDisplayInfo(std::move(callback));
+  RunAfterInitialized([this, callback = std::move(callback)]() mutable {
+    // TODO(SCN-452): This code assumes that, once all systems have been initialized, that there
+    // will be a proper delegate for Scenic API functions. Attached to the bug to remove this
+    // delegate class completely. If the delegate becomes a permanent fixture of the system, switch
+    // to SCN-1506, as we need a more formal mechanism for delayed execution and initialization
+    // order logic.
+    FXL_DCHECK(delegate_);
+    delegate_->GetDisplayInfo(std::move(callback));
+  });
 }
 
 void Scenic::TakeScreenshot(fuchsia::ui::scenic::Scenic::TakeScreenshotCallback callback) {
-  FXL_DCHECK(systems_[System::kGfx]);
-  TempSystemDelegate* delegate =
-      reinterpret_cast<TempSystemDelegate*>(systems_[System::kGfx].get());
-  delegate->TakeScreenshot(std::move(callback));
+  RunAfterInitialized([this, callback = std::move(callback)]() mutable {
+    // TODO(SCN-452): This code assumes that, once all systems have been initialized, that there
+    // will be a proper delegate for Scenic API functions. Attached to the bug to remove this
+    // delegate class completely. If the delegate becomes a permanent fixture of the system, switch
+    // to SCN-1506, as we need a more formal mechanism for delayed execution and initialization
+    // order logic.
+    FXL_DCHECK(delegate_);
+    delegate_->TakeScreenshot(std::move(callback));
+  });
 }
 
 void Scenic::GetDisplayOwnershipEvent(
     fuchsia::ui::scenic::Scenic::GetDisplayOwnershipEventCallback callback) {
-  FXL_DCHECK(systems_[System::kGfx]);
-  TempSystemDelegate* delegate =
-      reinterpret_cast<TempSystemDelegate*>(systems_[System::kGfx].get());
-  delegate->GetDisplayOwnershipEvent(std::move(callback));
+  RunAfterInitialized([this, callback = std::move(callback)]() mutable {
+    // TODO(SCN-452): This code assumes that, once all systems have been initialized, that there
+    // will be a proper delegate for Scenic API functions. Attached to the bug to remove this
+    // delegate class completely. If the delegate becomes a permanent fixture of the system, switch
+    // to SCN-1506, as we need a more formal mechanism for delayed execution and initialization
+    // order logic.
+    FXL_DCHECK(delegate_);
+    delegate_->GetDisplayOwnershipEvent(std::move(callback));
+  });
 }
 
 }  // namespace scenic_impl

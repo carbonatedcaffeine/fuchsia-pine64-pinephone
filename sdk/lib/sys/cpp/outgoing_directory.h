@@ -7,6 +7,8 @@
 
 #include <lib/async/dispatcher.h>
 #include <lib/fit/function.h>
+#include <lib/sys/service/cpp/service.h>
+#include <lib/sys/service/cpp/service_handler.h>
 #include <lib/vfs/cpp/pseudo_dir.h>
 #include <lib/vfs/cpp/service.h>
 
@@ -71,8 +73,7 @@ class OutgoingDirectory final {
   // ZX_ERR_ACCESS_DENIED: |directory_request| has insufficient rights.
   //
   // TODO: Document more errors.
-  zx_status_t Serve(zx::channel directory_request,
-                    async_dispatcher_t* dispatcher = nullptr);
+  zx_status_t Serve(zx::channel directory_request, async_dispatcher_t* dispatcher = nullptr);
 
   // Starts serving the outgoing directory on the channel provided to this
   // process at startup as |PA_DIRECTORY_REQUEST|.
@@ -111,9 +112,8 @@ class OutgoingDirectory final {
   // outgoing.AddPublicService(bindings.GetHandler(this));
   // ```
   template <typename Interface>
-  zx_status_t AddPublicService(
-      fidl::InterfaceRequestHandler<Interface> handler,
-      std::string service_name = Interface::Name_) const {
+  zx_status_t AddPublicService(fidl::InterfaceRequestHandler<Interface> handler,
+                               std::string service_name = Interface::Name_) const {
     return AddPublicService(std::make_unique<vfs::Service>(std::move(handler)),
                             std::move(service_name));
   }
@@ -143,25 +143,81 @@ class OutgoingDirectory final {
   // outgoing.RemovePublicService<fuchsia::foo::Controller>();
   // ```
   template <typename Interface>
-  zx_status_t RemovePublicService(
-      const std::string& name = Interface::Name_) const {
+  zx_status_t RemovePublicService(const std::string& name = Interface::Name_) const {
     return svc_->RemoveEntry(name);
   }
 
-  // Gets the directory to publish debug data.
+  // Adds an instance of a service.
+  //
+  // A |handler| is added to provide an |instance| of a service.
+  //
+  // # Errors
+  //
+  // ZX_ERR_ALREADY_EXISTS: The instance already exists.
+  //
+  // # Example
+  //
+  // ```
+  // ServiceHandler handler;
+  // handler.AddMember("my-member", ...);
+  // outgoing.AddService<MyService>(std::move(handler), "my-instance");
+  // ```
+  template <typename Service>
+  zx_status_t AddService(fidl::ServiceHandler handler,
+                         std::string instance = fidl::kDefaultInstance) const {
+    return AddNamedService(std::move(handler), Service::Name, std::move(instance));
+  }
+
+  // Adds an instance of a service.
+  //
+  // A |handler| is added to provide an |instance| of a |service|.
+  //
+  // # Errors
+  //
+  // ZX_ERR_ALREADY_EXISTS: The instance already exists.
+  zx_status_t AddNamedService(fidl::ServiceHandler handler, std::string service,
+                              std::string instance = fidl::kDefaultInstance) const;
+
+  // Removes an instance of a service.
+  //
+  // # Errors
+  //
+  // ZX_ERR_NOT_FOUND: The instance was not found.
+  //
+  // # Example
+  //
+  // ```
+  // outgoing.RemoveService<MyService>("my-instance");
+  // ```
+  template <typename Service>
+  zx_status_t RemoveService(const std::string& instance) const {
+    return RemoveNamedService(Service::Name, instance);
+  }
+
+  // Removes an instance of a service.
+  //
+  // # Errors
+  //
+  // ZX_ERR_NOT_FOUND: The instance was not found.
+  zx_status_t RemoveNamedService(const std::string& service, const std::string& instance) const;
+
+  // Gets the root directory.
+  //
   // The returned directory is owned by this class.
-  vfs::PseudoDir* debug_dir() { return debug_; }
+  vfs::PseudoDir* root_dir() const { return root_.get(); }
+
+  // Gets the directory to publish debug data.
+  //
+  // The returned directory is owned by this class.
+  vfs::PseudoDir* debug_dir() const { return debug_; }
 
   // Gets a subdirectory with the given |name|, creates it if it does not
   // already exist.
+  //
   // The returned directory is owned by this class.
   vfs::PseudoDir* GetOrCreateDirectory(const std::string& name);
 
  private:
-  // Adds a new empty directory to |root_| and returns pointer to new directory.
-  // Will fail silently if directory with that name already exists.
-  vfs::PseudoDir* AddNewEmptyDirectory(std::string name);
-
   // The root of the outgoing directory itself.
   std::unique_ptr<vfs::PseudoDir> root_;
 

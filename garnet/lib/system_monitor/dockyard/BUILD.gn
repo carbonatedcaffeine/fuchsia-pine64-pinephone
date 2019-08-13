@@ -4,6 +4,10 @@
 
 import("//third_party/protobuf/proto_library.gni")
 
+config("cc11only") {
+  cflags_cc = [ "-std=c++11" ]
+}
+
 source_set("headers") {
   sources = [
     "dockyard.h",
@@ -18,11 +22,10 @@ source_set("headers") {
 }
 
 source_set("lib") {
+  configs += [ ":cc11only" ]
   sources = [
     "dockyard.cc",
     "dockyard_service_impl.cc",
-    "test_sample_generator.cc",
-    "test_sample_generator.h",
   ]
 
   public_deps = [
@@ -65,6 +68,8 @@ source_set("tests") {
 
   sources = [
     "dockyard_test.cc",
+    "test_sample_generator.cc",
+    "test_sample_generator.h",
   ]
 
   deps = [

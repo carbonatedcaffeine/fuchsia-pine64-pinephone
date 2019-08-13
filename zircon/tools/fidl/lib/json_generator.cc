@@ -237,6 +237,7 @@ void JSONGenerator::Generate(const flat::Name& value) {
 void JSONGenerator::Generate(const flat::Bits& value) {
   GenerateObject([&]() {
     GenerateObjectMember("name", value.name, Position::kFirst);
+    GenerateObjectMember("location", NameLocation(value.name));
     if (value.attributes)
       GenerateObjectMember("maybe_attributes", value.attributes);
     GenerateObjectMember("type", value.subtype_ctor->type);
@@ -246,12 +247,14 @@ void JSONGenerator::Generate(const flat::Bits& value) {
     EmitObjectKey("mask");
     EmitNumeric(value.mask, kAsString);
     GenerateObjectMember("members", value.members);
+    GenerateObjectMember("strict", value.strictness == types::Strictness::kStrict);
   });
 }
 
 void JSONGenerator::Generate(const flat::Bits::Member& value) {
   GenerateObject([&]() {
     GenerateObjectMember("name", value.name, Position::kFirst);
+    GenerateObjectMember("location", NameLocation(value.name));
     GenerateObjectMember("value", value.value);
     if (value.attributes)
       GenerateObjectMember("maybe_attributes", value.attributes);
@@ -277,6 +280,7 @@ void JSONGenerator::Generate(const flat::Enum& value) {
       GenerateObjectMember("maybe_attributes", value.attributes);
     GenerateObjectMember("type", value.type->name);
     GenerateObjectMember("members", value.members);
+    GenerateObjectMember("strict", value.strictness == types::Strictness::kStrict);
   });
 }
 
@@ -305,7 +309,9 @@ void JSONGenerator::Generate(const flat::Protocol::MethodWithInfo& method_with_i
   const auto& value = *method_with_info.method;
   GenerateObject([&]() {
     GenerateObjectMember("ordinal", value.generated_ordinal32, Position::kFirst);
-    GenerateObjectMember("generated_ordinal", value.generated_ordinal32);
+    GenerateObjectPunctuation(Position::kSubsequent);
+    EmitObjectKey("generated_ordinal");
+    EmitNumeric(static_cast<uint64_t>(value.generated_ordinal32->value) << 32);
     GenerateObjectMember("name", value.name);
     GenerateObjectMember("location", NameLocation(value.name));
     GenerateObjectMember("has_request", value.maybe_request != nullptr);
@@ -324,9 +330,31 @@ void JSONGenerator::Generate(const flat::Protocol::MethodWithInfo& method_with_i
 
 void JSONGenerator::GenerateRequest(const std::string& prefix, const flat::Struct& value) {
   GenerateObjectMember(prefix, value.members);
-  GenerateObjectMember(prefix + "_size", value.typeshape.Size());
+  GenerateObjectMember(prefix + "_size", value.typeshape.InlineSize());
   GenerateObjectMember(prefix + "_alignment", value.typeshape.Alignment());
   GenerateObjectMember(prefix + "_has_padding", value.typeshape.HasPadding());
+  GenerateObjectMember("experimental_" + prefix + "_has_flexible_envelope",
+                       value.typeshape.HasFlexibleEnvelope());
+}
+
+void JSONGenerator::Generate(const flat::Service& value) {
+  GenerateObject([&]() {
+    GenerateObjectMember("name", value.name, Position::kFirst);
+    GenerateObjectMember("location", NameLocation(value.name));
+    if (value.attributes)
+      GenerateObjectMember("maybe_attributes", value.attributes);
+    GenerateObjectMember("members", value.members);
+  });
+}
+
+void JSONGenerator::Generate(const flat::Service::Member& value) {
+  GenerateObject([&]() {
+    GenerateObjectMember("type", value.type_ctor->type, Position::kFirst);
+    GenerateObjectMember("name", value.name);
+    GenerateObjectMember("location", NameLocation(value.name));
+    if (value.attributes)
+      GenerateObjectMember("maybe_attributes", value.attributes);
+  });
 }
 
 void JSONGenerator::Generate(const flat::Struct& value) {
@@ -337,7 +365,7 @@ void JSONGenerator::Generate(const flat::Struct& value) {
     if (value.attributes)
       GenerateObjectMember("maybe_attributes", value.attributes);
     GenerateObjectMember("members", value.members);
-    GenerateObjectMember("size", value.typeshape.Size());
+    GenerateObjectMember("size", value.typeshape.InlineSize());
     GenerateObjectMember("max_out_of_line", value.typeshape.MaxOutOfLine());
     GenerateObjectMember("alignment", value.typeshape.Alignment());
     GenerateObjectMember("max_handles", value.typeshape.MaxHandles());
@@ -354,7 +382,7 @@ void JSONGenerator::Generate(const flat::Struct::Member& value) {
       GenerateObjectMember("maybe_attributes", value.attributes);
     if (value.maybe_default_value)
       GenerateObjectMember("maybe_default_value", value.maybe_default_value);
-    GenerateObjectMember("size", value.fieldshape.Size());
+    GenerateObjectMember("size", value.fieldshape.InlineSize());
     GenerateObjectMember("max_out_of_line", value.fieldshape.MaxOutOfLine());
     GenerateObjectMember("alignment", value.fieldshape.Alignment());
     GenerateObjectMember("offset", value.fieldshape.Offset());
@@ -369,10 +397,11 @@ void JSONGenerator::Generate(const flat::Table& value) {
     if (value.attributes)
       GenerateObjectMember("maybe_attributes", value.attributes);
     GenerateObjectMember("members", value.members);
-    GenerateObjectMember("size", value.typeshape.Size());
+    GenerateObjectMember("size", value.typeshape.InlineSize());
     GenerateObjectMember("max_out_of_line", value.typeshape.MaxOutOfLine());
     GenerateObjectMember("alignment", value.typeshape.Alignment());
     GenerateObjectMember("max_handles", value.typeshape.MaxHandles());
+    GenerateObjectMember("strict", value.strictness == types::Strictness::kStrict);
   });
 }
 
@@ -388,7 +417,7 @@ void JSONGenerator::Generate(const flat::Table::Member& value) {
       if (value.maybe_used->attributes)
         GenerateObjectMember("maybe_attributes", value.maybe_used->attributes);
       // TODO(FIDL-609): Support defaults on tables.
-      GenerateObjectMember("size", value.maybe_used->typeshape.Size());
+      GenerateObjectMember("size", value.maybe_used->typeshape.InlineSize());
       GenerateObjectMember("max_out_of_line", value.maybe_used->typeshape.MaxOutOfLine());
       GenerateObjectMember("alignment", value.maybe_used->typeshape.Alignment());
       GenerateObjectMember("max_handles", value.maybe_used->typeshape.MaxHandles());
@@ -407,7 +436,7 @@ void JSONGenerator::Generate(const flat::Union& value) {
     if (value.attributes)
       GenerateObjectMember("maybe_attributes", value.attributes);
     GenerateObjectMember("members", value.members);
-    GenerateObjectMember("size", value.typeshape.Size());
+    GenerateObjectMember("size", value.typeshape.InlineSize());
     GenerateObjectMember("max_out_of_line", value.typeshape.MaxOutOfLine());
     GenerateObjectMember("alignment", value.typeshape.Alignment());
     GenerateObjectMember("max_handles", value.typeshape.MaxHandles());
@@ -421,7 +450,7 @@ void JSONGenerator::Generate(const flat::Union::Member& value) {
     GenerateObjectMember("location", NameLocation(value.name));
     if (value.attributes)
       GenerateObjectMember("maybe_attributes", value.attributes);
-    GenerateObjectMember("size", value.fieldshape.Size());
+    GenerateObjectMember("size", value.fieldshape.InlineSize());
     GenerateObjectMember("max_out_of_line", value.fieldshape.MaxOutOfLine());
     GenerateObjectMember("alignment", value.fieldshape.Alignment());
     GenerateObjectMember("offset", value.fieldshape.Offset());
@@ -435,7 +464,7 @@ void JSONGenerator::Generate(const flat::XUnion& value) {
     if (value.attributes)
       GenerateObjectMember("maybe_attributes", value.attributes);
     GenerateObjectMember("members", value.members);
-    GenerateObjectMember("size", value.typeshape.Size());
+    GenerateObjectMember("size", value.typeshape.InlineSize());
     GenerateObjectMember("max_out_of_line", value.typeshape.MaxOutOfLine());
     GenerateObjectMember("alignment", value.typeshape.Alignment());
     GenerateObjectMember("max_handles", value.typeshape.MaxHandles());
@@ -451,7 +480,7 @@ void JSONGenerator::Generate(const flat::XUnion::Member& value) {
     GenerateObjectMember("location", NameLocation(value.name));
     if (value.attributes)
       GenerateObjectMember("maybe_attributes", value.attributes);
-    GenerateObjectMember("size", value.fieldshape.Size());
+    GenerateObjectMember("size", value.fieldshape.InlineSize());
     GenerateObjectMember("max_out_of_line", value.fieldshape.MaxOutOfLine());
     GenerateObjectMember("alignment", value.fieldshape.Alignment());
     GenerateObjectMember("offset", value.fieldshape.Offset());
@@ -533,6 +562,9 @@ void JSONGenerator::GenerateDeclarationsMember(const flat::Library* library, Pos
     for (const auto& decl : library->protocol_declarations_)
       GenerateDeclarationsEntry(count++, decl->name, "interface");
 
+    for (const auto& decl : library->service_declarations_)
+      GenerateDeclarationsEntry(count++, decl->name, "service");
+
     for (const auto& decl : library->struct_declarations_) {
       if (decl->anonymous)
         continue;
@@ -566,16 +598,33 @@ struct LibraryComparator {
 std::set<const flat::Library*, LibraryComparator> TransitiveDependencies(
     const flat::Library* library) {
   std::set<const flat::Library*, LibraryComparator> dependencies;
-  for (const auto& dep_library : library->dependencies()) {
+  auto add_dependency = [&](const flat::Library* dep_library) {
     if (!dep_library->HasAttribute("Internal")) {
       dependencies.insert(dep_library);
     }
+  };
+  for (const auto& dep_library : library->dependencies()) {
+    add_dependency(dep_library);
   }
   // Discover additional dependencies that are required to support
   // cross-library protocol composition.
   for (const auto& protocol : library->protocol_declarations_) {
     for (const auto method_with_info : protocol->all_methods) {
-      dependencies.insert(method_with_info.method->owning_protocol->name.library());
+      if (auto request = method_with_info.method->maybe_request) {
+        for (const auto& member : request->members) {
+          if (auto dep_library = member.type_ctor->name.library()) {
+            add_dependency(dep_library);
+          }
+        }
+      }
+      if (auto response = method_with_info.method->maybe_response) {
+        for (const auto& member : response->members) {
+          if (auto dep_library = member.type_ctor->name.library()) {
+            add_dependency(dep_library);
+          }
+        }
+      }
+      add_dependency(method_with_info.method->owning_protocol->name.library());
     }
   }
   dependencies.erase(library);
@@ -591,6 +640,10 @@ std::ostringstream JSONGenerator::Produce() {
 
     GenerateObjectMember("name", LibraryName(library_, "."));
 
+    if (auto attributes = library_->attributes(); attributes) {
+      GenerateObjectMember("maybe_attributes", *attributes);
+    }
+
     GenerateObjectPunctuation(Position::kSubsequent);
     EmitObjectKey("library_dependencies");
     GenerateArray(TransitiveDependencies(library_));
@@ -599,6 +652,7 @@ std::ostringstream JSONGenerator::Produce() {
     GenerateObjectMember("const_declarations", library_->const_declarations_);
     GenerateObjectMember("enum_declarations", library_->enum_declarations_);
     GenerateObjectMember("interface_declarations", library_->protocol_declarations_);
+    GenerateObjectMember("service_declarations", library_->service_declarations_);
     GenerateObjectMember("struct_declarations", library_->struct_declarations_);
     GenerateObjectMember("table_declarations", library_->table_declarations_);
     GenerateObjectMember("union_declarations", library_->union_declarations_);

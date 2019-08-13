@@ -23,14 +23,23 @@ impl HttpRequest for MockHttpRequest {
     fn request(&mut self, req: Request<Body>) -> BoxFuture<Result<Response<Body>, hyper::Error>> {
         self.request = req;
 
-        let resp = self.responses.pop_front().expect("no response to return");
-        return future::ready(Ok(resp)).boxed();
+        future::ok(if let Some(resp) = self.responses.pop_front() {
+            resp
+        } else {
+            // No response to return, generate a 500 internal server error
+            Response::builder().status(500).body(Body::empty()).unwrap()
+        })
+        .boxed()
     }
 }
 
 impl MockHttpRequest {
     pub fn new(res: Response<Body>) -> MockHttpRequest {
         MockHttpRequest { request: Request::default(), responses: vec![res].into() }
+    }
+
+    pub fn empty() -> MockHttpRequest {
+        MockHttpRequest { request: Request::default(), responses: vec![].into() }
     }
 
     pub fn add_response(&mut self, res: Response<Body>) {
@@ -52,18 +61,18 @@ impl MockHttpRequest {
     }
 
     pub async fn assert_body(self, body: &[u8]) {
-        let chunks = await!(self.request.into_body().compat().try_concat()).unwrap();
+        let chunks = self.request.into_body().compat().try_concat().await.unwrap();
         assert_eq!(body, chunks.as_ref())
     }
 
     pub async fn assert_body_str(self, body: &str) {
-        let chunks = await!(self.request.into_body().compat().try_concat()).unwrap();
+        let chunks = self.request.into_body().compat().try_concat().await.unwrap();
         assert_eq!(body, String::from_utf8_lossy(chunks.as_ref()));
     }
 }
 
 async fn response_to_vec(response: Response<Body>) -> Vec<u8> {
-    await!(response.into_body().compat().try_concat()).unwrap().to_vec()
+    response.into_body().compat().try_concat().await.unwrap().to_vec()
 }
 
 #[test]
@@ -76,26 +85,26 @@ fn test_mock() {
     let req =
         Request::get(uri).header("X-Custom-Foo", "Bar").body(req_body.clone().into()).unwrap();
     block_on(async {
-        let response = await!(mock.request(req)).unwrap();
-        assert_eq!(res_body, await!(response_to_vec(response)));
+        let response = mock.request(req).await.unwrap();
+        assert_eq!(res_body, response_to_vec(response).await);
 
         mock.assert_method(&hyper::Method::GET);
         mock.assert_uri(uri);
         mock.assert_header("X-Custom-Foo", "Bar");
-        await!(mock.assert_body(req_body.as_slice()));
+        mock.assert_body(req_body.as_slice()).await;
     });
 }
 
 #[test]
-#[should_panic(expected = "no response to return")]
 fn test_missing_response() {
     let res_body = vec![1, 2, 3];
     let mut mock = MockHttpRequest::new(Response::new(res_body.clone().into()));
     block_on(async {
-        let response = await!(mock.request(Request::default())).unwrap();
-        assert_eq!(res_body, await!(response_to_vec(response)));
+        let response = mock.request(Request::default()).await.unwrap();
+        assert_eq!(res_body, response_to_vec(response).await);
 
-        let _response2 = await!(mock.request(Request::default()));
+        let response2 = mock.request(Request::default()).await.unwrap();
+        assert_eq!(response2.status(), hyper::StatusCode::INTERNAL_SERVER_ERROR);
     });
 }
 
@@ -107,10 +116,10 @@ fn test_multiple_responses() {
     mock.add_response(Response::new(res_body2.clone().into()));
 
     block_on(async {
-        let response = await!(mock.request(Request::default())).unwrap();
-        assert_eq!(res_body, await!(response_to_vec(response)));
+        let response = mock.request(Request::default()).await.unwrap();
+        assert_eq!(res_body, response_to_vec(response).await);
 
-        let response2 = await!(mock.request(Request::default())).unwrap();
-        assert_eq!(res_body2, await!(response_to_vec(response2)));
+        let response2 = mock.request(Request::default()).await.unwrap();
+        assert_eq!(res_body2, response_to_vec(response2).await);
     });
 }

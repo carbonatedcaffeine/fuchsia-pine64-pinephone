@@ -4,6 +4,8 @@
 
 #include "garnet/lib/ui/gfx/swapchain/display_swapchain.h"
 
+#include <lib/async/default.h>
+
 #include <fbl/auto_call.h>
 #include <trace/event.h>
 
@@ -69,13 +71,9 @@ vk::ImageUsageFlags GetFramebufferImageUsage();
 }  // namespace
 
 DisplaySwapchain::DisplaySwapchain(DisplayManager* display_manager, Display* display,
-                                   EventTimestamper* timestamper, escher::Escher* escher)
-    : escher_(escher),
-      display_manager_(display_manager),
-      display_(display),
-      timestamper_(timestamper) {
+                                   escher::Escher* escher)
+    : escher_(escher), display_manager_(display_manager), display_(display) {
   FXL_DCHECK(display);
-  FXL_DCHECK(timestamper);
 
   if (escher_) {
     device_ = escher_->vk_device();
@@ -337,10 +335,10 @@ DisplaySwapchain::~DisplaySwapchain() {
     const size_t idx = (i + next_frame_index_) % frames_.size();
     FrameRecord* record = frames_[idx].get();
     if (record && !record->frame_timings->finalized()) {
-      if (record->render_finished_watch.IsWatching()) {
-        // There has not been an OnFrameRendered signal. The watch will be
+      if (record->render_finished_wait->is_pending()) {
+        // There has not been an OnFrameRendered signal. The wait will be
         // destroyed when this function returns, and will never trigger the
-        // OnFrameRendered callback.Trigger it here to make the state consistent
+        // OnFrameRendered callback. Trigger it here to make the state consistent
         // in FrameTimings. Record infinite time to signal unknown render time.
         record->frame_timings->OnFrameRendered(record->swapchain_index, FrameTimings::kTimeDropped);
       }
@@ -391,11 +389,16 @@ std::unique_ptr<DisplaySwapchain::FrameRecord> DisplaySwapchain::NewFrameRecord(
   record->retired_event = std::move(retired_event);
   record->retired_event_id = retired_event_id;
 
-  record->render_finished_watch = EventTimestamper::Watch(
-      timestamper_, std::move(render_finished_event), escher::kFenceSignalled,
-      [this, index = next_frame_index_](zx_time_t timestamp) {
-        OnFrameRendered(index, timestamp);
+  record->render_finished_event = std::move(render_finished_event);
+  record->render_finished_wait = std::make_unique<async::Wait>(
+      record->render_finished_event.get(), escher::kFenceSignalled, ZX_WAIT_ASYNC_TIMESTAMP,
+      [this, index = next_frame_index_](async_dispatcher_t* dispatcher, async::Wait* wait,
+                                        zx_status_t status, const zx_packet_signal_t* signal) {
+        OnFrameRendered(index, zx::time(signal->timestamp));
       });
+
+  // TODO(SCN-244): What to do if rendering fails?
+  record->render_finished_wait->Begin(async_get_default_dispatcher());
 
   return record;
 }
@@ -424,9 +427,6 @@ bool DisplaySwapchain::DrawAndPresentFrame(const FrameTimingsPtr& frame_timings,
   }
 
   auto& frame_record = frames_[next_frame_index_] = NewFrameRecord(frame_timings);
-
-  // TODO(SCN-244): See below.  What to do if rendering fails?
-  frame_record->render_finished_watch.Start();
 
   next_frame_index_ = (next_frame_index_ + 1) % kSwapchainImageCount;
   outstanding_frame_count_++;
@@ -473,7 +473,7 @@ void DisplaySwapchain::SetDisplayColorConversion(const ColorTransform& transform
   display_manager_->SetDisplayColorConversion(display_, transform);
 }
 
-void DisplaySwapchain::OnFrameRendered(size_t frame_index, zx_time_t render_finished_time) {
+void DisplaySwapchain::OnFrameRendered(size_t frame_index, zx::time render_finished_time) {
   FXL_DCHECK(frame_index < kSwapchainImageCount);
   auto& record = frames_[frame_index];
 
@@ -491,7 +491,7 @@ void DisplaySwapchain::OnFrameRendered(size_t frame_index, zx_time_t render_fini
   // See ::OnVsync for comment about finalization.
 }
 
-void DisplaySwapchain::OnVsync(zx_time_t timestamp, const std::vector<uint64_t>& image_ids) {
+void DisplaySwapchain::OnVsync(zx::time timestamp, const std::vector<uint64_t>& image_ids) {
   if (on_vsync_) {
     on_vsync_(timestamp);
   }

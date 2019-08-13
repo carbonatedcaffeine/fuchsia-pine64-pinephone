@@ -7,6 +7,7 @@
 #include "src/developer/debug/zxdb/client/breakpoint_settings.h"
 #include "src/developer/debug/zxdb/client/frame.h"
 #include "src/developer/debug/zxdb/client/session.h"
+#include "src/developer/debug/zxdb/client/setting_schema_definition.h"
 #include "src/developer/debug/zxdb/console/command.h"
 #include "src/developer/debug/zxdb/console/command_utils.h"
 #include "src/developer/debug/zxdb/console/console.h"
@@ -41,8 +42,7 @@ void CreateOrEditBreakpointComplete(fxl::WeakPtr<Breakpoint> breakpoint, const E
 
   auto locs = breakpoint->GetLocations();
   if (locs.empty()) {
-    // When the breakpoint resolved to nothing, warn the user, they may have
-    // made a typo.
+    // When the breakpoint resolved to nothing, warn the user, they may have made a typo.
     OutputBuffer out;
     out.Append(FormatBreakpoint(&console->context(), breakpoint.get()));
     out.Append(Syntax::kWarning, "\nPending");
@@ -56,27 +56,30 @@ void CreateOrEditBreakpointComplete(fxl::WeakPtr<Breakpoint> breakpoint, const E
   out.Append(FormatBreakpoint(&console->context(), breakpoint.get()));
   out.Append("\n");
 
-  // There is a question of what to show the breakpoint enabled state. The
-  // breakpoint has a main enabled bit and each location (it can apply to more
-  // than one address -- think templates and inlined functions) within that
-  // breakpoint has its own. But each location normally resolves to the same
-  // source code location so we can't practically show the individual
-  // location's enabled state separately.
+  // There is a question of what to show the breakpoint enabled state. The breakpoint has a main
+  // enabled bit and each location (it can apply to more than one address -- think templates and
+  // inlined functions) within that breakpoint has its own. But each location normally resolves to
+  // the same source code location so we can't practically show the individual location's enabled
+  // state separately.
   //
-  // For simplicity, just base it on the main enabled bit. Most people won't
-  // use location-specific enabling anyway.
+  // For simplicity, just base it on the main enabled bit. Most people won't use location-specific
+  // enabling anyway.
   //
-  // Ignore errors from printing the source, it doesn't matter that much.
-  FormatBreakpointContext(locs[0]->GetLocation(),
-                          breakpoint->session()->system().GetSymbols()->build_dir(),
-                          breakpoint->GetSettings().enabled, &out);
+  // Ignore errors from printing the source, it doesn't matter that much. Since breakpoints are
+  // in the global scope we have to use the global settings for the build dir. We could use the
+  // process build dir for process-specific breakpoints but both process-specific breakpoints and
+  // process-specific build settings are rare.
+  FormatBreakpointContext(
+      locs[0]->GetLocation(),
+      breakpoint->session()->system().settings().GetList(ClientSettings::Target::kBuildDirs),
+      breakpoint->GetSettings().enabled, &out);
   console->Output(out);
 }
 
-// Backend for setting attributes on a breakpoint from both creation and
-// editing. The given breakpoint is specified if this is an edit, or is null
-// if this is a creation.
-Err CreateOrEditBreakpoint(ConsoleContext* context, const Command& cmd, Breakpoint* breakpoint) {
+// Backend for setting attributes on a breakpoint from both creation and editing. The given
+// breakpoint is specified if this is an edit, or is null if this is a creation.
+Err CreateOrEditBreakpoint(ConsoleContext* context, const Command& cmd, Breakpoint* breakpoint,
+                           CommandCallback callback) {
   // Get existing settings (or defaults for new one).
   BreakpointSettings settings;
   if (breakpoint)
@@ -131,18 +134,17 @@ Err CreateOrEditBreakpoint(ConsoleContext* context, const Command& cmd, Breakpoi
   // Location.
   if (cmd.args().empty()) {
     if (!breakpoint) {
-      // Creating a breakpoint with no location implicitly uses the current
-      // frame's current location.
+      // Creating a breakpoint with no location implicitly uses the current frame's current
+      // location.
       if (!cmd.frame()) {
         return Err(ErrType::kInput,
                    "There isn't a current frame to take the breakpoint "
                    "location from.");
       }
 
-      // Use the file/line of the frame if available. This is what a user will
-      // generally want to see in the breakpoint list, and will persist across
-      // restarts. Fall back to an address otherwise. Sometimes the file/line
-      // might not be what they want, though.
+      // Use the file/line of the frame if available. This is what a user will generally want to see
+      // in the breakpoint list, and will persist across restarts. Fall back to an address
+      // otherwise. Sometimes the file/line might not be what they want, though.
       const Location& frame_loc = cmd.frame()->GetLocation();
       if (frame_loc.has_symbols())
         settings.location = InputLocation(frame_loc.file_line());
@@ -170,10 +172,8 @@ Err CreateOrEditBreakpoint(ConsoleContext* context, const Command& cmd, Breakpoi
     settings.scope_thread = nullptr;
     settings.scope_target = cmd.target();
   }
-  // TODO(brettw) We don't have a "system" noun so there's no way to express
-  // converting a process- or thread-specific breakpoint to a global one.
-  // A system noun should be added and, if specified, this code should
-  // convert to a global breakpoint.
+  // TODO(brettw) Now that we have a "global" noun we should use that to convert a breakpoint's
+  // context to global. That didn't exist when this code was written.
 
   // Commit the changes.
   if (!breakpoint) {
@@ -181,14 +181,18 @@ Err CreateOrEditBreakpoint(ConsoleContext* context, const Command& cmd, Breakpoi
     breakpoint = context->session()->system().CreateNewBreakpoint();
     context->SetActiveBreakpoint(breakpoint);
   }
-  breakpoint->SetSettings(settings, [breakpoint = breakpoint->GetWeakPtr()](const Err& err) {
+  breakpoint->SetSettings(settings, [breakpoint = breakpoint->GetWeakPtr(),
+                                     callback = std::move(callback)](const Err& err) mutable {
     CreateOrEditBreakpointComplete(std::move(breakpoint), err);
+    if (callback) {
+      callback(err);
+    }
   });
 
   return Err();
 }
 
-// break -----------------------------------------------------------------------
+// break -------------------------------------------------------------------------------------------
 
 const char kBreakShortHelp[] = "break / b: Create a breakpoint.";
 const char kBreakHelp[] =
@@ -317,14 +321,14 @@ Examples
       Break at line 23 of the file referenced by the current frame and use a
       hardware breakpoint.
 )";
-Err DoBreak(ConsoleContext* context, const Command& cmd) {
+Err DoBreak(ConsoleContext* context, const Command& cmd, CommandCallback callback = nullptr) {
   Err err = cmd.ValidateNouns({Noun::kProcess, Noun::kThread, Noun::kFrame, Noun::kBreakpoint});
   if (err.has_error())
     return err;
-  return CreateOrEditBreakpoint(context, cmd, nullptr);
+  return CreateOrEditBreakpoint(context, cmd, nullptr, std::move(callback));
 }
 
-// hardware-breakpoint ---------------------------------------------------------
+// hardware-breakpoint -----------------------------------------------------------------------------
 
 const char kHardwareBreakpointShortHelp[] =
     "hardware-breakpoint / hb: Create a hardware breakpoint.";
@@ -346,7 +350,7 @@ Err DoHardwareBreakpoint(ConsoleContext* context, const Command& cmd) {
   return DoBreak(context, *cmd_ptr);
 }
 
-// clear -----------------------------------------------------------------------
+// clear -------------------------------------------------------------------------------------------
 
 const char kClearShortHelp[] = "clear / cl: Clear a breakpoint.";
 const char kClearHelp[] =
@@ -377,8 +381,8 @@ Err DoClear(ConsoleContext* context, const Command& cmd) {
   if (err.has_error())
     return err;
 
-  // Expect no args. If an arg was specified, most likely they're trying to
-  // use GDB syntax of "clear 2".
+  // Expect no args. If an arg was specified, most likely they're trying to use GDB syntax of
+  // "clear 2".
   if (cmd.args().size() > 0) {
     return Err(
         "\"clear\" takes no arguments. To specify an explicit "
@@ -401,7 +405,7 @@ Err DoClear(ConsoleContext* context, const Command& cmd) {
   return Err();
 }
 
-// edit ------------------------------------------------------------------------
+// edit --------------------------------------------------------------------------------------------
 
 const char kEditShortHelp[] = "edit / ed: Edit a breakpoint.";
 const char kEditHelp[] =
@@ -448,12 +452,11 @@ Examples
       Modifies breakpoint 7 to only break in process 1, thread 6 at the
       given address.
 )";
-Err DoEdit(ConsoleContext* context, const Command& cmd) {
+Err DoEdit(ConsoleContext* context, const Command& cmd, CommandCallback callback = nullptr) {
   if (!cmd.HasNoun(Noun::kBreakpoint)) {
-    // Edit requires an explicit "breakpoint" context so that in the future we
-    // can apply edit to other nouns. I'm thinking any noun that can be created
-    // can have its switches modified via an "edit" command that accepts the
-    // same settings.
+    // Edit requires an explicit "breakpoint" context so that in the future we can apply edit to
+    // other nouns. I'm thinking any noun that can be created can have its switches modified via an
+    // "edit" command that accepts the same settings.
     return Err(ErrType::kInput,
                "\"edit\" requires an explicit breakpoint context.\n"
                "Either \"breakpoint edit\" for the active breakpoint, or "
@@ -464,7 +467,7 @@ Err DoEdit(ConsoleContext* context, const Command& cmd) {
   if (err.has_error())
     return err;
 
-  return CreateOrEditBreakpoint(context, cmd, cmd.breakpoint());
+  return CreateOrEditBreakpoint(context, cmd, cmd.breakpoint(), std::move(callback));
 }
 
 }  // namespace
@@ -479,15 +482,15 @@ void AppendBreakpointVerbs(std::map<Verb, VerbRecord>* verbs) {
   break_record.switches.push_back(enable_switch);
   break_record.switches.push_back(stop_switch);
   break_record.switches.push_back(type_switch);
-  (*verbs)[Verb::kBreak] = break_record;
+  (*verbs)[Verb::kBreak] = std::move(break_record);
 
-  // Note: if "edit" becomes more general than just for breakpoints, we'll
-  // want to change the command category.
+  // Note: if "edit" becomes more general than just for breakpoints, we'll want to change the
+  // command category.
   VerbRecord edit_record(&DoEdit, {"edit", "ed"}, kEditShortHelp, kEditHelp,
                          CommandGroup::kBreakpoint);
   edit_record.switches.push_back(enable_switch);
   edit_record.switches.push_back(stop_switch);
-  (*verbs)[Verb::kEdit] = edit_record;
+  (*verbs)[Verb::kEdit] = std::move(edit_record);
 
   (*verbs)[Verb::kHardwareBreakpoint] =
       VerbRecord(&DoHardwareBreakpoint, {"hardware-breakpoint", "hb"}, kHardwareBreakpointShortHelp,

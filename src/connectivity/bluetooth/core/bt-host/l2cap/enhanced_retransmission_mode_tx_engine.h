@@ -5,6 +5,8 @@
 #ifndef SRC_CONNECTIVITY_BLUETOOTH_CORE_BT_HOST_L2CAP_ENHANCED_RETRANSMISSION_MODE_TX_ENGINE_H_
 #define SRC_CONNECTIVITY_BLUETOOTH_CORE_BT_HOST_L2CAP_ENHANCED_RETRANSMISSION_MODE_TX_ENGINE_H_
 
+#include <list>
+
 #include "lib/async/cpp/task.h"
 #include "lib/fit/function.h"
 #include "lib/zx/time.h"
@@ -34,12 +36,13 @@ class EnhancedRetransmissionModeTxEngine final : public TxEngine {
   // transmission; see tx_engine.h for further detail.
   //
   // The engine will invoke |connection_failure_callback| when a fatal error
-  // occurs on this connection. This callback will never occur synchronously.
-  EnhancedRetransmissionModeTxEngine(
-      ChannelId channel_id, uint16_t tx_mtu, uint8_t max_transmissions,
-      uint8_t n_frames_in_tx_window,
-      SendBasicFrameCallback send_basic_frame_callback,
-      ConnectionFailureCallback connection_failure_callback);
+  // occurs on this connection. This callback _may_ occur synchronously. For
+  // example, a call to UpdateAckSeq() may synchronously invoke
+  // |connection_failure_callback|.
+  EnhancedRetransmissionModeTxEngine(ChannelId channel_id, uint16_t tx_mtu,
+                                     uint8_t max_transmissions, uint8_t n_frames_in_tx_window,
+                                     SendBasicFrameCallback send_basic_frame_callback,
+                                     ConnectionFailureCallback connection_failure_callback);
   ~EnhancedRetransmissionModeTxEngine() override = default;
 
   bool QueueSdu(ByteBufferPtr sdu) override;
@@ -47,13 +50,34 @@ class EnhancedRetransmissionModeTxEngine final : public TxEngine {
   // Updates the Engine's knowledge of the last frame acknowledged by our peer.
   // The value of |is_final| should reflect the 'F' bit in header of the frame
   // which led to this call.
+  //
+  // * This _may_ trigger retransmission of previously transmitted data.
+  // * This _may_ cause the (initial) transmission of queued data.
   void UpdateAckSeq(uint8_t new_seq, bool is_final);
 
   // Updates the Engine's knowledge of the next frame we expect to receive from
   // our peer.
   void UpdateReqSeq(uint8_t new_seq);
 
+  // Informs the Engine that the peer is able to receive frames.
+  void ClearRemoteBusy();
+
+  // Informs the Engine that the peer is unable to receive additional frames at
+  // this time.
+  void SetRemoteBusy();
+
+  // Transmits data that has been queued, but which has never been previously
+  // sent to our peer. The transmissions are subject to remote-busy and transmit
+  // window constraints.
+  void MaybeSendQueuedData();
+
  private:
+  struct PendingPdu {
+    PendingPdu(DynamicByteBuffer buf_in) : buf(std::move(buf_in)), tx_count(0){};
+    DynamicByteBuffer buf;
+    uint8_t tx_count;
+  };
+
   // See Core Spec v5.0, Volume 3, Part A, Sec 8.6.2.1. Note that we assume
   // there is no flush timeout on the underlying logical link.
   //
@@ -94,12 +118,24 @@ class EnhancedRetransmissionModeTxEngine final : public TxEngine {
   void SendReceiverReadyPoll();
 
   // Return and consume the next sequence number.
-  uint8_t GetNextSeqnum();
+  uint8_t GetNextTxSeq();
+
+  // Returns the number of frames that have been transmitted but not yet
+  // acknowledged.
+  uint8_t NumUnackedFrames();
+
+  void SendPdu(PendingPdu* pdu);
+
+  // Retransmits frames from |pending_pdus_|. Returns |this| on success, or
+  // nullptr if a fatal error occurred.
+  //
+  // Notes:
+  // * The caller must ensure that !remote_is_busy_|.
+  // * When |nullptr| is returned, |this| may be invalid.
+  [[nodiscard]] EnhancedRetransmissionModeTxEngine* RetransmitUnackedData();
 
   const uint8_t max_transmissions_;
-
-  // TODO(quiche): Remove |maybe_unused| after adding transmit window logic.
-  [[maybe_unused]] const uint8_t n_frames_in_tx_window_;
+  const uint8_t n_frames_in_tx_window_;
 
   // Invoked when the connection encounters a fatal error.
   const ConnectionFailureCallback connection_failure_callback_;
@@ -109,14 +145,29 @@ class EnhancedRetransmissionModeTxEngine final : public TxEngine {
   // We assume that the Extended Window Size option is _not_ enabled. In such
   // cases, the sequence number is a 6-bit counter that wraps on overflow. See
   // Core Spec v5.0, Vol 3, Part A, Secs 5.7 and 8.3.
-  uint8_t ack_seqnum_;  // (AKA ExpectedAckSeq)
+  uint8_t expected_ack_seq_;
 
   // The sequence number we will use for the next new outbound I-frame.
   //
   // We assume that the Extended Window Size option is _not_ enabled. In such
   // cases, the sequence number is a 6-bit counter that wraps on overflow. See
   // Core Spec v5.0, Vol 3, Part A, Secs 5.7 and 8.3.
-  uint8_t next_seqnum_;  // (AKA NextTxSeq)
+  uint8_t next_tx_seq_;
+
+  // The sequence number of the "newest" transmitted frame.
+  //
+  // This sequence number is updated when a new frame is transmitted. This
+  // excludes cases where a frame is queued but not transmitted (due to transmit
+  // window limitations), and cases where a frame is retransmitted.
+  //
+  // This value is useful for determining the number of frames than are
+  // in-flight to our peer (frames that have been transmitted but not
+  // acknowledged).
+  //
+  // We assume that the Extended Window Size option is _not_ enabled. In such
+  // cases, the sequence number is a 6-bit counter that wraps on overflow. See
+  // Core Spec v5.0, Vol 3, Part A, Secs 5.7 and 8.3.
+  uint8_t last_tx_seq_;  // (AKA TxSeq)
 
   // The sequence number we expect for the next packet sent _to_ us.
   //
@@ -126,13 +177,13 @@ class EnhancedRetransmissionModeTxEngine final : public TxEngine {
   uint8_t req_seqnum_;
 
   uint8_t n_receiver_ready_polls_sent_;
-
+  bool remote_is_busy_;
+  std::list<PendingPdu> pending_pdus_;
   async::Task receiver_ready_poll_task_;
   async::Task monitor_task_;
-  fxl::WeakPtrFactory<EnhancedRetransmissionModeTxEngine>
-      weak_factory_;  // Keep last
+  fxl::WeakPtrFactory<EnhancedRetransmissionModeTxEngine> weak_factory_;  // Keep last
 
-  FXL_DISALLOW_COPY_AND_ASSIGN(EnhancedRetransmissionModeTxEngine);
+  DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(EnhancedRetransmissionModeTxEngine);
 };
 
 }  // namespace internal

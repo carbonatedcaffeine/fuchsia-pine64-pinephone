@@ -15,6 +15,11 @@ PageId PageStorageEmptyImpl::GetId() {
   return "NOT_IMPLEMENTED";
 }
 
+ObjectIdentifierFactory* PageStorageEmptyImpl::GetObjectIdentifierFactory() {
+  FXL_NOTIMPLEMENTED();
+  return nullptr;
+}
+
 void PageStorageEmptyImpl::SetSyncDelegate(PageSyncDelegate* /*page_sync*/) {
   FXL_NOTIMPLEMENTED();
 }
@@ -176,6 +181,13 @@ void PageStorageEmptyImpl::GetEntryFromCommit(const Commit& /*commit*/, std::str
                                               fit::function<void(Status, Entry)> callback) {
   FXL_NOTIMPLEMENTED();
   callback(Status::NOT_IMPLEMENTED, Entry());
+}
+
+void PageStorageEmptyImpl::GetDiffForCloud(
+    const Commit& /*target_commit*/,
+    fit::function<void(Status, CommitIdView, std::vector<EntryChange>)> callback) {
+  FXL_NOTIMPLEMENTED();
+  callback(Status::NOT_IMPLEMENTED, "", {});
 }
 
 void PageStorageEmptyImpl::GetCommitContentsDiff(const Commit& /*base_commit*/,

@@ -51,11 +51,11 @@ class TrackGetObjectFakePageStorage : public fake::FakePageStorage {
 
   void GetObject(ObjectIdentifier object_identifier, Location location,
                  fit::function<void(Status, std::unique_ptr<const Object>)> callback) override {
-    object_requests.insert(object_identifier);
+    object_requests.emplace(object_identifier, location);
     fake::FakePageStorage::GetObject(std::move(object_identifier), location, std::move(callback));
   }
 
-  std::set<ObjectIdentifier> object_requests;
+  std::set<std::pair<ObjectIdentifier, Location>> object_requests;
 
  protected:
   ObjectDigest FakeDigest(fxl::StringView content) const override {
@@ -82,6 +82,20 @@ class BTreeUtilsTest : public StorageTest {
     return new_root_identifier;
   }
 
+  std::set<ObjectIdentifier> GetTreeNodesList(ObjectIdentifier root_identifier) {
+    std::set<ObjectIdentifier> identifiers;
+    EXPECT_TRUE(RunInCoroutine([&](coroutine::CoroutineHandler* handler) {
+      SynchronousStorage storage(&fake_storage_, handler);
+      BTreeIterator it(&storage);
+      ASSERT_EQ(it.Init({root_identifier, PageStorage::Location::Local()}), Status::OK);
+      while (!it.Finished()) {
+        identifiers.insert(it.GetIdentifier());
+        ASSERT_EQ(it.Advance(), Status::OK);
+      }
+    }));
+    return identifiers;
+  }
+
   std::vector<Entry> GetEntriesList(ObjectIdentifier root_identifier) {
     std::vector<Entry> entries;
     auto on_next = [&entries](EntryAndNodeIdentifier entry) {
@@ -89,11 +103,12 @@ class BTreeUtilsTest : public StorageTest {
       return true;
     };
     auto on_done = [this](Status status) {
-      EXPECT_EQ(Status::OK, status);
+      EXPECT_EQ(status, Status::OK);
       QuitLoop();
     };
-    ForEachEntry(environment_.coroutine_service(), &fake_storage_, root_identifier, "",
-                 std::move(on_next), std::move(on_done));
+    ForEachEntry(environment_.coroutine_service(), &fake_storage_,
+                 {root_identifier, PageStorage::Location::Local()}, "", std::move(on_next),
+                 std::move(on_done));
     RunLoopFor(kSufficientDelay);
     return entries;
   }
@@ -134,18 +149,19 @@ TEST_F(BTreeUtilsTest, ApplyChangesFromEmpty) {
   // [00, 01, 02]
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, changes,
-                              &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
+        status =
+            ApplyChanges(handler, &fake_storage_, {root_identifier, PageStorage::Location::Local()},
+                         changes, &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(1u, new_nodes.size());
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(new_nodes.size(), 1u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier) != new_nodes.end());
 
   std::vector<Entry> entries = GetEntriesList(new_root_identifier);
-  ASSERT_EQ(changes.size(), entries.size());
+  ASSERT_EQ(entries.size(), changes.size());
   for (size_t i = 0; i < entries.size(); ++i) {
-    EXPECT_EQ(changes[i].entry, entries[i]);
+    EXPECT_EQ(entries[i], changes[i].entry);
   }
 }
 
@@ -163,18 +179,19 @@ TEST_F(BTreeUtilsTest, ApplyChangeSingleLevel1Entry) {
 
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, golden_entries,
+        status = ApplyChanges(handler, &fake_storage_,
+                              {root_identifier, PageStorage::Location::Local()}, golden_entries,
                               &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(1u, new_nodes.size());
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(new_nodes.size(), 1u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier) != new_nodes.end());
 
   std::vector<Entry> entries = GetEntriesList(new_root_identifier);
-  ASSERT_EQ(golden_entries.size(), entries.size());
+  ASSERT_EQ(entries.size(), golden_entries.size());
   for (size_t i = 0; i < golden_entries.size(); ++i) {
-    EXPECT_EQ(golden_entries[i].entry, entries[i]);
+    EXPECT_EQ(entries[i], golden_entries[i].entry);
   }
 }
 
@@ -193,22 +210,24 @@ TEST_F(BTreeUtilsTest, ApplyChangesManyEntries) {
   // [00, 01, 02]  [04, 05, 06] [08, 09, 10]
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, golden_entries,
+        status = ApplyChanges(handler, &fake_storage_,
+                              {root_identifier, PageStorage::Location::Local()}, golden_entries,
 
                               &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(4u, new_nodes.size());
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(new_nodes.size(), 4u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier) != new_nodes.end());
 
   std::vector<Entry> entries = GetEntriesList(new_root_identifier);
-  ASSERT_EQ(golden_entries.size(), entries.size());
+  ASSERT_EQ(entries.size(), golden_entries.size());
   for (size_t i = 0; i < golden_entries.size(); ++i) {
-    EXPECT_EQ(golden_entries[i].entry, entries[i]);
+    EXPECT_EQ(entries[i], golden_entries[i].entry);
   }
 
-  Entry new_entry = {"key071", MakeObjectIdentifier("object_digest_071"), KeyPriority::EAGER};
+  Entry new_entry = {"key071", MakeObjectIdentifier("object_digest_071"), KeyPriority::EAGER,
+                     EntryId()};
   std::vector<EntryChange> new_change{EntryChange{new_entry, false}};
   // Insert key "071" between keys "07" and "08".
   golden_entries.insert(golden_entries.begin() + 8, new_change[0]);
@@ -221,20 +240,21 @@ TEST_F(BTreeUtilsTest, ApplyChangesManyEntries) {
   // [00, 01, 02]  [04, 05, 06] [071, 08, 09, 10]
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, new_root_identifier, std::move(new_change),
-                              &new_root_identifier2, &new_nodes, &kTestNodeLevelCalculator);
+        status = ApplyChanges(
+            handler, &fake_storage_, {new_root_identifier, PageStorage::Location::Local()},
+            std::move(new_change), &new_root_identifier2, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
   EXPECT_NE(new_root_identifier, new_root_identifier2);
   // The root and the 3rd child have changed.
-  EXPECT_EQ(2u, new_nodes.size());
+  EXPECT_EQ(new_nodes.size(), 2u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier2) != new_nodes.end());
 
   entries = GetEntriesList(new_root_identifier2);
-  ASSERT_EQ(golden_entries.size(), entries.size());
+  ASSERT_EQ(entries.size(), golden_entries.size());
   for (size_t i = 0; i < golden_entries.size(); ++i) {
-    EXPECT_EQ(golden_entries[i].entry, entries[i]);
+    EXPECT_EQ(entries[i], golden_entries[i].entry);
   }
 }
 
@@ -251,12 +271,13 @@ TEST_F(BTreeUtilsTest, ApplyChangesBackToEmpty) {
   // [00, 01, 02]
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, changes,
-                              &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
+        status =
+            ApplyChanges(handler, &fake_storage_, {root_identifier, PageStorage::Location::Local()},
+                         changes, &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(1u, new_nodes.size());
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(new_nodes.size(), 1u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier) != new_nodes.end());
 
   for (auto& change : changes) {
@@ -268,14 +289,16 @@ TEST_F(BTreeUtilsTest, ApplyChangesBackToEmpty) {
   std::set<ObjectIdentifier> deleted_nodes;
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, new_root_identifier, std::move(changes),
-                              &deleted_root_identifier, &deleted_nodes, &kTestNodeLevelCalculator);
+        status =
+            ApplyChanges(handler, &fake_storage_,
+                         {new_root_identifier, PageStorage::Location::Local()}, std::move(changes),
+                         &deleted_root_identifier, &deleted_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(1u, deleted_nodes.size());
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(deleted_nodes.size(), 1u);
   EXPECT_TRUE(deleted_nodes.find(deleted_root_identifier) != deleted_nodes.end());
-  EXPECT_EQ(root_identifier, deleted_root_identifier);
+  EXPECT_EQ(deleted_root_identifier, root_identifier);
 }
 
 TEST_F(BTreeUtilsTest, UpdateValue) {
@@ -303,28 +326,29 @@ TEST_F(BTreeUtilsTest, UpdateValue) {
   std::set<ObjectIdentifier> new_nodes;
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, std::move(update_changes),
-                              &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
+        status = ApplyChanges(
+            handler, &fake_storage_, {root_identifier, PageStorage::Location::Local()},
+            std::move(update_changes), &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
   EXPECT_NE(root_identifier, new_root_identifier);
   // The root and the first child have changed.
-  EXPECT_EQ(2u, new_nodes.size());
+  EXPECT_EQ(new_nodes.size(), 2u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier) != new_nodes.end());
 
   std::vector<Entry> entries = GetEntriesList(new_root_identifier);
-  ASSERT_EQ(golden_entries.size(), entries.size());
+  ASSERT_EQ(entries.size(), golden_entries.size());
   size_t updated_index = 0;
   for (size_t i = 0; i < golden_entries.size(); ++i) {
     if (updated_index < entries_to_update.size() &&
         golden_entries[i].entry.key == entries_to_update[updated_index].key) {
-      EXPECT_EQ(entries_to_update[updated_index], entries[i]);
+      EXPECT_EQ(entries[i], entries_to_update[updated_index]);
       // Skip the updated entries.
       updated_index++;
       continue;
     }
-    EXPECT_EQ(golden_entries[i].entry, entries[i]);
+    EXPECT_EQ(entries[i], golden_entries[i].entry);
   }
 }
 
@@ -353,28 +377,29 @@ TEST_F(BTreeUtilsTest, UpdateValueLevel1) {
   std::set<ObjectIdentifier> new_nodes;
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, std::move(update_changes),
-                              &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
+        status = ApplyChanges(
+            handler, &fake_storage_, {root_identifier, PageStorage::Location::Local()},
+            std::move(update_changes), &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
   EXPECT_NE(root_identifier, new_root_identifier);
   // Only the root has changed.
-  EXPECT_EQ(1u, new_nodes.size());
+  EXPECT_EQ(new_nodes.size(), 1u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier) != new_nodes.end());
 
   std::vector<Entry> entries = GetEntriesList(new_root_identifier);
-  ASSERT_EQ(golden_entries.size(), entries.size());
+  ASSERT_EQ(entries.size(), golden_entries.size());
   size_t updated_index = 0;
   for (size_t i = 0; i < golden_entries.size(); ++i) {
     if (updated_index < entries_to_update.size() &&
         golden_entries[i].entry.key == entries_to_update[updated_index].key) {
-      EXPECT_EQ(entries_to_update[updated_index], entries[i]);
+      EXPECT_EQ(entries[i], entries_to_update[updated_index]);
       // Skip the updated entries.
       updated_index++;
       continue;
     }
-    EXPECT_EQ(golden_entries[i].entry, entries[i]);
+    EXPECT_EQ(entries[i], golden_entries[i].entry);
   }
 }
 
@@ -403,18 +428,19 @@ TEST_F(BTreeUtilsTest, UpdateValueSplitChange) {
   std::set<ObjectIdentifier> new_nodes;
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, update_changes,
+        status = ApplyChanges(handler, &fake_storage_,
+                              {root_identifier, PageStorage::Location::Local()}, update_changes,
                               &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
   EXPECT_NE(root_identifier, new_root_identifier);
   // The tree nodes are new.
-  EXPECT_EQ(3u, new_nodes.size());
+  EXPECT_EQ(new_nodes.size(), 3u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier) != new_nodes.end());
 
   std::vector<Entry> entries = GetEntriesList(new_root_identifier);
-  ASSERT_EQ(golden_entries.size() + update_changes.size(), entries.size());
+  ASSERT_EQ(entries.size(), golden_entries.size() + update_changes.size());
   size_t updated_index = 0;
   for (size_t i = 0; i < entries.size(); ++i) {
     if (updated_index < update_changes.size() &&
@@ -424,7 +450,7 @@ TEST_F(BTreeUtilsTest, UpdateValueSplitChange) {
       continue;
     }
     ASSERT_GT(golden_entries.size(), i - updated_index);
-    EXPECT_EQ(golden_entries[i - updated_index].entry, entries[i]);
+    EXPECT_EQ(entries[i], golden_entries[i - updated_index].entry);
   }
 }
 
@@ -443,14 +469,15 @@ TEST_F(BTreeUtilsTest, NoOpUpdateChange) {
   std::set<ObjectIdentifier> new_nodes;
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, std::move(golden_entries),
-                              &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
+        status = ApplyChanges(
+            handler, &fake_storage_, {root_identifier, PageStorage::Location::Local()},
+            std::move(golden_entries), &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(root_identifier, new_root_identifier);
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(new_root_identifier, root_identifier);
   // The root and the first child have changed.
-  EXPECT_EQ(0u, new_nodes.size());
+  EXPECT_EQ(new_nodes.size(), 0u);
 }
 
 TEST_F(BTreeUtilsTest, DeleteChanges) {
@@ -475,18 +502,19 @@ TEST_F(BTreeUtilsTest, DeleteChanges) {
   std::set<ObjectIdentifier> new_nodes;
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, delete_changes,
+        status = ApplyChanges(handler, &fake_storage_,
+                              {root_identifier, PageStorage::Location::Local()}, delete_changes,
                               &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
   EXPECT_NE(root_identifier, new_root_identifier);
   // The root and the first 2 children have changed.
-  EXPECT_EQ(3u, new_nodes.size());
+  EXPECT_EQ(new_nodes.size(), 3u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier) != new_nodes.end());
 
   std::vector<Entry> entries = GetEntriesList(new_root_identifier);
-  ASSERT_EQ(golden_entries.size() - delete_changes.size(), entries.size());
+  ASSERT_EQ(entries.size(), golden_entries.size() - delete_changes.size());
   size_t deleted_index = 0;
   for (size_t i = 0; i < golden_entries.size(); ++i) {
     if (deleted_index < delete_changes.size() &&
@@ -496,7 +524,7 @@ TEST_F(BTreeUtilsTest, DeleteChanges) {
       continue;
     }
     ASSERT_LT(i - deleted_index, entries.size());
-    EXPECT_EQ(golden_entries[i].entry, entries[i - deleted_index]);
+    EXPECT_EQ(entries[i - deleted_index], golden_entries[i].entry);
   }
 }
 
@@ -522,18 +550,19 @@ TEST_F(BTreeUtilsTest, DeleteLevel1Changes) {
   std::set<ObjectIdentifier> new_nodes;
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, delete_changes,
+        status = ApplyChanges(handler, &fake_storage_,
+                              {root_identifier, PageStorage::Location::Local()}, delete_changes,
                               &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
   EXPECT_NE(root_identifier, new_root_identifier);
   // The root and one child have changed.
-  EXPECT_EQ(2u, new_nodes.size());
+  EXPECT_EQ(new_nodes.size(), 2u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier) != new_nodes.end());
 
   std::vector<Entry> entries = GetEntriesList(new_root_identifier);
-  ASSERT_EQ(golden_entries.size() - delete_changes.size(), entries.size());
+  ASSERT_EQ(entries.size(), golden_entries.size() - delete_changes.size());
   size_t deleted_index = 0;
   for (size_t i = 0; i < golden_entries.size(); ++i) {
     if (deleted_index < delete_changes.size() &&
@@ -543,7 +572,7 @@ TEST_F(BTreeUtilsTest, DeleteLevel1Changes) {
       continue;
     }
     ASSERT_LT(i - deleted_index, entries.size());
-    EXPECT_EQ(golden_entries[i].entry, entries[i - deleted_index]);
+    EXPECT_EQ(entries[i - deleted_index], golden_entries[i].entry);
   }
 }
 
@@ -566,14 +595,15 @@ TEST_F(BTreeUtilsTest, NoOpDeleteChange) {
   std::set<ObjectIdentifier> new_nodes;
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, std::move(delete_changes),
-                              &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
+        status = ApplyChanges(
+            handler, &fake_storage_, {root_identifier, PageStorage::Location::Local()},
+            std::move(delete_changes), &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(root_identifier, new_root_identifier);
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(new_root_identifier, root_identifier);
   // The root and the first child have changed.
-  EXPECT_EQ(0u, new_nodes.size());
+  EXPECT_EQ(new_nodes.size(), 0u);
 }
 
 TEST_F(BTreeUtilsTest, SplitMergeUpdate) {
@@ -604,18 +634,19 @@ TEST_F(BTreeUtilsTest, SplitMergeUpdate) {
   std::set<ObjectIdentifier> new_nodes;
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, update_changes,
+        status = ApplyChanges(handler, &fake_storage_,
+                              {root_identifier, PageStorage::Location::Local()}, update_changes,
                               &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
   EXPECT_NE(root_identifier, new_root_identifier);
   // The tree nodes are new.
-  EXPECT_EQ(5u, new_nodes.size());
+  EXPECT_EQ(new_nodes.size(), 5u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier) != new_nodes.end());
 
   std::vector<Entry> entries = GetEntriesList(new_root_identifier);
-  ASSERT_EQ(golden_entries.size() + update_changes.size(), entries.size());
+  ASSERT_EQ(entries.size(), golden_entries.size() + update_changes.size());
   size_t updated_index = 0;
   for (size_t i = 0; i < entries.size(); ++i) {
     if (updated_index < update_changes.size() &&
@@ -625,7 +656,7 @@ TEST_F(BTreeUtilsTest, SplitMergeUpdate) {
       continue;
     }
     ASSERT_LT(i - updated_index, golden_entries.size());
-    EXPECT_EQ(golden_entries[i - updated_index].entry, entries[i]);
+    EXPECT_EQ(entries[i], golden_entries[i - updated_index].entry);
   }
 
   // Remove the new entry.
@@ -635,13 +666,14 @@ TEST_F(BTreeUtilsTest, SplitMergeUpdate) {
   ObjectIdentifier final_node_identifier;
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status =
-            ApplyChanges(handler, &fake_storage_, new_root_identifier, std::move(delete_changes),
-                         &final_node_identifier, &new_nodes, &kTestNodeLevelCalculator);
+        status = ApplyChanges(handler, &fake_storage_,
+                              {new_root_identifier, PageStorage::Location::Local()},
+                              std::move(delete_changes), &final_node_identifier, &new_nodes,
+                              &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(root_identifier, final_node_identifier);
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(final_node_identifier, root_identifier);
 }
 
 TEST_F(BTreeUtilsTest, DeleteAll) {
@@ -660,15 +692,16 @@ TEST_F(BTreeUtilsTest, DeleteAll) {
   std::set<ObjectIdentifier> new_nodes;
   ASSERT_TRUE(RunInCoroutine(
       [&](coroutine::CoroutineHandler* handler) {
-        status = ApplyChanges(handler, &fake_storage_, root_identifier, std::move(delete_changes),
-                              &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
+        status = ApplyChanges(
+            handler, &fake_storage_, {root_identifier, PageStorage::Location::Local()},
+            std::move(delete_changes), &new_root_identifier, &new_nodes, &kTestNodeLevelCalculator);
       },
       kSufficientDelay));
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
   EXPECT_NE(root_identifier, new_root_identifier);
   EXPECT_TRUE(new_root_identifier.object_digest().IsValid());
   // The empty node is new.
-  EXPECT_EQ(1u, new_nodes.size());
+  EXPECT_EQ(new_nodes.size(), 1u);
   EXPECT_TRUE(new_nodes.find(new_root_identifier) != new_nodes.end());
 }
 
@@ -679,12 +712,13 @@ TEST_F(BTreeUtilsTest, GetObjectIdentifiersFromEmpty) {
   Status status;
   std::set<ObjectIdentifier> object_identifiers;
   GetObjectIdentifiers(
-      environment_.coroutine_service(), &fake_storage_, root_identifier,
+      environment_.coroutine_service(), &fake_storage_,
+      {root_identifier, PageStorage::Location::Local()},
       callback::Capture(callback::SetWhenCalled(&called), &status, &object_identifiers));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(1u, object_identifiers.size());
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(object_identifiers.size(), 1u);
   EXPECT_TRUE(object_identifiers.find(root_identifier) != object_identifiers.end());
 }
 
@@ -697,12 +731,13 @@ TEST_F(BTreeUtilsTest, GetObjectOneNodeTree) {
   Status status;
   std::set<ObjectIdentifier> object_identifiers;
   GetObjectIdentifiers(
-      environment_.coroutine_service(), &fake_storage_, root_identifier,
+      environment_.coroutine_service(), &fake_storage_,
+      {root_identifier, PageStorage::Location::Local()},
       callback::Capture(callback::SetWhenCalled(&called), &status, &object_identifiers));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(6u, object_identifiers.size());
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(object_identifiers.size(), 6u);
   EXPECT_TRUE(object_identifiers.find(root_identifier) != object_identifiers.end());
   for (const EntryChange& e : entries) {
     EXPECT_TRUE(object_identifiers.find(e.entry.object_identifier) != object_identifiers.end());
@@ -718,12 +753,13 @@ TEST_F(BTreeUtilsTest, GetObjectIdentifiersBigTree) {
   Status status;
   std::set<ObjectIdentifier> object_identifiers;
   GetObjectIdentifiers(
-      environment_.coroutine_service(), &fake_storage_, root_identifier,
+      environment_.coroutine_service(), &fake_storage_,
+      {root_identifier, PageStorage::Location::Local()},
       callback::Capture(callback::SetWhenCalled(&called), &status, &object_identifiers));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
-  EXPECT_EQ(99u + 12, object_identifiers.size());
+  ASSERT_EQ(status, Status::OK);
+  EXPECT_EQ(object_identifiers.size(), 99u + 12);
   EXPECT_TRUE(object_identifiers.find(root_identifier) != object_identifiers.end());
   for (EntryChange& e : entries) {
     EXPECT_TRUE(object_identifiers.find(e.entry.object_identifier) != object_identifiers.end());
@@ -731,10 +767,18 @@ TEST_F(BTreeUtilsTest, GetObjectIdentifiersBigTree) {
 }
 
 TEST_F(BTreeUtilsTest, GetObjectsFromSync) {
+  CommitId commit_id = "commit0";
   std::vector<EntryChange> entries;
   ASSERT_TRUE(CreateEntryChanges(5, &entries));
   entries[3].entry.priority = KeyPriority::LAZY;
   ObjectIdentifier root_identifier = CreateTree(entries);
+
+  // List the identifiers of the values.
+  std::set<ObjectIdentifier> values;
+  for (auto& entry : entries) {
+    values.insert(entry.entry.object_identifier);
+  }
+  EXPECT_EQ(values.size(), 5u);
 
   fake_storage_.object_requests.clear();
   bool called;
@@ -743,32 +787,39 @@ TEST_F(BTreeUtilsTest, GetObjectsFromSync) {
   //          [03]
   //       /        \
   // [00, 01, 02]  [04]
-  GetObjectsFromSync(environment_.coroutine_service(), &fake_storage_, root_identifier,
+  GetObjectsFromSync(environment_.coroutine_service(), &fake_storage_,
+                     {root_identifier, PageStorage::Location::TreeNodeFromNetwork(commit_id)},
                      callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
 
-  std::vector<ObjectIdentifier> object_requests;
+  std::vector<std::pair<ObjectIdentifier, PageStorage::Location>> object_requests;
   std::copy(fake_storage_.object_requests.begin(), fake_storage_.object_requests.end(),
             std::back_inserter(object_requests));
   // There are 8 objects: 3 nodes and 4 eager values and 1 lazy. Except from
   // the lazy object, all others should have been requested.
-  EXPECT_EQ(3 + 4u, object_requests.size());
+  EXPECT_EQ(object_requests.size(), 3 + 4u);
 
   std::set<ObjectIdentifier> object_identifiers;
   GetObjectIdentifiers(
-      environment_.coroutine_service(), &fake_storage_, root_identifier,
+      environment_.coroutine_service(), &fake_storage_,
+      {root_identifier, PageStorage::Location::Local()},
       callback::Capture(callback::SetWhenCalled(&called), &status, &object_identifiers));
   RunLoopFor(kSufficientDelay);
   EXPECT_TRUE(called);
-  ASSERT_EQ(Status::OK, status);
-  ASSERT_EQ(3 + 5u, object_identifiers.size());
-  for (ObjectIdentifier& identifier : object_requests) {
+  ASSERT_EQ(status, Status::OK);
+  ASSERT_EQ(object_identifiers.size(), 3 + 5u);
+  for (auto& [identifier, location] : object_requests) {
     // entries[3] contains the lazy value.
-    if (identifier != entries[3].entry.object_identifier) {
-      EXPECT_TRUE(object_identifiers.find(identifier) != object_identifiers.end());
+    EXPECT_TRUE(identifier != entries[3].entry.object_identifier);
+    if (values.find(identifier) != values.end()) {
+      EXPECT_TRUE(location.is_value_from_network());
+    } else {
+      ASSERT_TRUE(location.is_tree_node_from_network());
+      EXPECT_EQ(location.in_commit(), commit_id);
     }
+    EXPECT_TRUE(object_identifiers.find(identifier) != object_identifiers.end());
   }
 }
 
@@ -781,11 +832,12 @@ TEST_F(BTreeUtilsTest, ForEachEmptyTree) {
     return false;
   };
   auto on_done = [this](Status status) {
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
     QuitLoop();
   };
-  ForEachEntry(environment_.coroutine_service(), &fake_storage_, root_identifier, "",
-               std::move(on_next), std::move(on_done));
+  ForEachEntry(environment_.coroutine_service(), &fake_storage_,
+               {root_identifier, PageStorage::Location::Local()}, "", std::move(on_next),
+               std::move(on_done));
   RunLoopFor(kSufficientDelay);
 }
 
@@ -797,16 +849,16 @@ TEST_F(BTreeUtilsTest, ForEachAllEntries) {
 
   int current_key = 0;
   auto on_next = [&current_key](EntryAndNodeIdentifier e) {
-    EXPECT_EQ(fxl::StringPrintf("key%02d", current_key), e.entry.key);
+    EXPECT_EQ(e.entry.key, fxl::StringPrintf("key%02d", current_key));
     current_key++;
     return true;
   };
   auto on_done = [this](Status status) {
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
     QuitLoop();
   };
-  ForEachEntry(environment_.coroutine_service(), &fake_storage_, root_identifier, "", on_next,
-               on_done);
+  ForEachEntry(environment_.coroutine_service(), &fake_storage_,
+               {root_identifier, PageStorage::Location::Local()}, "", on_next, on_done);
   RunLoopFor(kSufficientDelay);
 }
 
@@ -823,16 +875,16 @@ TEST_F(BTreeUtilsTest, ForEachEntryPrefix) {
     if (e.entry.key.substr(0, prefix.length()) != prefix) {
       return false;
     }
-    EXPECT_EQ(fxl::StringPrintf("key%02d", current_key++), e.entry.key);
+    EXPECT_EQ(e.entry.key, fxl::StringPrintf("key%02d", current_key++));
     return true;
   };
   auto on_done = [this, &current_key](Status status) {
-    EXPECT_EQ(Status::OK, status);
-    EXPECT_EQ(40, current_key);
+    EXPECT_EQ(status, Status::OK);
+    EXPECT_EQ(current_key, 40);
     QuitLoop();
   };
-  ForEachEntry(environment_.coroutine_service(), &fake_storage_, root_identifier, prefix, on_next,
-               on_done);
+  ForEachEntry(environment_.coroutine_service(), &fake_storage_,
+               {root_identifier, PageStorage::Location::Local()}, prefix, on_next, on_done);
   RunLoopFor(kSufficientDelay);
 }
 

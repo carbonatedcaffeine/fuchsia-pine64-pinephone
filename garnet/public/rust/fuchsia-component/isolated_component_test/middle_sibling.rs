@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 use {
     failure::{Error, ResultExt},
@@ -15,7 +15,7 @@ use {
 fn echo_sibling_server(stream: EchoExposedBySiblingRequestStream) -> impl Future<Output = ()> {
     stream
         .err_into::<failure::Error>()
-        .try_for_each(async move |EchoExposedBySiblingRequest::Echo { value, responder }| {
+        .try_for_each(|EchoExposedBySiblingRequest::Echo { value, responder }| async move {
             responder.send(value * 2).context("sending response")?;
             Ok(())
         })
@@ -30,7 +30,7 @@ async fn main() -> Result<(), Error> {
     fs.take_and_serve_directory_handle()?;
 
     // spawn server to respond to FIDL requests
-    await!(fs.for_each_concurrent(None, echo_sibling_server));
+    fs.for_each_concurrent(None, echo_sibling_server).await;
 
     Ok(())
 }

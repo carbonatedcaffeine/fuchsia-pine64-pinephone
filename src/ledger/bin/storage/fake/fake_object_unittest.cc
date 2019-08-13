@@ -5,6 +5,7 @@
 #include "src/ledger/bin/storage/fake/fake_object.h"
 
 #include "gtest/gtest.h"
+#include "src/ledger/bin/storage/fake/fake_object_identifier_factory.h"
 #include "src/ledger/bin/storage/public/object.h"
 #include "src/ledger/bin/storage/public/types.h"
 #include "src/lib/fxl/strings/string_view.h"
@@ -14,8 +15,10 @@ namespace fake {
 namespace {
 
 TEST(FakeObjectTest, FakePiece) {
+  FakeObjectIdentifierFactory factory;
   const std::string content = "some content";
-  const ObjectIdentifier identifier(1u, 2u, ObjectDigest("some digest"));
+  const ObjectIdentifier identifier =
+      factory.MakeObjectIdentifier(1u, 2u, ObjectDigest("some digest"));
   const FakePiece piece(identifier, content);
 
   EXPECT_EQ(piece.GetData(), content);
@@ -26,8 +29,10 @@ TEST(FakeObjectTest, FakePiece) {
 }
 
 TEST(FakeObjectTest, FakeObject) {
+  FakeObjectIdentifierFactory factory;
   const std::string content = "some content";
-  const ObjectIdentifier identifier(1u, 2u, ObjectDigest("some digest"));
+  const ObjectIdentifier identifier =
+      factory.MakeObjectIdentifier(1u, 2u, ObjectDigest("some digest"));
   const FakeObject object(std::make_unique<FakePiece>(identifier, content));
 
   fxl::StringView data;
@@ -37,32 +42,6 @@ TEST(FakeObjectTest, FakeObject) {
   ObjectReferencesAndPriority references;
   EXPECT_EQ(object.AppendReferences(&references), Status::OK);
   EXPECT_TRUE(references.empty());
-}
-
-TEST(FakeObjectTest, FakeTokenChecker) {
-  const ObjectIdentifier identifier(1u, 2u, ObjectDigest("some digest"));
-  auto token = std::make_unique<FakePieceToken>(identifier);
-  EXPECT_EQ(token->GetIdentifier(), identifier);
-
-  const FakeTokenChecker checker = token->GetChecker();
-  EXPECT_TRUE(checker);
-  token.reset();
-  EXPECT_FALSE(checker);
-}
-
-TEST(FakeObjectTest, TracksToken) {
-  const ObjectIdentifier identifier(1u, 2u, ObjectDigest("some digest"));
-  auto fake_token = std::make_unique<FakePieceToken>(identifier);
-  const FakeTokenChecker checker = fake_token->GetChecker();
-
-  // Cast fake_token to a regular token to check TracksToken.
-  std::unique_ptr<const PieceToken> token(fake_token.release());
-
-  EXPECT_TRUE(checker.TracksToken(token));
-
-  std::unique_ptr<const PieceToken> another_token = std::make_unique<FakePieceToken>(identifier);
-  EXPECT_FALSE(checker.TracksToken(another_token));
-  EXPECT_FALSE(checker.TracksToken(nullptr));
 }
 
 }  // namespace

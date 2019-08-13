@@ -19,12 +19,10 @@ namespace {
 void ReportNotifyStatus(att::Status status, IdType id,
                         RemoteCharacteristic::NotifyStatusCallback callback,
                         async_dispatcher_t* dispatcher) {
-  RunOrPost([status, id, cb = std::move(callback)] { cb(status, id); },
-            dispatcher);
+  RunOrPost([status, id, cb = std::move(callback)] { cb(status, id); }, dispatcher);
 }
 
-void NotifyValue(const ByteBuffer& value,
-                 RemoteCharacteristic::ValueCallback callback,
+void NotifyValue(const ByteBuffer& value, RemoteCharacteristic::ValueCallback callback,
                  async_dispatcher_t* dispatcher) {
   if (!dispatcher) {
     callback(value);
@@ -34,8 +32,8 @@ void NotifyValue(const ByteBuffer& value,
   auto buffer = NewSlabBuffer(value.size());
   if (buffer) {
     value.Copy(buffer.get());
-    async::PostTask(dispatcher, [callback = std::move(callback),
-                                 val = std::move(buffer)] { callback(*val); });
+    async::PostTask(dispatcher,
+                    [callback = std::move(callback), val = std::move(buffer)] { callback(*val); });
   } else {
     bt_log(TRACE, "gatt", "out of memory!");
   }
@@ -43,45 +41,33 @@ void NotifyValue(const ByteBuffer& value,
 
 }  // namespace
 
-RemoteCharacteristic::PendingNotifyRequest::PendingNotifyRequest(
-    async_dispatcher_t* d, ValueCallback value_cb,
-    NotifyStatusCallback status_cb)
-    : dispatcher(d),
-      value_callback(std::move(value_cb)),
-      status_callback(std::move(status_cb)) {
+RemoteCharacteristic::PendingNotifyRequest::PendingNotifyRequest(async_dispatcher_t* d,
+                                                                 ValueCallback value_cb,
+                                                                 NotifyStatusCallback status_cb)
+    : dispatcher(d), value_callback(std::move(value_cb)), status_callback(std::move(status_cb)) {
   ZX_DEBUG_ASSERT(value_callback);
   ZX_DEBUG_ASSERT(status_callback);
 }
 
-RemoteCharacteristic::NotifyHandler::NotifyHandler(async_dispatcher_t* d,
-                                                   ValueCallback cb)
+RemoteCharacteristic::NotifyHandler::NotifyHandler(async_dispatcher_t* d, ValueCallback cb)
     : dispatcher(d), callback(std::move(cb)) {
   ZX_DEBUG_ASSERT(callback);
 }
 
-RemoteCharacteristic::Descriptor::Descriptor(IdType id,
-                                             const DescriptorData& info)
-    : id_(id), info_(info) {}
-
 RemoteCharacteristic::RemoteCharacteristic(fxl::WeakPtr<Client> client,
-                                           IdType id,
                                            const CharacteristicData& info)
-    : id_(id),
-      info_(info),
+    : info_(info),
       discovery_error_(false),
       shut_down_(false),
       ccc_handle_(att::kInvalidHandle),
       next_notify_handler_id_(1u),
       client_(client),
       weak_ptr_factory_(this) {
-  // See comments about "ID scheme" in remote_characteristics.h
-  ZX_DEBUG_ASSERT(id_ <= std::numeric_limits<uint16_t>::max());
   ZX_DEBUG_ASSERT(client_);
 }
 
 RemoteCharacteristic::RemoteCharacteristic(RemoteCharacteristic&& other)
-    : id_(other.id_),
-      info_(other.info_),
+    : info_(other.info_),
       discovery_error_(other.discovery_error_),
       shut_down_(other.shut_down_.load()),
       ccc_handle_(other.ccc_handle_),
@@ -138,19 +124,16 @@ void RemoteCharacteristic::DiscoverDescriptors(att::Handle range_end,
 
     if (desc.type == types::kClientCharacteristicConfig) {
       if (self->ccc_handle_ != att::kInvalidHandle) {
-        bt_log(TRACE, "gatt",
-               "characteristic has more than one CCC descriptor!");
+        bt_log(TRACE, "gatt", "characteristic has more than one CCC descriptor!");
         self->discovery_error_ = true;
         return;
       }
       self->ccc_handle_ = desc.handle;
     }
 
-    // See comments about "ID scheme" in remote_characteristics.h
-    ZX_DEBUG_ASSERT(self->descriptors_.size() <=
-                    std::numeric_limits<uint16_t>::max());
-    IdType id = (self->id_ << 16) | self->descriptors_.size();
-    self->descriptors_.push_back(Descriptor(id, desc));
+    // As descriptors must be strictly increasing, this emplace should always succeed
+    auto [_unused, success] = self->descriptors_.try_emplace(DescriptorHandle(desc.handle), desc);
+    ZX_DEBUG_ASSERT(success);
   };
 
   auto status_cb = [self, cb = std::move(callback)](att::Status status) {
@@ -171,13 +154,13 @@ void RemoteCharacteristic::DiscoverDescriptors(att::Handle range_end,
     cb(status);
   };
 
-  client_->DiscoverDescriptors(info().value_handle + 1, range_end,
-                               std::move(desc_cb), std::move(status_cb));
+  client_->DiscoverDescriptors(info().value_handle + 1, range_end, std::move(desc_cb),
+                               std::move(status_cb));
 }
 
-void RemoteCharacteristic::EnableNotifications(
-    ValueCallback value_callback, NotifyStatusCallback status_callback,
-    async_dispatcher_t* dispatcher) {
+void RemoteCharacteristic::EnableNotifications(ValueCallback value_callback,
+                                               NotifyStatusCallback status_callback,
+                                               async_dispatcher_t* dispatcher) {
   ZX_DEBUG_ASSERT(thread_checker_.IsCreationThreadCurrent());
   ZX_DEBUG_ASSERT(client_);
   ZX_DEBUG_ASSERT(value_callback);
@@ -198,13 +181,11 @@ void RemoteCharacteristic::EnableNotifications(
 
     IdType id = next_notify_handler_id_++;
     notify_handlers_[id] = NotifyHandler(dispatcher, std::move(value_callback));
-    ReportNotifyStatus(att::Status(), id, std::move(status_callback),
-                       dispatcher);
+    ReportNotifyStatus(att::Status(), id, std::move(status_callback), dispatcher);
     return;
   }
 
-  pending_notify_reqs_.emplace(dispatcher, std::move(value_callback),
-                               std::move(status_callback));
+  pending_notify_reqs_.emplace(dispatcher, std::move(value_callback), std::move(status_callback));
 
   // If there are other pending requests to enable notifications then we'll wait
   // until the descriptor write completes.
@@ -223,8 +204,7 @@ void RemoteCharacteristic::EnableNotifications(
 
   auto self = weak_ptr_factory_.GetWeakPtr();
   auto ccc_write_cb = [self](att::Status status) {
-    bt_log(TRACE, "gatt", "CCC write status (enable): %s",
-           status.ToString().c_str());
+    bt_log(TRACE, "gatt", "CCC write status (enable): %s", status.ToString().c_str());
     if (self) {
       self->ResolvePendingNotifyRequests(status);
     }
@@ -263,8 +243,7 @@ void RemoteCharacteristic::DisableNotificationsInternal() {
   ccc_value.SetToZeros();
 
   auto ccc_write_cb = [](att::Status status) {
-    bt_log(TRACE, "gatt", "CCC write status (disable): %s",
-           status.ToString().c_str());
+    bt_log(TRACE, "gatt", "CCC write status (disable): %s", status.ToString().c_str());
   };
 
   // We send the request without handling the status as there is no good way to
@@ -285,12 +264,10 @@ void RemoteCharacteristic::ResolvePendingNotifyRequests(att::Status status) {
 
     if (status) {
       id = next_notify_handler_id_++;
-      notify_handlers_[id] =
-          NotifyHandler(req.dispatcher, std::move(req.value_callback));
+      notify_handlers_[id] = NotifyHandler(req.dispatcher, std::move(req.value_callback));
     }
 
-    ReportNotifyStatus(status, id, std::move(req.status_callback),
-                       req.dispatcher);
+    ReportNotifyStatus(status, id, std::move(req.status_callback), req.dispatcher);
   }
 }
 

@@ -1,3 +1,7 @@
+// Copyright 2019 The Fuchsia Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 use eapol;
 use failure::{bail, ensure, format_err};
 use fidl_fuchsia_wlan_mlme::BssDescription;
@@ -12,12 +16,15 @@ use wlan_rsn::{
     self, nonce::NonceReader, psk, rsna::UpdateSink, NegotiatedProtection, ProtectionInfo,
 };
 
-use crate::{client::state::Protection, DeviceInfo};
+use crate::{
+    client::{state::Protection, InvalidPasswordArgError},
+    DeviceInfo,
+};
 
 #[derive(Debug)]
 pub struct Rsna {
     pub negotiated_protection: NegotiatedProtection,
-    pub supplicant: Box<Supplicant>,
+    pub supplicant: Box<dyn Supplicant>,
 }
 
 impl PartialEq for Rsna {
@@ -95,13 +102,12 @@ pub fn get_rsna(
     };
 
     // Credentials supplied and BSS is protected.
-    let a_rsne = rsne::from_bytes(a_rsne_bytes)
-        .to_full_result()
+    let (_, a_rsne) = rsne::from_bytes(a_rsne_bytes)
         .map_err(|e| format_err!("invalid RSNE {:02x?}: {:?}", a_rsne_bytes, e))?;
     let s_rsne = derive_s_rsne(&a_rsne)?;
     let negotiated_protection = NegotiatedProtection::from_rsne(&s_rsne)?;
     let psk = compute_psk(credential, &bss.ssid[..])?;
-    let supplicant = wlan_rsn::Supplicant::new_wpa2psk_ccmp128(
+    let supplicant = wlan_rsn::Supplicant::new_wpa_personal(
         // Note: There should be one Reader per device, not per SME.
         // Follow-up with improving on this.
         NonceReader::new(&device_info.addr[..])?,
@@ -115,14 +121,23 @@ pub fn get_rsna(
     Ok(Protection::Rsna(Rsna { negotiated_protection, supplicant: Box::new(supplicant) }))
 }
 
-fn compute_psk(credential: &fidl_sme::Credential, ssid: &[u8]) -> Result<psk::Psk, failure::Error> {
+pub fn compute_psk(
+    credential: &fidl_sme::Credential,
+    ssid: &[u8],
+) -> Result<psk::Psk, failure::Error> {
     match credential {
         fidl_sme::Credential::Password(password) => psk::compute(&password[..], ssid),
         fidl_sme::Credential::Psk(psk) => {
             ensure!(psk.len() == 32, "PSK must be 32 octets but was {}", psk.len());
             Ok(psk.clone().into_boxed_slice())
         }
-        _ => bail!("unsupported credentials configuration for computing PSK"),
+        fidl_sme::Credential::None(..) => {
+            Err(InvalidPasswordArgError("expected credentials but none is provided").into())
+        }
+        _ => {
+            let msg = "unsupported credentials configuration for computing PSK";
+            Err(InvalidPasswordArgError(msg).into())
+        }
     }
 }
 

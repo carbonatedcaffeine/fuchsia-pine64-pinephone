@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
-#![deny(warnings)]
+#![feature(async_await)]
+#![recursion_limit = "4096"]
 
 mod app;
+mod pty;
 mod view_controller;
 
 use app::App;

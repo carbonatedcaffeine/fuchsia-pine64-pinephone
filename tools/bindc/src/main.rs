@@ -4,10 +4,4 @@
 
 //! A Fuchsia Driver Bind Program compiler
 
-#[macro_use]
-extern crate bitfield;
-
-mod c_generation;
-mod instruction;
-
 fn main() {}

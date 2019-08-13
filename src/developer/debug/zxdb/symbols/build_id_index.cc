@@ -16,6 +16,17 @@ namespace zxdb {
 
 namespace {
 
+std::optional<std::string> ProbeOneBuildIdFile(const std::filesystem::path& path,
+                                               DebugSymbolFileType file_type) {
+  if (auto elf = elflib::ElfLib::Create(path)) {
+    if (file_type == DebugSymbolFileType::kDebugInfo && elf->ProbeHasDebugInfo())
+      return path;
+    if (file_type == DebugSymbolFileType::kBinary && elf->ProbeHasProgramBits())
+      return path;
+  }
+  return std::nullopt;
+}
+
 std::optional<std::string> FindInRepoFolder(const std::string& build_id,
                                             const std::filesystem::path& path,
                                             DebugSymbolFileType file_type) {
@@ -27,17 +38,14 @@ std::optional<std::string> FindInRepoFolder(const std::string& build_id,
   auto tail = build_id.substr(2);
   auto name = tail;
 
-  if (file_type == DebugSymbolFileType::kDebugInfo) {
-    name += ".debug";
-  }
-
-  std::error_code ec;
-  auto direct = path / prefix / name;
-  if (std::filesystem::exists(direct, ec)) {
-    return direct;
-  }
-
-  return std::nullopt;
+  // There are potentially two files, one with just the build ID, one with a ".debug" suffix. The
+  // ".debug" suffix one is supposed to contain either just the DWARF symbols, or the full
+  // unstripped binary. The plain one is supposed to be either a stripped or unstripped binary.
+  //
+  // Since we're looking for DWARF information, look in the ".debug" one first.
+  if (auto found = ProbeOneBuildIdFile(path / prefix / (name + ".debug"), file_type))
+    return found;
+  return ProbeOneBuildIdFile(path / prefix / name, file_type);
 }
 
 }  // namespace
@@ -76,8 +84,9 @@ std::string BuildIDIndex::SearchRepoSources(const std::string& build_id,
   return std::string();
 }
 
-void BuildIDIndex::AddBuildIDMapping(const std::string& build_id, const std::string& file_name,
-                                     DebugSymbolFileType file_type) {
+void BuildIDIndex::AddBuildIDMappingForTest(const std::string& build_id,
+                                            const std::string& file_name,
+                                            DebugSymbolFileType file_type) {
   if (file_type == DebugSymbolFileType::kDebugInfo) {
     // This map saves the manual mapping across cache updates.
     manual_mappings_[build_id].debug_info = file_name;
@@ -87,6 +96,10 @@ void BuildIDIndex::AddBuildIDMapping(const std::string& build_id, const std::str
     manual_mappings_[build_id].binary = file_name;
     build_id_to_files_[build_id].binary = file_name;
   }
+}
+
+bool BuildIDIndex::AddOneFile(const std::string& file_name) {
+  return IndexOneSourceFile(file_name, true);
 }
 
 void BuildIDIndex::AddBuildIDMappingFile(const std::string& id_file_name) {
@@ -247,7 +260,7 @@ void BuildIDIndex::IndexOneSourcePath(const std::string& path) {
   }
 }
 
-bool BuildIDIndex::IndexOneSourceFile(const std::string& file_path) {
+bool BuildIDIndex::IndexOneSourceFile(const std::string& file_path, bool preserve) {
   auto elf = elflib::ElfLib::Create(file_path);
   if (!elf)
     return false;
@@ -265,6 +278,10 @@ bool BuildIDIndex::IndexOneSourceFile(const std::string& file_path) {
   if (elf->ProbeHasProgramBits()) {
     build_id_to_files_[build_id].binary = file_path;
     ret = true;
+  }
+
+  if (ret && preserve) {
+    manual_mappings_[build_id] = build_id_to_files_[build_id];
   }
 
   return ret;

@@ -4,9 +4,11 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT
 
-#pragma once
+#ifndef ZIRCON_KERNEL_ARCH_X86_INCLUDE_ARCH_X86_TIMER_FREQ_H_
+#define ZIRCON_KERNEL_ARCH_X86_INCLUDE_ARCH_X86_TIMER_FREQ_H_
 
 #include <stdint.h>
+#include <zircon/compiler.h>
 
 __BEGIN_CDECLS
 
@@ -20,4 +22,4 @@ uint64_t x86_lookup_tsc_freq(void);
 
 __END_CDECLS
 
-
+#endif  // ZIRCON_KERNEL_ARCH_X86_INCLUDE_ARCH_X86_TIMER_FREQ_H_

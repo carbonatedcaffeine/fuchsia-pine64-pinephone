@@ -2,22 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
-#![deny(warnings)]
+#![feature(async_await)]
 
 use carnelian::{
-    measure_text, Canvas, Color, FontDescription, FontFace, IntSize, Paint, PixelSink, Point, Rect,
-    Size,
+    measure_text, Canvas, Color, FontDescription, FontFace, IntSize, MappingPixelSink, Paint,
+    PixelSink, Point, Rect, Size,
 };
 use failure::{bail, Error, ResultExt};
 use fuchsia_async as fasync;
-use fuchsia_framebuffer::{Config, Frame, FrameBuffer, PixelFormat};
+use fuchsia_framebuffer::{Config, FrameBuffer, PixelFormat};
 use futures::StreamExt;
 
 mod setup;
 
 static FONT_DATA: &'static [u8] =
-    include_bytes!("../../../../garnet/bin/fonts/third_party/robotoslab/RobotoSlab-Regular.ttf");
+    include_bytes!("../../../../prebuilt/third_party/fonts/robotoslab/RobotoSlab-Regular.ttf");
 
 struct RecoveryUI<'a, T: PixelSink> {
     face: FontFace<'a>,
@@ -65,21 +64,11 @@ impl<'a, T: PixelSink> RecoveryUI<'a, T> {
     }
 }
 
-struct FramePixelSink {
-    frame: Frame,
-}
-
-impl PixelSink for FramePixelSink {
-    fn write_pixel_at_offset(&mut self, offset: usize, value: &[u8]) {
-        self.frame.write_pixel_at_offset(offset, &value);
-    }
-}
-
-async fn run<'a, T: PixelSink>(ui: &'a mut RecoveryUI<'a, T>) -> Result<(), Error> {
+async fn run<'a>(ui: &'a mut RecoveryUI<'a, MappingPixelSink>) -> Result<(), Error> {
     ui.draw("Fuchsia System Recovery", "Waiting...");
 
     let mut receiver = setup::start_server()?;
-    while let Some(_event) = await!(receiver.next()) {
+    while let Some(_event) = receiver.next().await {
         println!("recovery: received request");
         ui.draw("Fuchsia System Recovery", "Got event");
     }
@@ -92,7 +81,10 @@ fn main() -> Result<(), Error> {
     let mut executor = fasync::Executor::new().context("Failed to create executor")?;
     let fb = FrameBuffer::new(None, &mut executor).context("Failed to create framebuffer")?;
     let config = fb.get_config();
-    if config.format != PixelFormat::Argb8888 && config.format != PixelFormat::Rgb565 {
+    if config.format != PixelFormat::Argb8888
+        && config.format != PixelFormat::Rgb565
+        && config.format != PixelFormat::RgbX888
+    {
         bail!("Unsupported pixel format {:#?}", config.format);
     }
 
@@ -103,10 +95,9 @@ fn main() -> Result<(), Error> {
 
     let face = FontFace::new(FONT_DATA).unwrap();
 
-    let sink = FramePixelSink { frame };
-    let canvas = Canvas::new_with_sink(
+    let canvas = Canvas::new(
         display_size,
-        sink,
+        MappingPixelSink::new(&frame.mapping),
         config.linear_stride_bytes() as u32,
         config.pixel_size_bytes,
     );
@@ -143,7 +134,7 @@ mod tests {
             format: PixelFormat::Argb8888,
             pixel_size_bytes: 4,
         };
-        let canvas = Canvas::new_with_sink(
+        let canvas = Canvas::new(
             IntSize::new(WIDTH, HEIGHT),
             sink,
             config.linear_stride_bytes() as u32,

@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
-use ct_logs;
+#![feature(async_await)]
 use fuchsia_hyper;
 use futures::compat::Future01CompatExt;
 use hyper;
@@ -129,14 +128,13 @@ async fn get_network_time_backstop(
     // us to defer trust evaluation until after we've parsed the response.
     let mut config = rustls::ClientConfig::new();
     config.root_store.add_server_trust_anchors(&webpki_roots_fuchsia::TLS_SERVER_ROOTS);
-    config.ct_logs = Some(&ct_logs::LOGS);
     config
         .dangerous()
-        .set_certificate_verifier(Arc::clone(&verifier) as Arc<rustls::ServerCertVerifier>);
+        .set_certificate_verifier(Arc::clone(&verifier) as Arc<dyn rustls::ServerCertVerifier>);
 
     let client = fuchsia_hyper::new_https_client_dangerous(config);
 
-    let response = await!(client.get(url).compat()).map_err(|_| HttpsDateError::NetworkError)?;
+    let response = client.get(url).compat().await.map_err(|_| HttpsDateError::NetworkError)?;
 
     // Ok, so now we pull the Date header out of the response.
     // Technically the Date header is the date of page creation, but it's the best
@@ -190,7 +188,7 @@ async fn get_network_time_backstop(
 /// always provide a date that falls into the validity period of the certificates
 /// they provide.
 pub async fn get_network_time(hostname: &str) -> Result<DateTime, HttpsDateError> {
-    await!(get_network_time_backstop(hostname, *BUILD_TIME))
+    get_network_time_backstop(hostname, *BUILD_TIME).await
 }
 
 #[cfg(test)]
@@ -232,7 +230,7 @@ mod test {
         let mut executor = Executor::new().expect("Error creating executor");
         executor.run_singlethreaded(
             async {
-                let date = await!(get_network_time("google.com"));
+                let date = get_network_time("google.com").await;
                 if date.is_err() {
                     assert!(date.unwrap_err().is_network_error());
                     return Ok(());
@@ -251,7 +249,7 @@ mod test {
             async {
                 let future_date = FixedOffset::east(0).ymd(5000, 1, 1).and_hms(0, 0, 0);
                 let error =
-                    await!(get_network_time_backstop("google.com", future_date)).unwrap_err();
+                    get_network_time_backstop("google.com", future_date).await.unwrap_err();
                 assert!(error.is_network_error() || error == HttpsDateError::InvalidDate);
                 Ok(())
             },
@@ -265,7 +263,7 @@ mod test {
             async {
                 let future_date = FixedOffset::east(0).ymd(5000, 1, 1).and_hms(0, 0, 0);
                 let error =
-                    await!(get_network_time_backstop("google com", future_date)).unwrap_err();
+                    get_network_time_backstop("google com", future_date).await.unwrap_err();
                 assert!(error.is_network_error() || error == HttpsDateError::InvalidHostname);
                 Ok(())
             },

@@ -1,0 +1,121 @@
+// Copyright 2019 The Fuchsia Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+library fuchsia.settings;
+
+using fuchsia.ui.types;
+
+/// Modify or watch accessibility settings that are persisted.
+[Discoverable]
+protocol Accessibility {
+    /// Gets the current value of all accessibility settings. Returns
+    /// immediately on first call; subsequent calls return when any of the
+    /// values change.
+    ///
+    /// - `settings` all current values of the accessibility settings.
+    /// * see [`AccessibilitySettings`] for their meaning.
+    Watch() -> (AccessibilitySettings settings);
+
+    /// Sets [AccessibilitySettings] settings. Any field not explicitly set in the table performs a
+    /// no-op, and will not make any changes.
+    Set(AccessibilitySettings settings) -> ();
+};
+
+/// Supported accessibility settings.
+table AccessibilitySettings {
+    /// For videos, use an alternative audio track (akin to changing languages)
+    /// that explains what is happening visually while there is no dialogue.
+    1: bool audio_description;
+
+    /// Read aloud elements of the screen selected by the user.
+    2: bool screen_reader;
+
+    /// Invert colors on the screen.
+    3: bool color_inversion;
+
+    /// Interpret triple-tap on the touchscreen as a command to zoom in.
+    4: bool enable_magnification;
+
+    /// What type of color-blindness, if any, to correct for.
+    5: ColorBlindnessType color_correction;
+
+    /// What kind of sources get closed captions, and how they look.
+    6: CaptionsSettings captions_settings;
+};
+
+enum ColorBlindnessType {
+    /// No color blindness.
+    NONE = 0;
+
+    /// Red-green color blindness due to reduced sensitivity to red light.
+    PROTANOMALY = 1;
+
+    /// Red-green color blindness due to reduced sensitivity to green light.
+    DEUTERANOMALY = 2;
+
+    /// Blue-yellow color blindness. It is due to reduced sensitivity to blue
+    /// light.
+    TRITANOMALY = 3;
+};
+
+/// What kind of sources get closed captions, and how they look.
+table CaptionsSettings {
+    /// Closed captions enabled for media sources of audio.
+    1: bool for_media;
+
+    /// Closed captions enabled for Text-To-Speech sources of audio.
+    2: bool for_tts;
+
+    /// Font style and color used for the closed captions text.
+    3: CaptionFontStyle font_style;
+
+    /// Border color used around the closed captions window.
+    4: fuchsia.ui.types.ColorRgba window_color;
+
+    /// Background color of the closed captions window.
+    5: fuchsia.ui.types.ColorRgba background_color;
+};
+
+/// Font, size, and color of closed captions text.
+table CaptionFontStyle {
+    1: CaptionFontFamily family;
+    /// 47 CFR §79.103(c)(2) requires at least 3-bit RGB for user override of
+    /// closed-captions color.
+    2: fuchsia.ui.types.ColorRgba color;
+    /// Size of closed captions text relative to the default captions size. A
+    /// range of [0.5, 2] is guaranteed to be supported (as 47 CFR §79.103(c)(4)
+    /// establishes).
+    3: float32 relative_size;
+    4: EdgeStyle char_edge_style;
+};
+
+/// Font family groups for closed captions, specified by 47 CFR §79.102(k).
+enum CaptionFontFamily {
+    UNKNOWN = 0;
+    MONOSPACED_SERIF = 1;
+    PROPORTIONAL_SERIF = 2;
+    MONOSPACED_SANS_SERIF = 3;
+    PROPORTIONAL_SANS_SERIF = 4;
+    CASUAL = 5;
+    CURSIVE = 6;
+    SMALL_CAPITALS = 7;
+};
+
+/// Edge style for fonts as specified in 47 CFR §79.103(c)(7)
+enum EdgeStyle {
+    /// No border around fonts.
+    NONE = 0;
+
+    /// A shadow "behind" and slightly offset from each edge.
+    DROP_SHADOW = 1;
+
+    /// A bevel that mimics a 3D raised effect.
+    RAISED = 2;
+
+    /// A bevel that mimics a 3D depressed effect.
+    DEPRESSED = 3;
+
+    /// A plain border around each shapes.
+    OUTLINE = 4;
+};

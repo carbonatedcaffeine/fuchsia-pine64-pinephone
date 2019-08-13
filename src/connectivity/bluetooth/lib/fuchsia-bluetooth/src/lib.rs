@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 //! Utilities for Bluetooth development.
 
@@ -18,6 +18,8 @@ pub mod expectation;
 pub mod hci_emulator;
 /// Bluetooth host API
 pub mod host;
+/// Extension traits and functions for interfacing with the Inspect API
+pub mod inspect;
 /// Common Bluetooth type extensions
 pub mod types;
 /// Frequently Used Functions

@@ -6,6 +6,8 @@
 
 #include <errno.h>
 
+#include <regex>
+
 #include "fidl/attributes.h"
 
 namespace fidl {
@@ -42,33 +44,54 @@ enum {
   More,
   Done,
 };
+
+bool IsValidLibraryComponentName(const std::string& component) {
+  static const std::regex kPattern("^[a-z][a-z0-9]*$");
+  return std::regex_match(component, kPattern);
+}
+
+// IsIdentifierValid disallows identifiers (escaped, and unescaped) from
+// starting or ending with underscore.
+bool IsIdentifierValid(const std::string& identifier) {
+  // this pattern comes from the FIDL language spec, available here:
+  // https://fuchsia.googlesource.com/fuchsia/+/HEAD/docs/development/languages/fidl/reference/language.md#identifiers
+  static const std::regex kPattern("^[A-Za-z0-9]([A-Za-z0-9_]*[A-Za-z0-9])?$");
+  return std::regex_match(identifier, kPattern);
+}
+
 }  // namespace
 
 Parser::Parser(Lexer* lexer, ErrorReporter* error_reporter)
     : lexer_(lexer), error_reporter_(error_reporter) {
-    handle_subtype_table_ = {
-        {"exception", types::HandleSubtype::kException},
-        {"process", types::HandleSubtype::kProcess},
-        {"thread", types::HandleSubtype::kThread},
-        {"vmo", types::HandleSubtype::kVmo},
-        {"channel", types::HandleSubtype::kChannel},
-        {"event", types::HandleSubtype::kEvent},
-        {"port", types::HandleSubtype::kPort},
-        {"interrupt", types::HandleSubtype::kInterrupt},
-        {"debuglog", types::HandleSubtype::kLog},
-        {"socket", types::HandleSubtype::kSocket},
-        {"resource", types::HandleSubtype::kResource},
-        {"eventpair", types::HandleSubtype::kEventpair},
-        {"job", types::HandleSubtype::kJob},
-        {"vmar", types::HandleSubtype::kVmar},
-        {"fifo", types::HandleSubtype::kFifo},
-        {"guest", types::HandleSubtype::kGuest},
-        {"timer", types::HandleSubtype::kTimer},
-        {"bti", types::HandleSubtype::kBti},
-        {"profile", types::HandleSubtype::kProfile},
-    };
+  handle_subtype_table_ = {
+      {"bti", types::HandleSubtype::kBti},
+      {"channel", types::HandleSubtype::kChannel},
+      {"debuglog", types::HandleSubtype::kLog},
+      {"event", types::HandleSubtype::kEvent},
+      {"eventpair", types::HandleSubtype::kEventpair},
+      {"exception", types::HandleSubtype::kException},
+      {"fifo", types::HandleSubtype::kFifo},
+      {"guest", types::HandleSubtype::kGuest},
+      {"interrupt", types::HandleSubtype::kInterrupt},
+      {"iommu", types::HandleSubtype::kIommu},
+      {"job", types::HandleSubtype::kJob},
+      {"pager", types::HandleSubtype::kPager},
+      {"pcidevice", types::HandleSubtype::kPciDevice},
+      {"pmt", types::HandleSubtype::kPmt},
+      {"port", types::HandleSubtype::kPort},
+      {"process", types::HandleSubtype::kProcess},
+      {"profile", types::HandleSubtype::kProfile},
+      {"resource", types::HandleSubtype::kResource},
+      {"socket", types::HandleSubtype::kSocket},
+      {"suspendtoken", types::HandleSubtype::kSuspendToken},
+      {"thread", types::HandleSubtype::kThread},
+      {"timer", types::HandleSubtype::kTimer},
+      {"vcpu", types::HandleSubtype::kVcpu},
+      {"vmar", types::HandleSubtype::kVmar},
+      {"vmo", types::HandleSubtype::kVmo},
+  };
 
-    last_token_ = Lex();
+  last_token_ = Lex();
 }
 
 bool Parser::LookupHandleSubtype(const raw::Identifier* identifier,
@@ -84,17 +107,35 @@ bool Parser::LookupHandleSubtype(const raw::Identifier* identifier,
 decltype(nullptr) Parser::Fail() { return Fail("found unexpected token"); }
 
 decltype(nullptr) Parser::Fail(std::string_view message) {
+  return Fail(last_token_, std::move(message));
+}
+
+decltype(nullptr) Parser::Fail(Token token, std::string_view message) {
   if (Ok()) {
-    error_reporter_->ReportError(last_token_, std::move(message));
+    error_reporter_->ReportError(token, std::move(message));
   }
   return nullptr;
 }
 
+types::Strictness Parser::MaybeParseStrictness() {
+  switch (Peek().combined()) {
+    case CASE_IDENTIFIER(Token::Subkind::kStrict):
+      ConsumeToken(IdentifierOfSubkind(Token::Subkind::kStrict));
+      assert(Ok() && "we should have just seen a strict token");
+      return types::Strictness::kStrict;
+    default:
+      return types::Strictness::kFlexible;
+  }
+}
+
 std::unique_ptr<raw::Identifier> Parser::ParseIdentifier(bool is_discarded) {
   ASTScope scope(this, is_discarded);
-  ConsumeToken(OfKind(Token::Kind::kIdentifier));
+  Token token = ConsumeToken(OfKind(Token::Kind::kIdentifier));
   if (!Ok())
     return Fail();
+  std::string identifier(token.data());
+  if (!IsIdentifierValid(identifier))
+    return Fail("invalid identifier '" + identifier + "'");
 
   return std::make_unique<raw::Identifier>(scope.GetSourceElement());
 }
@@ -127,6 +168,21 @@ std::unique_ptr<raw::CompoundIdentifier> Parser::ParseCompoundIdentifier() {
   }
 
   return std::make_unique<raw::CompoundIdentifier>(scope.GetSourceElement(), std::move(components));
+}
+
+std::unique_ptr<raw::CompoundIdentifier> Parser::ParseLibraryName() {
+  auto library_name = ParseCompoundIdentifier();
+  if (!Ok())
+    return Fail();
+
+  for (const auto& component : library_name->components) {
+    std::string component_data(component->start_.data());
+    if (!IsValidLibraryComponentName(component_data)) {
+      return Fail(component->start_, "Invalid library name component " + component_data);
+    }
+  }
+
+  return library_name;
 }
 
 std::unique_ptr<raw::StringLiteral> Parser::ParseStringLiteral() {
@@ -417,7 +473,7 @@ std::unique_ptr<raw::BitsMember> Parser::ParseBitsMember() {
 }
 
 std::unique_ptr<raw::BitsDeclaration> Parser::ParseBitsDeclaration(
-    std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope) {
+    std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope, types::Strictness strictness) {
   std::vector<std::unique_ptr<raw::BitsMember>> members;
   ConsumeToken(IdentifierOfSubkind(Token::Subkind::kBits));
   if (!Ok())
@@ -465,7 +521,7 @@ std::unique_ptr<raw::BitsDeclaration> Parser::ParseBitsDeclaration(
 
   return std::make_unique<raw::BitsDeclaration>(scope.GetSourceElement(), std::move(attributes),
                                                 std::move(identifier), std::move(maybe_type_ctor),
-                                                std::move(members));
+                                                std::move(members), strictness);
 }
 
 std::unique_ptr<raw::ConstDeclaration> Parser::ParseConstDeclaration(
@@ -514,7 +570,7 @@ std::unique_ptr<raw::EnumMember> Parser::ParseEnumMember() {
 }
 
 std::unique_ptr<raw::EnumDeclaration> Parser::ParseEnumDeclaration(
-    std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope) {
+    std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope, types::Strictness strictness) {
   std::vector<std::unique_ptr<raw::EnumMember>> members;
   ConsumeToken(IdentifierOfSubkind(Token::Subkind::kEnum));
   if (!Ok())
@@ -562,7 +618,7 @@ std::unique_ptr<raw::EnumDeclaration> Parser::ParseEnumDeclaration(
 
   return std::make_unique<raw::EnumDeclaration>(scope.GetSourceElement(), std::move(attributes),
                                                 std::move(identifier), std::move(maybe_type_ctor),
-                                                std::move(members));
+                                                std::move(members), strictness);
 }
 
 std::unique_ptr<raw::Parameter> Parser::ParseParameter() {
@@ -773,6 +829,60 @@ std::unique_ptr<raw::ProtocolDeclaration> Parser::ParseProtocolDeclaration(
       std::move(composed_protocols), std::move(methods));
 }
 
+std::unique_ptr<raw::ServiceMember> Parser::ParseServiceMember() {
+  ASTScope scope(this);
+  auto attributes = MaybeParseAttributeList();
+  if (!Ok())
+    return Fail();
+  auto type_ctor = ParseTypeConstructor();
+  if (!Ok())
+    return Fail();
+  auto identifier = ParseIdentifier();
+  if (!Ok())
+    return Fail();
+
+  return std::make_unique<raw::ServiceMember>(scope.GetSourceElement(), std::move(type_ctor),
+                                              std::move(identifier), std::move(attributes));
+}
+
+std::unique_ptr<raw::ServiceDeclaration> Parser::ParseServiceDeclaration(
+    std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope) {
+  std::vector<std::unique_ptr<raw::ServiceMember>> members;
+
+  ConsumeToken(IdentifierOfSubkind(Token::Subkind::kService));
+  if (!Ok())
+    return Fail();
+  auto identifier = ParseIdentifier();
+  if (!Ok())
+    return Fail();
+  ConsumeToken(OfKind(Token::Kind::kLeftCurly));
+  if (!Ok())
+    return Fail();
+
+  auto parse_member = [&]() {
+    if (Peek().kind() == Token::Kind::kRightCurly) {
+      ConsumeToken(OfKind(Token::Kind::kRightCurly));
+      return Done;
+    } else {
+      members.emplace_back(ParseServiceMember());
+      return More;
+    }
+  };
+
+  while (parse_member() == More) {
+    if (!Ok())
+      Fail();
+    ConsumeToken(OfKind(Token::Kind::kSemicolon));
+    if (!Ok())
+      return Fail();
+  }
+  if (!Ok())
+    Fail();
+
+  return std::make_unique<raw::ServiceDeclaration>(scope.GetSourceElement(), std::move(attributes),
+                                                   std::move(identifier), std::move(members));
+}
+
 std::unique_ptr<raw::StructMember> Parser::ParseStructMember() {
   ASTScope scope(this);
   auto attributes = MaybeParseAttributeList();
@@ -877,7 +987,7 @@ std::unique_ptr<raw::TableMember> Parser::ParseTableMember() {
 }
 
 std::unique_ptr<raw::TableDeclaration> Parser::ParseTableDeclaration(
-    std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope) {
+    std::unique_ptr<raw::AttributeList> attributes, ASTScope& scope, types::Strictness strictness) {
   std::vector<std::unique_ptr<raw::TableMember>> members;
 
   ConsumeToken(IdentifierOfSubkind(Token::Subkind::kTable));
@@ -920,7 +1030,8 @@ std::unique_ptr<raw::TableDeclaration> Parser::ParseTableDeclaration(
     Fail();
 
   return std::make_unique<raw::TableDeclaration>(scope.GetSourceElement(), std::move(attributes),
-                                                 std::move(identifier), std::move(members));
+                                                 std::move(identifier), std::move(members),
+                                                 strictness);
 }
 
 std::unique_ptr<raw::UnionMember> Parser::ParseUnionMember() {
@@ -1054,6 +1165,7 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
   std::vector<std::unique_ptr<raw::ConstDeclaration>> const_declaration_list;
   std::vector<std::unique_ptr<raw::EnumDeclaration>> enum_declaration_list;
   std::vector<std::unique_ptr<raw::ProtocolDeclaration>> protocol_declaration_list;
+  std::vector<std::unique_ptr<raw::ServiceDeclaration>> service_declaration_list;
   std::vector<std::unique_ptr<raw::StructDeclaration>> struct_declaration_list;
   std::vector<std::unique_ptr<raw::TableDeclaration>> table_declaration_list;
   std::vector<std::unique_ptr<raw::UnionDeclaration>> union_declaration_list;
@@ -1065,7 +1177,7 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
   ConsumeToken(IdentifierOfSubkind(Token::Subkind::kLibrary));
   if (!Ok())
     return Fail();
-  auto library_name = ParseCompoundIdentifier();
+  auto library_name = ParseLibraryName();
   if (!Ok())
     return Fail();
   ConsumeToken(OfKind(Token::Kind::kSemicolon));
@@ -1073,13 +1185,31 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
     return Fail();
 
   auto parse_declaration = [&bits_declaration_list, &const_declaration_list, &enum_declaration_list,
-                            &protocol_declaration_list, &struct_declaration_list,
-                            &done_with_library_imports, &using_list, &table_declaration_list,
-                            &union_declaration_list, &xunion_declaration_list, this]() {
+                            &protocol_declaration_list, &service_declaration_list,
+                            &struct_declaration_list, &done_with_library_imports, &using_list,
+                            &table_declaration_list, &union_declaration_list,
+                            &xunion_declaration_list, this]() {
     ASTScope scope(this);
     std::unique_ptr<raw::AttributeList> attributes = MaybeParseAttributeList();
     if (!Ok())
       return More;
+
+    types::Strictness strictness = MaybeParseStrictness();
+    if (!Ok())
+      return More;
+    if (strictness == types::Strictness::kStrict) {
+      switch (Peek().combined()) {
+        case CASE_IDENTIFIER(Token::Subkind::kBits):
+        case CASE_IDENTIFIER(Token::Subkind::kEnum):
+        case CASE_IDENTIFIER(Token::Subkind::kTable):
+        case CASE_IDENTIFIER(Token::Subkind::kXUnion):
+          break;
+        default:
+          std::string msg = std::string(Token::Name(Peek())) + " cannot be strict";
+          Fail(msg);
+          return More;
+      }
+    }
 
     switch (Peek().combined()) {
       default:
@@ -1087,7 +1217,8 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
 
       case CASE_IDENTIFIER(Token::Subkind::kBits):
         done_with_library_imports = true;
-        bits_declaration_list.emplace_back(ParseBitsDeclaration(std::move(attributes), scope));
+        bits_declaration_list.emplace_back(
+            ParseBitsDeclaration(std::move(attributes), scope, strictness));
         return More;
 
       case CASE_IDENTIFIER(Token::Subkind::kConst):
@@ -1097,13 +1228,20 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
 
       case CASE_IDENTIFIER(Token::Subkind::kEnum):
         done_with_library_imports = true;
-        enum_declaration_list.emplace_back(ParseEnumDeclaration(std::move(attributes), scope));
+        enum_declaration_list.emplace_back(
+            ParseEnumDeclaration(std::move(attributes), scope, strictness));
         return More;
 
       case CASE_IDENTIFIER(Token::Subkind::kProtocol):
         done_with_library_imports = true;
         protocol_declaration_list.emplace_back(
             ParseProtocolDeclaration(std::move(attributes), scope));
+        return More;
+
+      case CASE_IDENTIFIER(Token::Subkind::kService):
+        done_with_library_imports = true;
+        service_declaration_list.emplace_back(
+            ParseServiceDeclaration(std::move(attributes), scope));
         return More;
 
       case CASE_IDENTIFIER(Token::Subkind::kStruct):
@@ -1113,7 +1251,8 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
 
       case CASE_IDENTIFIER(Token::Subkind::kTable):
         done_with_library_imports = true;
-        table_declaration_list.emplace_back(ParseTableDeclaration(std::move(attributes), scope));
+        table_declaration_list.emplace_back(
+            ParseTableDeclaration(std::move(attributes), scope, strictness));
         return More;
 
       case CASE_IDENTIFIER(Token::Subkind::kUsing): {
@@ -1138,25 +1277,8 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
       case CASE_IDENTIFIER(Token::Subkind::kXUnion):
         done_with_library_imports = true;
         xunion_declaration_list.emplace_back(
-            ParseXUnionDeclaration(std::move(attributes), scope, types::Strictness::kFlexible));
+            ParseXUnionDeclaration(std::move(attributes), scope, strictness));
         return More;
-
-      case CASE_IDENTIFIER(Token::Subkind::kStrict):
-        done_with_library_imports = true;
-
-        ConsumeToken(IdentifierOfSubkind(Token::Subkind::kStrict));
-        assert(Ok() && "we should have just seen a strict token");
-
-        switch (Peek().combined()) {
-          case CASE_IDENTIFIER(Token::Subkind::kXUnion):
-            xunion_declaration_list.emplace_back(
-                ParseXUnionDeclaration(std::move(attributes), scope, types::Strictness::kStrict));
-            return More;
-          default:
-            std::string msg = std::string(Token::Name(Peek())) + " cannot be strict";
-            Fail(msg);
-            return Done;
-        }
     }
   };
 
@@ -1176,8 +1298,9 @@ std::unique_ptr<raw::File> Parser::ParseFile() {
       scope.GetSourceElement(), end, std::move(attributes), std::move(library_name),
       std::move(using_list), std::move(bits_declaration_list), std::move(const_declaration_list),
       std::move(enum_declaration_list), std::move(protocol_declaration_list),
-      std::move(struct_declaration_list), std::move(table_declaration_list),
-      std::move(union_declaration_list), std::move(xunion_declaration_list));
+      std::move(service_declaration_list), std::move(struct_declaration_list),
+      std::move(table_declaration_list), std::move(union_declaration_list),
+      std::move(xunion_declaration_list));
 }
 
 }  // namespace fidl

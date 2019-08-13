@@ -9,6 +9,7 @@ protocol Echo {
 };
 
 protocol FidlcatTestInterface {
+    Empty();
     String(string s);
     Bool(bool b);
     Int8(int8 i8);
@@ -32,6 +33,8 @@ protocol FidlcatTestInterface {
     TwoStringArrayInt(array<string>:2 arr, int32 i32);
     TwoStringVectorInt(vector<string> vec, int32 i32);
     TwoStringVectors(vector<string> v_1, vector<string> v_2);
+    VectorUint8(vector<uint8> v);
+    VectorUint32(vector<uint32> v);
 
     Struct(primitive_types p);
     NullableStruct(primitive_types? p);
@@ -60,6 +63,8 @@ protocol FidlcatTestInterface {
     Handle(handle<channel> ch);
     NullableHandle(handle<channel>? ch);
     HandleStruct(handle_struct hs);
+    TraversalOrder(traversal_order t);
+
     Protocol(ParamProtocol ch);
 };
 
@@ -125,6 +130,17 @@ struct handle_struct {
     handle<channel> h1;
     handle<channel> h2;
     handle<channel> h3;
+};
+
+struct opt_handle_struct {
+    handle<channel>? sh1;
+    handle<channel>? sh2;
+};
+
+struct traversal_order {
+    opt_handle_struct? s;
+    handle<channel>? h1;
+    handle<channel>? h2;
 };
 
 [FragileBase]

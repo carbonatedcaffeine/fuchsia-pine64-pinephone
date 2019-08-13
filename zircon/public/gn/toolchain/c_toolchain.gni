@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("$zx/public/gn/prebuilt.gni")
 import("ccache.gni")
 import("clang.gni")
 import("gcc.gni")
@@ -16,6 +17,11 @@ declare_args() {
   # Symbolization tools and debuggers find symbolic information this way.
   build_id_dir = "$root_build_dir/.build-id"
 }
+
+_buildidtool =
+    rebase_path("$prebuilt_dir/tools/buildidtool/$host_platform/buildidtool",
+                root_build_dir)
+_id_dir = rebase_path(build_id_dir, root_build_dir)
 
 # Define a toolchain for compiling C/C++ code.
 #
@@ -128,6 +134,31 @@ template("c_toolchain") {
   use_gcc = defined(invoker.gcc) && invoker.gcc
   use_strip = defined(invoker.strip) && invoker.strip != false
 
+  # These are used in some, but not all, of the if branches below.
+  if (clang_tool_dir == "") {
+    clangxx_exec_inputs = []
+    clangxx_exec_command = "clang++"
+  } else {
+    clangxx_exec_inputs = [ "${clang_tool_dir}/clang++" ]
+    clangxx_exec_command = rebase_path(clangxx_exec_inputs[0], root_build_dir)
+  }
+  clangxx_args = [
+    clangxx_exec_command,
+    "--target=$tc_target",
+
+    # This affects the multilib selection so that we get the right
+    # libc++.a binary.  It's not really proper that we have to encode here
+    # the multilib-affecting switches we presume all configs actually will
+    # use in the toolchain being defined.  But since everything in this
+    # codebase (certainly everything we support being compiled by GCC) is
+    # definitely compiled with -fno-exceptions, we can live with it.  An
+    # alternative would be to add the lib_dirs in a config() instead and
+    # then somehow tie it to exceptions vs no-exceptions configs, but we
+    # have no present need for any such complexity.
+    "-fno-exceptions",
+  ]
+  not_needed([ "clangxx_args" ])
+
   # If either $tool_dir or $tool_prefix is supplied then both must be supplied.
   if (defined(invoker.tool_dir) || defined(invoker.tool_prefix)) {
     tc = {
@@ -145,30 +176,6 @@ template("c_toolchain") {
         }
       }
     } else {
-      if (clang_tool_dir == "") {
-        clangxx_exec_inputs = []
-        clangxx_exec_command = "clang++"
-      } else {
-        clangxx_exec_inputs = [ "${clang_tool_dir}/clang++" ]
-        clangxx_exec_command =
-            rebase_path(clangxx_exec_inputs[0], root_build_dir)
-      }
-      clangxx_args = [
-        clangxx_exec_command,
-        "--target=$tc_target",
-
-        # This affects the multilib selection so that we get the right
-        # libc++.a binary.  It's not really proper that we have to encode here
-        # the multilib-affecting switches we presume all configs actually will
-        # use in the toolchain being defined.  But since everything in this
-        # codebase (certainly everything we support being compiled by GCC) is
-        # definitely compiled with -fno-exceptions, we can live with it.  An
-        # alternative would be to add the lib_dirs in a config() instead and
-        # then somehow tie it to exceptions vs no-exceptions configs, but we
-        # have no present need for any such complexity.
-        "-fno-exceptions",
-      ]
-
       tc = {
         tool_dir = gcc_tool_dir
         tool_prefix = "${tc_cpu}-elf-"
@@ -197,6 +204,19 @@ template("c_toolchain") {
       tool_dir = clang_tool_dir
       tool_prefix = "llvm-"
       version_string = clang_version_string
+
+      # TODO(TC-605): The MSVC target in the clang driver never uses the
+      # -stdlib=libc++ switch or the toolchain's own libc++ include path.
+      if (invoker.os == "win") {
+        include_dirs = [ rebase_path(
+                exec_script(
+                    "/usr/bin/env",
+                    clangxx_args + [ "-print-file-name=include/c++/v1" ],
+                    "trim string",
+                    clangxx_exec_inputs),
+                "",
+                root_build_dir) ]
+      }
     }
   }
 
@@ -244,56 +264,41 @@ template("c_toolchain") {
     runtime_outputs = [ outfile ]
     outputs = runtime_outputs
 
-    # All others are ELF and so might have build IDs.
-    make_id_link = invoker.os != "mac" && invoker.os != "win"
-    if (make_id_link) {
-      id_dir = rebase_path(build_id_dir, root_build_dir)
-    }
-
     if (use_strip) {
       unstripped_outfile = "${outfile}.debug"
       outputs += [ unstripped_outfile ]
       strip_command = " && "
-      if (invoker.strip == true && !make_id_link) {
+      if (invoker.strip == true) {
         if (invoker.os == "mac") {
           # Only the host native tool works on macOS.
           strip_tool = "strip"
         } else {
           strip_tool = "$dir_prefix${tc.tool_prefix}strip"
         }
-        strip_command += "$strip_tool -o $outfile $unstripped_outfile"
+        strip_command += "$strip_tool -o \"$outfile\" \"$unstripped_outfile\""
       } else {
-        if (invoker.strip == true) {
-          strip_switch = "--strip-all"
-        } else {
-          strip_switch = invoker.strip
-        }
-        if (make_id_link && !use_gcc) {
-          # llvm-objcopy has built-in support for populating $id_dir.
-          strip_switch +=
-              " --build-id-link-dir=$id_dir" + " --build-id-link-output=" +
-              " --build-id-link-input=.debug"
-          make_id_link = false
-        }
-        strip_command += "$dir_prefix${tc.tool_prefix}objcopy ${strip_switch} $unstripped_outfile $outfile"
+        strip_command +=
+            "$dir_prefix${tc.tool_prefix}objcopy ${invoker.strip}" +
+            " \"$unstripped_outfile\" \"$outfile\""
       }
     } else {
       unstripped_outfile = outfile
       strip_command = ""
     }
 
-    if (make_id_link) {
-      readelf = "$dir_prefix${tc.tool_prefix}readelf"
-
-      # This works with bash, but ${var:n:m} syntax is not standard.  This is
-      # better than the definition below because it does everything except
-      # `readelf` directly in the shell with no other process launches.
-      # However, non-bash shells can't handle it.  It's left here to show how
-      # it can be done better when presuming bash is acceptable.
-      #strip_command += " && notes=\$(\"$readelf\" -n $unstripped_outfile) && id=\"\${notes##*Build ID: }\" && nl=\$(echo; echo '*') && id=\"\${id%%\$nl}\" && { test -z \"\$id\" || { mkdir -p \"$id_dir/\${id:0:2}\" && ln -f $unstripped_outfile \"$id_dir/\${id:0:2}/\${id:2}.debug\" && ln -f $outfile \"$id_dir/\${id:0:2}/\${id:2}\" ; } ; }"
-
-      # This works with any POSIX-compliant sh and sed.
-      strip_command += " && eval \$(\"$readelf\" -n $unstripped_outfile | sed -n 's/.*Build ID: \\(..\\)\\(.*\\)\$/id0=\\1 id1=\\2/p') && { test -z \"\$id0\" || { mkdir -p \"$id_dir/\$id0\" && ln -f $unstripped_outfile \"$id_dir/\$id0/\$id1.debug\" && ln -f $outfile \"$id_dir/\$id0/\$id1\" ; } ; }"
+    # All others are ELF and so might have build IDs.
+    if (invoker.os != "mac" && invoker.os != "win") {
+      # TODO(TC-606): Kludgey heuristic to match --build-id=none switch and
+      # guess that only then will the output not have a build ID note.
+      # buildidtool unavoidably fails if there is no build ID note, but
+      # some binaries specifically don't have one.  Remove the check once
+      # buildidtool is fixed to be more tolerant.
+      strip_command +=
+          " && case '{{ldflags}}' in *build-id=none*) ;; *)" +
+          " $_buildidtool -build-id-dir \"$_id_dir\"" +
+          " -stamp \"$outfile.build-id.stamp\"" +
+          " -entry \"=$outfile\" -entry \".debug=$unstripped_outfile\"" +
+          " ;; esac"
     }
 
     rspfile = "${outfile}.rsp"

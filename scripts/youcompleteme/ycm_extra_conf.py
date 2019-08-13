@@ -5,6 +5,7 @@
 
 # Autocompletion config for YouCompleteMe in Fuchsia
 
+import glob
 import os
 import re
 import stat
@@ -21,7 +22,7 @@ fuchsia_root = os.path.realpath(fuchsia_paths.FUCHSIA_ROOT)
 zircon_database = None
 zircon_dir = os.path.join(fuchsia_root, 'zircon')
 # This doc explains how to generate compile_commands.json for Zircon:
-# https://fuchsia.googlesource.com/fuchsia/+/master/zircon/docs/editors.md
+# https://fuchsia.googlesource.com/fuchsia/+/master/docs/zircon/editors.md
 if os.path.exists(os.path.join(zircon_dir, 'compile_commands.json')):
   zircon_database = ycm_core.CompilationDatabase(zircon_dir)
 
@@ -32,7 +33,14 @@ fuchsia_build = subprocess.check_output(
     ).strip().decode('utf-8')
 
 fuchsia_clang = os.path.realpath(fuchsia_paths.CLANG_PATH)
-fuchsia_sysroot = os.path.join(fuchsia_paths.BUILDTOOLS_PATH, 'sysroot')
+fuchsia_sysroot = os.path.join(fuchsia_paths.PREBUILT_PATH,
+                               'third_party',
+                               'sysroot',
+                               fuchsia_paths.get_os())
+
+# Get the clang include paths.
+fuchsia_cpp_v1_includes = fuchsia_paths.recursive_search(fuchsia_clang, 'include/c++/v1')
+fuchsia_cpp_includes = glob.glob('%s/lib/clang/*/include' % fuchsia_clang)[0]
 ninja_path = os.path.join(fuchsia_root, 'buildtools', 'ninja')
 
 # Get the name of the zircon project from GN args.
@@ -50,8 +58,8 @@ common_flags = [
     '-I', fuchsia_root,
     '-I', os.path.join(fuchsia_build, 'gen'),
     '-isystem', os.path.join(fuchsia_sysroot, 'usr', 'include'),
-    '-isystem', os.path.join(fuchsia_clang, 'include', 'c++', 'v1'),
-    '-isystem', os.path.join(fuchsia_clang, 'include'),
+    '-isystem', fuchsia_cpp_v1_includes,
+    '-isystem', fuchsia_cpp_includes,
 ]
 
 arch_flags = []

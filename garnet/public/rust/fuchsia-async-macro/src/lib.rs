@@ -65,8 +65,6 @@
 //! compilation errors will be generated should `#[test]` be specified before
 //! `#[fuchsia_async::run_until_stalled]`.
 
-#![deny(warnings)]
-
 extern crate proc_macro;
 
 use {
@@ -199,7 +197,7 @@ fn common(
 /// ```
 /// #[fuchsia_async::run_until_stalled]
 /// async fn this_will_fail_and_not_block() -> Result<(), failure::Error> {
-///     let () = await!(future::empty());
+///     let () = future::empty().await;
 ///     Ok(())
 /// }
 /// ```

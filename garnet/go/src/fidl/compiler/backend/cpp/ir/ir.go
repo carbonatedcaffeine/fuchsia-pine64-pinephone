@@ -15,6 +15,8 @@ import (
 	"fidl/compiler/backend/types"
 )
 
+// This value needs to be kept in sync with the one defined in
+// zircon/system/ulib/fidl/include/lib/fidl/llcpp/sync_call.h
 const llcppMaxStackAllocSize = 512
 
 // These are used in header/impl templates to select the correct type-specific template
@@ -195,6 +197,10 @@ type Interface struct {
 	EventSenderName       string
 	SyncName              string
 	SyncProxyName         string
+	RequestEncoderName    string
+	RequestDecoderName    string
+	ResponseEncoderName   string
+	ResponseDecoderName   string
 	Methods               []Method
 	HasEvents             bool
 	StackAllocEventBuffer bool
@@ -203,10 +209,7 @@ type Interface struct {
 
 type Method struct {
 	types.Attributes
-	Ordinal              uint64
-	OrdinalName          string
-	GenOrdinal           uint64
-	GenOrdinalName       string
+	types.Ordinals
 	Name                 string
 	NameInLowerSnakeCase string
 	HasRequest           bool
@@ -216,6 +219,7 @@ type Method struct {
 	RequestMaxHandles    int
 	RequestMaxOutOfLine  int
 	RequestPadding       bool
+	RequestFlexible      bool
 	HasResponse          bool
 	Response             []Parameter
 	ResponseSize         int
@@ -223,11 +227,23 @@ type Method struct {
 	ResponseMaxHandles   int
 	ResponseMaxOutOfLine int
 	ResponsePadding      bool
+	ResponseFlexible     bool
 	CallbackType         string
 	ResponseHandlerType  string
 	ResponderType        string
 	Transitional         bool
 	LLProps              LLProps
+}
+
+// LLContextProps contain context-dependent properties of a method specific to llcpp.
+// Context is client (write request and read response) or server (read request and write response).
+type LLContextProps struct {
+	// Should the request be allocated on the stack, in the managed flavor.
+	StackAllocRequest bool
+	// Should the response be allocated on the stack, in the managed flavor.
+	StackAllocResponse bool
+	// Total number of bytes of stack used by storing the request and response.
+	StackUse int
 }
 
 // LLProps contain properties of a method specific to llcpp
@@ -236,10 +252,12 @@ type LLProps struct {
 	CBindingCompatible bool
 	LinearizeRequest   bool
 	LinearizeResponse  bool
-	StackAllocRequest  bool
-	StackAllocResponse bool
-	EncodeRequest      bool
-	DecodeResponse     bool
+	ClientContext      LLContextProps
+	ServerContext      LLContextProps
+	// EncodeRequest is true if the request needs encoding before being written to the transport.
+	EncodeRequest bool
+	// DecodeResponse is true if the response needs decoding before being cast to LLCPP data type.
+	DecodeResponse bool
 }
 
 type Parameter struct {
@@ -477,6 +495,9 @@ func (c *compiler) compileCompoundIdentifier(eci types.EncodedCompoundIdentifier
 		strs = append(strs, c.namespaceFormatter(val.Library, appendNamespace))
 	}
 	strs = append(strs, changeIfReserved(val.Name, ext))
+	if string(val.Member) != "" {
+		strs = append(strs, string(val.Member))
+	}
 	return strings.Join(strs, "::")
 }
 
@@ -528,11 +549,7 @@ func (c *compiler) compileLiteral(val types.Literal, typ types.Type) string {
 func (c *compiler) compileConstant(val types.Constant, t *Type, typ types.Type, appendNamespace string) string {
 	switch val.Kind {
 	case types.IdentifierConstant:
-		v := c.compileCompoundIdentifier(val.Identifier, "", appendNamespace)
-		if t != nil && (t.DeclType == types.BitsDeclType || t.DeclType == types.EnumDeclType) {
-			v = fmt.Sprintf("%s::%s", t.Decl, v)
-		}
-		return v
+		return c.compileCompoundIdentifier(val.Identifier, "", appendNamespace)
 	case types.LiteralConstant:
 		return c.compileLiteral(val.Literal, typ)
 	default:
@@ -768,6 +785,40 @@ func (c *compiler) maxOutOfLineFromParameterArray(val []types.Parameter) int {
 	}
 }
 
+// LLContext indicates where the request/response is used.
+// The allocation strategies differ for client and server contexts.
+type LLContext int
+
+const (
+	clientContext LLContext = iota
+	serverContext LLContext = iota
+)
+
+func (m Method) NewLLContextProps(context LLContext) LLContextProps {
+	stackAllocRequest := false
+	stackAllocResponse := false
+	if context == clientContext {
+		stackAllocRequest = len(m.Request) == 0 || (m.RequestSize+m.RequestMaxOutOfLine) < llcppMaxStackAllocSize
+		stackAllocResponse = len(m.Response) == 0 || (!m.ResponseFlexible && (m.ResponseSize+m.ResponseMaxOutOfLine) < llcppMaxStackAllocSize)
+	} else {
+		stackAllocRequest = len(m.Request) == 0 || (!m.RequestFlexible && (m.RequestSize+m.RequestMaxOutOfLine) < llcppMaxStackAllocSize)
+		stackAllocResponse = len(m.Response) == 0 || (m.ResponseSize+m.ResponseMaxOutOfLine) < llcppMaxStackAllocSize
+	}
+
+	stackUse := 0
+	if stackAllocRequest {
+		stackUse += m.RequestSize + m.RequestMaxOutOfLine
+	}
+	if stackAllocResponse {
+		stackUse += m.ResponseSize + m.ResponseMaxOutOfLine
+	}
+	return LLContextProps{
+		StackAllocRequest:  stackAllocRequest,
+		StackAllocResponse: stackAllocResponse,
+		StackUse:           stackUse,
+	}
+}
+
 func (m Method) NewLLProps(r Interface) LLProps {
 	return LLProps{
 		InterfaceName: r.Name,
@@ -776,25 +827,29 @@ func (m Method) NewLLProps(r Interface) LLProps {
 		CBindingCompatible: m.ResponseMaxOutOfLine == 0,
 		LinearizeRequest:   len(m.Request) > 0 && m.RequestMaxOutOfLine > 0,
 		LinearizeResponse:  len(m.Response) > 0 && m.ResponseMaxOutOfLine > 0,
-		StackAllocRequest:  len(m.Request) == 0 || (m.RequestSize+m.RequestMaxOutOfLine) < llcppMaxStackAllocSize,
-		StackAllocResponse: len(m.Response) == 0 || (m.ResponseSize+m.ResponseMaxOutOfLine) < llcppMaxStackAllocSize,
-		EncodeRequest:      m.RequestMaxOutOfLine > 0 || m.RequestMaxHandles > 0 || m.RequestPadding,
-		DecodeResponse:     m.ResponseMaxOutOfLine > 0 || m.ResponseMaxHandles > 0 || m.ResponsePadding,
+		ClientContext:      m.NewLLContextProps(clientContext),
+		ServerContext:      m.NewLLContextProps(serverContext),
+		EncodeRequest:      m.RequestMaxOutOfLine > 0 || m.RequestMaxHandles > 0 || m.RequestPadding || m.RequestFlexible,
+		DecodeResponse:     m.ResponseMaxOutOfLine > 0 || m.ResponseMaxHandles > 0 || m.ResponsePadding || m.ResponseFlexible,
 	}
 }
 
 func (c *compiler) compileInterface(val types.Interface) Interface {
 	r := Interface{
-		Attributes:      val.Attributes,
-		Namespace:       c.namespace,
-		Name:            c.compileCompoundIdentifier(val.Name, "", ""),
-		ClassName:       c.compileCompoundIdentifier(val.Name, "_clazz", ""),
-		ServiceName:     val.GetServiceName(),
-		ProxyName:       c.compileCompoundIdentifier(val.Name, "_Proxy", ""),
-		StubName:        c.compileCompoundIdentifier(val.Name, "_Stub", ""),
-		EventSenderName: c.compileCompoundIdentifier(val.Name, "_EventSender", ""),
-		SyncName:        c.compileCompoundIdentifier(val.Name, "_Sync", ""),
-		SyncProxyName:   c.compileCompoundIdentifier(val.Name, "_SyncProxy", ""),
+		Attributes:          val.Attributes,
+		Namespace:           c.namespace,
+		Name:                c.compileCompoundIdentifier(val.Name, "", ""),
+		ClassName:           c.compileCompoundIdentifier(val.Name, "_clazz", ""),
+		ServiceName:         val.GetServiceName(),
+		ProxyName:           c.compileCompoundIdentifier(val.Name, "_Proxy", ""),
+		StubName:            c.compileCompoundIdentifier(val.Name, "_Stub", ""),
+		EventSenderName:     c.compileCompoundIdentifier(val.Name, "_EventSender", ""),
+		SyncName:            c.compileCompoundIdentifier(val.Name, "_Sync", ""),
+		SyncProxyName:       c.compileCompoundIdentifier(val.Name, "_SyncProxy", ""),
+		RequestEncoderName:  c.compileCompoundIdentifier(val.Name, "_RequestEncoder", ""),
+		RequestDecoderName:  c.compileCompoundIdentifier(val.Name, "_RequestDecoder", ""),
+		ResponseEncoderName: c.compileCompoundIdentifier(val.Name, "_ResponseEncoder", ""),
+		ResponseDecoderName: c.compileCompoundIdentifier(val.Name, "_ResponseDecoder", ""),
 	}
 
 	hasEvents := false
@@ -812,11 +867,12 @@ func (c *compiler) compileInterface(val types.Interface) Interface {
 		}
 		_, transitional := v.LookupAttribute("Transitional")
 		m := Method{
-			Attributes:           v.Attributes,
-			Ordinal:              v.Ordinal,
-			OrdinalName:          fmt.Sprintf("k%s_%s_Ordinal", r.Name, v.Name),
-			GenOrdinal:           v.GenOrdinal,
-			GenOrdinalName:       fmt.Sprintf("k%s_%s_GenOrdinal", r.Name, v.Name),
+			Attributes: v.Attributes,
+			Ordinals: types.NewOrdinalsStep3(
+				v,
+				fmt.Sprintf("k%s_%s_Ordinal", r.Name, v.Name),
+				fmt.Sprintf("k%s_%s_GenOrdinal", r.Name, v.Name),
+			),
 			Name:                 name,
 			NameInLowerSnakeCase: common.ToSnakeCase(name),
 			HasRequest:           v.HasRequest,
@@ -826,6 +882,7 @@ func (c *compiler) compileInterface(val types.Interface) Interface {
 			RequestMaxHandles:    c.maxHandlesFromParameterArray(v.Request),
 			RequestMaxOutOfLine:  c.maxOutOfLineFromParameterArray(v.Request),
 			RequestPadding:       v.RequestPadding,
+			RequestFlexible:      v.RequestFlexible,
 			HasResponse:          v.HasResponse,
 			Response:             c.compileParameterArray(v.Response),
 			ResponseSize:         v.ResponseSize,
@@ -833,6 +890,7 @@ func (c *compiler) compileInterface(val types.Interface) Interface {
 			ResponseMaxHandles:   c.maxHandlesFromParameterArray(v.Response),
 			ResponseMaxOutOfLine: c.maxOutOfLineFromParameterArray(v.Response),
 			ResponsePadding:      v.ResponsePadding,
+			ResponseFlexible:     v.ResponseFlexible,
 			CallbackType:         callbackType,
 			ResponseHandlerType:  fmt.Sprintf("%s_%s_ResponseHandler", r.Name, v.Name),
 			ResponderType:        fmt.Sprintf("%s_%s_Responder", r.Name, v.Name),
@@ -841,7 +899,7 @@ func (c *compiler) compileInterface(val types.Interface) Interface {
 		m.LLProps = m.NewLLProps(r)
 		r.Methods = append(r.Methods, m)
 		if !v.HasRequest {
-			stackAllocEventBuffer = stackAllocEventBuffer && m.LLProps.StackAllocResponse
+			stackAllocEventBuffer = stackAllocEventBuffer && m.LLProps.ClientContext.StackAllocResponse
 		}
 	}
 	r.HasEvents = hasEvents
@@ -938,6 +996,8 @@ func (c *compiler) compileTable(val types.Table, appendNamespace string) Table {
 		Members:        nil,
 		Size:           val.Size,
 		BiggestOrdinal: 0,
+		MaxHandles:     val.MaxHandles,
+		MaxOutOfLine:   val.MaxOutOfLine,
 	}
 
 	for _, v := range val.Members {

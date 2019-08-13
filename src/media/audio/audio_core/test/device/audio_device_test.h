@@ -10,7 +10,7 @@
 
 #include <cmath>
 
-#include "src/media/audio/lib/test/audio_test_base.h"
+#include "src/media/audio/lib/test/hermetic_audio_test.h"
 
 namespace media::audio::test {
 
@@ -34,10 +34,7 @@ const fuchsia::media::AudioDeviceInfo kInvalidDeviceInfo = {
     .gain_info = kInvalidGainInfo,
     .is_default = true};
 
-class AudioDeviceTest : public AudioTestBase {
- public:
-  static void SetStartupContext(std::unique_ptr<sys::ComponentContext> startup_context);
-
+class AudioDeviceTest : public HermeticAudioTest {
  protected:
   static std::string PopulateUniqueIdStr(const std::array<uint8_t, 16>& unique_id);
 
@@ -54,8 +51,8 @@ class AudioDeviceTest : public AudioTestBase {
   // explicitly tolerating other callbacks on the async loop before the event
   // for the specified device is received. Each call resets the relevant "what
   // we received" state variables to default values and handles error_occurred_.
-  void ExpectDeviceAdded(const std::array<uint8_t, 16>& unique_id);
-  void ExpectDeviceRemoved(uint64_t remove_token);
+  virtual void ExpectDeviceAdded(const std::array<uint8_t, 16>& unique_id);
+  virtual void ExpectDeviceRemoved(uint64_t remove_token);
   void ExpectDefaultChanged(uint64_t default_token);
   void ExpectGainChanged(uint64_t gain_token);
 
@@ -78,8 +75,6 @@ class AudioDeviceTest : public AudioTestBase {
   static float initial_output_gain_db_;
   static uint32_t initial_input_gain_flags_;
   static uint32_t initial_output_gain_flags_;
-
-  static std::unique_ptr<sys::ComponentContext> startup_context_;
 
   fuchsia::media::AudioDeviceEnumeratorPtr audio_dev_enum_;
 

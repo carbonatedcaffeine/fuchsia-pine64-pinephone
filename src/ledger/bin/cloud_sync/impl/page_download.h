@@ -66,15 +66,25 @@ class PageDownload : public cloud_provider::PageCloudWatcher, public storage::Pa
   void SetRemoteWatcher(bool is_retry);
 
   // Downloads the given batch of commits.
-  void DownloadBatch(std::vector<cloud_provider::CommitPackEntry> entries,
+  void DownloadBatch(std::vector<cloud_provider::Commit> entries,
                      std::unique_ptr<cloud_provider::PositionToken> position_token,
                      fit::closure on_done);
 
   // storage::PageSyncDelegate:
-  void GetObject(storage::ObjectIdentifier object_identifier,
+  void GetObject(storage::ObjectIdentifier object_identifier, storage::ObjectType object_type,
                  fit::function<void(ledger::Status, storage::ChangeSource, storage::IsObjectSynced,
                                     std::unique_ptr<storage::DataSource::DataChunk>)>
                      callback) override;
+  void GetDiff(
+      storage::CommitId commit_id, std::vector<storage::CommitId> possible_bases,
+      fit::function<void(ledger::Status, storage::CommitId, std::vector<storage::EntryChange>)>
+          callback) override;
+
+  // Actual implementation of |GetObject|: |object_type| is ignored at this level.
+  void GetObject(storage::ObjectIdentifier object_identifier,
+                 fit::function<void(ledger::Status, storage::ChangeSource, storage::IsObjectSynced,
+                                    std::unique_ptr<storage::DataSource::DataChunk>)>
+                     callback);
 
   void DecryptObject(
       storage::ObjectIdentifier object_identifier, std::unique_ptr<storage::DataSource> content,
@@ -112,7 +122,7 @@ class PageDownload : public cloud_provider::PageCloudWatcher, public storage::Pa
   // The current batch of remote commits being downloaded.
   std::unique_ptr<BatchDownload> batch_download_;
   // Pending remote commits to download.
-  std::vector<cloud_provider::CommitPackEntry> commits_to_download_;
+  std::vector<cloud_provider::Commit> commits_to_download_;
   std::unique_ptr<cloud_provider::PositionToken> position_token_;
   // Container for in-progress datasource.
   callback::ManagedContainer managed_container_;

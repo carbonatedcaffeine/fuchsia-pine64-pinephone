@@ -119,7 +119,118 @@ def GenerateTestData(mean, stddev):
     return [x * stddev + mean for x in TEST_VALUES]
 
 
+# This is an example of a slow running time value for an initial run of a
+# test.  This should be skipped by the software under test.
+SLOW_INITIAL_RUN = [1e6]
+
+
+class StatisticsTest(TempDirTestCase):
+
+    # Generate some example perf test data, allowing variation at each
+    # level of the sampling process (per boot, per process, and per
+    # iteration within each process).  This follows a random effects model.
+    # Returns a list of lists of lists of values.
+    def GenerateData(self, mean=1000,
+                     stddev_across_boots=0,
+                     stddev_across_processes=0,
+                     stddev_across_iters=0):
+        it = iter(TEST_VALUES)
+
+        def GenerateValues(mean, stddev, count):
+            return [next(it) * stddev + mean for _ in xrange(count)]
+
+        # This reads 4**3 + 4**2 + 4 = 84 values from TEST_VALUES, so
+        # it does not exceed the number of values in TEST_VALUES.
+        return [[SLOW_INITIAL_RUN
+                 + GenerateValues(mean_within_process, stddev_across_iters, 4)
+                 for mean_within_process in GenerateValues(
+                         mean_within_boot, stddev_across_processes, 4)]
+                for mean_within_boot in GenerateValues(
+                        mean, stddev_across_boots, 4)]
+
+    # Given data in the format returned by GenerateData(), writes this data
+    # to a temporary directory.
+    def DirOfData(self, data):
+        dir_path = self.MakeTempDir()
+        os.mkdir(os.path.join(dir_path, 'by_boot'))
+        for boot_idx, results_for_boot in enumerate(data):
+            boot_dir = os.path.join(dir_path, 'by_boot', 'boot%06d' % boot_idx)
+            os.mkdir(boot_dir)
+            for process_idx, run_values in enumerate(results_for_boot):
+                dest_file = os.path.join(
+                    boot_dir, 'example_process%06d.json' % process_idx)
+                WriteJsonFile(dest_file,
+                              [{'label': 'ExampleTest',
+                                'values': run_values}])
+        return dir_path
+
+    # Sanity-check that DirOfData() writes data in the correct format by
+    # reading back some simple test data.
+    def test_readback_of_data(self):
+        data = [[[1, 2], [3, 4]],
+                [[5, 6], [7, 8]]]
+        dir_path = self.DirOfData(data)
+        self.assertEquals(len(os.listdir(os.path.join(dir_path, 'by_boot'))), 2)
+        boot_data = list(perfcompare.RawResultsFromDir(
+            os.path.join(dir_path, 'by_boot', 'boot000000')))
+        self.assertEquals(boot_data,
+                          [[{'label': 'ExampleTest', 'values': [1, 2]}],
+                           [{'label': 'ExampleTest', 'values': [3, 4]}]])
+        boot_data = list(perfcompare.RawResultsFromDir(
+            os.path.join(dir_path, 'by_boot', 'boot000001')))
+        self.assertEquals(boot_data,
+                          [[{'label': 'ExampleTest', 'values': [5, 6]}],
+                           [{'label': 'ExampleTest', 'values': [7, 8]}]])
+
+    def TarFileOfDir(self, dir_path, write_mode):
+        tar_filename = os.path.join(self.MakeTempDir(), 'out.tar')
+        with tarfile.open(tar_filename, write_mode) as tar:
+            for name in os.listdir(dir_path):
+                tar.add(os.path.join(dir_path, name), arcname=name)
+        return tar_filename
+
+    def test_readback_of_data_from_tar_file(self):
+        data = [[[1, 2], [3, 4]]]
+        dir_path = self.DirOfData(data)
+        self.assertEquals(len(os.listdir(os.path.join(dir_path, 'by_boot'))), 1)
+        # Test the uncompressed and gzipped cases.
+        for write_mode in ('w', 'w:gz'):
+            tar_filename = self.TarFileOfDir(
+                os.path.join(dir_path, 'by_boot', 'boot000000'), write_mode)
+            boot_data = list(perfcompare.RawResultsFromDir(tar_filename))
+            self.assertEquals(boot_data,
+                              [[{'label': 'ExampleTest', 'values': [1, 2]}],
+                               [{'label': 'ExampleTest', 'values': [3, 4]}]])
+
+    def CheckConfidenceInterval(self, data, interval_string):
+        dir_path = self.DirOfData(data)
+        stats = perfcompare.ResultsFromDir(dir_path)['ExampleTest']
+        self.assertEquals(stats.FormatConfidenceInterval(), interval_string)
+
+    # Test the CIs produced with variation at different levels of the
+    # multi-level sampling process.
+    def test_confidence_intervals(self):
+        self.CheckConfidenceInterval(self.GenerateData(), '1000 +/- 0')
+        self.CheckConfidenceInterval(
+            self.GenerateData(stddev_across_boots=100),
+            '1021 +/- 451')
+        self.CheckConfidenceInterval(
+            self.GenerateData(stddev_across_processes=100),
+            '1012 +/- 151')
+        self.CheckConfidenceInterval(
+            self.GenerateData(stddev_across_iters=100),
+            '980 +/- 73')
+
+
 class PerfCompareTest(TempDirTestCase):
+
+    def AddIgnoredFiles(self, dest_dir):
+        # Include a summary.json file to check that we skip reading it.
+        with open(os.path.join(dest_dir, 'summary.json'), 'w') as fh:
+            fh.write('dummy_data')
+        # Include a *.catapult_json file to check that we skip reading these.
+        with open(os.path.join(dest_dir, 'foo.catapult_json'), 'w') as fh:
+            fh.write('dummy_data')
 
     def WriteExampleDataDir(self, dir_path, mean=1000, stddev=100,
                             drop_one=False):
@@ -129,19 +240,17 @@ class PerfCompareTest(TempDirTestCase):
 
         for test_name, values in results:
             for idx, value in enumerate(values):
+                dest_dir = os.path.join(dir_path, 'by_boot', 'boot%06d' % idx)
+                dest_file = os.path.join(dest_dir, '%s.json' % test_name)
+                if not os.path.exists(dest_dir):
+                    os.makedirs(dest_dir)
+                    self.AddIgnoredFiles(dest_dir)
                 WriteJsonFile(
-                    os.path.join(dir_path, '%s_%d.json' % (test_name, idx)),
+                    dest_file,
                     [{'label': test_name,
                       'test_suite': 'fuchsia.example.perf_test',
                       'unit': 'nanoseconds',
-                      'values': [value]}])
-
-        # Include a summary.json file to check that we skip reading it.
-        with open(os.path.join(dir_path, 'summary.json'), 'w') as fh:
-            fh.write('dummy_data')
-        # Include a *.catapult_json file to check that we skip reading these.
-        with open(os.path.join(dir_path, 'foo.catapult_json'), 'w') as fh:
-            fh.write('dummy_data')
+                      'values': SLOW_INITIAL_RUN + [value]}])
 
     def ExampleDataDir(self, **kwargs):
         dir_path = self.MakeTempDir()
@@ -154,30 +263,6 @@ class PerfCompareTest(TempDirTestCase):
         self.assertEquals(
             results['ClockGetTimeExample'].FormatConfidenceInterval(),
             '991 +/- 26')
-
-    def test_reading_results_from_multi_boot_dir(self):
-        dir_path = self.MakeTempDir()
-        subdir = os.path.join(dir_path, 'by_boot', 'boot000000')
-        os.makedirs(subdir)
-        self.WriteExampleDataDir(subdir)
-        results = perfcompare.ResultsFromDir(dir_path)
-        self.assertEquals(
-            results['ClockGetTimeExample'].FormatConfidenceInterval(),
-            '991 +/- 26')
-
-    def test_reading_results_from_tar_file(self):
-        dir_path = self.ExampleDataDir()
-        # Test the uncompressed and gzipped cases.
-        for write_mode in ('w', 'w:gz'):
-            # Create a tar file containing the example results files.
-            tar_filename = os.path.join(self.MakeTempDir(), 'out.tar')
-            with tarfile.open(tar_filename, write_mode) as tar:
-                for name in os.listdir(dir_path):
-                    tar.add(os.path.join(dir_path, name), arcname=name)
-            results = perfcompare.ResultsFromDir(tar_filename)
-            self.assertEquals(
-                results['ClockGetTimeExample'].FormatConfidenceInterval(),
-                '991 +/- 26')
 
     # Returns the output of compare_perf when run on the given directories.
     def ComparePerf(self, before_dir, after_dir):
@@ -254,12 +339,18 @@ class PerfCompareTest(TempDirTestCase):
         self.assertEquals(perfcompare.MismatchRate([(0,2), (1,3), (4,5)]), 2./3)
 
     def test_validate_perfcompare(self):
+        def MakeExampleDirs(**kwargs):
+            by_boot_dir = os.path.join(self.ExampleDataDir(**kwargs), 'by_boot')
+            return [os.path.join(by_boot_dir, name)
+                    for name in sorted(os.listdir(by_boot_dir))]
+
         # This is an example input dataset that gives a high mismatch rate,
         # because the data is drawn from two very different distributions.
-        results_dirs = ([self.ExampleDataDir(mean=100, stddev=10)] * 10 +
-                        [self.ExampleDataDir(mean=200, stddev=10)] * 10)
+        results_dirs = (MakeExampleDirs(mean=100, stddev=10) +
+                        MakeExampleDirs(mean=200, stddev=10))
         stdout = StringIO.StringIO()
-        perfcompare.Main(['validate_perfcompare'] + results_dirs, stdout)
+        perfcompare.Main(['validate_perfcompare', '--group_size=5']
+                         + results_dirs, stdout)
         output = stdout.getvalue()
         GOLDEN.AssertCaseEq('validate_perfcompare', output)
 

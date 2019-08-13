@@ -119,8 +119,7 @@ const CodecAdapterFactory kCodecFactories[] = {
 }  // namespace
 
 // device - associated device.
-LocalCodecFactory::LocalCodecFactory(DeviceCtx* device)
-    : device_(device), factory_binding_(this) {
+LocalCodecFactory::LocalCodecFactory(DeviceCtx* device) : device_(device), factory_binding_(this) {
   // nothing else to do here
 }
 
@@ -139,21 +138,19 @@ LocalCodecFactory::~LocalCodecFactory() {
 
 void LocalCodecFactory::SetErrorHandler(fit::closure error_handler) {
   ZX_DEBUG_ASSERT(!factory_binding_.is_bound());
-  factory_binding_.set_error_handler([this,
-                                      error_handler = std::move(error_handler)](
-                                         zx_status_t status) mutable {
-    ZX_DEBUG_ASSERT(thrd_current() == device_->driver()->shared_fidl_thread());
-    // This queues after the similar posting in CreateDecoder() (via
-    // TryAddCodec()), so that LocalCodecFactory won't get deleted until
-    // after previously-started TryAddCodec()s are done.
-    device_->codec_admission_control()->PostAfterPreviouslyStartedClosesDone(
-        [this, error_handler = std::move(error_handler)] {
-          ZX_DEBUG_ASSERT(thrd_current() ==
-                          device_->driver()->shared_fidl_thread());
-          error_handler();
-          // "this" is gone
-        });
-  });
+  factory_binding_.set_error_handler(
+      [this, error_handler = std::move(error_handler)](zx_status_t status) mutable {
+        ZX_DEBUG_ASSERT(thrd_current() == device_->driver()->shared_fidl_thread());
+        // This queues after the similar posting in CreateDecoder() (via
+        // TryAddCodec()), so that LocalCodecFactory won't get deleted until
+        // after previously-started TryAddCodec()s are done.
+        device_->codec_admission_control()->PostAfterPreviouslyStartedClosesDone(
+            [this, error_handler = std::move(error_handler)] {
+              ZX_DEBUG_ASSERT(thrd_current() == device_->driver()->shared_fidl_thread());
+              error_handler();
+              // "this" is gone
+            });
+      });
   is_error_handler_set_ = true;
 }
 
@@ -168,7 +165,7 @@ void LocalCodecFactory::Bind(zx::channel server_endpoint) {
 
   // All HW-accelerated local CodecFactory(s) must send OnCodecList()
   // immediately upon creation of the local CodecFactory.
-  fidl::VectorPtr<fuchsia::mediacodec::CodecDescription> codec_descriptions;
+  std::vector<fuchsia::mediacodec::CodecDescription> codec_descriptions;
   for (const CodecAdapterFactory& factory : kCodecFactories) {
     if (!factory.is_enabled) {
       continue;
@@ -220,10 +217,9 @@ void LocalCodecFactory::CreateDecoder(
   // The factory pointer remains valid for whole lifetime of this devhost
   // process.
   device_->codec_admission_control()->TryAddCodec(
-      factory->multi_instance,
-      [this, video_decoder_params = std::move(video_decoder_params),
-       video_decoder = std::move(video_decoder),
-       factory](std::unique_ptr<CodecAdmission> codec_admission) mutable {
+      factory->multi_instance, [this, video_decoder_params = std::move(video_decoder_params),
+                                video_decoder = std::move(video_decoder),
+                                factory](std::unique_ptr<CodecAdmission> codec_admission) mutable {
         if (!codec_admission) {
           // We can't create another Codec presently.
           //
@@ -237,16 +233,13 @@ void LocalCodecFactory::CreateDecoder(
           return;
         }
 
-        std::unique_ptr<CodecImpl> codec = std::make_unique<CodecImpl>(
-            std::move(sysmem), std::move(codec_admission),
-            device_->driver()->shared_fidl_loop()->dispatcher(),
-            device_->driver()->shared_fidl_thread(),
-            std::make_unique<fuchsia::mediacodec::CreateDecoder_Params>(
-                std::move(video_decoder_params)),
-            std::move(video_decoder));
+        std::unique_ptr<CodecImpl> codec =
+            std::make_unique<CodecImpl>(std::move(sysmem), std::move(codec_admission),
+                                        device_->driver()->shared_fidl_loop()->dispatcher(),
+                                        device_->driver()->shared_fidl_thread(),
+                                        std::move(video_decoder_params), std::move(video_decoder));
 
-        codec->SetCoreCodecAdapter(
-            factory->create(codec->lock(), codec.get(), device_));
+        codec->SetCoreCodecAdapter(factory->create(codec->lock(), codec.get(), device_));
 
         device_->device_fidl()->BindCodecImpl(std::move(codec));
       });

@@ -1,0 +1,14 @@
+# Please, read https://fuchsia.dev/fuchsia-src/best-practices/documentation_navigation_toc
+# before making changes to this file, and add a member of the fuchsia.dev
+# team as reviewer.
+toc:
+- title: "Test environments"
+  path: /docs/development/testing/environments.md
+- title: "Test component"
+  path: /docs/development/testing/test_component.md
+- title: "Running tests as components"
+  path: /docs/development/testing/running_tests_as_components.md
+- title: "Testing isolated cache storage"
+  path: /docs/development/testing/testing_isolated_cache_storage.md
+- title: "Testability rubrics"
+  path: /docs/development/testing/testability_rubric.md

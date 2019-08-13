@@ -10,15 +10,13 @@
         "binary": "test/service_startup_test"
     },
     "sandbox": {
+        "features": [ "deprecated-ambient-replace-as-executable" ],
         "pkgfs": [
             "packages"
         ],
         "services": [
             "fidl.examples.echo.Echo",
             "fuchsia.process.Launcher"
-        ],
-        "system": [
-            "data/appmgr"
         ]
     }
 }

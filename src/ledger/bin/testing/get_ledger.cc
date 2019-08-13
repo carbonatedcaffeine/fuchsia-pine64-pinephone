@@ -43,7 +43,7 @@ Status GetLedger(sys::ComponentContext* context,
                  cloud_provider::CloudProviderPtr cloud_provider, std::string user_id,
                  std::string ledger_name, const DetachedPath& ledger_repository_path,
                  fit::function<void()> error_handler, LedgerPtr* ledger) {
-  fxl::UniqueFD dir(
+  fbl::unique_fd dir(
       openat(ledger_repository_path.root_fd(), ledger_repository_path.path().c_str(), O_RDONLY));
   if (!dir.is_valid()) {
     FXL_LOG(ERROR) << "Unable to open directory at " << ledger_repository_path.path()
@@ -57,7 +57,7 @@ Status GetLedger(sys::ComponentContext* context,
   fuchsia::sys::LaunchInfo launch_info;
   launch_info.url = "fuchsia-pkg://fuchsia.com/ledger#meta/ledger.cmx";
   launch_info.directory_request = child_services.NewRequest();
-  launch_info.arguments.push_back("--disable_reporting");
+  launch_info.arguments.emplace({"--disable_reporting"});
   fuchsia::sys::LauncherPtr launcher;
   context->svc()->Connect(launcher.NewRequest());
   launcher->CreateComponent(std::move(launch_info), std::move(controller_request));

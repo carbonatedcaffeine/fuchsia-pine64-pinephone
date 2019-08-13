@@ -23,7 +23,6 @@
 #include "src/ledger/bin/encryption/primitives/hash.h"
 #include "src/ledger/bin/storage/impl/btree/encoding.h"
 #include "src/ledger/bin/storage/impl/btree/tree_node.h"
-#include "src/ledger/bin/storage/impl/commit_impl.h"
 #include "src/ledger/bin/storage/impl/commit_random_impl.h"
 #include "src/ledger/bin/storage/impl/constants.h"
 #include "src/ledger/bin/storage/impl/journal_impl.h"
@@ -69,6 +68,7 @@ using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 using ::testing::Not;
+using ::testing::SizeIs;
 using ::testing::UnorderedElementsAreArray;
 
 std::vector<PageStorage::CommitIdAndBytes> CommitAndBytesFromCommit(const Commit& commit) {
@@ -118,7 +118,7 @@ class DelayingFakeSyncDelegate : public PageSyncDelegate {
     digest_to_value_[std::move(object_identifier)] = value;
   }
 
-  void GetObject(ObjectIdentifier object_identifier,
+  void GetObject(ObjectIdentifier object_identifier, ObjectType object_type,
                  fit::function<void(Status, ChangeSource, IsObjectSynced,
                                     std::unique_ptr<DataSource::DataChunk>)>
                      callback) override {
@@ -133,6 +133,14 @@ class DelayingFakeSyncDelegate : public PageSyncDelegate {
       callback(Status::OK, ChangeSource::CLOUD, IsObjectSynced::YES,
                DataSource::DataChunk::Create(value));
     });
+  }
+
+  void GetDiff(CommitId commit_id, std::vector<CommitId> possible_bases,
+               fit::function<void(Status status, CommitId base_commit,
+                                  std::vector<EntryChange> diff_entries)>
+                   callback) {
+    FXL_NOTIMPLEMENTED();
+    callback(ledger::Status::NOT_IMPLEMENTED, {}, {});
   }
 
   size_t GetNumberOfObjectsStored() { return digest_to_value_.size(); }
@@ -264,7 +272,7 @@ class PageStorageTest : public ledger::TestWithEnvironment {
     auto db =
         std::make_unique<ControlledLevelDb>(dispatcher(), ledger::DetachedPath(tmpfs_->root_fd()));
     leveldb_ = db.get();
-    ASSERT_EQ(Status::OK, db->Init());
+    ASSERT_EQ(db->Init(), Status::OK);
     storage_ = std::make_unique<PageStorageImpl>(&environment_, &encryption_service_, std::move(db),
                                                  id, CommitPruningPolicy::NEVER);
 
@@ -273,8 +281,15 @@ class PageStorageTest : public ledger::TestWithEnvironment {
     storage_->Init(callback::Capture(callback::SetWhenCalled(&called), &status));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
-    EXPECT_EQ(id, storage_->GetId());
+    EXPECT_EQ(status, Status::OK);
+    EXPECT_EQ(storage_->GetId(), id);
+  }
+
+  // After |ResetStorage|, |identifier| may point to an expired factory.
+  // Reallocates a fresh identifier tracked by the current storage's factory.
+  void RetrackIdentifier(ObjectIdentifier* identifier) {
+    *identifier = storage_->GetObjectIdentifierFactory()->MakeObjectIdentifier(
+        identifier->key_index(), identifier->deletion_scope_id(), identifier->object_digest());
   }
 
  protected:
@@ -283,7 +298,7 @@ class PageStorageTest : public ledger::TestWithEnvironment {
   std::vector<std::unique_ptr<const Commit>> GetHeads() {
     std::vector<std::unique_ptr<const Commit>> heads;
     Status status = storage_->GetHeadCommits(&heads);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
     return heads;
   }
 
@@ -300,8 +315,19 @@ class PageStorageTest : public ledger::TestWithEnvironment {
     storage_->GetCommit(id, callback::Capture(callback::SetWhenCalled(&called), &status, &commit));
     RunLoopUntilIdle();
     EXPECT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
     return commit;
+  }
+
+  ObjectIdentifier RandomObjectIdentifier() {
+    return storage::RandomObjectIdentifier(environment_.random(),
+                                           storage_->GetObjectIdentifierFactory());
+  }
+
+  // Returns an ObjectData built with the provided |args| and tracked by |storage_|.
+  template <typename... Args>
+  ObjectData MakeObject(Args&&... args) {
+    return ObjectData(storage_->GetObjectIdentifierFactory(), std::forward<Args>(args)...);
   }
 
   std::unique_ptr<const Commit> TryCommitFromSync() {
@@ -310,8 +336,8 @@ class PageStorageTest : public ledger::TestWithEnvironment {
 
     std::vector<std::unique_ptr<const Commit>> parent;
     parent.emplace_back(GetFirstHead());
-    std::unique_ptr<const Commit> commit = CommitImpl::FromContentAndParents(
-        storage_->GetCommitTracker(), environment_.clock(), root_identifier, std::move(parent));
+    std::unique_ptr<const Commit> commit = storage_->GetCommitFactory()->FromContentAndParents(
+        environment_.clock(), root_identifier, std::move(parent));
 
     bool called;
     Status status;
@@ -321,7 +347,7 @@ class PageStorageTest : public ledger::TestWithEnvironment {
         callback::Capture(callback::SetWhenCalled(&called), &status, &missing_ids));
     RunLoopUntilIdle();
     EXPECT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
     return commit;
   }
 
@@ -335,7 +361,7 @@ class PageStorageTest : public ledger::TestWithEnvironment {
                             callback::Capture(callback::SetWhenCalled(&called), &status, &commit));
 
     RunLoopUntilIdle();
-    EXPECT_EQ(expected_status, status);
+    EXPECT_EQ(status, expected_status);
     if (!called) {
       return std::unique_ptr<const Commit>();
     }
@@ -352,7 +378,7 @@ class PageStorageTest : public ledger::TestWithEnvironment {
       if (key.size() < min_key_size) {
         key.resize(min_key_size);
       }
-      journal->Put(key, RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+      journal->Put(key, RandomObjectIdentifier(), KeyPriority::EAGER);
     }
 
     journal->Delete("key_does_not_exist");
@@ -364,13 +390,13 @@ class PageStorageTest : public ledger::TestWithEnvironment {
 
     // Check the contents.
     std::vector<Entry> entries = GetCommitContents(*commit);
-    EXPECT_EQ(static_cast<size_t>(keys), entries.size());
+    EXPECT_EQ(entries.size(), static_cast<size_t>(keys));
     for (int i = 0; i < keys; ++i) {
       auto key = fxl::StringPrintf("key%05d", i);
       if (key.size() < min_key_size) {
         key.resize(min_key_size);
       }
-      EXPECT_EQ(key, entries[i].key);
+      EXPECT_EQ(entries[i].key, key);
     }
 
     return commit;
@@ -385,8 +411,8 @@ class PageStorageTest : public ledger::TestWithEnvironment {
         callback::Capture(callback::SetWhenCalled(&called), &status, &object_identifier));
     RunLoopUntilIdle();
     EXPECT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
-    EXPECT_EQ(expected_identifier, object_identifier);
+    EXPECT_EQ(status, Status::OK);
+    EXPECT_EQ(object_identifier, expected_identifier);
   }
 
   std::unique_ptr<const Object> TryGetObject(const ObjectIdentifier& object_identifier,
@@ -399,7 +425,7 @@ class PageStorageTest : public ledger::TestWithEnvironment {
                         callback::Capture(callback::SetWhenCalled(&called), &status, &object));
     RunLoopUntilIdle();
     EXPECT_TRUE(called);
-    EXPECT_EQ(expected_status, status);
+    EXPECT_EQ(status, expected_status);
     return object;
   }
 
@@ -413,7 +439,7 @@ class PageStorageTest : public ledger::TestWithEnvironment {
                             callback::Capture(callback::SetWhenCalled(&called), &status, &vmo));
     RunLoopUntilIdle();
     EXPECT_TRUE(called);
-    EXPECT_EQ(expected_status, status);
+    EXPECT_EQ(status, expected_status);
     return vmo;
   }
 
@@ -426,7 +452,7 @@ class PageStorageTest : public ledger::TestWithEnvironment {
                        callback::Capture(callback::SetWhenCalled(&called), &status, &piece));
     RunLoopUntilIdle();
     EXPECT_TRUE(called);
-    EXPECT_EQ(expected_status, status);
+    EXPECT_EQ(status, expected_status);
     return piece;
   }
 
@@ -442,7 +468,7 @@ class PageStorageTest : public ledger::TestWithEnvironment {
                                 callback::Capture(callback::SetWhenCalled(&called), &status));
     RunLoopUntilIdle();
     EXPECT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
     return result;
   }
 
@@ -454,7 +480,7 @@ class PageStorageTest : public ledger::TestWithEnvironment {
         callback::Capture(callback::SetWhenCalled(&called), &status, &commits));
     RunLoopUntilIdle();
     EXPECT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
     return commits;
   }
 
@@ -479,9 +505,9 @@ class PageStorageTest : public ledger::TestWithEnvironment {
         << "Broken test: CheckInboundObjectReferences must be called on "
            "non-inline pieces only.";
     ObjectReferencesAndPriority stored_references;
-    ASSERT_EQ(Status::OK,
-              PageStorageImplAccessorForTest::GetDb(storage_).GetInboundObjectReferences(
-                  handler, object_identifier, &stored_references));
+    ASSERT_EQ(PageStorageImplAccessorForTest::GetDb(storage_).GetInboundObjectReferences(
+                  handler, object_identifier, &stored_references),
+              Status::OK);
     EXPECT_THAT(stored_references, UnorderedElementsAreArray(expected_references));
   }
 
@@ -492,9 +518,9 @@ class PageStorageTest : public ledger::TestWithEnvironment {
         << "Broken test: CheckInboundCommitReferences must be called on "
            "non-inline pieces only.";
     std::vector<CommitId> stored_references;
-    ASSERT_EQ(Status::OK,
-              PageStorageImplAccessorForTest::GetDb(storage_).GetInboundCommitReferences(
-                  handler, object_identifier, &stored_references));
+    ASSERT_EQ(PageStorageImplAccessorForTest::GetDb(storage_).GetInboundCommitReferences(
+                  handler, object_identifier, &stored_references),
+              Status::OK);
     EXPECT_THAT(stored_references, UnorderedElementsAreArray(expected_references));
   }
 
@@ -552,12 +578,13 @@ class PageStorageTest : public ledger::TestWithEnvironment {
   }
 
   ::testing::AssertionResult CreateNodeFromIdentifier(
-      ObjectIdentifier identifier, std::unique_ptr<const btree::TreeNode>* node) {
+      ObjectIdentifier identifier, PageStorage::Location location,
+      std::unique_ptr<const btree::TreeNode>* node) {
     bool called;
     Status status;
     std::unique_ptr<const btree::TreeNode> result;
     btree::TreeNode::FromIdentifier(
-        GetStorage(), std::move(identifier),
+        GetStorage(), {std::move(identifier), std::move(location)},
         callback::Capture(callback::SetWhenCalled(&called), &status, &result));
     RunLoopUntilIdle();
 
@@ -588,7 +615,7 @@ class PageStorageTest : public ledger::TestWithEnvironment {
     if (status != Status::OK) {
       return ::testing::AssertionFailure() << "TreeNode::FromEntries failed with status " << status;
     }
-    return CreateNodeFromIdentifier(identifier, node);
+    return CreateNodeFromIdentifier(identifier, PageStorage::Location::Local(), node);
   }
 
   ::testing::AssertionResult GetEmptyNodeIdentifier(ObjectIdentifier* empty_node_identifier) {
@@ -624,24 +651,24 @@ TEST_F(PageStorageTest, AddGetLocalCommits) {
                       callback::Capture(callback::SetWhenCalled(&called), &status, &lookup_commit));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::INTERNAL_NOT_FOUND, status);
+  EXPECT_EQ(status, Status::INTERNAL_NOT_FOUND);
   EXPECT_FALSE(lookup_commit);
 
   std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
-  journal->Put("key", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key", RandomObjectIdentifier(), KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit;
   storage_->CommitJournal(std::move(journal),
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   CommitId id = commit->GetId();
   std::string storage_bytes = commit->GetStorageBytes().ToString();
 
   // Search for a commit that exists and check the content.
   std::unique_ptr<const Commit> found = GetCommit(id);
-  EXPECT_EQ(storage_bytes, found->GetStorageBytes());
+  EXPECT_EQ(found->GetStorageBytes(), storage_bytes);
 }
 
 TEST_F(PageStorageTest, AddLocalCommitsReferences) {
@@ -649,7 +676,8 @@ TEST_F(PageStorageTest, AddLocalCommitsReferences) {
   // creating two identical journals and commiting them. We then check that both
   // commits are stored as inbound references of said object.
   std::unique_ptr<const Commit> base = GetFirstHead();
-  const ObjectData data(RandomString(environment_.random(), 65536), InlineBehavior::PREVENT);
+  const ObjectData data =
+      MakeObject(RandomString(environment_.random(), 65536), InlineBehavior::PREVENT);
   const ObjectIdentifier object_id = data.object_identifier;
   std::unique_ptr<Journal> journal = storage_->StartCommit(base->Clone());
   journal->Put("key", object_id, KeyPriority::EAGER);
@@ -660,7 +688,7 @@ TEST_F(PageStorageTest, AddLocalCommitsReferences) {
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit1));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   // Advance the clock a bit.
   RunLoopFor(zx::sec(1));
@@ -674,14 +702,14 @@ TEST_F(PageStorageTest, AddLocalCommitsReferences) {
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit2));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   ObjectIdentifier root_node2 = commit2->GetRootIdentifier();
 
   CommitId id1 = commit1->GetId();
   CommitId id2 = commit2->GetId();
   EXPECT_NE(id1, id2);
-  EXPECT_EQ(root_node1, root_node2);
+  EXPECT_EQ(root_node2, root_node1);
 
   RunInCoroutine([this, root_node1, id1, id2](CoroutineHandler* handler) {
     CheckInboundCommitReferences(handler, root_node1, {id1, id2});
@@ -696,38 +724,38 @@ TEST_F(PageStorageTest, AddCommitFromLocalDoNotMarkUnsynedAlreadySyncedCommit) {
   std::unique_ptr<const Commit> base = GetFirstHead();
 
   std::unique_ptr<Journal> journal = storage_->StartCommit(base->Clone());
-  journal->Put("key", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key", RandomObjectIdentifier(), KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit1;
   storage_->CommitJournal(std::move(journal),
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit1));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   CommitId id1 = commit1->GetId();
   storage_->MarkCommitSynced(id1, callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   journal = storage_->StartCommit(base->Clone());
-  journal->Put("key", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key", RandomObjectIdentifier(), KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit2;
   storage_->CommitJournal(std::move(journal),
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit2));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   CommitId id2 = commit2->GetId();
   storage_->MarkCommitSynced(id2, callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   // Make a merge commit. Merge commits only depend on their parents and
   // contents, so we can reproduce them.
-  storage::ObjectIdentifier merged_object_id = RandomObjectIdentifier(environment_.random());
+  storage::ObjectIdentifier merged_object_id = RandomObjectIdentifier();
   journal = storage_->StartMergeCommit(commit1->Clone(), commit2->Clone());
   journal->Put("key", merged_object_id, KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit_merged1;
@@ -735,18 +763,18 @@ TEST_F(PageStorageTest, AddCommitFromLocalDoNotMarkUnsynedAlreadySyncedCommit) {
                                                                 &status, &commit_merged1));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   CommitId merged_id1 = commit_merged1->GetId();
 
   auto commits = GetUnsyncedCommits();
-  EXPECT_EQ(1u, commits.size());
-  EXPECT_EQ(merged_id1, commits[0]->GetId());
+  EXPECT_EQ(commits.size(), 1u);
+  EXPECT_EQ(commits[0]->GetId(), merged_id1);
 
   storage_->MarkCommitSynced(merged_id1,
                              callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   // Add the commit again.
   journal = storage_->StartMergeCommit(commit1->Clone(), commit2->Clone());
@@ -756,22 +784,23 @@ TEST_F(PageStorageTest, AddCommitFromLocalDoNotMarkUnsynedAlreadySyncedCommit) {
                                                                 &status, &commit_merged2));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   CommitId merged_id2 = commit_merged2->GetId();
 
   // Check that the commit is not marked unsynced.
   commits = GetUnsyncedCommits();
-  EXPECT_EQ(0u, commits.size());
+  EXPECT_EQ(commits.size(), 0u);
 }
 
 TEST_F(PageStorageTest, AddCommitBeforeParentsError) {
   // Try to add a commit before its parent and see the error.
   std::vector<std::unique_ptr<const Commit>> parent;
-  parent.emplace_back(std::make_unique<CommitRandomImpl>(environment_.random()));
+  parent.emplace_back(std::make_unique<CommitRandomImpl>(environment_.random(),
+                                                         storage_->GetObjectIdentifierFactory()));
   ObjectIdentifier empty_object_id;
   GetEmptyNodeIdentifier(&empty_object_id);
-  std::unique_ptr<const Commit> commit = CommitImpl::FromContentAndParents(
-      storage_->GetCommitTracker(), environment_.clock(), empty_object_id, std::move(parent));
+  std::unique_ptr<const Commit> commit = storage_->GetCommitFactory()->FromContentAndParents(
+      environment_.clock(), empty_object_id, std::move(parent));
 
   bool called;
   Status status;
@@ -784,7 +813,7 @@ TEST_F(PageStorageTest, AddCommitBeforeParentsError) {
 
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::INTERNAL_NOT_FOUND, status);
+  EXPECT_EQ(status, Status::INTERNAL_NOT_FOUND);
 }
 
 TEST_F(PageStorageTest, AddCommitsOutOfOrderError) {
@@ -794,12 +823,12 @@ TEST_F(PageStorageTest, AddCommitsOutOfOrderError) {
 
   std::vector<std::unique_ptr<const Commit>> parent;
   parent.emplace_back(GetFirstHead());
-  auto commit1 = CommitImpl::FromContentAndParents(
-      storage_->GetCommitTracker(), environment_.clock(), root_identifier, std::move(parent));
+  auto commit1 = storage_->GetCommitFactory()->FromContentAndParents(
+      environment_.clock(), root_identifier, std::move(parent));
   parent.clear();
   parent.push_back(commit1->Clone());
-  auto commit2 = CommitImpl::FromContentAndParents(
-      storage_->GetCommitTracker(), environment_.clock(), root_identifier, std::move(parent));
+  auto commit2 = storage_->GetCommitFactory()->FromContentAndParents(
+      environment_.clock(), root_identifier, std::move(parent));
 
   std::vector<PageStorage::CommitIdAndBytes> commits_and_bytes;
   commits_and_bytes.emplace_back(commit2->GetId(), commit2->GetStorageBytes().ToString());
@@ -813,7 +842,7 @@ TEST_F(PageStorageTest, AddCommitsOutOfOrderError) {
       callback::Capture(callback::SetWhenCalled(&called), &status, &missing_ids));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::INTERNAL_NOT_FOUND, status);
+  EXPECT_EQ(status, Status::INTERNAL_NOT_FOUND);
 }
 
 TEST_F(PageStorageTest, AddGetSyncedCommits) {
@@ -822,11 +851,11 @@ TEST_F(PageStorageTest, AddGetSyncedCommits) {
     storage_->SetSyncDelegate(&sync);
 
     // Create a node with 2 values.
-    ObjectData lazy_value("Some data", InlineBehavior::PREVENT);
-    ObjectData eager_value("More data", InlineBehavior::PREVENT);
+    ObjectData lazy_value = MakeObject("Some data", InlineBehavior::PREVENT);
+    ObjectData eager_value = MakeObject("More data", InlineBehavior::PREVENT);
     std::vector<Entry> entries = {
-        Entry{"key0", lazy_value.object_identifier, KeyPriority::LAZY},
-        Entry{"key1", eager_value.object_identifier, KeyPriority::EAGER},
+        Entry{"key0", lazy_value.object_identifier, KeyPriority::LAZY, EntryId()},
+        Entry{"key1", eager_value.object_identifier, KeyPriority::EAGER, EntryId()},
     };
     std::unique_ptr<const btree::TreeNode> node;
     ASSERT_TRUE(CreateNodeFromEntries(entries, {}, &node));
@@ -840,21 +869,22 @@ TEST_F(PageStorageTest, AddGetSyncedCommits) {
       // Ensure root_object is not kept, as the storage it depends on will be
       // deleted.
       std::unique_ptr<const Object> root_object =
-          TryGetObject(root_identifier, PageStorage::Location::NETWORK);
+          TryGetObject(root_identifier, PageStorage::Location::Local());
 
       fxl::StringView root_data;
-      ASSERT_EQ(Status::OK, root_object->GetData(&root_data));
+      ASSERT_EQ(root_object->GetData(&root_data), Status::OK);
       sync.AddObject(root_identifier, root_data.ToString());
     }
 
     // Reset and clear the storage.
     ResetStorage();
     storage_->SetSyncDelegate(&sync);
+    RetrackIdentifier(&root_identifier);
 
     std::vector<std::unique_ptr<const Commit>> parent;
     parent.emplace_back(GetFirstHead());
-    std::unique_ptr<const Commit> commit = CommitImpl::FromContentAndParents(
-        storage_->GetCommitTracker(), environment_.clock(), root_identifier, std::move(parent));
+    std::unique_ptr<const Commit> commit = storage_->GetCommitFactory()->FromContentAndParents(
+        environment_.clock(), root_identifier, std::move(parent));
     CommitId id = commit->GetId();
 
     // Adding the commit should only request the tree node and the eager value.
@@ -867,8 +897,8 @@ TEST_F(PageStorageTest, AddGetSyncedCommits) {
         callback::Capture(callback::SetWhenCalled(&called), &status, &missing_ids));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
-    EXPECT_EQ(2u, sync.object_requests.size());
+    EXPECT_EQ(status, Status::OK);
+    EXPECT_EQ(sync.object_requests.size(), 2u);
     EXPECT_TRUE(sync.object_requests.find(root_identifier) != sync.object_requests.end());
     EXPECT_TRUE(sync.object_requests.find(eager_value.object_identifier) !=
                 sync.object_requests.end());
@@ -880,11 +910,11 @@ TEST_F(PageStorageTest, AddGetSyncedCommits) {
         callback::Capture(callback::SetWhenCalled(&called), &status, &missing_ids));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
     EXPECT_TRUE(sync.object_requests.empty());
 
     std::unique_ptr<const Commit> found = GetCommit(id);
-    EXPECT_EQ(commit->GetStorageBytes(), found->GetStorageBytes());
+    EXPECT_EQ(found->GetStorageBytes(), commit->GetStorageBytes());
 
     // Check that the commit is not marked as unsynced.
     std::vector<std::unique_ptr<const Commit>> commits = GetUnsyncedCommits();
@@ -901,16 +931,16 @@ TEST_F(PageStorageTest, MarkRemoteCommitSynced) {
   bool called;
   Status status;
   std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
-  journal->Put("key", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key", RandomObjectIdentifier(), KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit;
   storage_->CommitJournal(std::move(journal),
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   CommitId id = commit->GetId();
 
-  EXPECT_EQ(1u, GetUnsyncedCommits().size());
+  EXPECT_EQ(GetUnsyncedCommits().size(), 1u);
 
   std::vector<PageStorage::CommitIdAndBytes> commits_and_bytes;
   commits_and_bytes.emplace_back(commit->GetId(), commit->GetStorageBytes().ToString());
@@ -921,7 +951,7 @@ TEST_F(PageStorageTest, MarkRemoteCommitSynced) {
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
 
-  EXPECT_EQ(0u, GetUnsyncedCommits().size());
+  EXPECT_EQ(GetUnsyncedCommits().size(), 0u);
 }
 
 TEST_F(PageStorageTest, SyncCommits) {
@@ -933,24 +963,24 @@ TEST_F(PageStorageTest, SyncCommits) {
   bool called;
   Status status;
   std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
-  journal->Put("key", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key", RandomObjectIdentifier(), KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit;
   storage_->CommitJournal(std::move(journal),
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   commits = GetUnsyncedCommits();
-  EXPECT_EQ(1u, commits.size());
-  EXPECT_EQ(commit->GetStorageBytes(), commits[0]->GetStorageBytes());
+  EXPECT_EQ(commits.size(), 1u);
+  EXPECT_EQ(commits[0]->GetStorageBytes(), commit->GetStorageBytes());
 
   // Mark it as synced.
   storage_->MarkCommitSynced(commit->GetId(),
                              callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   commits = GetUnsyncedCommits();
   EXPECT_TRUE(commits.empty());
@@ -959,24 +989,24 @@ TEST_F(PageStorageTest, SyncCommits) {
 TEST_F(PageStorageTest, HeadCommits) {
   // Every page should have one initial head commit.
   std::vector<std::unique_ptr<const Commit>> heads = GetHeads();
-  EXPECT_EQ(1u, heads.size());
+  EXPECT_EQ(heads.size(), 1u);
 
   // Adding a new commit with the previous head as its parent should replace the
   // old head.
   bool called;
   Status status;
   std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
-  journal->Put("key", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key", RandomObjectIdentifier(), KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit;
   storage_->CommitJournal(std::move(journal),
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   heads = GetHeads();
-  ASSERT_EQ(1u, heads.size());
-  EXPECT_EQ(commit->GetId(), heads[0]->GetId());
+  ASSERT_EQ(heads.size(), 1u);
+  EXPECT_EQ(heads[0]->GetId(), commit->GetId());
 }
 
 TEST_F(PageStorageTest, OrderHeadCommitsByTimestampThenId) {
@@ -993,9 +1023,9 @@ TEST_F(PageStorageTest, OrderHeadCommitsByTimestampThenId) {
   std::vector<ObjectIdentifier> object_identifiers;
   object_identifiers.resize(timestamps.size());
   for (size_t i = 0; i < timestamps.size(); ++i) {
-    ObjectData value("value" + std::to_string(i), InlineBehavior::ALLOW);
+    ObjectData value = MakeObject("value" + std::to_string(i), InlineBehavior::ALLOW);
     std::vector<Entry> entries = {
-        Entry{"key" + std::to_string(i), value.object_identifier, KeyPriority::EAGER}};
+        Entry{"key" + std::to_string(i), value.object_identifier, KeyPriority::EAGER, EntryId()}};
     std::unique_ptr<const btree::TreeNode> node;
     ASSERT_TRUE(CreateNodeFromEntries(entries, {}, &node));
     object_identifiers[i] = node->GetIdentifier();
@@ -1010,8 +1040,8 @@ TEST_F(PageStorageTest, OrderHeadCommitsByTimestampThenId) {
     test_clock.Set(timestamps[i]);
     std::vector<std::unique_ptr<const Commit>> parent;
     parent.push_back(base->Clone());
-    std::unique_ptr<const Commit> commit = CommitImpl::FromContentAndParents(
-        storage_->GetCommitTracker(), &test_clock, object_identifiers[i], std::move(parent));
+    std::unique_ptr<const Commit> commit = storage_->GetCommitFactory()->FromContentAndParents(
+        &test_clock, object_identifiers[i], std::move(parent));
 
     commits.emplace_back(commit->GetId(), commit->GetStorageBytes().ToString());
     sorted_commits.emplace_back(timestamps[i], commit->GetId());
@@ -1027,16 +1057,16 @@ TEST_F(PageStorageTest, OrderHeadCommitsByTimestampThenId) {
       callback::Capture(callback::SetWhenCalled(&called), &status, &missing_ids));
   EXPECT_TRUE(RunLoopUntilIdle());
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   // Check that GetHeadCommitIds returns sorted commits.
   std::vector<std::unique_ptr<const Commit>> heads;
   status = storage_->GetHeadCommits(&heads);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   std::sort(sorted_commits.begin(), sorted_commits.end());
-  ASSERT_EQ(sorted_commits.size(), heads.size());
+  ASSERT_EQ(heads.size(), sorted_commits.size());
   for (size_t i = 0; i < sorted_commits.size(); ++i) {
-    EXPECT_EQ(sorted_commits[i].second, heads[i]->GetId());
+    EXPECT_EQ(heads[i]->GetId(), sorted_commits[i].second);
   }
 }
 
@@ -1057,9 +1087,9 @@ TEST_F(PageStorageTest, CreateJournalHugeNode) {
   ASSERT_TRUE(commit);
   std::vector<Entry> entries = GetCommitContents(*commit);
 
-  EXPECT_EQ(500u, entries.size());
+  EXPECT_EQ(entries.size(), 500u);
   for (const auto& entry : entries) {
-    EXPECT_EQ(1024u, entry.key.size());
+    EXPECT_EQ(entry.key.size(), 1024u);
   }
 
   // Check that all node's parts are marked as unsynced.
@@ -1104,9 +1134,9 @@ TEST_F(PageStorageTest, CreateJournalHugeNode) {
             return true;
           });
       RunLoopUntilIdle();
-      EXPECT_EQ(IterationStatus::DONE, iteration_status);
+      EXPECT_EQ(iteration_status, IterationStatus::DONE);
       for (const auto& identifier : sub_identifiers) {
-        EXPECT_EQ(1u, unsynced_identifiers.count(identifier));
+        EXPECT_EQ(unsynced_identifiers.count(identifier), 1u);
       }
     }
   }
@@ -1116,12 +1146,12 @@ TEST_F(PageStorageTest, CreateJournalHugeNode) {
 TEST_F(PageStorageTest, DestroyUncommittedJournal) {
   // It is not an error if a journal is not committed or rolled back.
   std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
-  journal->Put("key", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key", RandomObjectIdentifier(), KeyPriority::EAGER);
 }
 
 TEST_F(PageStorageTest, AddObjectFromLocal) {
   RunInCoroutine([this](CoroutineHandler* handler) {
-    ObjectData data("Some data", InlineBehavior::PREVENT);
+    ObjectData data = MakeObject("Some data", InlineBehavior::PREVENT);
 
     bool called;
     Status status;
@@ -1131,12 +1161,12 @@ TEST_F(PageStorageTest, AddObjectFromLocal) {
         callback::Capture(callback::SetWhenCalled(&called), &status, &object_identifier));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
-    EXPECT_EQ(data.object_identifier, object_identifier);
+    EXPECT_EQ(status, Status::OK);
+    EXPECT_EQ(object_identifier, data.object_identifier);
 
     std::unique_ptr<const Piece> piece;
-    ASSERT_EQ(Status::OK, ReadObject(handler, object_identifier, &piece));
-    EXPECT_EQ(data.value, piece->GetData());
+    ASSERT_EQ(ReadObject(handler, object_identifier, &piece), Status::OK);
+    EXPECT_EQ(piece->GetData(), data.value);
     EXPECT_TRUE(ObjectIsUntracked(object_identifier, true));
     EXPECT_TRUE(IsPieceSynced(object_identifier, false));
   });
@@ -1144,7 +1174,7 @@ TEST_F(PageStorageTest, AddObjectFromLocal) {
 
 TEST_F(PageStorageTest, AddSmallObjectFromLocal) {
   RunInCoroutine([this](CoroutineHandler* handler) {
-    ObjectData data("Some data");
+    ObjectData data = MakeObject("Some data");
 
     bool called;
     Status status;
@@ -1154,19 +1184,19 @@ TEST_F(PageStorageTest, AddSmallObjectFromLocal) {
         callback::Capture(callback::SetWhenCalled(&called), &status, &object_identifier));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
-    EXPECT_EQ(data.object_identifier, object_identifier);
-    EXPECT_EQ(data.value, ExtractObjectDigestData(object_identifier.object_digest()));
+    EXPECT_EQ(status, Status::OK);
+    EXPECT_EQ(object_identifier, data.object_identifier);
+    EXPECT_EQ(ExtractObjectDigestData(object_identifier.object_digest()), data.value);
 
     std::unique_ptr<const Piece> piece;
-    EXPECT_EQ(Status::INTERNAL_NOT_FOUND, ReadObject(handler, object_identifier, &piece));
+    EXPECT_EQ(ReadObject(handler, object_identifier, &piece), Status::INTERNAL_NOT_FOUND);
     // Inline objects do not need to ever be tracked.
     EXPECT_TRUE(ObjectIsUntracked(object_identifier, false));
   });
 }
 
 TEST_F(PageStorageTest, InterruptAddObjectFromLocal) {
-  ObjectData data("Some data");
+  ObjectData data = MakeObject("Some data");
 
   storage_->AddObjectFromLocal(ObjectType::BLOB, data.ToDataSource(), {},
                                [](Status returned_status, ObjectIdentifier object_identifier) {});
@@ -1186,13 +1216,13 @@ TEST_F(PageStorageTest, AddObjectFromLocalError) {
       callback::Capture(callback::SetWhenCalled(&called), &status, &object_identifier));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::IO_ERROR, status);
+  EXPECT_EQ(status, Status::IO_ERROR);
 }
 
 TEST_F(PageStorageTest, AddLocalPiece) {
   RunInCoroutine([this](CoroutineHandler* handler) {
-    ObjectData data("Some data", InlineBehavior::PREVENT);
-    const ObjectIdentifier reference = RandomObjectIdentifier(environment_.random());
+    ObjectData data = MakeObject("Some data", InlineBehavior::PREVENT);
+    const ObjectIdentifier reference = RandomObjectIdentifier();
 
     bool called;
     Status status;
@@ -1202,11 +1232,11 @@ TEST_F(PageStorageTest, AddLocalPiece) {
         callback::Capture(callback::SetWhenCalled(&called), &status));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
 
     std::unique_ptr<const Piece> piece;
-    ASSERT_EQ(Status::OK, ReadObject(handler, data.object_identifier, &piece));
-    EXPECT_EQ(data.value, piece->GetData());
+    ASSERT_EQ(ReadObject(handler, data.object_identifier, &piece), Status::OK);
+    EXPECT_EQ(piece->GetData(), data.value);
     EXPECT_TRUE(ObjectIsUntracked(data.object_identifier, true));
     EXPECT_TRUE(IsPieceSynced(data.object_identifier, false));
 
@@ -1217,8 +1247,8 @@ TEST_F(PageStorageTest, AddLocalPiece) {
 
 TEST_F(PageStorageTest, AddSyncPiece) {
   RunInCoroutine([this](CoroutineHandler* handler) {
-    ObjectData data("Some data", InlineBehavior::PREVENT);
-    const ObjectIdentifier reference = RandomObjectIdentifier(environment_.random());
+    ObjectData data = MakeObject("Some data", InlineBehavior::PREVENT);
+    const ObjectIdentifier reference = RandomObjectIdentifier();
 
     bool called;
     Status status;
@@ -1228,11 +1258,11 @@ TEST_F(PageStorageTest, AddSyncPiece) {
         callback::Capture(callback::SetWhenCalled(&called), &status));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
 
     std::unique_ptr<const Piece> piece;
-    ASSERT_EQ(Status::OK, ReadObject(handler, data.object_identifier, &piece));
-    EXPECT_EQ(data.value, piece->GetData());
+    ASSERT_EQ(ReadObject(handler, data.object_identifier, &piece), Status::OK);
+    EXPECT_EQ(piece->GetData(), data.value);
     EXPECT_TRUE(ObjectIsUntracked(data.object_identifier, false));
     EXPECT_TRUE(IsPieceSynced(data.object_identifier, true));
 
@@ -1243,7 +1273,7 @@ TEST_F(PageStorageTest, AddSyncPiece) {
 
 TEST_F(PageStorageTest, AddP2PPiece) {
   RunInCoroutine([this](CoroutineHandler* handler) {
-    ObjectData data("Some data", InlineBehavior::PREVENT);
+    ObjectData data = MakeObject("Some data", InlineBehavior::PREVENT);
 
     bool called;
     Status status;
@@ -1252,11 +1282,11 @@ TEST_F(PageStorageTest, AddP2PPiece) {
         callback::Capture(callback::SetWhenCalled(&called), &status));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
 
     std::unique_ptr<const Piece> piece;
-    ASSERT_EQ(Status::OK, ReadObject(handler, data.object_identifier, &piece));
-    EXPECT_EQ(data.value, piece->GetData());
+    ASSERT_EQ(ReadObject(handler, data.object_identifier, &piece), Status::OK);
+    EXPECT_EQ(piece->GetData(), data.value);
     EXPECT_TRUE(ObjectIsUntracked(data.object_identifier, false));
     EXPECT_TRUE(IsPieceSynced(data.object_identifier, false));
   });
@@ -1264,67 +1294,67 @@ TEST_F(PageStorageTest, AddP2PPiece) {
 
 TEST_F(PageStorageTest, GetObject) {
   RunInCoroutine([this](CoroutineHandler* handler) {
-    ObjectData data("Some data");
-    ASSERT_EQ(Status::OK, WriteObject(handler, &data));
+    ObjectData data = MakeObject("Some data");
+    ASSERT_EQ(WriteObject(handler, &data), Status::OK);
 
     std::unique_ptr<const Object> object =
-        TryGetObject(data.object_identifier, PageStorage::Location::LOCAL);
-    EXPECT_EQ(data.object_identifier, object->GetIdentifier());
+        TryGetObject(data.object_identifier, PageStorage::Location::Local());
+    EXPECT_EQ(object->GetIdentifier(), data.object_identifier);
     fxl::StringView object_data;
-    ASSERT_EQ(Status::OK, object->GetData(&object_data));
-    EXPECT_EQ(data.value, convert::ToString(object_data));
+    ASSERT_EQ(object->GetData(&object_data), Status::OK);
+    EXPECT_EQ(convert::ToString(object_data), data.value);
   });
 }
 
 TEST_F(PageStorageTest, GetObjectPart) {
   RunInCoroutine([this](CoroutineHandler* handler) {
-    ObjectData data("_Some data_");
-    ASSERT_EQ(Status::OK, WriteObject(handler, &data));
+    ObjectData data = MakeObject("_Some data_");
+    ASSERT_EQ(WriteObject(handler, &data), Status::OK);
 
     fsl::SizedVmo object_part =
-        TryGetObjectPart(data.object_identifier, 1, data.size - 2, PageStorage::Location::LOCAL);
+        TryGetObjectPart(data.object_identifier, 1, data.size - 2, PageStorage::Location::Local());
     std::string object_part_data;
     ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
-    EXPECT_EQ(data.value.substr(1, data.size - 2), convert::ToString(object_part_data));
+    EXPECT_EQ(convert::ToString(object_part_data), data.value.substr(1, data.size - 2));
   });
 }
 
 TEST_F(PageStorageTest, GetObjectPartLargeOffset) {
   RunInCoroutine([this](CoroutineHandler* handler) {
-    ObjectData data("_Some data_");
-    ASSERT_EQ(Status::OK, WriteObject(handler, &data));
+    ObjectData data = MakeObject("_Some data_");
+    ASSERT_EQ(WriteObject(handler, &data), Status::OK);
 
     fsl::SizedVmo object_part = TryGetObjectPart(data.object_identifier, data.size * 2, data.size,
-                                                 PageStorage::Location::LOCAL);
+                                                 PageStorage::Location::Local());
     std::string object_part_data;
     ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
-    EXPECT_EQ("", convert::ToString(object_part_data));
+    EXPECT_EQ(convert::ToString(object_part_data), "");
   });
 }
 
 TEST_F(PageStorageTest, GetObjectPartLargeMaxSize) {
   RunInCoroutine([this](CoroutineHandler* handler) {
-    ObjectData data("_Some data_");
-    ASSERT_EQ(Status::OK, WriteObject(handler, &data));
+    ObjectData data = MakeObject("_Some data_");
+    ASSERT_EQ(WriteObject(handler, &data), Status::OK);
 
     fsl::SizedVmo object_part =
-        TryGetObjectPart(data.object_identifier, 0, data.size * 2, PageStorage::Location::LOCAL);
+        TryGetObjectPart(data.object_identifier, 0, data.size * 2, PageStorage::Location::Local());
     std::string object_part_data;
     ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
-    EXPECT_EQ(data.value, convert::ToString(object_part_data));
+    EXPECT_EQ(convert::ToString(object_part_data), data.value);
   });
 }
 
 TEST_F(PageStorageTest, GetObjectPartNegativeArgs) {
   RunInCoroutine([this](CoroutineHandler* handler) {
-    ObjectData data("_Some data_");
-    ASSERT_EQ(Status::OK, WriteObject(handler, &data));
+    ObjectData data = MakeObject("_Some data_");
+    ASSERT_EQ(WriteObject(handler, &data), Status::OK);
 
-    fsl::SizedVmo object_part =
-        TryGetObjectPart(data.object_identifier, -data.size + 1, -1, PageStorage::Location::LOCAL);
+    fsl::SizedVmo object_part = TryGetObjectPart(data.object_identifier, -data.size + 1, -1,
+                                                 PageStorage::Location::Local());
     std::string object_part_data;
     ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
-    EXPECT_EQ(data.value.substr(1, data.size - 1), convert::ToString(object_part_data));
+    EXPECT_EQ(convert::ToString(object_part_data), data.value.substr(1, data.size - 1));
   });
 }
 
@@ -1333,10 +1363,10 @@ TEST_F(PageStorageTest, GetLargeObjectPart) {
   size_t offset = 6144;
   size_t size = 49152;
 
-  ObjectData data(std::move(data_str), InlineBehavior::PREVENT);
+  ObjectData data = MakeObject(std::move(data_str), InlineBehavior::PREVENT);
 
-  ASSERT_EQ(PieceType::INDEX,
-            GetObjectDigestInfo(data.object_identifier.object_digest()).piece_type);
+  ASSERT_EQ(GetObjectDigestInfo(data.object_identifier.object_digest()).piece_type,
+            PieceType::INDEX);
 
   bool called;
   Status status;
@@ -1347,36 +1377,36 @@ TEST_F(PageStorageTest, GetLargeObjectPart) {
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
 
-  EXPECT_EQ(Status::OK, status);
-  EXPECT_EQ(data.object_identifier, object_identifier);
+  EXPECT_EQ(status, Status::OK);
+  EXPECT_EQ(object_identifier, data.object_identifier);
 
   fsl::SizedVmo object_part =
-      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::LOCAL);
+      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::Local());
   std::string object_part_data;
   ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
   std::string result_str = convert::ToString(object_part_data);
-  EXPECT_EQ(size, result_str.size());
-  EXPECT_EQ(data.value.substr(offset, size), result_str);
+  EXPECT_EQ(result_str.size(), size);
+  EXPECT_EQ(result_str, data.value.substr(offset, size));
 }
 
 TEST_F(PageStorageTest, GetObjectPartFromSync) {
-  ObjectData data("_Some data_", InlineBehavior::PREVENT);
+  ObjectData data = MakeObject("_Some data_", InlineBehavior::PREVENT);
   FakeSyncDelegate sync;
   sync.AddObject(data.object_identifier, data.value);
   storage_->SetSyncDelegate(&sync);
 
-  fsl::SizedVmo object_part =
-      TryGetObjectPart(data.object_identifier, 1, data.size - 2, PageStorage::Location::NETWORK);
+  fsl::SizedVmo object_part = TryGetObjectPart(data.object_identifier, 1, data.size - 2,
+                                               PageStorage::Location::ValueFromNetwork());
   std::string object_part_data;
   ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
-  EXPECT_EQ(data.value.substr(1, data.size - 2), convert::ToString(object_part_data));
+  EXPECT_EQ(convert::ToString(object_part_data), data.value.substr(1, data.size - 2));
 
   storage_->SetSyncDelegate(nullptr);
-  ObjectData other_data("_Some other data_", InlineBehavior::PREVENT);
+  ObjectData other_data = MakeObject("_Some other data_", InlineBehavior::PREVENT);
   TryGetObjectPart(other_data.object_identifier, 1, other_data.size - 2,
-                   PageStorage::Location::LOCAL, Status::INTERNAL_NOT_FOUND);
+                   PageStorage::Location::Local(), Status::INTERNAL_NOT_FOUND);
   TryGetObjectPart(other_data.object_identifier, 1, other_data.size - 2,
-                   PageStorage::Location::NETWORK, Status::NETWORK_ERROR);
+                   PageStorage::Location::ValueFromNetwork(), Status::NETWORK_ERROR);
 }
 
 TEST_F(PageStorageTest, GetObjectPartFromSyncEndOfChunk) {
@@ -1393,7 +1423,7 @@ TEST_F(PageStorageTest, GetObjectPartFromSyncEndOfChunk) {
   std::vector<size_t> chunk_lengths;
   std::vector<ObjectIdentifier> chunk_identifiers;
   ObjectIdentifier object_identifier = ForEachPiece(
-      data_str, ObjectType::BLOB,
+      data_str, ObjectType::BLOB, storage_->GetObjectIdentifierFactory(),
       [&sync, &chunk_lengths, &chunk_identifiers](std::unique_ptr<const Piece> piece) {
         ObjectIdentifier object_identifier = piece->GetIdentifier();
         ObjectDigestInfo digest_info = GetObjectDigestInfo(object_identifier.object_digest());
@@ -1406,7 +1436,7 @@ TEST_F(PageStorageTest, GetObjectPartFromSyncEndOfChunk) {
         }
         sync.AddObject(std::move(object_identifier), piece->GetData().ToString());
       });
-  ASSERT_EQ(PieceType::INDEX, GetObjectDigestInfo(object_identifier.object_digest()).piece_type);
+  ASSERT_EQ(GetObjectDigestInfo(object_identifier.object_digest()).piece_type, PieceType::INDEX);
   storage_->SetSyncDelegate(&sync);
 
   // Read 128 bytes off the end of the first chunk.
@@ -1415,10 +1445,10 @@ TEST_F(PageStorageTest, GetObjectPartFromSyncEndOfChunk) {
   uint64_t offset = chunk_lengths[0] - size;
 
   fsl::SizedVmo object_part =
-      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::NETWORK);
+      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::ValueFromNetwork());
   std::string object_part_data;
   ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
-  EXPECT_EQ(data_str.substr(offset, size), convert::ToString(object_part_data));
+  EXPECT_EQ(convert::ToString(object_part_data), data_str.substr(offset, size));
   EXPECT_LT(sync.object_requests.size(), sync.GetNumberOfObjectsStored());
   EXPECT_THAT(sync.object_requests, Contains(object_identifier));
   EXPECT_THAT(sync.object_requests, Contains(chunk_identifiers[0]));
@@ -1437,7 +1467,7 @@ TEST_F(PageStorageTest, GetObjectPartFromSyncStartOfChunk) {
   std::vector<size_t> chunk_lengths;
   std::vector<ObjectIdentifier> chunk_identifiers;
   ObjectIdentifier object_identifier = ForEachPiece(
-      data_str, ObjectType::BLOB,
+      data_str, ObjectType::BLOB, storage_->GetObjectIdentifierFactory(),
       [&sync, &chunk_lengths, &chunk_identifiers](std::unique_ptr<const Piece> piece) {
         ObjectIdentifier object_identifier = piece->GetIdentifier();
         ObjectDigestInfo digest_info = GetObjectDigestInfo(object_identifier.object_digest());
@@ -1450,7 +1480,7 @@ TEST_F(PageStorageTest, GetObjectPartFromSyncStartOfChunk) {
         }
         sync.AddObject(std::move(object_identifier), piece->GetData().ToString());
       });
-  ASSERT_EQ(PieceType::INDEX, GetObjectDigestInfo(object_identifier.object_digest()).piece_type);
+  ASSERT_EQ(GetObjectDigestInfo(object_identifier.object_digest()).piece_type, PieceType::INDEX);
   storage_->SetSyncDelegate(&sync);
 
   // Read 128 bytes off the start of the second chunk.
@@ -1459,10 +1489,10 @@ TEST_F(PageStorageTest, GetObjectPartFromSyncStartOfChunk) {
   uint64_t offset = chunk_lengths[0];
 
   fsl::SizedVmo object_part =
-      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::NETWORK);
+      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::ValueFromNetwork());
   std::string object_part_data;
   ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
-  EXPECT_EQ(data_str.substr(offset, size), convert::ToString(object_part_data));
+  EXPECT_EQ(convert::ToString(object_part_data), data_str.substr(offset, size));
   EXPECT_LT(sync.object_requests.size(), sync.GetNumberOfObjectsStored());
   EXPECT_THAT(sync.object_requests, Contains(object_identifier));
   EXPECT_THAT(sync.object_requests, Not(Contains(chunk_identifiers[0])));
@@ -1474,8 +1504,9 @@ TEST_F(PageStorageTest, GetObjectPartFromSyncZeroBytes) {
   std::string data_str = RandomString(environment_.random(), 2 * 65536 + 1);
 
   FakeSyncDelegate sync;
-  ObjectIdentifier object_identifier =
-      ForEachPiece(data_str, ObjectType::BLOB, [&sync](std::unique_ptr<const Piece> piece) {
+  ObjectIdentifier object_identifier = ForEachPiece(
+      data_str, ObjectType::BLOB, storage_->GetObjectIdentifierFactory(),
+      [&sync](std::unique_ptr<const Piece> piece) {
         ObjectIdentifier object_identifier = piece->GetIdentifier();
         ObjectDigestInfo digest_info = GetObjectDigestInfo(object_identifier.object_digest());
         if (digest_info.is_inlined()) {
@@ -1483,16 +1514,16 @@ TEST_F(PageStorageTest, GetObjectPartFromSyncZeroBytes) {
         }
         sync.AddObject(std::move(object_identifier), piece->GetData().ToString());
       });
-  ASSERT_EQ(PieceType::INDEX, GetObjectDigestInfo(object_identifier.object_digest()).piece_type);
+  ASSERT_EQ(GetObjectDigestInfo(object_identifier.object_digest()).piece_type, PieceType::INDEX);
   storage_->SetSyncDelegate(&sync);
 
   // Read zero bytes inside a chunk. This succeeds and only reads the root
   // piece.
   fsl::SizedVmo object_part =
-      TryGetObjectPart(object_identifier, 12, 0, PageStorage::Location::NETWORK);
+      TryGetObjectPart(object_identifier, 12, 0, PageStorage::Location::ValueFromNetwork());
   std::string object_part_data;
   ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
-  EXPECT_EQ("", convert::ToString(object_part_data));
+  EXPECT_EQ(convert::ToString(object_part_data), "");
   EXPECT_THAT(sync.object_requests, ElementsAre(object_identifier));
 }
 
@@ -1501,8 +1532,8 @@ TEST_F(PageStorageTest, GetObjectPartFromSyncZeroBytesNotFound) {
   storage_->SetSyncDelegate(&sync);
 
   // Reading zero bytes from non-existing objects returns an error.
-  ObjectData other_data("_Some other data_", InlineBehavior::PREVENT);
-  TryGetObjectPart(other_data.object_identifier, 1, 0, PageStorage::Location::NETWORK,
+  ObjectData other_data = MakeObject("_Some other data_", InlineBehavior::PREVENT);
+  TryGetObjectPart(other_data.object_identifier, 1, 0, PageStorage::Location::ValueFromNetwork(),
                    Status::INTERNAL_NOT_FOUND);
 }
 
@@ -1514,7 +1545,7 @@ TEST_F(PageStorageTest, GetHugeObjectPartFromSync) {
   FakeSyncDelegate sync;
   std::map<ObjectDigest, ObjectIdentifier> digest_to_identifier;
   ObjectIdentifier object_identifier =
-      ForEachPiece(data_str, ObjectType::BLOB,
+      ForEachPiece(data_str, ObjectType::BLOB, storage_->GetObjectIdentifierFactory(),
                    [&sync, &digest_to_identifier](std::unique_ptr<const Piece> piece) {
                      ObjectIdentifier object_identifier = piece->GetIdentifier();
                      if (GetObjectDigestInfo(object_identifier.object_digest()).is_inlined()) {
@@ -1523,14 +1554,14 @@ TEST_F(PageStorageTest, GetHugeObjectPartFromSync) {
                      digest_to_identifier[object_identifier.object_digest()] = object_identifier;
                      sync.AddObject(std::move(object_identifier), piece->GetData().ToString());
                    });
-  ASSERT_EQ(PieceType::INDEX, GetObjectDigestInfo(object_identifier.object_digest()).piece_type);
+  ASSERT_EQ(GetObjectDigestInfo(object_identifier.object_digest()).piece_type, PieceType::INDEX);
   storage_->SetSyncDelegate(&sync);
 
   fsl::SizedVmo object_part =
-      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::NETWORK);
+      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::ValueFromNetwork());
   std::string object_part_data;
   ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
-  EXPECT_EQ(data_str.substr(offset, size), convert::ToString(object_part_data));
+  EXPECT_EQ(convert::ToString(object_part_data), data_str.substr(offset, size));
   EXPECT_LT(sync.object_requests.size(), sync.GetNumberOfObjectsStored());
   EXPECT_THAT(sync.object_requests, Contains(object_identifier));
   // Check that the requested pieces have been added to storage, and collect
@@ -1543,7 +1574,7 @@ TEST_F(PageStorageTest, GetHugeObjectPartFromSync) {
     auto piece = TryGetPiece(piece_identifier);
     ASSERT_NE(piece, nullptr);
     ObjectReferencesAndPriority outbound_references;
-    ASSERT_EQ(piece->AppendReferences(&outbound_references), Status::OK);
+    ASSERT_EQ(Status::OK, piece->AppendReferences(&outbound_references));
     for (const auto& [reference, priority] : outbound_references) {
       auto reference_identifier = digest_to_identifier.find(reference);
       ASSERT_NE(reference_identifier, digest_to_identifier.end());
@@ -1567,47 +1598,49 @@ TEST_F(PageStorageTest, GetHugeObjectPartFromSyncNegativeOffset) {
 
   FakeSyncDelegate sync;
   ObjectIdentifier object_identifier =
-      ForEachPiece(data_str, ObjectType::BLOB, [&sync](std::unique_ptr<const Piece> piece) {
-        ObjectIdentifier object_identifier = piece->GetIdentifier();
-        if (GetObjectDigestInfo(object_identifier.object_digest()).is_inlined()) {
-          return;
-        }
-        sync.AddObject(std::move(object_identifier), piece->GetData().ToString());
-      });
-  ASSERT_EQ(PieceType::INDEX, GetObjectDigestInfo(object_identifier.object_digest()).piece_type);
+      ForEachPiece(data_str, ObjectType::BLOB, storage_->GetObjectIdentifierFactory(),
+                   [&sync](std::unique_ptr<const Piece> piece) {
+                     ObjectIdentifier object_identifier = piece->GetIdentifier();
+                     if (GetObjectDigestInfo(object_identifier.object_digest()).is_inlined()) {
+                       return;
+                     }
+                     sync.AddObject(std::move(object_identifier), piece->GetData().ToString());
+                   });
+  ASSERT_EQ(GetObjectDigestInfo(object_identifier.object_digest()).piece_type, PieceType::INDEX);
   storage_->SetSyncDelegate(&sync);
 
   fsl::SizedVmo object_part =
-      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::NETWORK);
+      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::ValueFromNetwork());
   std::string object_part_data;
   ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
-  EXPECT_EQ(data_str.substr(data_str.size() + offset, size), convert::ToString(object_part_data));
+  EXPECT_EQ(convert::ToString(object_part_data), data_str.substr(data_str.size() + offset, size));
   EXPECT_LT(sync.object_requests.size(), sync.GetNumberOfObjectsStored());
   // Check that at least the root piece has been added to storage.
   TryGetPiece(object_identifier);
 }
 
 TEST_F(PageStorageTest, GetObjectFromSync) {
-  ObjectData data("Some data", InlineBehavior::PREVENT);
+  ObjectData data = MakeObject("Some data", InlineBehavior::PREVENT);
   FakeSyncDelegate sync;
   sync.AddObject(data.object_identifier, data.value);
   storage_->SetSyncDelegate(&sync);
 
   std::unique_ptr<const Object> object =
-      TryGetObject(data.object_identifier, PageStorage::Location::NETWORK);
-  EXPECT_EQ(data.object_identifier, object->GetIdentifier());
+      TryGetObject(data.object_identifier, PageStorage::Location::ValueFromNetwork());
+  EXPECT_EQ(object->GetIdentifier(), data.object_identifier);
   fxl::StringView object_data;
-  ASSERT_EQ(Status::OK, object->GetData(&object_data));
-  EXPECT_EQ(data.value, convert::ToString(object_data));
+  ASSERT_EQ(object->GetData(&object_data), Status::OK);
+  EXPECT_EQ(convert::ToString(object_data), data.value);
   // Check that the piece has been added to storage (it is small enough that
   // there is only one piece).
   TryGetPiece(data.object_identifier);
 
   storage_->SetSyncDelegate(nullptr);
-  ObjectData other_data("Some other data", InlineBehavior::PREVENT);
-  TryGetObject(other_data.object_identifier, PageStorage::Location::LOCAL,
+  ObjectData other_data = MakeObject("Some other data", InlineBehavior::PREVENT);
+  TryGetObject(other_data.object_identifier, PageStorage::Location::Local(),
                Status::INTERNAL_NOT_FOUND);
-  TryGetObject(other_data.object_identifier, PageStorage::Location::NETWORK, Status::NETWORK_ERROR);
+  TryGetObject(other_data.object_identifier, PageStorage::Location::ValueFromNetwork(),
+               Status::NETWORK_ERROR);
 }
 
 TEST_F(PageStorageTest, FullDownloadAfterPartial) {
@@ -1617,35 +1650,36 @@ TEST_F(PageStorageTest, FullDownloadAfterPartial) {
 
   FakeSyncDelegate sync;
   ObjectIdentifier object_identifier =
-      ForEachPiece(data_str, ObjectType::BLOB, [&sync](std::unique_ptr<const Piece> piece) {
-        ObjectIdentifier object_identifier = piece->GetIdentifier();
-        if (GetObjectDigestInfo(object_identifier.object_digest()).is_inlined()) {
-          return;
-        }
-        sync.AddObject(std::move(object_identifier), piece->GetData().ToString());
-      });
-  ASSERT_EQ(PieceType::INDEX, GetObjectDigestInfo(object_identifier.object_digest()).piece_type);
+      ForEachPiece(data_str, ObjectType::BLOB, storage_->GetObjectIdentifierFactory(),
+                   [&sync](std::unique_ptr<const Piece> piece) {
+                     ObjectIdentifier object_identifier = piece->GetIdentifier();
+                     if (GetObjectDigestInfo(object_identifier.object_digest()).is_inlined()) {
+                       return;
+                     }
+                     sync.AddObject(std::move(object_identifier), piece->GetData().ToString());
+                   });
+  ASSERT_EQ(GetObjectDigestInfo(object_identifier.object_digest()).piece_type, PieceType::INDEX);
   storage_->SetSyncDelegate(&sync);
 
   fsl::SizedVmo object_part =
-      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::NETWORK);
+      TryGetObjectPart(object_identifier, offset, size, PageStorage::Location::ValueFromNetwork());
   std::string object_part_data;
   ASSERT_TRUE(fsl::StringFromVmo(object_part, &object_part_data));
-  EXPECT_EQ(data_str.substr(offset, size), convert::ToString(object_part_data));
+  EXPECT_EQ(convert::ToString(object_part_data), data_str.substr(offset, size));
   EXPECT_LT(sync.object_requests.size(), sync.GetNumberOfObjectsStored());
-  TryGetObject(object_identifier, PageStorage::LOCAL, Status::INTERNAL_NOT_FOUND);
+  TryGetObject(object_identifier, PageStorage::Location::Local(), Status::INTERNAL_NOT_FOUND);
   // Check that all requested pieces have been stored locally.
   for (const auto& piece_identifier : sync.object_requests) {
     TryGetPiece(piece_identifier);
   }
 
   std::unique_ptr<const Object> object =
-      TryGetObject(object_identifier, PageStorage::Location::NETWORK);
+      TryGetObject(object_identifier, PageStorage::Location::ValueFromNetwork());
   fxl::StringView object_data;
-  ASSERT_EQ(Status::OK, object->GetData(&object_data));
-  EXPECT_EQ(data_str, convert::ToString(object_data));
-  EXPECT_EQ(sync.object_requests.size(), sync.GetNumberOfObjectsStored());
-  TryGetObject(object_identifier, PageStorage::LOCAL, Status::OK);
+  ASSERT_EQ(object->GetData(&object_data), Status::OK);
+  EXPECT_EQ(convert::ToString(object_data), data_str);
+  EXPECT_EQ(sync.GetNumberOfObjectsStored(), sync.object_requests.size());
+  TryGetObject(object_identifier, PageStorage::Location::Local(), Status::OK);
   // Check that all pieces have been stored locally.
   for (const auto& piece_identifier : sync.object_requests) {
     TryGetPiece(piece_identifier);
@@ -1653,27 +1687,27 @@ TEST_F(PageStorageTest, FullDownloadAfterPartial) {
 }
 
 TEST_F(PageStorageTest, GetObjectFromSyncWrongId) {
-  ObjectData data("Some data", InlineBehavior::PREVENT);
-  ObjectData data2("Some data2", InlineBehavior::PREVENT);
+  ObjectData data = MakeObject("Some data", InlineBehavior::PREVENT);
+  ObjectData data2 = MakeObject("Some data2", InlineBehavior::PREVENT);
   FakeSyncDelegate sync;
   sync.AddObject(data.object_identifier, data2.value);
   storage_->SetSyncDelegate(&sync);
 
-  TryGetObject(data.object_identifier, PageStorage::Location::NETWORK,
+  TryGetObject(data.object_identifier, PageStorage::Location::ValueFromNetwork(),
                Status::DATA_INTEGRITY_ERROR);
 }
 
 TEST_F(PageStorageTest, AddAndGetHugeTreenodeFromLocal) {
   std::string data_str = RandomString(environment_.random(), 65536);
 
-  ObjectData data(std::move(data_str), ObjectType::TREE_NODE, InlineBehavior::PREVENT);
+  ObjectData data = MakeObject(std::move(data_str), ObjectType::TREE_NODE, InlineBehavior::PREVENT);
   // An identifier to another tree node pointed at by the current one.
-  const ObjectIdentifier tree_reference = RandomObjectIdentifier(environment_.random());
-  ASSERT_EQ(ObjectType::TREE_NODE,
-            GetObjectDigestInfo(data.object_identifier.object_digest()).object_type);
-  ASSERT_EQ(PieceType::INDEX,
-            GetObjectDigestInfo(data.object_identifier.object_digest()).piece_type);
-  ASSERT_EQ(InlinedPiece::NO, GetObjectDigestInfo(data.object_identifier.object_digest()).inlined);
+  const ObjectIdentifier tree_reference = RandomObjectIdentifier();
+  ASSERT_EQ(GetObjectDigestInfo(data.object_identifier.object_digest()).object_type,
+            ObjectType::TREE_NODE);
+  ASSERT_EQ(GetObjectDigestInfo(data.object_identifier.object_digest()).piece_type,
+            PieceType::INDEX);
+  ASSERT_EQ(GetObjectDigestInfo(data.object_identifier.object_digest()).inlined, InlinedPiece::NO);
 
   bool called;
   Status status;
@@ -1685,16 +1719,16 @@ TEST_F(PageStorageTest, AddAndGetHugeTreenodeFromLocal) {
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
 
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   // This ensures that the object is encoded with an index, as we checked the
   // piece type of |data.object_identifier| above.
-  EXPECT_EQ(data.object_identifier, object_identifier);
+  EXPECT_EQ(object_identifier, data.object_identifier);
 
   std::unique_ptr<const Object> object =
-      TryGetObject(object_identifier, PageStorage::Location::LOCAL);
+      TryGetObject(object_identifier, PageStorage::Location::Local());
   fxl::StringView content;
-  ASSERT_EQ(Status::OK, object->GetData(&content));
-  EXPECT_EQ(data.value, content);
+  ASSERT_EQ(object->GetData(&content), Status::OK);
+  EXPECT_EQ(content, data.value);
   EXPECT_TRUE(ObjectIsUntracked(object_identifier, true));
   EXPECT_TRUE(IsPieceSynced(object_identifier, false));
 
@@ -1710,17 +1744,19 @@ TEST_F(PageStorageTest, AddAndGetHugeTreenodeFromLocal) {
     CheckInboundObjectReferences(handler, tree_reference,
                                  {{object_identifier.object_digest(), KeyPriority::LAZY}});
     // Check piece references.
-    ASSERT_EQ(
-        Status::OK, ForEachIndexChild(piece->GetData(), [this, handler, object_identifier](
-                                                            ObjectIdentifier piece_identifier) {
-          if (GetObjectDigestInfo(piece_identifier.object_digest()).is_inlined()) {
-            // References to inline pieces are not stored on disk.
-            return Status::OK;
-          }
-          CheckInboundObjectReferences(handler, piece_identifier,
-                                       {{object_identifier.object_digest(), KeyPriority::EAGER}});
-          return Status::OK;
-        }));
+    ASSERT_EQ(ForEachIndexChild(
+                  piece->GetData(), storage_->GetObjectIdentifierFactory(),
+                  [this, handler, object_identifier](ObjectIdentifier piece_identifier) {
+                    if (GetObjectDigestInfo(piece_identifier.object_digest()).is_inlined()) {
+                      // References to inline pieces are not stored on disk.
+                      return Status::OK;
+                    }
+                    CheckInboundObjectReferences(
+                        handler, piece_identifier,
+                        {{object_identifier.object_digest(), KeyPriority::EAGER}});
+                    return Status::OK;
+                  }),
+              Status::OK);
   });
 }
 
@@ -1729,10 +1765,9 @@ TEST_F(PageStorageTest, AddAndGetHugeTreenodeFromSync) {
   std::vector<Entry> entries;
   std::map<size_t, ObjectIdentifier> children;
   for (size_t i = 0; i < 1000; ++i) {
-    entries.push_back(Entry{RandomString(environment_.random(), 50),
-                            RandomObjectIdentifier(environment_.random()),
-                            i % 2 ? KeyPriority::EAGER : KeyPriority::LAZY});
-    children.emplace(i, RandomObjectIdentifier(environment_.random()));
+    entries.push_back(Entry{RandomString(environment_.random(), 50), RandomObjectIdentifier(),
+                            i % 2 ? KeyPriority::EAGER : KeyPriority::LAZY, EntryId()});
+    children.emplace(i, RandomObjectIdentifier());
   }
   std::sort(entries.begin(), entries.end(),
             [](const Entry& e1, const Entry& e2) { return e1.key < e2.key; });
@@ -1746,15 +1781,16 @@ TEST_F(PageStorageTest, AddAndGetHugeTreenodeFromSync) {
   std::map<ObjectDigest, ObjectIdentifier> digest_to_identifier;
   std::map<ObjectIdentifier, ObjectReferencesAndPriority> inbound_references;
   ObjectIdentifier object_identifier = ForEachPiece(
-      data_str, ObjectType::TREE_NODE,
-      [&sync, &digest_to_identifier, &inbound_references](std::unique_ptr<const Piece> piece) {
+      data_str, ObjectType::TREE_NODE, storage_->GetObjectIdentifierFactory(),
+      [&sync, &digest_to_identifier, &inbound_references,
+       factory = storage_->GetObjectIdentifierFactory()](std::unique_ptr<const Piece> piece) {
         ObjectIdentifier piece_identifier = piece->GetIdentifier();
         if (GetObjectDigestInfo(piece_identifier.object_digest()).is_inlined()) {
           return;
         }
         digest_to_identifier[piece_identifier.object_digest()] = piece_identifier;
         ObjectReferencesAndPriority outbound_references;
-        ASSERT_EQ(piece->AppendReferences(&outbound_references), Status::OK);
+        ASSERT_EQ(Status::OK, piece->AppendReferences(&outbound_references));
         for (const auto& [reference, priority] : outbound_references) {
           auto reference_identifier = digest_to_identifier.find(reference);
           // ForEachPiece returns pieces in order, so we must have already seen
@@ -1765,7 +1801,7 @@ TEST_F(PageStorageTest, AddAndGetHugeTreenodeFromSync) {
         }
         sync.AddObject(std::move(piece_identifier), piece->GetData().ToString());
       });
-  ASSERT_EQ(PieceType::INDEX, GetObjectDigestInfo(object_identifier.object_digest()).piece_type);
+  ASSERT_EQ(GetObjectDigestInfo(object_identifier.object_digest()).piece_type, PieceType::INDEX);
   storage_->SetSyncDelegate(&sync);
 
   // Add object references to the inbound references map.
@@ -1779,14 +1815,16 @@ TEST_F(PageStorageTest, AddAndGetHugeTreenodeFromSync) {
   }
 
   // Get the object from network and check that it is correct.
+  // TODO(LE-823): when removing compatibility, we need to disable diffs for this test so we
+  // actually get the objects (getting the objects this way will still be needed for P2P).
   std::unique_ptr<const Object> object =
-      TryGetObject(object_identifier, PageStorage::Location::NETWORK);
+      TryGetObject(object_identifier, PageStorage::Location::ValueFromNetwork());
   fxl::StringView content;
-  ASSERT_EQ(Status::OK, object->GetData(&content));
-  EXPECT_EQ(data_str, content);
+  ASSERT_EQ(object->GetData(&content), Status::OK);
+  EXPECT_EQ(content, data_str);
 
   // Check that all pieces have been stored locally.
-  EXPECT_EQ(sync.object_requests.size(), sync.GetNumberOfObjectsStored());
+  EXPECT_EQ(sync.GetNumberOfObjectsStored(), sync.object_requests.size());
   for (const auto& piece_identifier : sync.object_requests) {
     TryGetPiece(piece_identifier);
   }
@@ -1801,16 +1839,16 @@ TEST_F(PageStorageTest, AddAndGetHugeTreenodeFromSync) {
 
   // Now that the object has been retrieved from network, we should be able to
   // retrieve it again locally.
-  auto local_object = TryGetObject(object_identifier, PageStorage::LOCAL, Status::OK);
-  ASSERT_EQ(Status::OK, object->GetData(&content));
-  EXPECT_EQ(data_str, content);
+  auto local_object = TryGetObject(object_identifier, PageStorage::Location::Local(), Status::OK);
+  ASSERT_EQ(object->GetData(&content), Status::OK);
+  EXPECT_EQ(content, data_str);
 }
 
 TEST_F(PageStorageTest, UnsyncedPieces) {
   ObjectData data_array[] = {
-      ObjectData("Some data", InlineBehavior::PREVENT),
-      ObjectData("Some more data", InlineBehavior::PREVENT),
-      ObjectData("Even more data", InlineBehavior::PREVENT),
+      MakeObject("Some data", InlineBehavior::PREVENT),
+      MakeObject("Some more data", InlineBehavior::PREVENT),
+      MakeObject("Even more data", InlineBehavior::PREVENT),
   };
   constexpr size_t size = arraysize(data_array);
   for (auto& data : data_array) {
@@ -1840,8 +1878,8 @@ TEST_F(PageStorageTest, UnsyncedPieces) {
       callback::Capture(callback::SetWhenCalled(&called), &status, &object_identifiers));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
-  EXPECT_EQ(6u, object_identifiers.size());
+  EXPECT_EQ(status, Status::OK);
+  EXPECT_EQ(object_identifiers.size(), 6u);
   for (size_t i = 0; i < size; ++i) {
     std::unique_ptr<const Commit> commit = GetCommit(commits[i]);
     EXPECT_TRUE(std::find_if(object_identifiers.begin(), object_identifiers.end(),
@@ -1860,14 +1898,14 @@ TEST_F(PageStorageTest, UnsyncedPieces) {
                             callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   std::vector<ObjectIdentifier> objects;
   storage_->GetUnsyncedPieces(
       callback::Capture(callback::SetWhenCalled(&called), &status, &objects));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
-  EXPECT_EQ(5u, objects.size());
+  EXPECT_EQ(status, Status::OK);
+  EXPECT_EQ(objects.size(), 5u);
   std::unique_ptr<const Commit> commit = GetCommit(commits[2]);
   EXPECT_TRUE(std::find(objects.begin(), objects.end(), commit->GetRootIdentifier()) !=
               objects.end());
@@ -1879,9 +1917,9 @@ TEST_F(PageStorageTest, UnsyncedPieces) {
 
 TEST_F(PageStorageTest, PageIsSynced) {
   ObjectData data_array[] = {
-      ObjectData("Some data", InlineBehavior::PREVENT),
-      ObjectData("Some more data", InlineBehavior::PREVENT),
-      ObjectData("Even more data", InlineBehavior::PREVENT),
+      MakeObject("Some data", InlineBehavior::PREVENT),
+      MakeObject("Some more data", InlineBehavior::PREVENT),
+      MakeObject("Even more data", InlineBehavior::PREVENT),
   };
   constexpr size_t size = arraysize(data_array);
   for (auto& data : data_array) {
@@ -1898,8 +1936,8 @@ TEST_F(PageStorageTest, PageIsSynced) {
   storage_->IsSynced(callback::Capture(callback::SetWhenCalled(&called), &status, &is_synced));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
-  EXPECT_EQ(true, is_synced);
+  EXPECT_EQ(status, Status::OK);
+  EXPECT_EQ(is_synced, true);
 
   // Add all objects in one commit.
   std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
@@ -1915,7 +1953,7 @@ TEST_F(PageStorageTest, PageIsSynced) {
   storage_->IsSynced(callback::Capture(callback::SetWhenCalled(&called), &status, &is_synced));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   EXPECT_FALSE(is_synced);
   // Mark objects (and the root tree node) as synced and expect that the page is
   // still unsynced.
@@ -1925,7 +1963,7 @@ TEST_F(PageStorageTest, PageIsSynced) {
                               callback::Capture(callback::SetWhenCalled(&called), &status));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
   }
 
   called = false;
@@ -1933,13 +1971,13 @@ TEST_F(PageStorageTest, PageIsSynced) {
                             callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   called = false;
   storage_->IsSynced(callback::Capture(callback::SetWhenCalled(&called), &status, &is_synced));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   EXPECT_FALSE(is_synced);
 
   // Mark the commit as synced and expect that the page is synced.
@@ -1948,12 +1986,12 @@ TEST_F(PageStorageTest, PageIsSynced) {
                              callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   called = false;
   storage_->IsSynced(callback::Capture(callback::SetWhenCalled(&called), &status, &is_synced));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   EXPECT_TRUE(is_synced);
 
   // All objects should be synced now.
@@ -1981,13 +2019,13 @@ TEST_F(PageStorageTest, PageIsMarkedOnlineAfterCloudSync) {
       callback::Capture(callback::SetWhenCalled(&called), &status, &object_identifiers));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   for (ObjectIdentifier& object_identifier : object_identifiers) {
     storage_->MarkPieceSynced(object_identifier,
                               callback::Capture(callback::SetWhenCalled(&called), &status));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
   }
   EXPECT_FALSE(storage_->IsOnline());
 
@@ -1996,7 +2034,7 @@ TEST_F(PageStorageTest, PageIsMarkedOnlineAfterCloudSync) {
                              callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   EXPECT_TRUE(storage_->IsOnline());
 }
 
@@ -2010,12 +2048,12 @@ TEST_F(PageStorageTest, PageIsMarkedOnlineSyncWithPeer) {
   storage_->MarkSyncedToPeer(callback::Capture(callback::SetWhenCalled(&called), &status));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   EXPECT_TRUE(storage_->IsOnline());
 }
 
 TEST_F(PageStorageTest, PageIsEmpty) {
-  ObjectData value("Some value", InlineBehavior::PREVENT);
+  ObjectData value = MakeObject("Some value", InlineBehavior::PREVENT);
   bool called;
   Status status;
   bool is_empty;
@@ -2024,7 +2062,7 @@ TEST_F(PageStorageTest, PageIsEmpty) {
   storage_->IsEmpty(callback::Capture(callback::SetWhenCalled(&called), &status, &is_empty));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   EXPECT_TRUE(is_empty);
 
   // Add an entry and expect that the page is not empty any more.
@@ -2035,7 +2073,7 @@ TEST_F(PageStorageTest, PageIsEmpty) {
   storage_->IsEmpty(callback::Capture(callback::SetWhenCalled(&called), &status, &is_empty));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   EXPECT_FALSE(is_empty);
 
   // Clear the page and expect it to be empty again.
@@ -2046,12 +2084,12 @@ TEST_F(PageStorageTest, PageIsEmpty) {
   storage_->IsEmpty(callback::Capture(callback::SetWhenCalled(&called), &status, &is_empty));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   EXPECT_TRUE(is_empty);
 }
 
 TEST_F(PageStorageTest, UntrackedObjectsSimple) {
-  ObjectData data("Some data", InlineBehavior::PREVENT);
+  ObjectData data = MakeObject("Some data", InlineBehavior::PREVENT);
 
   // The object is not yet created and its id should not be marked as untracked.
   EXPECT_TRUE(ObjectIsUntracked(data.object_identifier, false));
@@ -2070,9 +2108,9 @@ TEST_F(PageStorageTest, UntrackedObjectsSimple) {
 
 TEST_F(PageStorageTest, UntrackedObjectsComplex) {
   ObjectData data_array[] = {
-      ObjectData("Some data", InlineBehavior::PREVENT),
-      ObjectData("Some more data", InlineBehavior::PREVENT),
-      ObjectData("Even more data", InlineBehavior::PREVENT),
+      MakeObject("Some data", InlineBehavior::PREVENT),
+      MakeObject("Some more data", InlineBehavior::PREVENT),
+      MakeObject("Even more data", InlineBehavior::PREVENT),
   };
   for (auto& data : data_array) {
     TryAddFromLocal(data.value, data.object_identifier);
@@ -2109,46 +2147,46 @@ TEST_F(PageStorageTest, CommitWatchers) {
   // Add a watcher and receive the commit.
   auto expected = TryCommitFromLocal(10);
   ASSERT_TRUE(expected);
-  EXPECT_EQ(1, watcher.commit_count);
-  EXPECT_EQ(expected->GetId(), watcher.last_commit_id);
-  EXPECT_EQ(ChangeSource::LOCAL, watcher.last_source);
+  EXPECT_EQ(watcher.commit_count, 1);
+  EXPECT_EQ(watcher.last_commit_id, expected->GetId());
+  EXPECT_EQ(watcher.last_source, ChangeSource::LOCAL);
 
   // Add a second watcher.
   FakeCommitWatcher watcher2;
   storage_->AddCommitWatcher(&watcher2);
   expected = TryCommitFromLocal(10);
   ASSERT_TRUE(expected);
-  EXPECT_EQ(2, watcher.commit_count);
-  EXPECT_EQ(expected->GetId(), watcher.last_commit_id);
-  EXPECT_EQ(ChangeSource::LOCAL, watcher.last_source);
-  EXPECT_EQ(1, watcher2.commit_count);
-  EXPECT_EQ(expected->GetId(), watcher2.last_commit_id);
-  EXPECT_EQ(ChangeSource::LOCAL, watcher2.last_source);
+  EXPECT_EQ(watcher.commit_count, 2);
+  EXPECT_EQ(watcher.last_commit_id, expected->GetId());
+  EXPECT_EQ(watcher.last_source, ChangeSource::LOCAL);
+  EXPECT_EQ(watcher2.commit_count, 1);
+  EXPECT_EQ(watcher2.last_commit_id, expected->GetId());
+  EXPECT_EQ(watcher2.last_source, ChangeSource::LOCAL);
 
   // Remove one watcher.
   storage_->RemoveCommitWatcher(&watcher2);
   expected = TryCommitFromSync();
-  EXPECT_EQ(3, watcher.commit_count);
-  EXPECT_EQ(expected->GetId(), watcher.last_commit_id);
-  EXPECT_EQ(ChangeSource::CLOUD, watcher.last_source);
-  EXPECT_EQ(1, watcher2.commit_count);
+  EXPECT_EQ(watcher.commit_count, 3);
+  EXPECT_EQ(watcher.last_commit_id, expected->GetId());
+  EXPECT_EQ(watcher.last_source, ChangeSource::CLOUD);
+  EXPECT_EQ(watcher2.commit_count, 1);
 }
 
 // If a commit fails to be persisted on disk, no notification should be sent.
 TEST_F(PageStorageTest, CommitFailNoWatchNotification) {
   FakeCommitWatcher watcher;
   storage_->AddCommitWatcher(&watcher);
-  EXPECT_EQ(0, watcher.commit_count);
+  EXPECT_EQ(watcher.commit_count, 0);
 
   // Create the commit.
   std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
-  journal->Put("key1", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key1", RandomObjectIdentifier(), KeyPriority::EAGER);
 
   leveldb_->SetFailBatchExecuteAfter(1);
   std::unique_ptr<const Commit> commit = TryCommitJournal(std::move(journal), Status::IO_ERROR);
 
   // The watcher is not called.
-  EXPECT_EQ(0, watcher.commit_count);
+  EXPECT_EQ(watcher.commit_count, 0);
 }
 
 TEST_F(PageStorageTest, SyncMetadata) {
@@ -2164,20 +2202,20 @@ TEST_F(PageStorageTest, SyncMetadata) {
         key, callback::Capture(callback::SetWhenCalled(&called), &status, &returned_value));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::INTERNAL_NOT_FOUND, status);
+    EXPECT_EQ(status, Status::INTERNAL_NOT_FOUND);
 
     storage_->SetSyncMetadata(key, value,
                               callback::Capture(callback::SetWhenCalled(&called), &status));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
 
     storage_->GetSyncMetadata(
         key, callback::Capture(callback::SetWhenCalled(&called), &status, &returned_value));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
-    EXPECT_EQ(value, returned_value);
+    EXPECT_EQ(status, Status::OK);
+    EXPECT_EQ(returned_value, value);
   }
 }
 
@@ -2193,41 +2231,41 @@ TEST_F(PageStorageTest, AddMultipleCommitsFromSync) {
     std::vector<ObjectIdentifier> object_identifiers;
     object_identifiers.resize(3);
     for (size_t i = 0; i < object_identifiers.size(); ++i) {
-      ObjectData value("value" + std::to_string(i), InlineBehavior::PREVENT);
+      ObjectData value = MakeObject("value" + std::to_string(i), InlineBehavior::PREVENT);
       std::vector<Entry> entries = {
-          Entry{"key" + std::to_string(i), value.object_identifier, KeyPriority::EAGER}};
+          Entry{"key" + std::to_string(i), value.object_identifier, KeyPriority::EAGER, EntryId()}};
       std::unique_ptr<const btree::TreeNode> node;
       ASSERT_TRUE(CreateNodeFromEntries(entries, {}, &node));
       object_identifiers[i] = node->GetIdentifier();
       sync.AddObject(value.object_identifier, value.value);
       std::unique_ptr<const Object> root_object =
-          TryGetObject(object_identifiers[i], PageStorage::Location::NETWORK);
+          TryGetObject(object_identifiers[i], PageStorage::Location::Local());
       fxl::StringView root_data;
-      ASSERT_EQ(Status::OK, root_object->GetData(&root_data));
+      ASSERT_EQ(root_object->GetData(&root_data), Status::OK);
       sync.AddObject(object_identifiers[i], root_data.ToString());
     }
 
     // Reset and clear the storage.
     ResetStorage();
     storage_->SetSyncDelegate(&sync);
+    for (auto& identifier : object_identifiers) {
+      RetrackIdentifier(&identifier);
+    }
 
     std::vector<std::unique_ptr<const Commit>> parent;
     parent.emplace_back(GetFirstHead());
-    std::unique_ptr<const Commit> commit0 =
-        CommitImpl::FromContentAndParents(storage_->GetCommitTracker(), environment_.clock(),
-                                          object_identifiers[0], std::move(parent));
+    std::unique_ptr<const Commit> commit0 = storage_->GetCommitFactory()->FromContentAndParents(
+        environment_.clock(), object_identifiers[0], std::move(parent));
     parent.clear();
 
     parent.emplace_back(GetFirstHead());
-    std::unique_ptr<const Commit> commit1 =
-        CommitImpl::FromContentAndParents(storage_->GetCommitTracker(), environment_.clock(),
-                                          object_identifiers[1], std::move(parent));
+    std::unique_ptr<const Commit> commit1 = storage_->GetCommitFactory()->FromContentAndParents(
+        environment_.clock(), object_identifiers[1], std::move(parent));
     parent.clear();
 
     parent.emplace_back(commit1->Clone());
-    std::unique_ptr<const Commit> commit2 =
-        CommitImpl::FromContentAndParents(storage_->GetCommitTracker(), environment_.clock(),
-                                          object_identifiers[2], std::move(parent));
+    std::unique_ptr<const Commit> commit2 = storage_->GetCommitFactory()->FromContentAndParents(
+        environment_.clock(), object_identifiers[2], std::move(parent));
 
     std::vector<PageStorage::CommitIdAndBytes> commits_and_bytes;
     commits_and_bytes.emplace_back(commit0->GetId(), commit0->GetStorageBytes().ToString());
@@ -2242,11 +2280,11 @@ TEST_F(PageStorageTest, AddMultipleCommitsFromSync) {
         callback::Capture(callback::SetWhenCalled(&called), &status, &missing_ids));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
 
-    EXPECT_EQ(4u, sync.object_requests.size());
+    EXPECT_EQ(sync.object_requests.size(), 4u);
     EXPECT_NE(sync.object_requests.find(object_identifiers[0]), sync.object_requests.end());
-    EXPECT_EQ(sync.object_requests.find(object_identifiers[1]), sync.object_requests.end());
+    EXPECT_EQ(sync.object_requests.end(), sync.object_requests.find(object_identifiers[1]));
     EXPECT_NE(sync.object_requests.find(object_identifiers[2]), sync.object_requests.end());
   });
 }
@@ -2254,18 +2292,18 @@ TEST_F(PageStorageTest, AddMultipleCommitsFromSync) {
 TEST_F(PageStorageTest, Generation) {
   std::unique_ptr<const Commit> commit1 = TryCommitFromLocal(3);
   ASSERT_TRUE(commit1);
-  EXPECT_EQ(1u, commit1->GetGeneration());
+  EXPECT_EQ(commit1->GetGeneration(), 1u);
 
   std::unique_ptr<const Commit> commit2 = TryCommitFromLocal(3);
   ASSERT_TRUE(commit2);
-  EXPECT_EQ(2u, commit2->GetGeneration());
+  EXPECT_EQ(commit2->GetGeneration(), 2u);
 
   std::unique_ptr<Journal> journal =
       storage_->StartMergeCommit(std::move(commit1), std::move(commit2));
 
   std::unique_ptr<const Commit> commit3 = TryCommitJournal(std::move(journal), Status::OK);
   ASSERT_TRUE(commit3);
-  EXPECT_EQ(3u, commit3->GetGeneration());
+  EXPECT_EQ(commit3->GetGeneration(), 3u);
 }
 
 TEST_F(PageStorageTest, GetEntryFromCommit) {
@@ -2281,7 +2319,7 @@ TEST_F(PageStorageTest, GetEntryFromCommit) {
       callback::Capture(callback::SetWhenCalled(&called), &status, &entry));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  ASSERT_EQ(Status::KEY_NOT_FOUND, status);
+  ASSERT_EQ(status, Status::KEY_NOT_FOUND);
 
   for (int i = 0; i < size; ++i) {
     std::string expected_key = fxl::StringPrintf("key%05d", i);
@@ -2290,9 +2328,176 @@ TEST_F(PageStorageTest, GetEntryFromCommit) {
         callback::Capture(callback::SetWhenCalled(&called), &status, &entry));
     RunLoopUntilIdle();
     ASSERT_TRUE(called);
-    ASSERT_EQ(Status::OK, status);
-    EXPECT_EQ(expected_key, entry.key);
+    ASSERT_EQ(status, Status::OK);
+    EXPECT_EQ(entry.key, expected_key);
   }
+}
+
+TEST_F(PageStorageTest, GetDiffForCloudInsertion) {
+  // Create an initial commit with 10 keys and then another one having commit1 as a parent,
+  // inserting a new key.
+  std::unique_ptr<const Commit> commit1 = TryCommitFromLocal(10);
+  ASSERT_TRUE(commit1);
+
+  const std::string new_key = "new_key";
+  const ObjectIdentifier new_identifier = RandomObjectIdentifier();
+  const KeyPriority new_priority = KeyPriority::LAZY;
+  std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
+  journal->Put(new_key, new_identifier, new_priority);
+  std::unique_ptr<const Commit> commit2 = TryCommitJournal(std::move(journal), Status::OK);
+
+  bool called = false;
+  storage_->GetDiffForCloud(
+      *commit2, [&](Status status, CommitIdView base_id, std::vector<EntryChange> changes) {
+        called = true;
+        ASSERT_EQ(status, Status::OK);
+        EXPECT_EQ(base_id, commit1->GetId());
+
+        EXPECT_THAT(changes, SizeIs(1));
+        EXPECT_EQ(changes[0].entry.key, new_key);
+        EXPECT_EQ(changes[0].entry.object_identifier, new_identifier);
+        EXPECT_EQ(changes[0].entry.priority, new_priority);
+        EXPECT_THAT(changes[0].entry.entry_id, Not(IsEmpty()));
+        EXPECT_EQ(changes[0].deleted, false);
+      });
+  RunLoopUntilIdle();
+  ASSERT_TRUE(called);
+}
+
+TEST_F(PageStorageTest, GetDiffForCloudDeletion) {
+  // Create an initial commit with 3 keys and then another one having commit1 as a parent,
+  // deleting a key.
+  const std::string deleted_key = "deleted_key";
+  const ObjectIdentifier deleted_identifier = RandomObjectIdentifier();
+  const KeyPriority deleted_priority = KeyPriority::EAGER;
+
+  std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
+  journal->Put("a key", RandomObjectIdentifier(), KeyPriority::LAZY);
+  journal->Put(deleted_key, deleted_identifier, deleted_priority);
+  journal->Put("last key", RandomObjectIdentifier(), KeyPriority::LAZY);
+  std::unique_ptr<const Commit> commit1 = TryCommitJournal(std::move(journal), Status::OK);
+  ASSERT_TRUE(commit1);
+
+  journal = storage_->StartCommit(GetFirstHead());
+  journal->Delete(deleted_key);
+  std::unique_ptr<const Commit> commit2 = TryCommitJournal(std::move(journal), Status::OK);
+
+  bool called = false;
+  storage_->GetDiffForCloud(
+      *commit2, [&](Status status, CommitIdView base_id, std::vector<EntryChange> changes) {
+        called = true;
+        ASSERT_EQ(status, Status::OK);
+        EXPECT_EQ(base_id, commit1->GetId());
+
+        EXPECT_THAT(changes, SizeIs(1));
+        EXPECT_EQ(changes[0].entry.key, deleted_key);
+        EXPECT_EQ(changes[0].entry.object_identifier, deleted_identifier);
+        EXPECT_EQ(changes[0].entry.priority, deleted_priority);
+        EXPECT_THAT(changes[0].entry.entry_id, Not(IsEmpty()));
+        EXPECT_EQ(changes[0].deleted, true);
+      });
+  RunLoopUntilIdle();
+  ASSERT_TRUE(called);
+}
+
+TEST_F(PageStorageTest, GetDiffForCloudUpdate) {
+  // Create an initial commit with 3 keys and then another one having commit1 as a parent,
+  // updating a key.
+  const std::string updated_key = "updated_key";
+  const ObjectIdentifier old_identifier = RandomObjectIdentifier();
+  const KeyPriority old_priority = KeyPriority::LAZY;
+  const ObjectIdentifier new_identifier = RandomObjectIdentifier();
+  const KeyPriority new_priority = KeyPriority::EAGER;
+
+  std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
+  journal->Put("a key", RandomObjectIdentifier(), KeyPriority::LAZY);
+  journal->Put(updated_key, old_identifier, old_priority);
+  journal->Put("last key", RandomObjectIdentifier(), KeyPriority::LAZY);
+  std::unique_ptr<const Commit> commit1 = TryCommitJournal(std::move(journal), Status::OK);
+  ASSERT_TRUE(commit1);
+
+  journal = storage_->StartCommit(GetFirstHead());
+  journal->Put(updated_key, new_identifier, new_priority);
+  std::unique_ptr<const Commit> commit2 = TryCommitJournal(std::move(journal), Status::OK);
+
+  bool called = false;
+  storage_->GetDiffForCloud(
+      *commit2, [&](Status status, CommitIdView base_id, std::vector<EntryChange> changes) {
+        called = true;
+        ASSERT_EQ(status, Status::OK);
+        EXPECT_EQ(base_id, commit1->GetId());
+
+        EXPECT_THAT(changes, SizeIs(2));
+        EXPECT_EQ(changes[0].entry.key, updated_key);
+        EXPECT_EQ(changes[0].entry.object_identifier, old_identifier);
+        EXPECT_EQ(changes[0].entry.priority, old_priority);
+        EXPECT_EQ(changes[0].deleted, true);
+
+        EXPECT_EQ(changes[1].entry.key, updated_key);
+        EXPECT_EQ(changes[1].entry.object_identifier, new_identifier);
+        EXPECT_EQ(changes[1].entry.priority, new_priority);
+        EXPECT_EQ(changes[1].deleted, false);
+      });
+  RunLoopUntilIdle();
+  ASSERT_TRUE(called);
+}
+
+TEST_F(PageStorageTest, GetDiffForCloudEntryIdCorrectness) {
+  // Create an initial commit with 10 keys, then one having commit1 as a parent adding a key and
+  // then one having commit2 as a parent deleting the same key.
+  std::unique_ptr<const Commit> commit1 = TryCommitFromLocal(10);
+  ASSERT_TRUE(commit1);
+
+  const std::string new_key = "new_key";
+  const ObjectIdentifier new_identifier = RandomObjectIdentifier();
+  const KeyPriority new_priority = KeyPriority::LAZY;
+
+  std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
+  journal->Put(new_key, new_identifier, new_priority);
+  std::unique_ptr<const Commit> commit2 = TryCommitJournal(std::move(journal), Status::OK);
+
+  journal = storage_->StartCommit(GetFirstHead());
+  journal->Delete(new_key);
+  std::unique_ptr<const Commit> commit3 = TryCommitJournal(std::move(journal), Status::OK);
+
+  // The entry_id of the inserted entry should be the same as the entry_id of the deleted one.
+  EntryId expected_entry_id;
+  bool called = false;
+  storage_->GetDiffForCloud(
+      *commit2, [&](Status status, CommitIdView base_id, std::vector<EntryChange> changes) {
+        called = true;
+        ASSERT_EQ(status, Status::OK);
+        EXPECT_EQ(base_id, commit1->GetId());
+
+        EXPECT_THAT(changes, SizeIs(1));
+        EXPECT_EQ(changes[0].entry.key, new_key);
+        EXPECT_EQ(changes[0].entry.object_identifier, new_identifier);
+        EXPECT_EQ(changes[0].entry.priority, new_priority);
+        EXPECT_THAT(changes[0].entry.entry_id, Not(IsEmpty()));
+        EXPECT_EQ(changes[0].deleted, false);
+        expected_entry_id = changes[0].entry.entry_id;
+      });
+  RunLoopUntilIdle();
+  ASSERT_TRUE(called);
+
+  called = false;
+  storage_->GetDiffForCloud(
+      *commit3, [&](Status status, CommitIdView base_id, std::vector<EntryChange> changes) {
+        called = true;
+        ASSERT_EQ(status, Status::OK);
+        EXPECT_EQ(base_id, commit2->GetId());
+
+        EXPECT_THAT(changes, SizeIs(1));
+        EXPECT_EQ(changes[0].entry.key, new_key);
+        EXPECT_EQ(changes[0].entry.object_identifier, new_identifier);
+        EXPECT_EQ(changes[0].entry.priority, new_priority);
+        EXPECT_THAT(changes[0].entry.entry_id, Not(IsEmpty()));
+        EXPECT_EQ(changes[0].deleted, true);
+
+        EXPECT_EQ(expected_entry_id, changes[0].entry.entry_id);
+      });
+  RunLoopUntilIdle();
+  ASSERT_TRUE(called);
 }
 
 TEST_F(PageStorageTest, WatcherForReEntrantCommits) {
@@ -2302,25 +2507,25 @@ TEST_F(PageStorageTest, WatcherForReEntrantCommits) {
   bool called;
   Status status;
   std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
-  journal->Put("key", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key", RandomObjectIdentifier(), KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit1;
   storage_->CommitJournal(std::move(journal),
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit1));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   journal = storage_->StartCommit(std::move(commit1));
-  journal->Put("key", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key", RandomObjectIdentifier(), KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit2;
   storage_->CommitJournal(std::move(journal),
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit2));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
-  EXPECT_EQ(2, watcher.commit_count);
-  EXPECT_EQ(commit2->GetId(), watcher.last_commit_id);
+  EXPECT_EQ(watcher.commit_count, 2);
+  EXPECT_EQ(watcher.last_commit_id, commit2->GetId());
 }
 
 TEST_F(PageStorageTest, NoOpCommit) {
@@ -2330,7 +2535,7 @@ TEST_F(PageStorageTest, NoOpCommit) {
   std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
 
   // Create a key, and delete it.
-  journal->Put("key", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key", RandomObjectIdentifier(), KeyPriority::EAGER);
   journal->Delete("key");
 
   // Commit the journal.
@@ -2344,7 +2549,7 @@ TEST_F(PageStorageTest, NoOpCommit) {
 
   // Commiting a no-op commit should result in a successful status, but a null
   // commit.
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
   ASSERT_FALSE(commit);
 }
 
@@ -2358,9 +2563,10 @@ TEST_F(PageStorageTest, MarkRemoteCommitSyncedRace) {
   bool called;
   Status status;
   std::unique_ptr<const Commit> base_commit = GetFirstHead();
-  ObjectData value_1("data1", InlineBehavior::ALLOW);
-  ObjectData value_2("data2", InlineBehavior::ALLOW);
-  ObjectData value_3("data3", InlineBehavior::ALLOW);
+  ObjectData value_1 = MakeObject("data1", InlineBehavior::ALLOW);
+  ObjectData value_2 = MakeObject("data2", InlineBehavior::ALLOW);
+  ObjectData value_3 = MakeObject("data3", InlineBehavior::ALLOW);
+  ObjectIdentifier value_3_id = value_3.object_identifier;
 
   std::unique_ptr<Journal> journal1 = storage_->StartCommit(base_commit->Clone());
   journal1->Put("key", value_1.object_identifier, KeyPriority::EAGER);
@@ -2369,7 +2575,7 @@ TEST_F(PageStorageTest, MarkRemoteCommitSyncedRace) {
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit1));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   RunLoopFor(zx::sec(1));
 
@@ -2380,18 +2586,18 @@ TEST_F(PageStorageTest, MarkRemoteCommitSyncedRace) {
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit2));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   // Create a merge.
   std::unique_ptr<Journal> journal3 =
       storage_->StartMergeCommit(commit1->Clone(), commit2->Clone());
-  journal3->Put("key", value_3.object_identifier, KeyPriority::EAGER);
+  journal3->Put("key", value_3_id, KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit3;
   storage_->CommitJournal(std::move(journal3),
                           callback::Capture(callback::SetWhenCalled(&called), &status, &commit3));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   CommitId id3 = commit3->GetId();
   std::map<ObjectIdentifier, std::string> object_data_base;
@@ -2416,6 +2622,7 @@ TEST_F(PageStorageTest, MarkRemoteCommitSyncedRace) {
   commit2.reset();
   commit3.reset();
   ResetStorage();
+  RetrackIdentifier(&value_3_id);
 
   FakeSyncDelegate sync;
   storage_->SetSyncDelegate(&sync);
@@ -2432,9 +2639,9 @@ TEST_F(PageStorageTest, MarkRemoteCommitSyncedRace) {
                                                  &commits_from_sync_status, &missing_ids));
   RunLoopUntilIdle();
   EXPECT_TRUE(commits_from_sync_called);
-  EXPECT_EQ(Status::OK, commits_from_sync_status);
-  EXPECT_EQ(0u, missing_ids.size());
-  ASSERT_EQ(2u, GetHeads().size());
+  EXPECT_EQ(commits_from_sync_status, Status::OK);
+  EXPECT_EQ(missing_ids.size(), 0u);
+  ASSERT_EQ(GetHeads().size(), 2u);
 
   bool sync_delegate_called;
   fit::closure sync_delegate_call;
@@ -2461,17 +2668,17 @@ TEST_F(PageStorageTest, MarkRemoteCommitSyncedRace) {
   Status commits_from_local_status;
   std::unique_ptr<Journal> journal =
       storage_->StartMergeCommit(std::move(heads[0]), std::move(heads[1]));
-  journal->Put("key", value_3.object_identifier, KeyPriority::EAGER);
+  journal->Put("key", value_3_id, KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit;
   storage_->CommitJournal(
       std::move(journal),
       callback::Capture(callback::SetWhenCalled(&called), &commits_from_local_status, &commit));
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, commits_from_local_status);
+  EXPECT_EQ(commits_from_local_status, Status::OK);
   EXPECT_FALSE(commits_from_sync_called);
 
-  EXPECT_EQ(id3, commit->GetId());
+  EXPECT_EQ(commit->GetId(), id3);
 
   // The local commit should be commited.
   ASSERT_TRUE(sync_delegate_call);
@@ -2480,17 +2687,17 @@ TEST_F(PageStorageTest, MarkRemoteCommitSyncedRace) {
   // Let the two AddCommit finish.
   RunLoopUntilIdle();
   EXPECT_TRUE(commits_from_sync_called);
-  EXPECT_EQ(Status::OK, commits_from_sync_status);
-  EXPECT_EQ(Status::OK, commits_from_local_status);
+  EXPECT_EQ(commits_from_sync_status, Status::OK);
+  EXPECT_EQ(commits_from_local_status, Status::OK);
 
   // Verify that the commit is added correctly.
   storage_->GetCommit(id3, callback::Capture(callback::SetWhenCalled(&called), &status, &commit));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
 
   // The commit should be marked as synced.
-  EXPECT_EQ(0u, GetUnsyncedCommits().size());
+  EXPECT_EQ(GetUnsyncedCommits().size(), 0u);
 }
 
 // Verifies that GetUnsyncedCommits() returns commits ordered by their
@@ -2508,16 +2715,16 @@ TEST_F(PageStorageTest, MarkRemoteCommitSyncedRace) {
 TEST_F(PageStorageTest, GetUnsyncedCommits) {
   std::unique_ptr<const Commit> root = GetFirstHead();
   std::unique_ptr<Journal> journal_a = storage_->StartCommit(root->Clone());
-  journal_a->Put("a", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal_a->Put("a", RandomObjectIdentifier(), KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit_a = TryCommitJournal(std::move(journal_a), Status::OK);
   ASSERT_TRUE(commit_a);
-  EXPECT_EQ(1u, commit_a->GetGeneration());
+  EXPECT_EQ(commit_a->GetGeneration(), 1u);
 
   std::unique_ptr<Journal> journal_b = storage_->StartCommit(root->Clone());
-  journal_b->Put("b", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal_b->Put("b", RandomObjectIdentifier(), KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit_b = TryCommitJournal(std::move(journal_b), Status::OK);
   ASSERT_TRUE(commit_b);
-  EXPECT_EQ(1u, commit_b->GetGeneration());
+  EXPECT_EQ(commit_b->GetGeneration(), 1u);
 
   std::unique_ptr<Journal> journal_merge =
       storage_->StartMergeCommit(std::move(commit_a), std::move(commit_b));
@@ -2525,19 +2732,19 @@ TEST_F(PageStorageTest, GetUnsyncedCommits) {
   std::unique_ptr<const Commit> commit_merge =
       TryCommitJournal(std::move(journal_merge), Status::OK);
   ASSERT_TRUE(commit_merge);
-  EXPECT_EQ(2u, commit_merge->GetGeneration());
+  EXPECT_EQ(commit_merge->GetGeneration(), 2u);
 
   std::unique_ptr<Journal> journal_c = storage_->StartCommit(std::move(root));
-  journal_c->Put("c", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal_c->Put("c", RandomObjectIdentifier(), KeyPriority::EAGER);
   std::unique_ptr<const Commit> commit_c = TryCommitJournal(std::move(journal_c), Status::OK);
   ASSERT_TRUE(commit_c);
-  EXPECT_EQ(1u, commit_c->GetGeneration());
+  EXPECT_EQ(commit_c->GetGeneration(), 1u);
 
   // Verify that the merge commit is returned as last, even though commit C is
   // older.
   std::vector<std::unique_ptr<const Commit>> unsynced_commits = GetUnsyncedCommits();
-  EXPECT_EQ(4u, unsynced_commits.size());
-  EXPECT_EQ(commit_merge->GetId(), unsynced_commits.back()->GetId());
+  EXPECT_EQ(unsynced_commits.size(), 4u);
+  EXPECT_EQ(unsynced_commits.back()->GetId(), commit_merge->GetId());
   EXPECT_LT(commit_merge->GetTimestamp(), commit_c->GetTimestamp());
 }
 
@@ -2550,12 +2757,12 @@ TEST_F(PageStorageTest, AddCommitsMissingParent) {
 
   std::vector<std::unique_ptr<const Commit>> parent;
   parent.emplace_back(GetFirstHead());
-  auto commit_parent = CommitImpl::FromContentAndParents(
-      storage_->GetCommitTracker(), environment_.clock(), root_identifier, std::move(parent));
+  auto commit_parent = storage_->GetCommitFactory()->FromContentAndParents(
+      environment_.clock(), root_identifier, std::move(parent));
   parent.clear();
   parent.push_back(commit_parent->Clone());
-  auto commit_child = CommitImpl::FromContentAndParents(
-      storage_->GetCommitTracker(), environment_.clock(), root_identifier, std::move(parent));
+  auto commit_child = storage_->GetCommitFactory()->FromContentAndParents(
+      environment_.clock(), root_identifier, std::move(parent));
 
   std::vector<PageStorage::CommitIdAndBytes> commits_and_bytes;
   commits_and_bytes.emplace_back(commit_child->GetId(), commit_child->GetStorageBytes().ToString());
@@ -2568,7 +2775,7 @@ TEST_F(PageStorageTest, AddCommitsMissingParent) {
       callback::Capture(callback::SetWhenCalled(&called), &status, &missing_ids));
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
-  EXPECT_EQ(Status::INTERNAL_NOT_FOUND, status);
+  EXPECT_EQ(status, Status::INTERNAL_NOT_FOUND);
   EXPECT_THAT(missing_ids, ElementsAre(commit_parent->GetId()));
 }
 
@@ -2627,7 +2834,7 @@ TEST_F(PageStorageTest, AddLocalCommitsInterrupted) {
   bool called;
   Status status;
   std::unique_ptr<Journal> journal = storage_->StartCommit(GetFirstHead());
-  journal->Put("key", RandomObjectIdentifier(environment_.random()), KeyPriority::EAGER);
+  journal->Put("key", RandomObjectIdentifier(), KeyPriority::EAGER);
 
   // Destroy the PageStorageImpl object during the first async operation of
   // CommitJournal.

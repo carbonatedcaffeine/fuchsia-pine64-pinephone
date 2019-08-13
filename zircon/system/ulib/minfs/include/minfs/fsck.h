@@ -16,10 +16,26 @@
 #include <fbl/vector.h>
 #include <fs/trace.h>
 
+#ifdef __Fuchsia__
+#include <block-client/cpp/block-device.h>
+#endif
+
 namespace minfs {
 
-// Validate header information about the filesystem backed by |bc|.
-zx_status_t CheckSuperblock(const Superblock* info, Bcache* bc);
+#ifdef __Fuchsia__
+// Validates header information.
+zx_status_t CheckSuperblock(const Superblock* info, block_client::BlockDevice* device,
+                            uint32_t max_blocks);
+// Reconstructs and updates the alloc_*_counts of superblock.
+zx_status_t ReconstructAllocCounts(fs::TransactionHandler* transaction_handler,
+                                   block_client::BlockDevice* device, Superblock* out_info);
+#else
+// Validates header information.
+zx_status_t CheckSuperblock(const Superblock* info, uint32_t max_blocks);
+// Reconstructs and updates the alloc_*_counts of superblock.
+zx_status_t ReconstructAllocCounts(fs::TransactionHandler* transaction_handler,
+                                   Superblock* out_info);
+#endif
 
 // On success, returns ZX_OK and copies the number of bytes used by data
 // within the fs.
@@ -69,4 +85,4 @@ zx_status_t SparseUsedSize(fbl::unique_fd fd, off_t start, off_t end,
                            const fbl::Vector<size_t>& extent_lengths, uint64_t* out_size);
 
 #endif
-} // namespace minfs
+}  // namespace minfs

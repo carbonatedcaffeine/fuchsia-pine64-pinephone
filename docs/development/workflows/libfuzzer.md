@@ -196,7 +196,7 @@ Next, add the build instructions to the library's BUILD.gn file.  Adding an impo
 ### The fuzzer GN template
 
 The `fuzzer` [template][fuzzer.gni] is used to build the fuzzer executable.  Given a fuzz target
-function in a source file and a the library under test as a dependency, it will provided the correct
+function in a source file and the library under test as a dependency, it will provided the correct
 [compiler flags] to link against the fuzzing engine:
 
 ```python
@@ -440,7 +440,7 @@ become available.
 [gn fuzzer]: #the-fuzzer-gn-template
 [gn fuzzers package]: #the-fuzzers_package-gn-template
 [source-based code coverage]: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
-[clusterfuzz]: https://github.com/google/oss-fuzz/blob/master/docs/clusterfuzz.md
+[clusterfuzz]: https://github.com/google/oss-fuzz/blob/master/docs/furthur-reading/clusterfuzz.md
 [rust-fuzzing]: https://github.com/rust-fuzz/libFuzzer-sys
 [go-fuzzing]: https://github.com/dvyukov/go-fuzz
 [ubsan]: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html

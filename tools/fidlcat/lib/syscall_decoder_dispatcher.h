@@ -5,7 +5,6 @@
 #ifndef TOOLS_FIDLCAT_LIB_SYSCALL_DECODER_DISPATCHER_H_
 #define TOOLS_FIDLCAT_LIB_SYSCALL_DECODER_DISPATCHER_H_
 
-#include <src/lib/fxl/logging.h>
 #include <zircon/system/public/zircon/errors.h>
 #include <zircon/system/public/zircon/types.h>
 
@@ -21,42 +20,80 @@
 #include <utility>
 #include <vector>
 
+#include <src/lib/fxl/logging.h>
+
 #include "src/developer/debug/zxdb/client/thread.h"
+#include "tools/fidlcat/lib/decode_options.h"
+#include "tools/fidlcat/lib/display_options.h"
 #include "tools/fidlcat/lib/message_decoder.h"
 #include "tools/fidlcat/lib/syscall_decoder.h"
+#include "tools/fidlcat/lib/type_decoder.h"
 
 namespace fidlcat {
 
-class DisplayTime {
- public:
-  DisplayTime(const Colors& colors, zx_time_t time_ns) : colors_(colors), time_ns_(time_ns) {}
-  const Colors& colors() const { return colors_; }
-  zx_time_t time_ns() const { return time_ns_; }
+// Display a value on a stream.
+template <typename ValueType>
+void DisplayValue(const Colors& colors, SyscallType type, ValueType value, bool hexa,
+                  std::ostream& os) {
+  os << "unimplemented generic value " << static_cast<uint32_t>(type);
+}
 
- private:
-  const Colors& colors_;
-  const zx_time_t time_ns_;
-};
-
-inline std::ostream& operator<<(std::ostream& os, const DisplayTime& time) {
-  if (time.time_ns() == ZX_TIME_INFINITE) {
-    os << time.colors().blue << "ZX_TIME_INFINITE" << time.colors().reset;
-  } else if (time.time_ns() == ZX_TIME_INFINITE_PAST) {
-    os << time.colors().blue << "ZX_TIME_INFINITE_PAST" << time.colors().reset;
-  } else {
-    time_t value = time.time_ns() / 1'000'000'000L;
-    struct tm tm;
-    if (localtime_r(&value, &tm) == &tm) {
-      char buffer[100];
-      strftime(buffer, sizeof(buffer), "%c", &tm);
-      os << time.colors().blue << buffer << " and ";
-      snprintf(buffer, sizeof(buffer), "%09ld", time.time_ns() % 1000000000L);
-      os << buffer << " ns" << time.colors().reset;
-    } else {
-      os << time.colors().red << "unknown time" << time.colors().reset;
-    }
+template <>
+inline void DisplayValue<int64_t>(const Colors& colors, SyscallType type, int64_t value, bool hexa,
+                                  std::ostream& os) {
+  switch (type) {
+    case SyscallType::kInt64:
+      os << colors.blue << value << colors.reset;
+      break;
+    case SyscallType::kDuration:
+      os << DisplayDuration(colors, value);
+      break;
+    case SyscallType::kTime:
+      os << DisplayTime(colors, value);
+      break;
+    default:
+      os << "unimplemented int64_t value " << static_cast<uint32_t>(type);
+      break;
   }
-  return os;
+}
+
+template <>
+inline void DisplayValue<uint32_t>(const Colors& colors, SyscallType type, uint32_t value,
+                                   bool hexa, std::ostream& os) {
+  switch (type) {
+    case SyscallType::kUint32:
+      os << colors.blue << value << colors.reset;
+      break;
+    case SyscallType::kClock:
+      os << colors.red;
+      ClockName(value, os);
+      os << colors.reset;
+      break;
+    case SyscallType::kHandle: {
+      zx_handle_info_t handle_info;
+      handle_info.handle = value;
+      handle_info.type = ZX_OBJ_TYPE_NONE;
+      handle_info.rights = 0;
+      DisplayHandle(colors, handle_info, os);
+      break;
+    }
+    default:
+      os << "unimplemented uint32_t value " << static_cast<uint32_t>(type);
+      break;
+  }
+}
+
+template <>
+inline void DisplayValue<uint64_t>(const Colors& colors, SyscallType type, uint64_t value,
+                                   bool hexa, std::ostream& os) {
+  switch (type) {
+    case SyscallType::kTime:
+      os << DisplayTime(colors, value);
+      break;
+    default:
+      os << "unimplemented uint64_t value " << static_cast<uint32_t>(type);
+      break;
+  }
 }
 
 // Base class (not templated) for system call arguments.
@@ -117,7 +154,9 @@ class SyscallArgument : public SyscallArgumentBaseTyped<Type> {
 
   bool ValueValid(SyscallDecoder* decoder) const override { return true; }
 
-  Type Value(SyscallDecoder* decoder) const override { return Type(decoder->Value(index())); }
+  Type Value(SyscallDecoder* decoder) const override {
+    return Type(decoder->ArgumentValue(index()));
+  }
 };
 
 // Defines a buffer argument for a system call.
@@ -137,15 +176,15 @@ class SyscallPointerArgument : public SyscallArgumentBaseTyped<Type> {
   }
 
   bool Loaded(SyscallDecoder* decoder) const override {
-    return decoder->Loaded(index(), sizeof(Type));
+    return decoder->ArgumentLoaded(index(), sizeof(Type));
   }
 
   bool ValueValid(SyscallDecoder* decoder) const override {
-    return decoder->Content(index()) != nullptr;
+    return decoder->ArgumentContent(index()) != nullptr;
   }
 
   Type Value(SyscallDecoder* decoder) const override {
-    uint8_t* content = decoder->Content(index());
+    uint8_t* content = decoder->ArgumentContent(index());
     if (content == nullptr) {
       return Type();
     }
@@ -157,11 +196,11 @@ class SyscallPointerArgument : public SyscallArgumentBaseTyped<Type> {
   }
 
   bool ArrayLoaded(SyscallDecoder* decoder, size_t size) const override {
-    return decoder->Loaded(index(), size);
+    return decoder->ArgumentLoaded(index(), size);
   }
 
   Type* Content(SyscallDecoder* decoder) const override {
-    return reinterpret_cast<Type*>(decoder->Content(index()));
+    return reinterpret_cast<Type*>(decoder->ArgumentContent(index()));
   }
 };
 
@@ -200,10 +239,6 @@ class Access {
   // Display the data on a stream (with name and type).
   void Display(SyscallDisplayDispatcher* dispatcher, SyscallDecoder* decoder, std::string_view name,
                std::ostream& os) const;
-
-  // Display a value on a stream
-  void DisplayValue(SyscallDisplayDispatcher* dispatcher, SyscallDecoder* decoder, Type value,
-                    std::ostream& os) const;
 };
 
 // Access to a system call argument. There is a direct access to the value
@@ -300,33 +335,29 @@ class PointerFieldAccess : public Access<Type> {
   Type Value(SyscallDecoder* decoder) const override { return {}; }
 
   void LoadArray(SyscallDecoder* decoder, size_t size) override {
-    if (loading_) {
-      return;
-    }
     argument_->LoadArray(decoder, sizeof(ClassType));
-    if (argument_->ArrayLoaded(decoder, sizeof(ClassType))) {
-      ClassType* object = argument_->Content(decoder);
-      if (object != nullptr) {
-        loading_ = true;
-        decoder->LoadMemory(reinterpret_cast<uint64_t>(get_(object)), size, &loaded_values_);
-      }
+    ClassType* object = argument_->Content(decoder);
+    if (object != nullptr) {
+      decoder->LoadBuffer(reinterpret_cast<uint64_t>(get_(object)), size);
     }
   }
 
   bool ArrayLoaded(SyscallDecoder* decoder, size_t size) const override {
-    return loaded_values_.size() == size;
+    ClassType* object = argument_->Content(decoder);
+    return (object == nullptr) ||
+           decoder->BufferLoaded(reinterpret_cast<uint64_t>(get_(object)), size);
   }
 
   const Type* Content(SyscallDecoder* decoder) const override {
-    return reinterpret_cast<const Type*>(loaded_values_.data());
+    ClassType* object = argument_->Content(decoder);
+    return reinterpret_cast<const Type*>(
+        decoder->BufferContent(reinterpret_cast<uint64_t>(get_(object))));
   }
 
  private:
   const SyscallPointerArgument<ClassType>* const argument_;
   const Type* (*get_)(const ClassType* from);
   const SyscallType syscall_type_;
-  std::vector<uint8_t> loaded_values_;
-  bool loading_ = false;
 };
 
 // Base class for the inputs/outputs we want to display for a system call.
@@ -384,13 +415,14 @@ class SyscallInputOutput : public SyscallInputOutputBase {
 };
 
 // An input/output which is a FIDL message. This is always displayed outline.
+template <typename HandleType>
 class SyscallFidlMessage : public SyscallInputOutputBase {
  public:
   SyscallFidlMessage(int64_t error_code, std::string_view name, SyscallFidlType type,
                      std::unique_ptr<Access<zx_handle_t>> handle,
                      std::unique_ptr<Access<uint8_t>> bytes,
                      std::unique_ptr<Access<uint32_t>> num_bytes,
-                     std::unique_ptr<Access<zx_handle_t>> handles,
+                     std::unique_ptr<Access<HandleType>> handles,
                      std::unique_ptr<Access<uint32_t>> num_handles)
       : SyscallInputOutputBase(error_code, name),
         type_(type),
@@ -415,43 +447,82 @@ class SyscallFidlMessage : public SyscallInputOutputBase {
     if (num_handles_->Loaded(decoder)) {
       uint32_t value = num_handles_->Value(decoder);
       if (value > 0) {
-        handles_->LoadArray(decoder, value * sizeof(zx_handle_t));
+        handles_->LoadArray(decoder, value * sizeof(HandleType));
       }
     }
   }
 
-  void DisplayOutline(SyscallDisplayDispatcher* dispatcher, SyscallDecoder* decoder,
-                      std::string_view line_header, int tabs, std::ostream& os) const override;
-
- private:
+ protected:
   const SyscallFidlType type_;
   const std::unique_ptr<Access<zx_handle_t>> handle_;
   const std::unique_ptr<Access<uint8_t>> bytes_;
   const std::unique_ptr<Access<uint32_t>> num_bytes_;
-  const std::unique_ptr<Access<zx_handle_t>> handles_;
+  const std::unique_ptr<Access<HandleType>> handles_;
   const std::unique_ptr<Access<uint32_t>> num_handles_;
+};
+
+class SyscallFidlMessageHandle : public SyscallFidlMessage<zx_handle_t> {
+ public:
+  SyscallFidlMessageHandle(int64_t error_code, std::string_view name, SyscallFidlType type,
+                           std::unique_ptr<Access<zx_handle_t>> handle,
+                           std::unique_ptr<Access<uint8_t>> bytes,
+                           std::unique_ptr<Access<uint32_t>> num_bytes,
+                           std::unique_ptr<Access<zx_handle_t>> handles,
+                           std::unique_ptr<Access<uint32_t>> num_handles)
+      : SyscallFidlMessage<zx_handle_t>(error_code, name, type, std::move(handle), std::move(bytes),
+                                        std::move(num_bytes), std::move(handles),
+                                        std::move(num_handles)) {}
+
+  void DisplayOutline(SyscallDisplayDispatcher* dispatcher, SyscallDecoder* decoder,
+                      std::string_view line_header, int tabs, std::ostream& os) const override;
+};
+
+class SyscallFidlMessageHandleInfo : public SyscallFidlMessage<zx_handle_info_t> {
+ public:
+  SyscallFidlMessageHandleInfo(int64_t error_code, std::string_view name, SyscallFidlType type,
+                               std::unique_ptr<Access<zx_handle_t>> handle,
+                               std::unique_ptr<Access<uint8_t>> bytes,
+                               std::unique_ptr<Access<uint32_t>> num_bytes,
+                               std::unique_ptr<Access<zx_handle_info_t>> handles,
+                               std::unique_ptr<Access<uint32_t>> num_handles)
+      : SyscallFidlMessage<zx_handle_info_t>(error_code, name, type, std::move(handle),
+                                             std::move(bytes), std::move(num_bytes),
+                                             std::move(handles), std::move(num_handles)) {}
+
+  void DisplayOutline(SyscallDisplayDispatcher* dispatcher, SyscallDecoder* decoder,
+                      std::string_view line_header, int tabs, std::ostream& os) const override;
 };
 
 // Defines a syscall we want to decode/display.
 class Syscall {
  public:
-  explicit Syscall(std::string_view name) : name_(name), breakpoint_name_(name_ + "@plt") {}
+  Syscall(std::string_view name, SyscallReturnType return_type)
+      : name_(name), return_type_(return_type), breakpoint_name_(name_ + "@plt") {}
 
   // Name of the syscall.
-  const std::string& name() const { return name_; }
+  [[nodiscard]] const std::string& name() const { return name_; }
+
+  // Type of the syscall returned value.
+  [[nodiscard]] SyscallReturnType return_type() const { return return_type_; }
 
   // Name of the breakpoint used to watch the syscall.
-  const std::string& breakpoint_name() const { return breakpoint_name_; }
+  [[nodiscard]] const std::string& breakpoint_name() const { return breakpoint_name_; }
 
   // All arguments for the syscall.
-  const std::vector<std::unique_ptr<SyscallArgumentBase>>& arguments() const { return arguments_; }
+  [[nodiscard]] const std::vector<std::unique_ptr<SyscallArgumentBase>>& arguments() const {
+    return arguments_;
+  }
 
   // All the data we want to display at the syscall entry.
-  const std::vector<std::unique_ptr<SyscallInputOutputBase>>& inputs() const { return inputs_; }
+  [[nodiscard]] const std::vector<std::unique_ptr<SyscallInputOutputBase>>& inputs() const {
+    return inputs_;
+  }
 
   // All the data we want to display at the syscall exit. These data are
   // conditionally displayed depending on the syscall error code.
-  const std::vector<std::unique_ptr<SyscallInputOutputBase>>& outputs() const { return outputs_; }
+  [[nodiscard]] const std::vector<std::unique_ptr<SyscallInputOutputBase>>& outputs() const {
+    return outputs_;
+  }
 
   // Adds an argument definition to the syscall.
   template <typename Type>
@@ -485,7 +556,7 @@ class Syscall {
                         std::unique_ptr<Access<uint32_t>> num_bytes,
                         std::unique_ptr<Access<zx_handle_t>> handles,
                         std::unique_ptr<Access<uint32_t>> num_handles) {
-    inputs_.push_back(std::make_unique<SyscallFidlMessage>(
+    inputs_.push_back(std::make_unique<SyscallFidlMessageHandle>(
         0, name, type, std::move(handle), std::move(bytes), std::move(num_bytes),
         std::move(handles), std::move(num_handles)));
   }
@@ -498,19 +569,30 @@ class Syscall {
   }
 
   // Add an output FIDL message to display.
-  void OutputFidlMessage(int64_t error_code, std::string_view name, SyscallFidlType type,
-                         std::unique_ptr<Access<zx_handle_t>> handle,
-                         std::unique_ptr<Access<uint8_t>> bytes,
-                         std::unique_ptr<Access<uint32_t>> num_bytes,
-                         std::unique_ptr<Access<zx_handle_t>> handles,
-                         std::unique_ptr<Access<uint32_t>> num_handles) {
-    outputs_.push_back(std::make_unique<SyscallFidlMessage>(
+  void OutputFidlMessageHandle(int64_t error_code, std::string_view name, SyscallFidlType type,
+                               std::unique_ptr<Access<zx_handle_t>> handle,
+                               std::unique_ptr<Access<uint8_t>> bytes,
+                               std::unique_ptr<Access<uint32_t>> num_bytes,
+                               std::unique_ptr<Access<zx_handle_t>> handles,
+                               std::unique_ptr<Access<uint32_t>> num_handles) {
+    outputs_.push_back(std::make_unique<SyscallFidlMessageHandle>(
+        error_code, name, type, std::move(handle), std::move(bytes), std::move(num_bytes),
+        std::move(handles), std::move(num_handles)));
+  }
+  void OutputFidlMessageHandleInfo(int64_t error_code, std::string_view name, SyscallFidlType type,
+                                   std::unique_ptr<Access<zx_handle_t>> handle,
+                                   std::unique_ptr<Access<uint8_t>> bytes,
+                                   std::unique_ptr<Access<uint32_t>> num_bytes,
+                                   std::unique_ptr<Access<zx_handle_info_t>> handles,
+                                   std::unique_ptr<Access<uint32_t>> num_handles) {
+    outputs_.push_back(std::make_unique<SyscallFidlMessageHandleInfo>(
         error_code, name, type, std::move(handle), std::move(bytes), std::move(num_bytes),
         std::move(handles), std::move(num_handles)));
   }
 
  private:
   const std::string name_;
+  const SyscallReturnType return_type_;
   const std::string breakpoint_name_;
   std::vector<std::unique_ptr<SyscallArgumentBase>> arguments_;
   std::vector<std::unique_ptr<SyscallInputOutputBase>> inputs_;
@@ -522,8 +604,13 @@ class Syscall {
 // SyscallDecoder object which will handle the decoding of one syscall.
 class SyscallDecoderDispatcher {
  public:
-  SyscallDecoderDispatcher() { Populate(); }
+  explicit SyscallDecoderDispatcher(const DecodeOptions& decode_options)
+      : decode_options_(decode_options) {
+    Populate();
+  }
   virtual ~SyscallDecoderDispatcher() = default;
+
+  const DecodeOptions& decode_options() const { return decode_options_; }
 
   const std::vector<std::unique_ptr<Syscall>>& syscalls() const { return syscalls_; }
 
@@ -551,12 +638,15 @@ class SyscallDecoderDispatcher {
   void Populate();
 
   // Add a syscall. Used by Populate.
-  Syscall* Add(std::string_view name) {
-    auto syscall = std::make_unique<Syscall>(name);
+  Syscall* Add(std::string_view name, SyscallReturnType return_type) {
+    auto syscall = std::make_unique<Syscall>(name, return_type);
     auto result = syscall.get();
     syscalls_.push_back(std::move(syscall));
     return result;
   }
+
+  // Decoding options.
+  const DecodeOptions& decode_options_;
 
   // The definition of all the syscalls we can decode.
   std::vector<std::unique_ptr<Syscall>> syscalls_;
@@ -567,9 +657,11 @@ class SyscallDecoderDispatcher {
 
 class SyscallDisplayDispatcher : public SyscallDecoderDispatcher {
  public:
-  SyscallDisplayDispatcher(LibraryLoader* loader, const DisplayOptions& display_options,
-                           std::ostream& os)
-      : message_decoder_dispatcher_(loader, display_options), os_(os) {}
+  SyscallDisplayDispatcher(LibraryLoader* loader, const DecodeOptions& decode_options,
+                           const DisplayOptions& display_options, std::ostream& os)
+      : SyscallDecoderDispatcher(decode_options),
+        message_decoder_dispatcher_(loader, display_options),
+        os_(os) {}
 
   MessageDecoderDispatcher& message_decoder_dispatcher() { return message_decoder_dispatcher_; }
 
@@ -600,64 +692,13 @@ class SyscallDisplayDispatcher : public SyscallDecoderDispatcher {
 };
 
 template <typename Type>
-void Access<Type>::DisplayValue(SyscallDisplayDispatcher* dispatcher, SyscallDecoder* decoder,
-                                Type value, std::ostream& os) const {
-  os << "unimplemented generic value " << static_cast<uint32_t>(GetSyscallType());
-}
-
-template <>
-inline void Access<uint32_t>::DisplayValue(SyscallDisplayDispatcher* dispatcher,
-                                           SyscallDecoder* decoder, uint32_t value,
-                                           std::ostream& os) const {
-  const Colors& colors = dispatcher->colors();
-  switch (GetSyscallType()) {
-    case SyscallType::kUint32:
-      os << colors.blue << value << colors.reset;
-      break;
-    case SyscallType::kHandle:
-      os << colors.red << value << colors.reset;
-      break;
-    default:
-      os << "unimplemented uint32_t value " << static_cast<uint32_t>(GetSyscallType());
-      break;
-  }
-}
-
-template <>
-inline void Access<int64_t>::DisplayValue(SyscallDisplayDispatcher* dispatcher,
-                                          SyscallDecoder* decoder, int64_t value,
-                                          std::ostream& os) const {
-  const Colors& colors = dispatcher->colors();
-  switch (GetSyscallType()) {
-    case SyscallType::kTime:
-      os << DisplayTime(colors, value);
-      break;
-    default:
-      os << "unimplemented int64_t value " << static_cast<uint32_t>(GetSyscallType());
-      break;
-  }
-}
-template <typename Type>
 void Access<Type>::Display(SyscallDisplayDispatcher* dispatcher, SyscallDecoder* decoder,
                            std::string_view name, std::ostream& os) const {
   const Colors& colors = dispatcher->colors();
-  switch (GetSyscallType()) {
-    case SyscallType::kUint32:
-      os << name << ":" << colors.green << "uint32" << colors.reset << ": ";
-      break;
-    case SyscallType::kHandle:
-      os << name << ":" << colors.green << "handle" << colors.reset << ": ";
-      break;
-    case SyscallType::kTime:
-      os << name << ":" << colors.green << "time" << colors.reset << ": ";
-      break;
-    default:
-      os << name << ":" << colors.green << "unimplemented type "
-         << static_cast<uint32_t>(GetSyscallType()) << colors.reset;
-      return;
-  }
+  os << name;
+  DisplayType(colors, GetSyscallType(), os);
   if (ValueValid(decoder)) {
-    DisplayValue(dispatcher, decoder, Value(decoder), os);
+    DisplayValue<Type>(colors, GetSyscallType(), Value(decoder), /*hexa=*/false, os);
   } else {
     os << colors.red << "(nullptr)" << colors.reset;
   }

@@ -9,7 +9,7 @@ import("//build/test/test_package.gni")
 import("//build/testing/environments.gni")
 
 if (current_toolchain == host_toolchain) {
-  sdk_executable("bin") {
+  sdk_executable("fidlcat") {
     category = "partner"
 
     output_name = "fidlcat"
@@ -50,7 +50,7 @@ if (current_toolchain == host_toolchain) {
       ":host_tests",
       ":lib",
       "//src/lib/fxl/test:gtest_main",
-      "//tools/fidlcat/lib:host_tests",
+      "//tools/fidlcat/interception_tests:host_tests",
     ]
   }
 
@@ -90,7 +90,7 @@ unittest_package("fidlcat_tests") {
 
 install_host_tools("fidlcat_host") {
   deps = [
-    ":bin",
+    ":fidlcat",
   ]
   outputs = [
     "fidlcat",

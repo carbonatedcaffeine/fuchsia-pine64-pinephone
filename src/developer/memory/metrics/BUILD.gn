@@ -9,6 +9,8 @@ source_set("metrics") {
   sources = [
     "capture.cc",
     "capture.h",
+    "digest.cc",
+    "digest.h",
     "printer.cc",
     "printer.h",
     "summary.cc",
@@ -20,7 +22,8 @@ source_set("metrics") {
   deps = [
     "//garnet/public/lib/fsl",
     "//src/lib/fxl",
-    "//zircon/public/fidl/fuchsia-sysinfo:fuchsia-sysinfo_c",
+    "//zircon/public/fidl/fuchsia-boot:fuchsia-boot_c",
     "//zircon/public/lib/task-utils",
+    "//zircon/public/lib/trace",
   ]
 }

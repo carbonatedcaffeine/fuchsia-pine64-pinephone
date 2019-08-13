@@ -6,11 +6,12 @@
 #define TOOLS_FIDLCAT_LIB_WIRE_OBJECT_H_
 
 #include <lib/fidl/cpp/message.h>
-#include <src/lib/fxl/logging.h>
 
 #include <memory>
 #include <string_view>
 #include <vector>
+
+#include <src/lib/fxl/logging.h>
 
 #include "tools/fidlcat/lib/library_loader.h"
 #include "tools/fidlcat/lib/message_decoder.h"
@@ -35,8 +36,12 @@ class Field {
   // find that the object doesn't fit.
   virtual int DisplaySize(int remaining_size) const = 0;
 
+  // Returns the uint8_t value of the field. If the field is not a uint8_t value this returns zero.
+  // This is used to eventually display a vector of uint8_t values as a string.
+  virtual uint8_t GetUint8Value() const { return 0; }
+
   // Decode the extra content of the field (in a secondary object).
-  virtual void DecodeContent(MessageDecoder* decoder) = 0;
+  virtual void DecodeContent(MessageDecoder* decoder, uint64_t offset) = 0;
 
   // Extract the JSON for this field.
   virtual void ExtractJson(rapidjson::Document::AllocatorType& allocator,
@@ -58,7 +63,7 @@ class NullableField : public Field {
 
   bool is_null() const { return is_null_; }
 
-  bool DecodeNullable(MessageDecoder* decoder, uint64_t offset);
+  bool DecodeNullable(MessageDecoder* decoder, uint64_t offset, uint64_t size);
 
  private:
   bool is_null_ = false;
@@ -72,7 +77,7 @@ class InlineField : public Field {
 
   const uint8_t* data() const { return data_; }
 
-  void DecodeContent(MessageDecoder* decoder) override;
+  void DecodeContent(MessageDecoder* decoder, uint64_t offset) override;
 
  private:
   const uint8_t* const data_;
@@ -106,6 +111,12 @@ class NumericField : public InlineField {
                : std::to_string(internal::MemoryFrom<T, const uint8_t*>(data())).size();
   }
 
+  uint8_t GetUint8Value() const override {
+    return ((data() != nullptr) && (sizeof(T) == 1))
+               ? internal::MemoryFrom<T, const uint8_t*>(data())
+               : 0;
+  }
+
   void PrettyPrint(std::ostream& os, const Colors& colors, std::string_view line_header, int tabs,
                    int remaining_size, int max_line_size) const override {
     if (data() == nullptr) {
@@ -125,7 +136,7 @@ class StringField : public NullableField {
 
   int DisplaySize(int remaining_size) const override;
 
-  void DecodeContent(MessageDecoder* decoder) override;
+  void DecodeContent(MessageDecoder* decoder, uint64_t offset) override;
 
   void ExtractJson(rapidjson::Document::AllocatorType& allocator,
                    rapidjson::Value& result) const override;
@@ -158,7 +169,7 @@ class Object : public NullableField {
 
   int DisplaySize(int remaining_size) const override;
 
-  void DecodeContent(MessageDecoder* decoder) override;
+  void DecodeContent(MessageDecoder* decoder, uint64_t offset) override;
 
   void DecodeAt(MessageDecoder* decoder, uint64_t base_offset);
 
@@ -185,7 +196,7 @@ class EnvelopeField : public NullableField {
 
   int DisplaySize(int remaining_size) const override;
 
-  void DecodeContent(MessageDecoder* decoder) override;
+  void DecodeContent(MessageDecoder* decoder, uint64_t offset) override;
 
   void DecodeAt(MessageDecoder* decoder, uint64_t base_offset);
 
@@ -209,7 +220,7 @@ class TableField : public NullableField {
 
   int DisplaySize(int remaining_size) const override;
 
-  void DecodeContent(MessageDecoder* decoder) override;
+  void DecodeContent(MessageDecoder* decoder, uint64_t offset) override;
 
   void DecodeAt(MessageDecoder* decoder, uint64_t base_offset);
 
@@ -235,7 +246,7 @@ class UnionField : public NullableField {
 
   int DisplaySize(int remaining_size) const override;
 
-  void DecodeContent(MessageDecoder* decoder) override;
+  void DecodeContent(MessageDecoder* decoder, uint64_t offset) override;
 
   void DecodeAt(MessageDecoder* decoder, uint64_t base_offset);
 
@@ -266,7 +277,7 @@ class ArrayField : public Field {
 
   int DisplaySize(int remaining_size) const override;
 
-  void DecodeContent(MessageDecoder* decoder) override;
+  void DecodeContent(MessageDecoder* decoder, uint64_t offset) override;
 
   void ExtractJson(rapidjson::Document::AllocatorType& allocator,
                    rapidjson::Value& result) const override;
@@ -286,7 +297,7 @@ class VectorField : public NullableField {
 
   int DisplaySize(int remaining_size) const override;
 
-  void DecodeContent(MessageDecoder* decoder) override;
+  void DecodeContent(MessageDecoder* decoder, uint64_t offset) override;
 
   void ExtractJson(rapidjson::Document::AllocatorType& allocator,
                    rapidjson::Value& result) const override;
@@ -298,6 +309,8 @@ class VectorField : public NullableField {
   const uint64_t size_;
   const Type* const component_type_;
   std::vector<std::unique_ptr<Field>> fields_;
+  bool is_string_ = false;
+  bool has_new_line_ = false;
 };
 
 // An enum.
@@ -322,18 +335,18 @@ class EnumField : public InlineField {
 // A handle.
 class HandleField : public Field {
  public:
-  HandleField(std::string_view name, const Type* type, zx_handle_t handle)
+  HandleField(std::string_view name, const Type* type, const zx_handle_info_t& handle)
       : Field(name, type), handle_(handle) {}
 
   int DisplaySize(int remaining_size) const override;
 
-  void DecodeContent(MessageDecoder* decoder) override;
+  void DecodeContent(MessageDecoder* decoder, uint64_t offset) override;
 
   void PrettyPrint(std::ostream& os, const Colors& colors, std::string_view line_header, int tabs,
                    int remaining_size, int max_line_size) const override;
 
  private:
-  const zx_handle_t handle_;
+  const zx_handle_info_t handle_;
 };
 
 }  // namespace fidlcat

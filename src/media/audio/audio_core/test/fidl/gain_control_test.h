@@ -7,14 +7,14 @@
 
 #include <fuchsia/media/cpp/fidl.h>
 
-#include "src/media/audio/lib/test/audio_core_test_base.h"
+#include "src/media/audio/lib/test/hermetic_audio_test.h"
 
 namespace media::audio::test {
 
 // GainControlTestBase
 //
 // This set of tests verifies asynchronous usage of GainControl.
-class GainControlTestBase : public AudioCoreTestBase {
+class GainControlTestBase : public HermeticAudioCoreTest {
  protected:
   void TearDown() final;
 

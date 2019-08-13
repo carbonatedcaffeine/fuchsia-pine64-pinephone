@@ -5,6 +5,8 @@
 #ifndef SRC_MEDIA_AUDIO_AUDIO_CORE_TEST_DEVICE_VIRTUAL_AUDIO_DEVICE_TEST_H_
 #define SRC_MEDIA_AUDIO_AUDIO_CORE_TEST_DEVICE_VIRTUAL_AUDIO_DEVICE_TEST_H_
 
+#include <unordered_set>
+
 #include "src/media/audio/audio_core/test/device/audio_device_test.h"
 
 namespace media::audio::test {
@@ -34,20 +36,20 @@ class AtomicDeviceId {
 // This set of tests verifies asynchronous usage of AudioDeviceEnumerator.
 class VirtualAudioDeviceTest : public AudioDeviceTest {
  public:
-  // Per-test-suite tear-down. Called after last test in this suite.
-  static void TearDownTestSuite() { VirtualAudioDeviceTest::DisableVirtualDevices(); }
-
-  // Set up once when binary loaded; this is used at start/end of each suite.
-  static void SetControl(fuchsia::virtualaudio::ControlSyncPtr control_sync);
-  static void DisableVirtualDevices();
+  void EnableVirtualDevices();
+  void DisableVirtualDevices();
 
  protected:
-  static void ResetVirtualDevices();
-
   static void PopulateUniqueIdArr(bool is_input, uint8_t* unique_id_arr);
+
+  static void SetUpTestSuite();
+  static void TearDownTestSuite();
 
   void SetUp() override;
   void TearDown() override;
+  void WaitForVirtualDeviceDepartures();
+  void ExpectDeviceAdded(const std::array<uint8_t, 16>& unique_id_arr) override;
+  void ExpectDeviceRemoved(uint64_t remove_token) override;
 
   void AddTwoDevices(bool is_input, bool is_plugged = true);
 
@@ -85,6 +87,8 @@ class VirtualAudioDeviceTest : public AudioDeviceTest {
   fuchsia::virtualaudio::InputPtr input_2_;
   fuchsia::virtualaudio::OutputPtr output_;
   fuchsia::virtualaudio::OutputPtr output_2_;
+
+  std::unordered_set<uint64_t> virtual_device_tokens_;
 };
 
 }  // namespace media::audio::test

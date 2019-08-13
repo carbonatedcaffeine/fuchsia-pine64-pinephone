@@ -29,8 +29,8 @@ TEST_F(ActivePageManagerContainerTest, OneEarlyBindingNoPageManager) {
   Status status;
   bool on_empty_called;
 
-  ActivePageManagerContainer active_page_manager_container(kLedgerName, page_id,
-                                                           &page_usage_listener);
+  ActivePageManagerContainer active_page_manager_container(
+      kLedgerName, page_id, std::vector<PageUsageListener*>{&page_usage_listener});
   active_page_manager_container.set_on_empty(callback::SetWhenCalled(&on_empty_called));
   active_page_manager_container.BindPage(
       page.NewRequest(), callback::Capture(callback::SetWhenCalled(&callback_called), &status));
@@ -41,7 +41,7 @@ TEST_F(ActivePageManagerContainerTest, OneEarlyBindingNoPageManager) {
   active_page_manager_container.SetActivePageManager(Status::IO_ERROR, nullptr);
   RunLoopUntilIdle();
   EXPECT_TRUE(callback_called);
-  EXPECT_EQ(Status::IO_ERROR, status);
+  EXPECT_EQ(status, Status::IO_ERROR);
   EXPECT_TRUE(on_empty_called);
 
   // We expect that the page unbinding will have no further effect.
@@ -67,8 +67,8 @@ TEST_F(ActivePageManagerContainerTest, BindBeforePageManager) {
   Status status;
   bool on_empty_called;
 
-  ActivePageManagerContainer active_page_manager_container(kLedgerName, page_id,
-                                                           &page_usage_listener);
+  ActivePageManagerContainer active_page_manager_container(
+      kLedgerName, page_id, std::vector<PageUsageListener*>{&page_usage_listener});
   active_page_manager_container.set_on_empty(callback::SetWhenCalled(&on_empty_called));
   active_page_manager_container.BindPage(
       page.NewRequest(), callback::Capture(callback::SetWhenCalled(&callback_called), &status));
@@ -77,7 +77,7 @@ TEST_F(ActivePageManagerContainerTest, BindBeforePageManager) {
   active_page_manager_container.SetActivePageManager(Status::OK, std::move(active_page_manager));
 
   EXPECT_TRUE(callback_called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   EXPECT_FALSE(on_empty_called);
 
   // We expect that the page unbinding will empty the ActivePageManagerContainer

@@ -5,9 +5,9 @@
 //! Custom error types for the netstack.
 
 use failure::Fail;
+use net_types::ip::{Ip, IpAddress};
+use net_types::MulticastAddress;
 
-use crate::ip::{Ip, IpAddress};
-use crate::types::MulticastAddress;
 use crate::wire::icmp::IcmpIpTypes;
 
 /// Results returned from many functions in the netstack.
@@ -128,6 +128,7 @@ impl<I: Ip> From<ParseError> for IpParseError<I> {
 
 /// Error when something exists unexpectedly, such as trying to add an
 /// element when the element is already present.
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ExistsError;
 
 impl From<ExistsError> for NetstackError {
@@ -138,6 +139,7 @@ impl From<ExistsError> for NetstackError {
 
 /// Error when something unexpectedly doesn't exist, such as trying to
 /// remove an element when the element is not present.
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct NotFoundError;
 
 impl From<NotFoundError> for NetstackError {

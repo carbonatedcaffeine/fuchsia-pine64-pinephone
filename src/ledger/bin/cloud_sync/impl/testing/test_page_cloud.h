@@ -16,18 +16,14 @@
 
 namespace cloud_sync {
 
-struct ReceivedCommit {
-  std::string id;
-  std::string data;
-};
-
-cloud_provider::CommitPackEntry MakeTestCommit(
-    encryption::FakeEncryptionService* encryption_service, const std::string& id,
-    const std::string& data);
+cloud_provider::Commit MakeTestCommit(encryption::FakeEncryptionService* encryption_service,
+                                      const std::string& id, const std::string& data);
 
 std::unique_ptr<cloud_provider::CommitPack> MakeTestCommitPack(
     encryption::FakeEncryptionService* encryption_service,
     std::vector<std::tuple<std::string, std::string>> commit_data);
+
+bool CommitHasIdAndData(const cloud_provider::Commit& commit);
 
 class TestPageCloud : public cloud_provider::PageCloud {
  public:
@@ -43,11 +39,11 @@ class TestPageCloud : public cloud_provider::PageCloud {
 
   // AddCommits().
   unsigned int add_commits_calls = 0u;
-  std::vector<cloud_provider::CommitPackEntry> received_commits;
+  std::vector<cloud_provider::Commit> received_commits;
 
   // GetCommits().
   unsigned int get_commits_calls = 0u;
-  std::vector<cloud_provider::CommitPackEntry> commits_to_return;
+  std::vector<cloud_provider::Commit> commits_to_return;
   std::unique_ptr<cloud_provider::PositionToken> position_token_to_return;
 
   // AddObject().
@@ -76,6 +72,8 @@ class TestPageCloud : public cloud_provider::PageCloud {
   void SetWatcher(std::unique_ptr<cloud_provider::PositionToken> min_position_token,
                   fidl::InterfaceHandle<cloud_provider::PageCloudWatcher> watcher,
                   SetWatcherCallback callback) override;
+  void GetDiff(std::vector<uint8_t> commit_id, std::vector<std::vector<uint8_t>> possible_bases,
+               GetDiffCallback callback) override;
 
   fidl::Binding<cloud_provider::PageCloud> binding_;
 

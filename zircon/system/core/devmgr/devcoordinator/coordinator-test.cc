@@ -4,10 +4,6 @@
 
 #include "coordinator.h"
 
-#include <ddk/binding.h>
-#include <ddk/driver.h>
-#include <fbl/algorithm.h>
-#include <fbl/vector.h>
 #include <fuchsia/device/manager/c/fidl.h>
 #include <fuchsia/driver/test/c/fidl.h>
 #include <lib/async-loop/cpp/loop.h>
@@ -18,6 +14,13 @@
 #include <string.h>
 #include <threads.h>
 #include <zircon/fidl.h>
+
+#include <vector>
+
+#include <ddk/binding.h>
+#include <ddk/driver.h>
+#include <fbl/algorithm.h>
+#include <fbl/vector.h>
 #include <zxtest/zxtest.h>
 
 #include "../shared/fdio.h"
@@ -40,13 +43,13 @@ constexpr char kLogTestCaseName[] = "log test case";
 void CreateBootArgs(const char* config, size_t size, devmgr::BootArgs* boot_args) {
   zx::vmo vmo;
   zx_status_t status = zx::vmo::create(size, 0, &vmo);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
 
   status = vmo.write(config, 0, size);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
 
   status = devmgr::BootArgs::Create(std::move(vmo), size, boot_args);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
 }
 
 devmgr::CoordinatorConfig DefaultConfig(async_dispatcher_t* dispatcher,
@@ -68,20 +71,20 @@ TEST(CoordinatorTestCase, InitializeCoreDevices) {
   devmgr::Coordinator coordinator(DefaultConfig(nullptr, nullptr));
 
   zx_status_t status = coordinator.InitializeCoreDevices(kSystemDriverPath);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
 }
 
 TEST(CoordinatorTestCase, DumpState) {
   devmgr::Coordinator coordinator(DefaultConfig(nullptr, nullptr));
 
   zx_status_t status = coordinator.InitializeCoreDevices(kSystemDriverPath);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
 
   constexpr int32_t kBufSize = 256;
   char buf[kBufSize + 1] = {0};
 
   zx::vmo vmo;
-  ASSERT_EQ(ZX_OK, zx::vmo::create(kBufSize, 0, &vmo));
+  ASSERT_OK(zx::vmo::create(kBufSize, 0, &vmo));
   devmgr::VmoWriter writer(std::move(vmo));
 
   coordinator.DumpState(&writer);
@@ -89,7 +92,7 @@ TEST(CoordinatorTestCase, DumpState) {
   ASSERT_EQ(writer.written(), writer.available());
   ASSERT_LT(writer.written(), kBufSize);
   ASSERT_GT(writer.written(), 0);
-  ASSERT_EQ(ZX_OK, writer.vmo().read(buf, 0, writer.written()));
+  ASSERT_OK(writer.vmo().read(buf, 0, writer.written()));
 
   ASSERT_NE(nullptr, strstr(buf, "[root]"));
 }
@@ -109,7 +112,7 @@ TEST(CoordinatorTestCase, BindDrivers) {
   devmgr::Coordinator coordinator(DefaultConfig(loop.dispatcher(), nullptr));
 
   zx_status_t status = coordinator.InitializeCoreDevices(kSystemDriverPath);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
   coordinator.set_running(true);
 
   devmgr::Driver* driver;
@@ -129,7 +132,7 @@ TEST(CoordinatorTestCase, BindDriversForBuiltins) {
   devmgr::Coordinator coordinator(DefaultConfig(loop.dispatcher(), nullptr));
 
   zx_status_t status = coordinator.InitializeCoreDevices(kSystemDriverPath);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
 
   // AttemptBind function that asserts it has only been called once
   class CallOnce {
@@ -224,7 +227,7 @@ TEST(CoordinatorTestCase, BindDriversForBuiltins) {
 
 void InitializeCoordinator(devmgr::Coordinator* coordinator) {
   zx_status_t status = coordinator->InitializeCoreDevices(kSystemDriverPath);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
 
   // Load the component driver
   devmgr::load_driver(devmgr::kComponentDriverPath,
@@ -238,7 +241,7 @@ void InitializeCoordinator(devmgr::Coordinator* coordinator) {
   devmgr::devfs_init(coordinator->root_device(), coordinator->dispatcher());
   status = devmgr::devfs_publish(coordinator->root_device(), coordinator->test_device());
   status = devmgr::devfs_publish(coordinator->root_device(), coordinator->sys_device());
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
   coordinator->set_running(true);
 }
 
@@ -292,13 +295,13 @@ TEST(CoordinatorTestCase, BindDevices) {
   // Add the device.
   zx::channel local, remote;
   zx_status_t status = zx::channel::create(0, &local, &remote);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
   fbl::RefPtr<devmgr::Device> device;
   status = coordinator.AddDevice(coordinator.test_device(), std::move(local),
                                  nullptr /* props_data */, 0 /* props_count */, "mock-device",
                                  ZX_PROTOCOL_TEST, nullptr /* driver_path */, nullptr /* args */,
                                  false /* invisible */, zx::channel() /* client_remote */, &device);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
   ASSERT_EQ(1, coordinator.devices().size_slow());
 
   // Add the driver.
@@ -313,7 +316,7 @@ TEST(CoordinatorTestCase, BindDevices) {
   host.AddRef();  // refcount starts at zero, so bump it up to keep us from being cleaned up
   dev->set_host(&host);
   status = coordinator.BindDevice(dev, kDriverPath, true /* new device */);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
 
   // Check the BindDriver request.
   ASSERT_NO_FATAL_FAILURES(CheckBindDriverReceived(remote, kDriverPath));
@@ -460,13 +463,13 @@ TEST(CoordinatorTestCase, TestOutput) {
   // Add the device.
   zx::channel local, remote;
   zx_status_t status = zx::channel::create(0, &local, &remote);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
   fbl::RefPtr<devmgr::Device> device;
   status = coordinator.AddDevice(coordinator.test_device(), std::move(local),
                                  nullptr /* props_data */, 0 /* props_count */, "mock-device",
                                  ZX_PROTOCOL_TEST, nullptr /* driver_path */, nullptr /* args */,
                                  false /* invisible */, zx::channel() /* client_remote */, &device);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
   ASSERT_EQ(1, coordinator.devices().size_slow());
 
   fbl::String driver_name;
@@ -486,7 +489,7 @@ TEST(CoordinatorTestCase, TestOutput) {
   host.AddRef();  // refcount starts at zero, so bump it up to keep us from being cleaned up
   dev->set_host(&host);
   status = coordinator.BindDevice(dev, kDriverPath, true /* new device */);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
 
   // Check the BindDriver request.
   zx::channel test_device, test_coordinator;
@@ -549,10 +552,9 @@ void CheckCreateDeviceReceived(const zx::channel& remote, const char* expected_d
                   "");
 }
 
-// Reads the request from |remote| and verifies whether it matches the expected
-// Unbind or CompleteRemoval request.
+// Reads the request from |remote| and verifies whether it matches the expected Unbind request.
 // |SendUnbindReply| can be used to send the desired response.
-void CheckUnbindReceived(const zx::channel& remote, bool expect_unbind) {
+void CheckUnbindReceived(const zx::channel& remote) {
   // Read the unbind request.
   FIDL_ALIGNDECL uint8_t bytes[ZX_CHANNEL_MAX_MSG_BYTES];
   zx_handle_t handles[ZX_CHANNEL_MAX_MSG_HANDLES];
@@ -565,19 +567,11 @@ void CheckUnbindReceived(const zx::channel& remote, bool expect_unbind) {
   ASSERT_EQ(0, actual_handles);
 
   // Validate the unbind request.
-  if (expect_unbind) {
-    auto hdr = reinterpret_cast<fidl_message_header_t*>(bytes);
-    ASSERT_EQ(fuchsia_device_manager_DeviceControllerUnbindOrdinal, hdr->ordinal);
-    status = fidl_decode(&fuchsia_device_manager_DeviceControllerUnbindRequestTable, bytes,
-                         actual_bytes, handles, actual_handles, nullptr);
-    ASSERT_OK(status);
-  } else {
-    auto hdr = reinterpret_cast<fidl_message_header_t*>(bytes);
-    ASSERT_EQ(fuchsia_device_manager_DeviceControllerCompleteRemovalOrdinal, hdr->ordinal);
-    status = fidl_decode(&fuchsia_device_manager_DeviceControllerCompleteRemovalRequestTable, bytes,
-                         actual_bytes, handles, actual_handles, nullptr);
-    ASSERT_OK(status);
-  }
+  auto hdr = reinterpret_cast<fidl_message_header_t*>(bytes);
+  ASSERT_EQ(fuchsia_device_manager_DeviceControllerUnbindOrdinal, hdr->ordinal);
+  status = fidl_decode(&fuchsia_device_manager_DeviceControllerUnbindRequestTable, bytes,
+                       actual_bytes, handles, actual_handles, nullptr);
+  ASSERT_OK(status);
 }
 
 // Sends a response with the given return_status. This can be used to reply to a
@@ -590,12 +584,65 @@ void SendUnbindReply(const zx::channel& remote) {
   memset(bytes, 0, sizeof(bytes));
   auto resp = reinterpret_cast<fuchsia_device_manager_CoordinatorUnbindDoneRequest*>(bytes);
   resp->hdr.ordinal = fuchsia_device_manager_CoordinatorUnbindDoneOrdinal;
-  zx_status_t status = fidl_encode(&fuchsia_device_manager_CoordinatorUnbindDoneRequestTable, bytes,
-                                   sizeof(*resp), handles, fbl::count_of(handles), &actual_handles, nullptr);
+  zx_status_t status =
+      fidl_encode(&fuchsia_device_manager_CoordinatorUnbindDoneRequestTable, bytes, sizeof(*resp),
+                  handles, fbl::count_of(handles), &actual_handles, nullptr);
   ASSERT_OK(status);
   ASSERT_EQ(0, actual_handles);
   status = remote.write(0, bytes, sizeof(*resp), nullptr, 0);
   ASSERT_OK(status);
+}
+
+void CheckUnbindReceivedAndReply(const zx::channel& remote) {
+  CheckUnbindReceived(remote);
+  SendUnbindReply(remote);
+}
+
+// Reads the request from |remote| and verifies whether it matches the expected
+// CompleteRemoval request.
+// |SendRemoveReply| can be used to send the desired response.
+void CheckRemoveReceived(const zx::channel& remote) {
+  // Read the remove request.
+  FIDL_ALIGNDECL uint8_t bytes[ZX_CHANNEL_MAX_MSG_BYTES];
+  zx_handle_t handles[ZX_CHANNEL_MAX_MSG_HANDLES];
+  uint32_t actual_bytes;
+  uint32_t actual_handles;
+  zx_status_t status = remote.read(0, bytes, handles, sizeof(bytes), fbl::count_of(handles),
+                                   &actual_bytes, &actual_handles);
+  ASSERT_OK(status);
+  ASSERT_LT(0, actual_bytes);
+  ASSERT_EQ(0, actual_handles);
+
+  // Validate the remove request.
+  auto hdr = reinterpret_cast<fidl_message_header_t*>(bytes);
+  ASSERT_EQ(fuchsia_device_manager_DeviceControllerCompleteRemovalOrdinal, hdr->ordinal);
+  status = fidl_decode(&fuchsia_device_manager_DeviceControllerCompleteRemovalRequestTable, bytes,
+                       actual_bytes, handles, actual_handles, nullptr);
+  ASSERT_OK(status);
+}
+
+// Sends a response with the given return_status. This can be used to reply to a
+// request received by |CheckRemoveReceived|.
+void SendRemoveReply(const zx::channel& remote) {
+  FIDL_ALIGNDECL uint8_t bytes[ZX_CHANNEL_MAX_MSG_BYTES];
+  zx_handle_t handles[ZX_CHANNEL_MAX_MSG_HANDLES];
+  uint32_t actual_handles;
+  // Write the remove response.
+  memset(bytes, 0, sizeof(bytes));
+  auto resp = reinterpret_cast<fuchsia_device_manager_CoordinatorRemoveDoneRequest*>(bytes);
+  resp->hdr.ordinal = fuchsia_device_manager_CoordinatorRemoveDoneOrdinal;
+  zx_status_t status =
+      fidl_encode(&fuchsia_device_manager_CoordinatorRemoveDoneRequestTable, bytes, sizeof(*resp),
+                  handles, fbl::count_of(handles), &actual_handles, nullptr);
+  ASSERT_OK(status);
+  ASSERT_EQ(0, actual_handles);
+  status = remote.write(0, bytes, sizeof(*resp), nullptr, 0);
+  ASSERT_OK(status);
+}
+
+void CheckRemoveReceivedAndReply(const zx::channel& remote) {
+  CheckRemoveReceived(remote);
+  SendRemoveReply(remote);
 }
 
 // Reads a Suspend request from remote and checks that it is for the expected
@@ -634,9 +681,9 @@ void SendSuspendReply(const zx::channel& remote, zx_status_t return_status) {
   auto resp = reinterpret_cast<fuchsia_device_manager_DeviceControllerSuspendResponse*>(bytes);
   resp->hdr.ordinal = fuchsia_device_manager_DeviceControllerSuspendOrdinal;
   resp->status = return_status;
-  zx_status_t status = fidl_encode(&fuchsia_device_manager_DeviceControllerSuspendResponseTable,
-                                   bytes, sizeof(*resp), handles, fbl::count_of(handles),
-                                   &actual_handles, nullptr);
+  zx_status_t status =
+      fidl_encode(&fuchsia_device_manager_DeviceControllerSuspendResponseTable, bytes,
+                  sizeof(*resp), handles, fbl::count_of(handles), &actual_handles, nullptr);
   ASSERT_OK(status);
   ASSERT_EQ(0, actual_handles);
   status = remote.write(0, bytes, sizeof(*resp), nullptr, 0);
@@ -705,28 +752,35 @@ void BindCompositeDefineComposite(const fbl::RefPtr<devmgr::Device>& platform_bu
                                   const uint32_t* protocol_ids, size_t component_count,
                                   const zx_device_prop_t* props, size_t props_count,
                                   const char* name, zx_status_t expected_status = ZX_OK) {
-  auto components = std::make_unique<fuchsia_device_manager_DeviceComponent[]>(component_count);
+  std::vector<llcpp::fuchsia::device::manager::DeviceComponent> components = {};
   for (size_t i = 0; i < component_count; ++i) {
     // Define a union type to avoid violating the strict aliasing rule.
-    union InstValue {
-      zx_bind_inst_t inst;
-      uint64_t value;
-    };
-    InstValue always = {.inst = BI_MATCH()};
-    InstValue protocol = {.inst = BI_MATCH_IF(EQ, BIND_PROTOCOL, protocol_ids[i])};
 
-    fuchsia_device_manager_DeviceComponent* component = &components[i];
-    component->parts_count = 2;
-    component->parts[0].match_program_count = 1;
-    component->parts[0].match_program[0] = always.value;
-    component->parts[1].match_program_count = 1;
-    component->parts[1].match_program[0] = protocol.value;
+    zx_bind_inst_t always = BI_MATCH();
+    zx_bind_inst_t protocol = BI_MATCH_IF(EQ, BIND_PROTOCOL, protocol_ids[i]);
+
+    llcpp::fuchsia::device::manager::DeviceComponent component;  // = &components[i];
+    component.parts_count = 2;
+    component.parts[0].match_program_count = 1;
+    component.parts[0].match_program[0] = ::llcpp::fuchsia::device::manager::BindInstruction{
+        .op = always.op,
+        .arg = always.arg,
+    };
+    component.parts[1].match_program_count = 1;
+    component.parts[1].match_program[0] = ::llcpp::fuchsia::device::manager::BindInstruction{
+        .op = protocol.op,
+        .arg = protocol.arg,
+    };
+    components.push_back(component);
   }
+
+  auto prop_view = ::fidl::VectorView<uint64_t>(
+      props_count, reinterpret_cast<uint64_t*>(const_cast<zx_device_prop_t*>(props)));
   devmgr::Coordinator* coordinator = platform_bus->coordinator;
-  ASSERT_EQ(
-      coordinator->AddCompositeDevice(platform_bus, name, props, props_count, components.get(),
-                                      component_count, 0 /* coresident index */),
-      expected_status);
+  ASSERT_EQ(coordinator->AddCompositeDevice(platform_bus, name, prop_view,
+                                            ::fidl::VectorView(component_count, components.data()),
+                                            0 /* coresident index */),
+            expected_status);
 }
 
 struct DeviceState {
@@ -769,12 +823,12 @@ class MultipleDeviceTestCase : public zxtest::Test {
     {
       zx::channel local;
       zx_status_t status = zx::channel::create(0, &local, &devhost_remote_);
-      ASSERT_EQ(ZX_OK, status);
+      ASSERT_OK(status);
       devhost_.set_hrpc(local.release());
     }
 
     // Set up the sys device proxy, inside of the devhost
-    ASSERT_EQ(coordinator_.PrepareProxy(coordinator_.sys_device(), &devhost_), ZX_OK);
+    ASSERT_OK(coordinator_.PrepareProxy(coordinator_.sys_device(), &devhost_));
     loop_.RunUntilIdle();
     ASSERT_NO_FATAL_FAILURES(
         CheckCreateDeviceReceived(devhost_remote_, kSystemDriverPath, &sys_proxy_remote_));
@@ -784,12 +838,12 @@ class MultipleDeviceTestCase : public zxtest::Test {
     {
       zx::channel local;
       zx_status_t status = zx::channel::create(0, &local, &platform_bus_.remote);
-      ASSERT_EQ(ZX_OK, status);
+      ASSERT_OK(status);
       status = coordinator_.AddDevice(
           coordinator_.sys_device()->proxy(), std::move(local), nullptr /* props_data */,
           0 /* props_count */, "platform-bus", 0, nullptr /* driver_path */, nullptr /* args */,
           false /* invisible */, zx::channel() /* client_remote */, &platform_bus_.device);
-      ASSERT_EQ(ZX_OK, status);
+      ASSERT_OK(status);
       loop_.RunUntilIdle();
     }
   }
@@ -839,13 +893,13 @@ void MultipleDeviceTestCase::AddDevice(const fbl::RefPtr<devmgr::Device>& parent
 
   zx::channel local;
   zx_status_t status = zx::channel::create(0, &local, &state.remote);
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
   status = coordinator_.AddDevice(
       parent, std::move(local), nullptr /* props_data */, 0 /* props_count */, name, protocol_id,
       driver.data() /* driver_path */, nullptr /* args */, false /* invisible */,
       zx::channel() /* client_remote */, &state.device);
   state.device->flags |= DEV_CTX_ALLOW_MULTI_COMPOSITE;
-  ASSERT_EQ(ZX_OK, status);
+  ASSERT_OK(status);
   loop_.RunUntilIdle();
 
   devices_.push_back(std::move(state));
@@ -882,6 +936,7 @@ void MultipleDeviceTestCase::DoSuspend(uint32_t flags,
       }
       return true;
     };
+
     thrd_t fshost_thrd;
     ASSERT_EQ(thrd_create(&fshost_thrd, thrd_func, &event), thrd_success);
 
@@ -912,8 +967,7 @@ void MultipleDeviceTestCase::DoSuspend(uint32_t flags) {
 
 TEST_F(MultipleDeviceTestCase, RemoveDeadDevice) {
   size_t index;
-  ASSERT_NO_FATAL_FAILURES(AddDevice(platform_bus(), "device", 0 /* protocol id */, "",
-                                     &index));
+  ASSERT_NO_FATAL_FAILURES(AddDevice(platform_bus(), "device", 0 /* protocol id */, "", &index));
 
   auto& state = devices_[index];
   ASSERT_OK(coordinator_.RemoveDevice(state.device, false));
@@ -943,20 +997,21 @@ class UnbindTestCase : public MultipleDeviceTestCase {
     std::function<void()> unbind_op = nullptr;
     // index for use with device()
     size_t index = 0;
+    bool removed = false;
     bool unbound = false;
   };
-  // |index_to_remove| is the index into |devices| to call |ScheduleRemove| on.
-  void UnbindTest(DeviceDesc devices[], size_t num_devices, size_t index_to_remove);
+  // |target_device_index| is the index of the device in the |devices| array to
+  // schedule removal of.
+  // If |unbind_children_only| is true, it will skip removal of the target device.
+  void UnbindTest(DeviceDesc devices[], size_t num_devices, size_t target_device_index,
+                  bool unbind_children_only = false, bool unbind_target_device = false);
 };
 
 TEST_F(UnbindTestCase, UnbindLeaf) {
   DeviceDesc devices[] = {
-    { UINT32_MAX, "root_child1" },
-    { UINT32_MAX, "root_child2" },
-    { 0, "root_child1_1" },
-    { 0, "root_child1_2" },
-    { 2, "root_child1_1_1" },
-    { 1, "root_child2_1", Action::kRemove },
+      {UINT32_MAX, "root_child1"}, {UINT32_MAX, "root_child2"},
+      {0, "root_child1_1"},        {0, "root_child1_2"},
+      {2, "root_child1_1_1"},      {1, "root_child2_1", Action::kRemove},
   };
   // Only remove root_child2_1.
   size_t index_to_remove = 5;
@@ -965,12 +1020,9 @@ TEST_F(UnbindTestCase, UnbindLeaf) {
 
 TEST_F(UnbindTestCase, UnbindMultipleChildren) {
   DeviceDesc devices[] = {
-    { UINT32_MAX, "root_child1", Action::kRemove },
-    { UINT32_MAX, "root_child2" },
-    { 0, "root_child1_1", Action::kUnbind },
-    { 0, "root_child1_2", Action::kUnbind },
-    { 2, "root_child1_1_1", Action::kUnbind },
-    { 1, "root_child2_1" },
+      {UINT32_MAX, "root_child1", Action::kRemove}, {UINT32_MAX, "root_child2"},
+      {0, "root_child1_1", Action::kUnbind},        {0, "root_child1_2", Action::kUnbind},
+      {2, "root_child1_1_1", Action::kUnbind},      {1, "root_child2_1"},
   };
   // Remove root_child1 and all its children.
   size_t index_to_remove = 0;
@@ -987,21 +1039,56 @@ TEST_F(UnbindTestCase, UnbindWithRemoveOp) {
   // Remove root_child1 and all its children.
   size_t index_to_remove = 0;
   DeviceDesc devices[] = {
-    { UINT32_MAX, "root_child1", Action::kRemove },
-    { 0, "root_child1_1", Action::kUnbind },
-    { 1, "root_child1_1_1", Action::kRemove },
-    { 2, "root_child1_1_1_1", Action::kUnbind },
+      {UINT32_MAX, "root_child1", Action::kRemove},
+      {0, "root_child1_1", Action::kUnbind},
+      {1, "root_child1_1_1", Action::kRemove},
+      {2, "root_child1_1_1_1", Action::kUnbind},
   };
 
   // We will schedule child device 1_1_1's removal in device 1_1's unbind hook.
   auto unbind_op = [&] {
-    ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleRemove(device(devices[2].index)->device));
+    ASSERT_NO_FATAL_FAILURES(
+        coordinator_.ScheduleDevhostRequestedRemove(device(devices[2].index)->device));
   };
   devices[1].unbind_op = unbind_op;
   ASSERT_NO_FATAL_FAILURES(UnbindTest(devices, fbl::count_of(devices), index_to_remove));
 }
 
-void UnbindTestCase::UnbindTest(DeviceDesc devices[], size_t num_devices, size_t index_to_remove) {
+TEST_F(UnbindTestCase, UnbindChildrenOnly) {
+  DeviceDesc devices[] = {
+      {UINT32_MAX, "root_child1"},  // Unbinding children of this device.
+      {UINT32_MAX, "root_child2"},
+      {0, "root_child1_1", Action::kUnbind},
+      {0, "root_child1_2", Action::kUnbind},
+      {2, "root_child1_1_1", Action::kUnbind},
+      {1, "root_child2_1"},
+  };
+  // Remove the children of root_child1.
+  size_t target_device_index = 0;
+  ASSERT_NO_FATAL_FAILURES(UnbindTest(devices, fbl::count_of(devices), target_device_index,
+                                      true /* unbind_children_only */));
+}
+
+TEST_F(UnbindTestCase, UnbindSelf) {
+  DeviceDesc devices[] = {
+      {UINT32_MAX, "root_child1", Action::kUnbind},  // Require unbinding of the target device.
+      {UINT32_MAX, "root_child2"},
+      {0, "root_child1_1", Action::kUnbind},
+      {0, "root_child1_2", Action::kUnbind},
+      {2, "root_child1_1_1", Action::kUnbind},
+      {1, "root_child2_1"},
+  };
+  // Unbind root_child1.
+  size_t index_to_remove = 0;
+  ASSERT_NO_FATAL_FAILURES(UnbindTest(devices, fbl::count_of(devices), index_to_remove,
+                                      false /* unbind_children_only */,
+                                      true /* unbind_target_device */));
+}
+
+void UnbindTestCase::UnbindTest(DeviceDesc devices[], size_t num_devices,
+                                size_t target_device_index, bool unbind_children_only,
+                                bool unbind_target_device) {
+  size_t num_to_remove = 0;
   size_t num_to_unbind = 0;
   for (size_t i = 0; i < num_devices; i++) {
     auto& desc = devices[i];
@@ -1013,13 +1100,23 @@ void UnbindTestCase::UnbindTest(DeviceDesc devices[], size_t num_devices, size_t
       parent = device(index)->device;
     }
     ASSERT_NO_FATAL_FAILURES(AddDevice(parent, desc.name, 0 /* protocol id */, "", &desc.index));
-    if (desc.want_action != Action::kNone) {
+    if (desc.want_action == Action::kUnbind) {
       num_to_unbind++;
+      num_to_remove++;
+    } else if (desc.want_action == Action::kRemove) {
+      num_to_remove++;
     }
   }
 
-  auto& desc = devices[index_to_remove];
-  ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleRemove(device(desc.index)->device));
+  auto& desc = devices[target_device_index];
+  if (unbind_children_only) {
+    // Skip removal of the target device.
+    ASSERT_NO_FATAL_FAILURES(
+        coordinator_.ScheduleDevhostRequestedUnbindChildren(device(desc.index)->device));
+  } else {
+    ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleDevhostRequestedRemove(device(desc.index)->device,
+                                                                         unbind_target_device));
+  }
   loop()->RunUntilIdle();
 
   while (num_to_unbind > 0) {
@@ -1028,7 +1125,7 @@ void UnbindTestCase::UnbindTest(DeviceDesc devices[], size_t num_devices, size_t
     // Always check from leaf device upwards, so we ensure no child
     // is unbound before its parent.
     // To avoid overflow, check the counter before it is decremented.
-    for (size_t i = num_devices; i-- > 0; ) {
+    for (size_t i = num_devices; i-- > 0;) {
       auto& desc = devices[i];
       if (desc.unbound) {
         continue;
@@ -1038,22 +1135,59 @@ void UnbindTestCase::UnbindTest(DeviceDesc devices[], size_t num_devices, size_t
         continue;
       }
       ASSERT_NE(desc.want_action, Action::kNone);
-      ASSERT_NO_FATAL_FAILURES(CheckUnbindReceived(device(desc.index)->remote,
-                               desc.want_action == Action::kUnbind /* expect_unbind */));
-      if (desc.unbind_op) {
-        desc.unbind_op();
+      if (desc.want_action == Action::kUnbind) {
+        ASSERT_NO_FATAL_FAILURES(CheckUnbindReceived(device(desc.index)->remote));
+        if (desc.unbind_op) {
+          desc.unbind_op();
+        }
+        ASSERT_NO_FATAL_FAILURES(SendUnbindReply(device(desc.index)->remote));
+        desc.unbound = true;
       }
-      ASSERT_NO_FATAL_FAILURES(SendUnbindReply(device(desc.index)->remote));
-      // Make sure the parent has already been unbound.
-      if (desc.parent_desc_index != UINT32_MAX && i != index_to_remove) {
+      // Check if the parent is expected to have been unbound already.
+      if (desc.parent_desc_index != UINT32_MAX) {
         auto parent_desc = devices[desc.parent_desc_index];
-        ASSERT_TRUE(parent_desc.unbound);
+        if (parent_desc.want_action == Action::kUnbind) {
+          ASSERT_TRUE(parent_desc.unbound);
+        }
       }
 
-      desc.unbound = true;
       --num_to_unbind;
       made_progress = true;
     }
+    // Make sure we're not stuck waiting
+    ASSERT_TRUE(made_progress);
+    loop()->RunUntilIdle();
+  }
+
+  // Now check that we receive the removals in the expected order, leaf first.
+  while (num_to_remove > 0) {
+    bool made_progress = false;
+    for (size_t i = 0; i < num_devices; ++i) {
+      auto& desc = devices[i];
+      if (desc.removed) {
+        continue;
+      }
+
+      if (!DeviceHasPendingMessages(desc.index)) {
+        continue;
+      }
+
+      ASSERT_NE(desc.want_action, Action::kNone);
+      ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(device(desc.index)->remote));
+
+      // Check that all our children have already been removed.
+      for (size_t j = 0; j < num_devices; ++j) {
+        auto& other_desc = devices[j];
+        if (other_desc.parent_desc_index == i) {
+          ASSERT_TRUE(other_desc.removed);
+        }
+      }
+
+      desc.removed = true;
+      --num_to_remove;
+      made_progress = true;
+    }
+
     // Make sure we're not stuck waiting
     ASSERT_TRUE(made_progress);
     loop()->RunUntilIdle();
@@ -1065,20 +1199,69 @@ TEST_F(UnbindTestCase, UnbindSysDevice) {
   ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleRemove(coordinator_.sys_device()));
   loop()->RunUntilIdle();
 
-  // Check that platform bus is not unbound yet.
-  ASSERT_FALSE(DeviceHasPendingMessages(platform_bus_remote()));
+  ASSERT_FALSE(DeviceHasPendingMessages(sys_proxy_remote_));
 
-  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceived(sys_proxy_remote_,
-                           false /* expect_unbind */));
-  ASSERT_NO_FATAL_FAILURES(SendUnbindReply(sys_proxy_remote_));
+  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceivedAndReply(platform_bus_remote()));
   loop()->RunUntilIdle();
 
-  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceived(platform_bus_remote(),
-                           true /* expect_unbind */));
-  ASSERT_NO_FATAL_FAILURES(SendUnbindReply(platform_bus_remote()));
+  ASSERT_FALSE(DeviceHasPendingMessages(sys_proxy_remote_));
+
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(platform_bus_remote()));
+  loop()->RunUntilIdle();
+
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(sys_proxy_remote_));
   loop()->RunUntilIdle();
 }
 
+TEST_F(UnbindTestCase, NumRemovals) {
+  size_t child_index;
+  ASSERT_NO_FATAL_FAILURES(
+      AddDevice(platform_bus(), "child", 0 /* protocol id */, "", &child_index));
+
+  auto* child_device = device(child_index);
+
+  ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleRemove(child_device->device));
+  loop()->RunUntilIdle();
+
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(child_device->remote));
+  loop()->RunUntilIdle();
+
+  // Make sure the coordinator device does not detect the devhost's channel closing,
+  // otherwise it will try to remove an already dead device and we will get a log error.
+  child_device->remote.reset();
+  loop()->RunUntilIdle();
+
+  ASSERT_EQ(child_device->device->num_removal_attempts(), 1);
+}
+
+TEST_F(UnbindTestCase, AddDuringParentUnbind) {
+  size_t parent_index;
+  ASSERT_NO_FATAL_FAILURES(
+      AddDevice(platform_bus(), "parent", 0 /* protocol id */, "", &parent_index));
+
+  auto* parent_device = device(parent_index);
+  ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleRemove(parent_device->device));
+  loop()->RunUntilIdle();
+
+  // Don't reply to the request until we add the device.
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceived(parent_device->remote));
+
+  // Adding a child device to an unbinding parent should fail.
+  fbl::RefPtr<devmgr::Device> child;
+  zx::channel local, remote;
+  zx_status_t status = zx::channel::create(0, &local, &remote);
+  ASSERT_OK(status);
+  status = coordinator_.AddDevice(parent_device->device, std::move(local), nullptr /* props_data */,
+                                  0 /* props_count */, "child", 0 /* protocol_id */,
+                                  nullptr /* driver_path */, nullptr /* args */,
+                                  false /* invisible */, zx::channel() /* client_remote */, &child);
+  ASSERT_NOT_OK(status);
+  loop_.RunUntilIdle();
+
+  // Complete the original parent unbind.
+  ASSERT_NO_FATAL_FAILURES(SendRemoveReply(parent_device->remote));
+  loop()->RunUntilIdle();
+}
 
 class SuspendTestCase : public MultipleDeviceTestCase {
  public:
@@ -1186,8 +1369,7 @@ TEST_F(SuspendTestCase, SuspendFail) {
 void SuspendTestCase::StateTest(zx_status_t suspend_status,
                                 devmgr::Device::State want_device_state) {
   size_t index;
-  ASSERT_NO_FATAL_FAILURES(AddDevice(platform_bus(), "device", 0 /* protocol id */, "",
-                                     &index));
+  ASSERT_NO_FATAL_FAILURES(AddDevice(platform_bus(), "device", 0 /* protocol id */, "", &index));
 
   const uint32_t flags = DEVICE_SUSPEND_FLAG_POWEROFF;
   ASSERT_NO_FATAL_FAILURES(DoSuspend(flags));
@@ -1219,53 +1401,81 @@ class CompositeTestCase : public MultipleDeviceTestCase {
 };
 
 TEST_F(MultipleDeviceTestCase, UnbindThenSuspend) {
-  size_t index;
-  ASSERT_NO_FATAL_FAILURES(AddDevice(platform_bus(), "main-device", 0 /* protocol id */, "",
-                                     &index));
+  size_t parent_index;
+  ASSERT_NO_FATAL_FAILURES(
+      AddDevice(platform_bus(), "parent-device", 0 /* protocol id */, "", &parent_index));
 
-  ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleRemove(devices_[index].device));
+  size_t child_index;
+  ASSERT_NO_FATAL_FAILURES(
+      AddDevice(device(parent_index)->device, "child-device", 0 /* protocol id */, "",
+                &child_index));
+
+  ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleRemove(device(parent_index)->device));
   loop()->RunUntilIdle();
 
-  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceived(device(index)->remote, false /* expect_unbind */));
+  // The child should be unbound first.
+  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceived(device(child_index)->remote));
 
   const uint32_t flags = DEVICE_SUSPEND_FLAG_POWEROFF;
   ASSERT_NO_FATAL_FAILURES(DoSuspend(flags));
 
-  // Check that device has not yet started suspending.
-  ASSERT_FALSE(DeviceHasPendingMessages(device(index)->remote));
+  ASSERT_NO_FATAL_FAILURES(SendUnbindReply(device(child_index)->remote));
+  loop()->RunUntilIdle();
 
-  ASSERT_NO_FATAL_FAILURES(SendUnbindReply(device(index)->remote));
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(device(child_index)->remote));
+  loop()->RunUntilIdle();
+
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(device(parent_index)->remote));
   loop()->RunUntilIdle();
 
   // The suspend task should complete but not send a suspend message.
-  ASSERT_FALSE(DeviceHasPendingMessages(device(index)->remote));
+  ASSERT_FALSE(DeviceHasPendingMessages(device(parent_index)->remote));
 
   ASSERT_NO_FATAL_FAILURES(CheckSuspendReceived(platform_bus_remote(), flags, ZX_OK));
 }
 
 TEST_F(MultipleDeviceTestCase, SuspendThenUnbind) {
-  size_t index;
-  ASSERT_NO_FATAL_FAILURES(AddDevice(platform_bus(), "main-device", 0 /* protocol id */, "",
-                                     &index));
+  size_t parent_index;
+  ASSERT_NO_FATAL_FAILURES(
+      AddDevice(platform_bus(), "parent-device", 0 /* protocol id */, "", &parent_index));
+
+  size_t child_index;
+  ASSERT_NO_FATAL_FAILURES(
+      AddDevice(device(parent_index)->device, "child-device", 0 /* protocol id */, "",
+                &child_index));
 
   const uint32_t flags = DEVICE_SUSPEND_FLAG_POWEROFF;
   ASSERT_NO_FATAL_FAILURES(DoSuspend(flags));
 
   // Don't reply to the suspend yet.
-  ASSERT_NO_FATAL_FAILURES(CheckSuspendReceived(device(index)->remote, flags));
-
-  ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleRemove(devices_[index].device));
+  ASSERT_NO_FATAL_FAILURES(CheckSuspendReceived(device(child_index)->remote, flags));
+  ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleRemove(device(parent_index)->device));
   loop()->RunUntilIdle();
 
-  // Check that device has not yet started unbinding.
-  ASSERT_FALSE(DeviceHasPendingMessages(device(index)->remote));
+  // Check that the child device has not yet started unbinding.
+  ASSERT_FALSE(DeviceHasPendingMessages(device(child_index)->remote));
 
-  ASSERT_NO_FATAL_FAILURES(SendSuspendReply(device(index)->remote, ZX_OK));
+  ASSERT_NO_FATAL_FAILURES(SendSuspendReply(device(child_index)->remote, ZX_OK));
   loop()->RunUntilIdle();
 
-  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceived(device(index)->remote, false /* expect_unbind */));
+  // The parent should have started suspending. Don't reply yet.
+  ASSERT_NO_FATAL_FAILURES(CheckSuspendReceived(device(parent_index)->remote, flags));
+
+  // Finish unbinding the child.
+  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceivedAndReply(device(child_index)->remote));
+  loop()->RunUntilIdle();
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(device(child_index)->remote));
+  loop()->RunUntilIdle();
+
+  // Finish suspending the parent.
+  ASSERT_NO_FATAL_FAILURES(SendSuspendReply(device(parent_index)->remote, ZX_OK));
+  loop()->RunUntilIdle();
 
   ASSERT_NO_FATAL_FAILURES(CheckSuspendReceived(platform_bus_remote(), flags, ZX_OK));
+
+  // The parent should now be removed.
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(device(parent_index)->remote));
+  loop()->RunUntilIdle();
 }
 
 void CompositeTestCase::CheckCompositeCreation(const char* composite_name,
@@ -1540,7 +1750,6 @@ TEST_F(CompositeTestCase, SharedComponentUnbinds) {
   loop()->RunUntilIdle();
 
   {
-    // Remove device the composite, device 0's component device, and device 0
     auto device1 = device(device_indexes[1])->device;
     fbl::RefPtr<devmgr::Device> comp_device1;
     fbl::RefPtr<devmgr::Device> comp_device2;
@@ -1555,13 +1764,53 @@ TEST_F(CompositeTestCase, SharedComponentUnbinds) {
         continue;
       }
     }
-    ASSERT_OK(coordinator()->RemoveDevice(comp_device1, false));
-    ASSERT_OK(coordinator()->RemoveDevice(comp_device2, false));
-
-    ASSERT_NO_FATAL_FAILURES(RemoveDevice(component_device1_indexes[0]));
-    ASSERT_NO_FATAL_FAILURES(RemoveDevice(component_device2_indexes[0]));
-    ASSERT_NO_FATAL_FAILURES(RemoveDevice(device_indexes[0]));
+    ASSERT_NOT_NULL(comp_device1);
+    ASSERT_NOT_NULL(comp_device2);
   }
+  // Remove device 0 and its children (component and composite devices).
+  ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleRemove(device(device_indexes[0])->device));
+  loop()->RunUntilIdle();
+
+  zx::channel& device_remote = device(device_indexes[0])->remote;
+  zx::channel& component1_remote = device(component_device1_indexes[0])->remote;
+  zx::channel& component2_remote = device(component_device2_indexes[0])->remote;
+
+  // Check the components have received their unbind requests.
+  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceived(component1_remote));
+  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceived(component2_remote));
+
+  // The device and composites should not have received any requests yet.
+  ASSERT_FALSE(DeviceHasPendingMessages(device_remote));
+  ASSERT_FALSE(DeviceHasPendingMessages(composite1_remote));
+  ASSERT_FALSE(DeviceHasPendingMessages(composite2_remote));
+
+  ASSERT_NO_FATAL_FAILURES(SendUnbindReply(component1_remote));
+  ASSERT_NO_FATAL_FAILURES(SendUnbindReply(component2_remote));
+  loop()->RunUntilIdle();
+
+  // The composites should start unbinding since the components finished unbinding.
+  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceivedAndReply(composite1_remote));
+  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceivedAndReply(composite2_remote));
+  loop()->RunUntilIdle();
+
+  // We are still waiting for the composites to be removed.
+  ASSERT_FALSE(DeviceHasPendingMessages(device_remote));
+  ASSERT_FALSE(DeviceHasPendingMessages(component1_remote));
+  ASSERT_FALSE(DeviceHasPendingMessages(component2_remote));
+
+  // Finish removing the composites.
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(composite1_remote));
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(composite2_remote));
+  loop()->RunUntilIdle();
+
+  ASSERT_FALSE(DeviceHasPendingMessages(device_remote));
+
+  // Finish removing the components.
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(component1_remote));
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(component2_remote));
+  loop()->RunUntilIdle();
+
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(device_remote));
 
   // Add the device back and verify the composite gets created again
   ASSERT_NO_FATAL_FAILURES(
@@ -1622,7 +1871,6 @@ TEST_F(CompositeTestCase, ComponentUnbinds) {
   loop()->RunUntilIdle();
 
   {
-    // Remove device the composite, device 0's component device, and device 0
     auto device1 = device(device_indexes[1])->device;
     fbl::RefPtr<devmgr::Device> comp_device;
     for (auto& comp : device1->components()) {
@@ -1631,11 +1879,45 @@ TEST_F(CompositeTestCase, ComponentUnbinds) {
         break;
       }
     }
-    ASSERT_OK(coordinator()->RemoveDevice(comp_device, false));
-
-    ASSERT_NO_FATAL_FAILURES(RemoveDevice(component_device_indexes[0]));
-    ASSERT_NO_FATAL_FAILURES(RemoveDevice(device_indexes[0]));
+    ASSERT_NOT_NULL(comp_device);
   }
+  // Remove device 0 and its children (component and composite devices).
+  ASSERT_NO_FATAL_FAILURES(coordinator_.ScheduleRemove(device(device_indexes[0])->device));
+  loop()->RunUntilIdle();
+
+  zx::channel& device_remote = device(device_indexes[0])->remote;
+  zx::channel& component_remote = device(component_device_indexes[0])->remote;
+
+  // The device and composite should not have received an unbind request yet.
+  ASSERT_FALSE(DeviceHasPendingMessages(device_remote));
+  ASSERT_FALSE(DeviceHasPendingMessages(composite_remote));
+
+  // Check the component and composite are unbound.
+  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceivedAndReply(component_remote));
+  loop()->RunUntilIdle();
+
+  ASSERT_FALSE(DeviceHasPendingMessages(device_remote));
+  ASSERT_FALSE(DeviceHasPendingMessages(component_remote));
+
+  ASSERT_NO_FATAL_FAILURES(CheckUnbindReceivedAndReply(composite_remote));
+  loop()->RunUntilIdle();
+
+  // Still waiting for the composite to be removed.
+  ASSERT_FALSE(DeviceHasPendingMessages(device_remote));
+  ASSERT_FALSE(DeviceHasPendingMessages(component_remote));
+
+  // Finish removing the composite.
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(composite_remote));
+  loop()->RunUntilIdle();
+
+  ASSERT_FALSE(DeviceHasPendingMessages(device_remote));
+
+  // Finish removing the component.
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(component_remote));
+  loop()->RunUntilIdle();
+
+  ASSERT_NO_FATAL_FAILURES(CheckRemoveReceivedAndReply(device_remote));
+  loop()->RunUntilIdle();
 
   // Add the device back and verify the composite gets created again
   ASSERT_NO_FATAL_FAILURES(
@@ -1803,14 +2085,14 @@ TEST_F(MultipleDeviceTestCase, SuspendFidlMexec) {
   ASSERT_OK(loop()->StartThread("DevCoordTestLoop"));
 
   async::Wait suspend_task_pbus(
-      platform_bus_remote().get(), ZX_CHANNEL_READABLE,
+      platform_bus_remote().get(), ZX_CHANNEL_READABLE, 0,
       [this](async_dispatcher_t*, async::Wait*, zx_status_t, const zx_packet_signal_t*) {
         CheckSuspendReceived(platform_bus_remote(), DEVICE_SUSPEND_FLAG_MEXEC, ZX_OK);
       });
   ASSERT_OK(suspend_task_pbus.Begin(loop()->dispatcher()));
 
   async::Wait suspend_task_sys(
-      sys_proxy_remote_.get(), ZX_CHANNEL_READABLE,
+      sys_proxy_remote_.get(), ZX_CHANNEL_READABLE, 0,
       [this](async_dispatcher_t*, async::Wait*, zx_status_t, const zx_packet_signal_t*) {
         CheckSuspendReceived(sys_proxy_remote_, DEVICE_SUSPEND_FLAG_MEXEC, ZX_OK);
       });

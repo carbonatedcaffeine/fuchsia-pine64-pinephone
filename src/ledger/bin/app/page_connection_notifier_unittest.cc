@@ -23,7 +23,7 @@ class PageConnectionNotifierTest : public TestWithEnvironment {
  public:
   PageConnectionNotifierTest()
       : page_connection_notifier_(kLedgerName, std::string(::fuchsia::ledger::PAGE_ID_SIZE, '3'),
-                                  &fake_disk_cleanup_manager_){};
+                                  std::vector<PageUsageListener*>{&fake_disk_cleanup_manager_}){};
   ~PageConnectionNotifierTest() override = default;
 
  protected:
@@ -37,7 +37,7 @@ class PageConnectionNotifierTest : public TestWithEnvironment {
 TEST_F(PageConnectionNotifierTest, SingleExternalRequest) {
   page_connection_notifier_.RegisterExternalRequest();
 
-  EXPECT_EQ(1, fake_disk_cleanup_manager_.page_opened_count);
+  EXPECT_EQ(fake_disk_cleanup_manager_.externally_used_count, 1);
   EXPECT_FALSE(page_connection_notifier_.IsEmpty());
 }
 
@@ -46,7 +46,7 @@ TEST_F(PageConnectionNotifierTest, MultipleExternalRequests) {
   page_connection_notifier_.RegisterExternalRequest();
   page_connection_notifier_.RegisterExternalRequest();
 
-  EXPECT_EQ(1, fake_disk_cleanup_manager_.page_opened_count);
+  EXPECT_EQ(fake_disk_cleanup_manager_.externally_used_count, 1);
   EXPECT_FALSE(page_connection_notifier_.IsEmpty());
 }
 
@@ -57,8 +57,8 @@ TEST_F(PageConnectionNotifierTest, UnregisteredExternalRequests) {
   page_connection_notifier_.RegisterExternalRequest();
   page_connection_notifier_.UnregisterExternalRequests();
 
-  EXPECT_EQ(1, fake_disk_cleanup_manager_.page_opened_count);
-  EXPECT_EQ(1, fake_disk_cleanup_manager_.page_closed_count);
+  EXPECT_EQ(fake_disk_cleanup_manager_.externally_used_count, 1);
+  EXPECT_EQ(fake_disk_cleanup_manager_.externally_unused_count, 1);
   EXPECT_TRUE(page_connection_notifier_.IsEmpty());
   EXPECT_TRUE(on_empty_called);
 }
@@ -167,7 +167,8 @@ TEST_F(PageConnectionNotifierTest, PageConnectionNotifierDestroyedWhileRequestsO
   bool on_empty_called;
 
   auto page_connection_notifier = std::make_unique<PageConnectionNotifier>(
-      kLedgerName, std::string(::fuchsia::ledger::PAGE_ID_SIZE, '3'), &fake_disk_cleanup_manager);
+      kLedgerName, std::string(::fuchsia::ledger::PAGE_ID_SIZE, '3'),
+      std::vector<PageUsageListener*>{&fake_disk_cleanup_manager});
   page_connection_notifier->set_on_empty(callback::SetWhenCalled(&on_empty_called));
   page_connection_notifier->RegisterExternalRequest();
   page_connection_notifier->RegisterExternalRequest();
@@ -182,7 +183,8 @@ TEST_F(PageConnectionNotifierTest, PageConnectionNotifierDestroyedWhileTokensOut
   bool on_empty_called;
 
   auto page_connection_notifier = std::make_unique<PageConnectionNotifier>(
-      kLedgerName, std::string(::fuchsia::ledger::PAGE_ID_SIZE, '3'), &fake_disk_cleanup_manager);
+      kLedgerName, std::string(::fuchsia::ledger::PAGE_ID_SIZE, '3'),
+      std::vector<PageUsageListener*>{&fake_disk_cleanup_manager});
   page_connection_notifier->set_on_empty(callback::SetWhenCalled(&on_empty_called));
   auto first_expiring_token = page_connection_notifier->NewInternalRequestToken();
   auto second_expiring_token = page_connection_notifier->NewInternalRequestToken();
@@ -197,7 +199,8 @@ TEST_F(PageConnectionNotifierTest,
   bool on_empty_called;
 
   auto page_connection_notifier = std::make_unique<PageConnectionNotifier>(
-      kLedgerName, std::string(::fuchsia::ledger::PAGE_ID_SIZE, '3'), &fake_disk_cleanup_manager);
+      kLedgerName, std::string(::fuchsia::ledger::PAGE_ID_SIZE, '3'),
+      std::vector<PageUsageListener*>{&fake_disk_cleanup_manager});
   page_connection_notifier->set_on_empty(callback::SetWhenCalled(&on_empty_called));
   page_connection_notifier->RegisterExternalRequest();
   page_connection_notifier->RegisterExternalRequest();
@@ -216,17 +219,31 @@ TEST_F(PageConnectionNotifierTest, PageConnectionNotifierDestroyedWhileCallingPa
   size_t unregister_requests_when_tokens_remain =
       std::uniform_int_distribution<size_t>(0u, token_count)(bit_generator);
   bool on_empty_called;
-  bool on_OnPageUnused_called = false;
+  bool on_OnExternallyUnused_called = false;
+  bool on_OnInternallyUnused_called = false;
   std::vector<std::unique_ptr<ExpiringToken>> tokens;
 
   auto page_connection_notifier = std::make_unique<PageConnectionNotifier>(
-      kLedgerName, std::string(::fuchsia::ledger::PAGE_ID_SIZE, '3'), &fake_disk_cleanup_manager);
+      kLedgerName, std::string(::fuchsia::ledger::PAGE_ID_SIZE, '3'),
+      std::vector<PageUsageListener*>{&fake_disk_cleanup_manager});
   page_connection_notifier->set_on_empty(callback::SetWhenCalled(&on_empty_called));
-  fake_disk_cleanup_manager.set_on_OnPageUnused(
-      [&on_OnPageUnused_called, page_connection_notifier_ptr = &page_connection_notifier] {
-        on_OnPageUnused_called = true;
-        page_connection_notifier_ptr->reset();
+  fake_disk_cleanup_manager.set_on_OnExternallyUnused(
+      [&on_OnExternallyUnused_called, &on_OnInternallyUnused_called,
+       page_connection_notifier_ptr = &page_connection_notifier] {
+        on_OnExternallyUnused_called = true;
+        if (on_OnInternallyUnused_called) {
+          page_connection_notifier_ptr->reset();
+        }
       });
+  fake_disk_cleanup_manager.set_on_OnInternallyUnused(
+      [&on_OnExternallyUnused_called, &on_OnInternallyUnused_called,
+       page_connection_notifier_ptr = &page_connection_notifier] {
+        on_OnInternallyUnused_called = true;
+        if (on_OnExternallyUnused_called) {
+          page_connection_notifier_ptr->reset();
+        }
+      });
+
   EXPECT_TRUE(page_connection_notifier->IsEmpty());
   page_connection_notifier->RegisterExternalRequest();
   page_connection_notifier->RegisterExternalRequest();
@@ -249,28 +266,49 @@ TEST_F(PageConnectionNotifierTest, PageConnectionNotifierDestroyedWhileCallingPa
   // places where it might be made.
   if (unregister_requests_when_tokens_remain == token_count) {
     page_connection_notifier->UnregisterExternalRequests();
+    EXPECT_TRUE(on_OnExternallyUnused_called);
   }
   while (tokens.size() > 1) {
     tokens.pop_back();
     EXPECT_FALSE(page_connection_notifier->IsEmpty());
-    EXPECT_FALSE(on_OnPageUnused_called);
+    EXPECT_FALSE(on_OnInternallyUnused_called);
     EXPECT_FALSE(on_empty_called);
     if (unregister_requests_when_tokens_remain == tokens.size()) {
       page_connection_notifier->UnregisterExternalRequests();
+      EXPECT_TRUE(on_OnExternallyUnused_called);
+      EXPECT_FALSE(on_OnInternallyUnused_called);
       EXPECT_FALSE(page_connection_notifier->IsEmpty());
-      EXPECT_FALSE(on_OnPageUnused_called);
       EXPECT_FALSE(on_empty_called);
     }
   }
   tokens.pop_back();
+  EXPECT_TRUE(on_OnInternallyUnused_called);
   if (unregister_requests_when_tokens_remain == 0) {
     EXPECT_FALSE(page_connection_notifier->IsEmpty());
-    EXPECT_FALSE(on_OnPageUnused_called);
+    EXPECT_FALSE(on_OnExternallyUnused_called);
     EXPECT_FALSE(on_empty_called);
     page_connection_notifier->UnregisterExternalRequests();
   }
-  EXPECT_TRUE(on_OnPageUnused_called);
   EXPECT_FALSE(on_empty_called);
+}
+
+TEST_F(PageConnectionNotifierTest, MultiplePageUsageListeners) {
+  std::vector<FakeDiskCleanupManager> page_usage_listeners(3);
+  std::vector<PageUsageListener*> page_usage_listeners_ptr;
+  for (auto& page_usage_listener : page_usage_listeners) {
+    page_usage_listeners_ptr.push_back(&page_usage_listener);
+  }
+
+  auto page_connection_notifier = std::make_unique<PageConnectionNotifier>(
+      kLedgerName, std::string(::fuchsia::ledger::PAGE_ID_SIZE, '3'), page_usage_listeners_ptr);
+  page_connection_notifier->RegisterExternalRequest();
+  page_connection_notifier->UnregisterExternalRequests();
+
+  for (const auto& page_usage_listener : page_usage_listeners) {
+    EXPECT_EQ(page_usage_listener.externally_used_count, 1);
+    EXPECT_EQ(page_usage_listener.externally_unused_count, 1);
+  }
+  EXPECT_TRUE(page_connection_notifier_.IsEmpty());
 }
 
 }  // namespace

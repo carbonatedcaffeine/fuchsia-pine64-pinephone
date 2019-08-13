@@ -99,6 +99,9 @@
             "required": [ "service" ]
           },
           {
+            "required": [ "legacy_service" ]
+          },
+          {
             "required": [ "directory" ]
           },
           {
@@ -109,6 +112,14 @@
           "service": {
             "title": "Used service source path",
             "description": "The path under which a service is offered to this component",
+            "allOf": [{ "$ref": "#/definitions/path-clause" }],
+            "examples": [
+              "/svc/fuchsia.logger.Log"
+            ]
+          },
+          "legacy_service": {
+            "title": "Used legacy service source path",
+            "description": "The path under which a legacy service is offered to this component",
             "allOf": [{ "$ref": "#/definitions/path-clause" }],
             "examples": [
               "/svc/fuchsia.logger.Log"
@@ -165,6 +176,9 @@
             "required": [ "service" ]
           },
           {
+            "required": [ "legacy_service" ]
+          },
+          {
             "required": [ "directory" ]
           }
         ],
@@ -172,6 +186,14 @@
           "service": {
             "title": "Exposed service source path",
             "description": "The path to the service being exposed. This is either a path in this component's outgoing namespace (if from \"self\"), or the path by which the service was exposed by the child (if from \"#$CHILD\").",
+            "allOf": [{ "$ref": "#/definitions/path-clause" }],
+            "examples": [
+              "/svc/fuchsia.ui.Scenic"
+            ]
+          },
+          "legacy_service": {
+            "title": "Exposed legacy service source path",
+            "description": "The path to the legacy service being exposed. This is either a path in this component's outgoing namespace (if from \"self\"), or the path by which the legacy service was exposed by the child (if from \"#$CHILD\").",
             "allOf": [{ "$ref": "#/definitions/path-clause" }],
             "examples": [
               "/svc/fuchsia.ui.Scenic"
@@ -187,7 +209,7 @@
           },
           "from": {
             "title": "Exposed capability source component",
-            "pattern": "^(self|#[0-9a-z_\\-\\.]+)$",
+            "pattern": "^(self|framework|#[0-9a-z_\\-\\.]+)$",
             "description": "The component which has the capability to expose. Either \"self\" or \"#$CHILD\".",
             "allOf": [{ "$ref": "#/definitions/relative-ref-clause" }],
             "examples": [
@@ -222,6 +244,9 @@
             "required": [ "service" ]
           },
           {
+            "required": [ "legacy_service" ]
+          },
+          {
             "required": [ "directory" ]
           },
           {
@@ -232,6 +257,14 @@
           "service": {
             "title": "Offered service source path",
             "description": "The path to the service being offered. This is either a path in this component's namespace (if from \"self\"), or the path by which the service was exposed or offered from another component (if from \"realm\" or \"#$CHILD\").",
+            "allOf": [{ "$ref": "#/definitions/path-clause" }],
+            "examples": [
+              "/svc/fuchsia.ui.Scenic"
+            ]
+          },
+          "legacy_service": {
+            "title": "Offered legacy service source path",
+            "description": "The path to the legacy service being offered. This is either a path in this component's namespace (if from \"self\"), or the path by which the legacy service was exposed or offered from another component (if from \"realm\" or \"#$CHILD\").",
             "allOf": [{ "$ref": "#/definitions/path-clause" }],
             "examples": [
               "/svc/fuchsia.ui.Scenic"
@@ -255,11 +288,12 @@
           },
           "from": {
             "title": "Offered capability source component",
-            "description": "The component which has the capability to offer. For services and directories either \"realm\", \"self\" or \"#$CHILD\", for storage either \"realm\" or \"$STORAGE_SECTION_NAME\".",
-            "pattern": "^(realm|self|#[0-9a-z_\\-\\.]+)$",
+            "description": "The component which has the capability to offer. For services and directories either \"framework\", \"realm\", \"self\" or \"#$CHILD\", for storage either \"realm\" or \"$STORAGE_SECTION_NAME\".",
+            "pattern": "^(realm|framework|self|#[0-9a-z_\\-\\.]+)$",
             "allOf": [{ "$ref": "#/definitions/relative-ref-clause" }],
             "examples": [
               "realm",
+              "framework",
               "self",
               "#scenic"
             ]

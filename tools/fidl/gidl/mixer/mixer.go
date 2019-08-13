@@ -16,15 +16,25 @@ import (
 // ExtractDeclaration extract the top-level declaration for the provided value,
 // and ensures the value conforms to the schema.
 func ExtractDeclaration(value interface{}, fidl fidlir.Root) (Declaration, error) {
+	decl, err := ExtractDeclarationUnsafe(value, fidl)
+	if err != nil {
+		return nil, err
+	}
+	if err := decl.conforms(value); err != nil {
+		return nil, err
+	}
+	return decl, nil
+}
+
+// ExtractDeclarationUnsafe extract the top-level declaration for the provided value,
+// but does not ensure the value conforms to the schema. This is used in cases where
+// conformance is too strict (e.g. failure cases).
+func ExtractDeclarationUnsafe(value interface{}, fidl fidlir.Root) (Declaration, error) {
 	switch value := value.(type) {
 	case gidlir.Object:
 		decl, ok := schema(fidl).LookupDeclByName(value.Name)
 		if !ok {
 			return nil, fmt.Errorf("unknown declaration %s", value.Name)
-		}
-		err := decl.conforms(value)
-		if err != nil {
-			return nil, err
 		}
 		return decl, nil
 	default:
@@ -42,6 +52,8 @@ type ValueVisitor interface {
 	OnTable(value gidlir.Object, decl *TableDecl)
 	OnXUnion(value gidlir.Object, decl *XUnionDecl)
 	OnUnion(value gidlir.Object, decl *UnionDecl)
+	OnArray(value []interface{}, decl *ArrayDecl)
+	OnVector(value []interface{}, decl *VectorDecl)
 }
 
 // Visit is the entry point into visiting a value, it dispatches appropriately
@@ -69,6 +81,15 @@ func Visit(visitor ValueVisitor, value interface{}, decl Declaration) {
 		default:
 			panic(fmt.Sprintf("not implemented: %T", decl))
 		}
+	case []interface{}:
+		switch decl := decl.(type) {
+		case *ArrayDecl:
+			visitor.OnArray(value, decl)
+		case *VectorDecl:
+			visitor.OnVector(value, decl)
+		default:
+			panic(fmt.Sprintf("not implemented: %T", decl))
+		}
 	default:
 		panic(fmt.Sprintf("not implemented: %T", value))
 	}
@@ -76,8 +97,8 @@ func Visit(visitor ValueVisitor, value interface{}, decl Declaration) {
 
 func extractSubtype(decl Declaration) fidlir.PrimitiveSubtype {
 	switch decl := decl.(type) {
-	case *numberDecl:
-		return decl.typ
+	case *NumberDecl:
+		return decl.Typ
 	default:
 		panic("should not be reachable, there must be a bug somewhere")
 	}
@@ -85,34 +106,51 @@ func extractSubtype(decl Declaration) fidlir.PrimitiveSubtype {
 
 // Declaration describes a FIDL declaration.
 type Declaration interface {
-	// ForKey looks up the declaration for a specific key.
-	ForKey(key string) (Declaration, bool)
-
 	// conforms verifies that the value conforms to this declaration.
 	conforms(value interface{}) error
 }
 
 // Assert that wrappers conform to the Declaration interface.
 var _ = []Declaration{
-	&boolDecl{},
-	&numberDecl{},
-	&stringDecl{},
+	&BoolDecl{},
+	&NumberDecl{},
+	&StringDecl{},
+	&StructDecl{},
+	&TableDecl{},
+	&XUnionDecl{},
+	&ArrayDecl{},
+	&VectorDecl{},
+}
+
+type KeyedDeclaration interface {
+	Declaration
+	// ForKey looks up the declaration for a specific key.
+	ForKey(key string) (Declaration, bool)
+}
+
+// Assert that wrappers conform to the KeyedDeclaration interface.
+var _ = []KeyedDeclaration{
 	&StructDecl{},
 	&TableDecl{},
 	&XUnionDecl{},
 }
 
-type hasNoKey struct{}
-
-func (decl hasNoKey) ForKey(key string) (Declaration, bool) {
-	return nil, false
+type ListDeclaration interface {
+	Declaration
+	// Returns the declaration of the child element (e.g. []int decl -> int decl).
+	Elem() (Declaration, bool)
 }
 
-type boolDecl struct {
-	hasNoKey
+// Assert that wrappers conform to the ListDeclaration interface.
+var _ = []ListDeclaration{
+	&ArrayDecl{},
+	&VectorDecl{},
 }
 
-func (decl *boolDecl) conforms(value interface{}) error {
+type BoolDecl struct {
+}
+
+func (decl *BoolDecl) conforms(value interface{}) error {
 	switch value.(type) {
 	default:
 		return fmt.Errorf("expecting number, found %T (%s)", value, value)
@@ -121,14 +159,13 @@ func (decl *boolDecl) conforms(value interface{}) error {
 	}
 }
 
-type numberDecl struct {
-	hasNoKey
-	typ   fidlir.PrimitiveSubtype
+type NumberDecl struct {
+	Typ   fidlir.PrimitiveSubtype
 	lower int64
 	upper uint64
 }
 
-func (decl *numberDecl) conforms(value interface{}) error {
+func (decl *NumberDecl) conforms(value interface{}) error {
 	switch value := value.(type) {
 	default:
 		return fmt.Errorf("expecting number, found %T (%s)", value, value)
@@ -151,12 +188,11 @@ func (decl *numberDecl) conforms(value interface{}) error {
 	}
 }
 
-type stringDecl struct {
-	hasNoKey
+type StringDecl struct {
 	bound *int
 }
 
-func (decl *stringDecl) conforms(value interface{}) error {
+func (decl *StringDecl) conforms(value interface{}) error {
 	switch value := value.(type) {
 	default:
 		return fmt.Errorf("expecting string, found %T (%s)", value, value)
@@ -205,11 +241,11 @@ func (decl *StructDecl) conforms(value interface{}) error {
 	default:
 		return fmt.Errorf("expecting string, found %T (%v)", value, value)
 	case gidlir.Object:
-		for key, field := range value.Fields {
-			if fieldDecl, ok := decl.ForKey(key); !ok {
-				return fmt.Errorf("field %s: unknown", key)
-			} else if err := fieldDecl.conforms(field); err != nil {
-				return fmt.Errorf("field %s: %s", key, err)
+		for _, field := range value.Fields {
+			if fieldDecl, ok := decl.ForKey(field.Name); !ok {
+				return fmt.Errorf("field %s: unknown", field.Name)
+			} else if err := fieldDecl.conforms(field.Value); err != nil {
+				return fmt.Errorf("field %s: %s", field.Name, err)
 			}
 		}
 		return nil
@@ -237,11 +273,11 @@ func (decl *TableDecl) conforms(untypedValue interface{}) error {
 	default:
 		return fmt.Errorf("expecting object, found %T (%v)", untypedValue, untypedValue)
 	case gidlir.Object:
-		for key, field := range value.Fields {
-			if fieldDecl, ok := decl.ForKey(key); !ok {
-				return fmt.Errorf("field %s: unknown", key)
-			} else if err := fieldDecl.conforms(field); err != nil {
-				return fmt.Errorf("field %s: %s", key, err)
+		for _, field := range value.Fields {
+			if fieldDecl, ok := decl.ForKey(field.Name); !ok {
+				return fmt.Errorf("field %s: unknown", field.Name)
+			} else if err := fieldDecl.conforms(field.Value); err != nil {
+				return fmt.Errorf("field %s: %s", field.Name, err)
 			}
 		}
 		return nil
@@ -272,11 +308,11 @@ func (decl XUnionDecl) conforms(untypedValue interface{}) error {
 		if num := len(value.Fields); num != 1 {
 			return fmt.Errorf("must have one field, found %d", num)
 		}
-		for key, field := range value.Fields {
-			if fieldDecl, ok := decl.ForKey(key); !ok {
-				return fmt.Errorf("field %s: unknown", key)
-			} else if err := fieldDecl.conforms(field); err != nil {
-				return fmt.Errorf("field %s: %s", key, err)
+		for _, field := range value.Fields {
+			if fieldDecl, ok := decl.ForKey(field.Name); !ok {
+				return fmt.Errorf("field %s: unknown", field.Name)
+			} else if err := fieldDecl.conforms(field.Value); err != nil {
+				return fmt.Errorf("field %s: %s", field.Name, err)
 			}
 		}
 		return nil
@@ -307,15 +343,61 @@ func (decl UnionDecl) conforms(untypedValue interface{}) error {
 		if num := len(value.Fields); num != 1 {
 			return fmt.Errorf("must have one field, found %d", num)
 		}
-		for key, field := range value.Fields {
-			if fieldDecl, ok := decl.ForKey(key); !ok {
-				return fmt.Errorf("field %s: unknown", key)
-			} else if err := fieldDecl.conforms(field); err != nil {
-				return fmt.Errorf("field %s: %s", key, err)
+		for _, field := range value.Fields {
+			if fieldDecl, ok := decl.ForKey(field.Name); !ok {
+				return fmt.Errorf("field %s: unknown", field.Name)
+			} else if err := fieldDecl.conforms(field.Value); err != nil {
+				return fmt.Errorf("field %s: %s", field.Name, err)
 			}
 		}
 		return nil
 	}
+}
+
+type ArrayDecl struct {
+	schema schema
+	typ    fidlir.Type
+}
+
+func (decl ArrayDecl) Elem() (Declaration, bool) {
+	return decl.schema.LookupDeclByType(*decl.typ.ElementType)
+}
+
+func (decl ArrayDecl) Size() int {
+	return *decl.typ.ElementCount
+}
+
+func (decl ArrayDecl) conforms(untypedValue interface{}) error {
+	if list, ok := untypedValue.([]interface{}); ok {
+		if len(list) > decl.Size() {
+			return fmt.Errorf("%d elements exceeds limits of an array of length %d", len(list), decl.Size())
+		}
+	} else {
+		return fmt.Errorf("expecting []interface{}, got %T (%v)", untypedValue, untypedValue)
+	}
+	if _, ok := decl.Elem(); !ok {
+		return fmt.Errorf("error resolving elem declaration")
+	}
+	return nil
+}
+
+type VectorDecl struct {
+	schema schema
+	typ    fidlir.Type
+}
+
+func (decl VectorDecl) Elem() (Declaration, bool) {
+	return decl.schema.LookupDeclByType(*decl.typ.ElementType)
+}
+
+func (decl VectorDecl) conforms(untypedValue interface{}) error {
+	if _, ok := untypedValue.([]interface{}); !ok {
+		return fmt.Errorf("expecting []interface{}, got %T (%v)", untypedValue, untypedValue)
+	}
+	if _, ok := decl.Elem(); !ok {
+		return fmt.Errorf("error resolving elem declaration")
+	}
+	return nil
 }
 
 type schema fidlir.Root
@@ -362,29 +444,29 @@ func (s schema) LookupDeclByName(name string) (Declaration, bool) {
 func (s schema) LookupDeclByType(typ fidlir.Type) (Declaration, bool) {
 	switch typ.Kind {
 	case fidlir.StringType:
-		return &stringDecl{
+		return &StringDecl{
 			bound: typ.ElementCount,
 		}, true
 	case fidlir.PrimitiveType:
 		switch typ.PrimitiveSubtype {
 		case fidlir.Bool:
-			return &boolDecl{}, true
+			return &BoolDecl{}, true
 		case fidlir.Int8:
-			return &numberDecl{typ: typ.PrimitiveSubtype, lower: math.MinInt8, upper: math.MaxInt8}, true
+			return &NumberDecl{Typ: typ.PrimitiveSubtype, lower: math.MinInt8, upper: math.MaxInt8}, true
 		case fidlir.Int16:
-			return &numberDecl{typ: typ.PrimitiveSubtype, lower: math.MinInt16, upper: math.MaxInt16}, true
+			return &NumberDecl{Typ: typ.PrimitiveSubtype, lower: math.MinInt16, upper: math.MaxInt16}, true
 		case fidlir.Int32:
-			return &numberDecl{typ: typ.PrimitiveSubtype, lower: math.MinInt32, upper: math.MaxInt32}, true
+			return &NumberDecl{Typ: typ.PrimitiveSubtype, lower: math.MinInt32, upper: math.MaxInt32}, true
 		case fidlir.Int64:
-			return &numberDecl{typ: typ.PrimitiveSubtype, lower: math.MinInt64, upper: math.MaxInt64}, true
+			return &NumberDecl{Typ: typ.PrimitiveSubtype, lower: math.MinInt64, upper: math.MaxInt64}, true
 		case fidlir.Uint8:
-			return &numberDecl{typ: typ.PrimitiveSubtype, lower: 0, upper: math.MaxUint8}, true
+			return &NumberDecl{Typ: typ.PrimitiveSubtype, lower: 0, upper: math.MaxUint8}, true
 		case fidlir.Uint16:
-			return &numberDecl{typ: typ.PrimitiveSubtype, lower: 0, upper: math.MaxUint16}, true
+			return &NumberDecl{Typ: typ.PrimitiveSubtype, lower: 0, upper: math.MaxUint16}, true
 		case fidlir.Uint32:
-			return &numberDecl{typ: typ.PrimitiveSubtype, lower: 0, upper: math.MaxUint32}, true
+			return &NumberDecl{Typ: typ.PrimitiveSubtype, lower: 0, upper: math.MaxUint32}, true
 		case fidlir.Uint64:
-			return &numberDecl{typ: typ.PrimitiveSubtype, lower: 0, upper: math.MaxUint64}, true
+			return &NumberDecl{Typ: typ.PrimitiveSubtype, lower: 0, upper: math.MaxUint64}, true
 		default:
 			panic(fmt.Sprintf("unsupported primitive subtype: %s", typ.PrimitiveSubtype))
 		}
@@ -394,6 +476,10 @@ func (s schema) LookupDeclByType(typ fidlir.Type) (Declaration, bool) {
 			panic(fmt.Sprintf("malformed identifier: %s", typ.Identifier))
 		}
 		return s.LookupDeclByName(parts[1])
+	case fidlir.ArrayType:
+		return &ArrayDecl{schema: s, typ: typ}, true
+	case fidlir.VectorType:
+		return &VectorDecl{schema: s, typ: typ}, true
 	default:
 		// TODO(pascallouis): many more cases.
 		panic("not implemented")

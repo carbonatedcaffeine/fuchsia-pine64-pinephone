@@ -2,21 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use failure::format_err;
-use fidl_fuchsia_wlan_device as fidl_wlan_dev;
-use fidl_fuchsia_wlan_mlme as fidl_mlme;
-use fuchsia_vfs_watcher::{WatchEvent, Watcher};
-use fuchsia_wlan_dev as wlan_dev;
-use fuchsia_zircon::Status as zx_Status;
-use futures::prelude::*;
-use log::{error, info};
-use std::fs::File;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-
-const PHY_PATH: &str = "/dev/class/wlanphy";
-const IFACE_PATH: &str = "/dev/class/wlanif";
+use {
+    failure::format_err,
+    fidl_fuchsia_wlan_device as fidl_wlan_dev, fidl_fuchsia_wlan_mlme as fidl_mlme,
+    fuchsia_vfs_watcher::{WatchEvent, Watcher},
+    fuchsia_zircon::Status as zx_Status,
+    futures::prelude::*,
+    log::{error, info},
+    std::io,
+    std::path::{Path, PathBuf},
+    std::str::FromStr,
+};
 
 pub struct NewPhyDevice {
     pub id: u16,
@@ -30,16 +26,19 @@ pub struct NewIfaceDevice {
     pub device: wlan_dev::Device,
 }
 
-pub fn watch_phy_devices() -> io::Result<impl Stream<Item = io::Result<NewPhyDevice>>> {
-    Ok(watch_new_devices(PHY_PATH)?
-        .try_filter_map(|path| future::ready(Ok(handle_open_error(&path, new_phy(&path), "phy")))))
+pub fn watch_phy_devices<E: wlan_dev::DeviceEnv>(
+) -> io::Result<impl Stream<Item = Result<NewPhyDevice, failure::Error>>> {
+    Ok(watch_new_devices::<_, E>(E::PHY_PATH)?.try_filter_map(|path| {
+        future::ready(Ok(handle_open_error(&path, new_phy::<E>(&path), "phy")))
+    }))
 }
 
 #[deprecated(note = "function is obsolete once WLAN-927 landed")]
-pub fn watch_iface_devices() -> io::Result<impl Stream<Item = io::Result<NewIfaceDevice>>> {
+pub fn watch_iface_devices<E: wlan_dev::DeviceEnv>(
+) -> io::Result<impl Stream<Item = Result<NewIfaceDevice, failure::Error>>> {
     #[allow(deprecated)]
-    Ok(watch_new_devices(IFACE_PATH)?.try_filter_map(|path| {
-        future::ready(Ok(handle_open_error(&path, new_iface(&path), "iface")))
+    Ok(watch_new_devices::<_, E>(E::IFACE_PATH)?.try_filter_map(|path| {
+        future::ready(Ok(handle_open_error(&path, new_iface::<E>(&path), "iface")))
     }))
 }
 
@@ -58,31 +57,33 @@ fn handle_open_error<T>(
     r.ok()
 }
 
-fn watch_new_devices<P: AsRef<Path>>(
+fn watch_new_devices<P: AsRef<Path>, E: wlan_dev::DeviceEnv>(
     path: P,
-) -> io::Result<impl Stream<Item = io::Result<PathBuf>>> {
-    let dir = File::open(&path)?;
-    let watcher = Watcher::new(&dir)?;
-    Ok(watcher.try_filter_map(move |msg| {
-        future::ready(Ok(match msg.event {
-            WatchEvent::EXISTING | WatchEvent::ADD_FILE => Some(path.as_ref().join(msg.filename)),
-            _ => None,
-        }))
-    }))
+) -> io::Result<impl Stream<Item = Result<PathBuf, failure::Error>>> {
+    let dir = E::open_dir(&path)?;
+    Ok(async move {
+        let watcher = Watcher::new(&dir).await?;
+        Ok(watcher.try_filter_map(move |msg| {
+            future::ready(Ok(match msg.event {
+                WatchEvent::EXISTING | WatchEvent::ADD_FILE => Some(path.as_ref().join(msg.filename)),
+                _ => None,
+            }))
+        }).err_into())
+    }.try_flatten_stream())
 }
 
-fn new_phy(path: &PathBuf) -> Result<NewPhyDevice, failure::Error> {
+fn new_phy<E: wlan_dev::DeviceEnv>(path: &PathBuf) -> Result<NewPhyDevice, failure::Error> {
     let id = id_from_path(path)?;
-    let device = wlan_dev::Device::new(path)?;
+    let device = E::device_from_path(path)?;
     let proxy = wlan_dev::connect_wlan_phy(&device)?;
     Ok(NewPhyDevice { id, proxy, device })
 }
 
 #[deprecated(note = "function is obsolete once WLAN-927 landed")]
-fn new_iface(path: &PathBuf) -> Result<NewIfaceDevice, failure::Error> {
+fn new_iface<E: wlan_dev::DeviceEnv>(path: &PathBuf) -> Result<NewIfaceDevice, failure::Error> {
     let id = id_from_path(path)?;
-    let device = wlan_dev::Device::new(path)?;
-    let proxy = fidl_mlme::MlmeProxy::new(wlan_dev::connect_wlan_iface(&device)?);
+    let device = E::device_from_path(path)?;
+    let proxy = wlan_dev::connect_wlan_iface(&device)?;
     Ok(NewIfaceDevice { id, proxy, device })
 }
 
@@ -103,12 +104,15 @@ mod tests {
     use fidl_fuchsia_wlan_tap as fidl_wlantap;
     use fuchsia_async::{self as fasync, DurationExt, TimeoutExt};
     use fuchsia_zircon::prelude::*;
+    use pin_utils::pin_mut;
     use wlantap_client;
 
     #[test]
     fn watch_phys() {
         let mut exec = fasync::Executor::new().expect("Failed to create an executor");
-        let mut new_phy_stream = watch_phy_devices().expect("watch_phy_devices() failed");
+        let new_phy_stream =
+            watch_phy_devices::<wlan_dev::RealDeviceEnv>().expect("watch_phy_devices() failed");
+        pin_mut!(new_phy_stream);
         let wlantap = wlantap_client::Wlantap::open().expect("Failed to connect to wlantapctl");
         let _tap_phy = wlantap.create_phy(create_wlantap_config(*b"wtchph"));
         for _ in 0..10 {
@@ -142,7 +146,7 @@ mod tests {
                     SupportedPhy::Ofdm,
                     SupportedPhy::Ht,
                 ],
-                driver_features: vec![],
+                driver_features: vec![fidl_common::DriverFeature::TempDirectSmeChannel],
                 mac_roles: vec![fidl_wlan_dev::MacRole::Client],
                 caps: vec![],
                 bands: vec![create_2_4_ghz_band_info()],

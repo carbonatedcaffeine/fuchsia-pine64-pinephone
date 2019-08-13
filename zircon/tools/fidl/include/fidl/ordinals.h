@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_ORDINALS_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_ORDINALS_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_ORDINALS_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_ORDINALS_H_
 
 #include "raw_ast.h"
 
@@ -31,7 +31,8 @@ raw::Ordinal32 GetGeneratedOrdinal32(const std::vector<std::string_view>& librar
 //
 // The 32bits ordinal value is equal to
 //
-//    *((int32_t *)sha256(library_name + "." + xunion_declaration_name + "/" + selector_name)) & 0x7fffffff;
+//    *((int32_t *)sha256(library_name + "." + xunion_declaration_name + "/" + selector_name)) &
+//    0x7fffffff;
 //
 // Note: the slash separator is between the xunion_declaration_name and selector_name.
 //
@@ -44,7 +45,8 @@ raw::Ordinal32 GetGeneratedOrdinal32(const std::vector<std::string_view>& librar
 //
 // The ordinal value is equal to
 //
-//    *((int64_t *)sha256(library_name + "/" + protocol_name + "." + selector_name)) & 0x7fffffffffffffff;
+//    *((int64_t *)sha256(library_name + "/" + protocol_name + "." + selector_name)) &
+//    0x7fffffffffffffff;
 //
 // Note: the slash separator is between the library_name and protocol_name.
 //
@@ -56,4 +58,4 @@ raw::Ordinal64 GetGeneratedOrdinal64(const std::vector<std::string_view>& librar
 }  // namespace ordinals
 }  // namespace fidl
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_ORDINALS_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_ORDINALS_H_

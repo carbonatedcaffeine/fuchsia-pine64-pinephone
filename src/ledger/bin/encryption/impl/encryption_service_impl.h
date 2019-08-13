@@ -25,7 +25,8 @@ class EncryptionServiceImpl : public EncryptionService {
   ~EncryptionServiceImpl() override;
 
   // EncryptionService:
-  storage::ObjectIdentifier MakeObjectIdentifier(storage::ObjectDigest digest) override;
+  storage::ObjectIdentifier MakeObjectIdentifier(storage::ObjectIdentifierFactory* factory,
+                                                 storage::ObjectDigest digest) override;
   void EncryptCommit(std::string commit_storage,
                      fit::function<void(Status, std::string)> callback) override;
   void DecryptCommit(convert::ExtendedStringView storage_bytes,
@@ -38,6 +39,12 @@ class EncryptionServiceImpl : public EncryptionService {
                      fit::function<void(Status, std::string)> callback) override;
   void GetChunkingPermutation(
       fit::function<void(Status, fit::function<uint64_t(uint64_t)>)> callback) override;
+
+  std::string GetEntryId() override;
+
+  std::string GetEntryIdForMerge(fxl::StringView entry_name, storage::CommitId left_parent_id,
+                                 storage::CommitId right_parent_id,
+                                 fxl::StringView operation_list) override;
 
  private:
   class KeyService;

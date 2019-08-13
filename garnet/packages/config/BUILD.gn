@@ -35,21 +35,6 @@ group("openssh_keys") {
   ]
 }
 
-group("kernel_crash_checker") {
-  testonly = true
-  public_deps = [
-    "//garnet/packages/config:services",
-    "//src/developer/kernel_crash_checker:config",
-  ]
-}
-
-group("crashpad_upload_to_prod_server") {
-  testonly = true
-  public_deps = [
-    "//src/developer/crashpad_agent:upload_to_prod_server_config",
-  ]
-}
-
 group("router") {
   testonly = true
   public_deps = [
@@ -77,7 +62,6 @@ group("amber_auto_ota") {
   testonly = true
   public_deps = [
     "//garnet/bin/system-update-checker:auto_update",
-    "//garnet/go/src/amber/ota_config:amber_flags",
   ]
 }
 
@@ -112,5 +96,13 @@ group("virtual_audio") {
   testonly = true
   public_deps = [
     "//src/media/audio/virtual_audio_service:virtual_audio_config",
+  ]
+}
+
+group("factory_reset") {
+  testonly = true
+  public_deps = [
+    "//garnet/packages/config:services",
+    "//src/recovery/factory_reset:configs",
   ]
 }

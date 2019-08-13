@@ -33,9 +33,10 @@ install_host_tools("host") {
 }
 
 go_test("gidl_parser_test") {
-  gopackage = "gidl/parser"
+  gopackages = ["gidl/parser"]
 
   deps = [
     ":lib",
   ]
 }
+

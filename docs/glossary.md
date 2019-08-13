@@ -52,7 +52,7 @@ other filesystems are available. It is part of the [ZBI](#zircon-boot-image),
 and is decompressed and served by [bootsvc](#bootsvc). After the early boot
 process is complete, the bootfs is mounted at `/boot`.
 
--   [Documentation](/zircon/docs/userboot.md#BOOTFS)
+-   [Documentation](/docs/zircon/userboot.md#BOOTFS)
 
 #### **bootsvc**
 
@@ -61,7 +61,7 @@ service for the [bootfs](#bootfs) and a loader service that loads programs from
 the same bootfs. After starting these services, it loads the third program,
 which defaults to `devmgr`.
 
--   [Documentation](/zircon/docs/bootsvc.md)
+-   [Documentation](/docs/zircon/bootsvc.md)
 
 #### **Bus Driver**
 
@@ -127,7 +127,7 @@ datagram-like transport that can transfer small messages including
 [Handles](#Handle). [FIDL](#FIDL) protocols typically use channels as their
 underlying transport.
 
--   [Channel Overview](/zircon/docs/objects/channel.md)
+-   [Channel Overview](/docs/zircon/objects/channel.md)
 
 #### **Component**
 
@@ -274,7 +274,7 @@ The Driver Development Kit is the documentation, APIs, and ABIs necessary to
 build Zircon Device Drivers. Device drivers are implemented as ELF shared
 libraries loaded by Zircon's Device Manager.
 
--   [DDK Overview](/zircon/docs/ddk/overview.md)
+-   [DDK Overview](/docs/zircon/ddk/overview.md)
 -   [DDK includes](/zircon/system/ulib/ddk/include/ddk/)
 
 #### **Directory capability**
@@ -295,7 +295,7 @@ Directory capability is a [components v2](#components-v2) concept.
 A driver is a dynamic shared library which [DevMgr](#DevMgr) can load into a
 [DevHost](#DevHost) and that enables, and controls one or more devices.
 
--   [Reference](/zircon/docs/ddk/driver-development.md)
+-   [Reference](/docs/zircon/ddk/driver-development.md)
 -   [Driver Sources](/zircon/system/dev)
 
 #### **Environment**
@@ -322,7 +322,7 @@ Fuchsia.
 
 FBL is the Fuchsia Base Library, which is shared between kernel and userspace.
 
--   [Zircon C++](/zircon/docs/cxx.md)
+-   [Zircon C++](/docs/zircon/cxx.md)
 
 #### **fdio**
 
@@ -340,6 +340,8 @@ protocols that are typically used over [channels](#channel). FIDL is programming
 language agnostic and has bindings for many popular languages, including C, C++,
 Dart, Go, and Rust. This approach lets system components written in a variety of
 languages interact seamlessly.
+
+-   [FIDL](/docs/development/languages/fidl/)
 
 #### **Flutter**
 
@@ -409,7 +411,7 @@ repository.
 A Handle is how a userspace process refers to a [kernel object](#Kernel-Object).
 They can be passed to other processes over [Channels](#Channel).
 
--   [Reference](/zircon/docs/handles.md)
+-   [Reference](/docs/zircon/handles.md)
 
 #### **Hardware Driver**
 
@@ -447,7 +449,7 @@ A Job is a [kernel object](#Kernel-Object) that groups a set of related
 processes, their child processes and their jobs (if any). Every process in the
 system belongs to a job and all jobs form a single rooted tree.
 
--   [Job Overview](/zircon/docs/objects/job.md)
+-   [Job Overview](/docs/zircon/objects/job.md)
 
 #### **Kernel Object**
 
@@ -455,7 +457,7 @@ A kernel object is a kernel data structure which is used to regulate access to
 system resources such as memory, i/o, processor time and access to other
 processes. Userspace can only reference kernel objects via [Handles](#Handle).
 
--   [Reference](/zircon/docs/objects.md)
+-   [Reference](/docs/zircon/objects.md)
 
 #### **KOID**
 
@@ -467,7 +469,7 @@ A Kernel Object Identifier.
 
 [Ledger](/src/ledger/docs/README.md) is a distributed storage system for
 Fuchsia. Applications use Ledger either directly or through state
-synchronization primitives exposed by the Modular framework that are based on
+synchronization primitives exposed by the [Modular](the-book/modular/overview.md) framework that are based on
 Ledger under-the-hood.
 
 #### **LK**
@@ -641,7 +643,7 @@ There are three types of storage capabilities:
 Storage capability is a [components v2](#components-v2) concept.
 
 -   [Capability routing](#capability-routing)
--   [Storage capabilities](/docs/the-book/components/storage_capabilities.md)
+-   [Storage capabilities](/docs/the-book/components/capabilities/storage.md)
 
 #### **Story**
 
@@ -661,7 +663,7 @@ the kernel image in the same way as the [vDSO](#Virtual Dynamic Shared Object),
 instead of being loaded from a filesystem. Its primary purpose is to load the
 second process, [bootsvc](#bootsvc), from the [bootfs](#bootfs).
 
--   [Documentation](/zircon/docs/userboot.md)
+-   [Documentation](/docs/zircon/userboot.md)
 
 #### **Virtual Dynamic Shared Object**
 
@@ -679,7 +681,7 @@ A Virtual Memory Address Range (VMAR) is a Zircon
 [Virtual Memory Objects](#virtual-memory-object) may be mapped into the address
 space of a process.
 
--   [VMAR Overview](/zircon/docs/objects/vm_address_region.md)
+-   [VMAR Overview](/docs/zircon/objects/vm_address_region.md)
 
 #### **Virtual Memory Object**
 
@@ -688,7 +690,7 @@ represents a collection of pages (or the potential for pages) which may be read,
 written, mapped into the address space of a process, or shared with another
 process by passing a [Handle](#Handle) over a [Channel](#Channel).
 
--   [VMO Overview](/zircon/docs/objects/vm_object.md)
+-   [VMO Overview](/docs/zircon/objects/vm_object.md)
 
 #### **Zircon Boot Image**
 
@@ -715,7 +717,7 @@ libc, etc) at the core of Fuchsia. In a traditional monolithic kernel, many of
 the userspace components of Zircon would be part of the kernel itself.
 
 -   [Zircon Documentation](/zircon/README.md)
--   [Zircon Concepts](/zircon/docs/concepts.md)
+-   [Zircon Concepts](/docs/zircon/concepts.md)
 -   [Source](/zircon)
 
 #### **ZX**

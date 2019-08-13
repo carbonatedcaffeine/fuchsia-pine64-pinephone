@@ -39,7 +39,10 @@ sdk_source_set("cpp") {
     "internal/stub_controller.h",
     "internal/weak_stub_controller.cc",
     "internal/weak_stub_controller.h",
+    "member_connector.h",
     "optional.h",
+    "service_connector.h",
+    "service_handler_base.h",
     "thread_safe_binding_set.h",
     "type_converter.h",
   ]
@@ -104,9 +107,9 @@ sdk_source_set("cpp_base") {
     "internal/logging.cc",
     "internal/logging.h",
     "object_coding.h",
-    "string.cc",
     "string.h",
     "traits.h",
+    "transition.h",
     "vector.h",
   ]
 
@@ -161,6 +164,7 @@ fidl("conformance_fidl") {
   testonly = true
 
   sources = [
+    "//tools/fidl/gidl-conformance-suite/arrays_and_vectors.test.fidl",
     "//tools/fidl/gidl-conformance-suite/mix_and_match.test.fidl",
     "//tools/fidl/gidl-conformance-suite/optionals.test.fidl",
     "//tools/fidl/gidl-conformance-suite/structs.test.fidl",

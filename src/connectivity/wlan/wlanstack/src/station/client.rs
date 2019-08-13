@@ -5,7 +5,7 @@
 use failure::bail;
 use fidl::{endpoints::RequestStream, endpoints::ServerEnd};
 use fidl_fuchsia_wlan_common as fidl_common;
-use fidl_fuchsia_wlan_mlme::{MlmeEventStream, MlmeProxy};
+use fidl_fuchsia_wlan_mlme::{self as fidl_mlme, MlmeEventStream, MlmeProxy};
 use fidl_fuchsia_wlan_sme::{self as fidl_sme, ClientSmeRequest};
 use fuchsia_zircon as zx;
 use futures::channel::mpsc;
@@ -17,8 +17,7 @@ use std::sync::{Arc, Mutex};
 use void::Void;
 use wlan_inspect;
 use wlan_sme::client::{
-    BssInfo, ConnectResult, ConnectionAttemptId, DiscoveryError, EssDiscoveryResult, EssInfo,
-    InfoEvent, ScanTxnId,
+    BssInfo, ConnectResult, ConnectionAttemptId, EssDiscoveryResult, EssInfo, InfoEvent, ScanTxnId,
 };
 use wlan_sme::{self as sme, client as client_sme, DeviceInfo, InfoStream};
 
@@ -114,9 +113,11 @@ async fn serve_fidl_endpoint(sme: &Mutex<Sme>, endpoint: Endpoint) {
         }
     };
     const MAX_CONCURRENT_REQUESTS: usize = 1000;
-    let r = await!(stream.try_for_each_concurrent(MAX_CONCURRENT_REQUESTS, move |request| {
-        handle_fidl_request(sme, request)
-    }));
+    let r = stream
+        .try_for_each_concurrent(MAX_CONCURRENT_REQUESTS, move |request| {
+            handle_fidl_request(sme, request)
+        })
+        .await;
     if let Err(e) = r {
         error!("Error serving FIDL: {}", e);
         return;
@@ -128,9 +129,11 @@ async fn handle_fidl_request(
     request: fidl_sme::ClientSmeRequest,
 ) -> Result<(), fidl::Error> {
     match request {
-        ClientSmeRequest::Scan { req, txn, .. } => Ok(await!(scan(sme, txn, req.scan_type))
+        ClientSmeRequest::Scan { req, txn, .. } => Ok(scan(sme, txn, req.scan_type)
+            .await
             .unwrap_or_else(|e| error!("Error handling a scan transaction: {:?}", e))),
-        ClientSmeRequest::Connect { req, txn, .. } => Ok(await!(connect(sme, txn, req))
+        ClientSmeRequest::Connect { req, txn, .. } => Ok(connect(sme, txn, req)
+            .await
             .unwrap_or_else(|e| error!("Error handling a connect transaction: {:?}", e))),
         ClientSmeRequest::Disconnect { responder } => {
             disconnect(sme);
@@ -147,7 +150,7 @@ async fn scan(
 ) -> Result<(), failure::Error> {
     let handle = txn.into_stream()?.control_handle();
     let receiver = sme.lock().unwrap().on_scan_command(scan_type);
-    let result = await!(receiver).unwrap_or(Err(DiscoveryError::InternalError));
+    let result = receiver.await.unwrap_or(Err(fidl_mlme::ScanResultCodes::InternalError));
     let send_result = send_scan_results(handle, result);
     filter_out_peer_closed(send_result)?;
     Ok(())
@@ -163,7 +166,7 @@ async fn connect(
         Some(txn) => Some(txn.into_stream()?.control_handle()),
     };
     let receiver = sme.lock().unwrap().on_connect_command(req);
-    let result = await!(receiver).ok();
+    let result = receiver.await.ok();
     let send_result = send_connect_result(handle, result);
     filter_out_peer_closed(send_result)?;
     Ok(())
@@ -231,17 +234,7 @@ fn handle_info_event(
                 connection_times.scan_started_time = None;
             }
         }
-        InfoEvent::ScanDiscoveryFinished {
-            bss_count,
-            ess_count,
-            num_bss_by_standard,
-            num_bss_by_channel,
-        } => {
-            telemetry::report_neighbor_networks_count(cobalt_sender, bss_count, ess_count);
-            telemetry::report_standards(cobalt_sender, num_bss_by_standard);
-            telemetry::report_channels(cobalt_sender, num_bss_by_channel);
-        }
-        InfoEvent::AssociationStarted { att_id } => {
+        InfoEvent::JoinStarted { att_id } => {
             connection_times.att_id = att_id;
             connection_times.assoc_started_time = Some(zx::Time::get(zx::ClockId::Monotonic));
         }
@@ -280,6 +273,23 @@ fn handle_info_event(
                 }
             }
         }
+        InfoEvent::DiscoveryScanStats(scan_stats, discovery_stats) => {
+            if let Some(s) = discovery_stats {
+                let bss_count = scan_stats.bss_count;
+                telemetry::report_neighbor_networks_count(cobalt_sender, bss_count, s.ess_count);
+                telemetry::report_standards(cobalt_sender, s.num_bss_by_standard);
+                telemetry::report_channels(cobalt_sender, s.num_bss_by_channel);
+            }
+            let is_join_scan = false;
+            telemetry::log_scan_stats(cobalt_sender, &scan_stats, is_join_scan);
+        }
+        InfoEvent::ConnectStats(connect_stats) => {
+            telemetry::log_connect_stats(cobalt_sender, &connect_stats)
+        }
+        InfoEvent::ConnectionMilestone(milestone) => {
+            telemetry::log_connection_milestone(cobalt_sender, &milestone)
+        }
+        InfoEvent::ConnectionLost(info) => telemetry::log_connection_lost(cobalt_sender, &info),
     }
 }
 
@@ -294,12 +304,15 @@ fn send_scan_results(
             handle.send_on_finished()?;
         }
         Err(e) => {
-            let mut fidl_err = fidl_sme::ScanError {
-                code: match e {
-                    DiscoveryError::NotSupported => fidl_sme::ScanErrorCode::NotSupported,
-                    DiscoveryError::InternalError => fidl_sme::ScanErrorCode::InternalError,
+            let mut fidl_err = match e {
+                fidl_mlme::ScanResultCodes::NotSupported => fidl_sme::ScanError {
+                    code: fidl_sme::ScanErrorCode::NotSupported,
+                    message: "Scanning not supported by device".to_string(),
                 },
-                message: e.to_string(),
+                _ => fidl_sme::ScanError {
+                    code: fidl_sme::ScanErrorCode::InternalError,
+                    message: "Internal error occurred".to_string(),
+                },
             };
             handle.send_on_error(&mut fidl_err)?;
         }

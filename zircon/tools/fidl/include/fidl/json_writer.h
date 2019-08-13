@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_JSON_WRITER_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_JSON_WRITER_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_JSON_WRITER_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_JSON_WRITER_H_
 
 #include <lib/fit/function.h>
 
@@ -25,8 +25,7 @@ namespace utils {
 template <typename DerivedT>
 class JsonWriter {
  public:
-  JsonWriter(std::ostream& os, int indent_level = 0)
-      : os_(os), indent_level_(indent_level) {}
+  JsonWriter(std::ostream& os, int indent_level = 0) : os_(os), indent_level_(indent_level) {}
 
   ~JsonWriter() = default;
 
@@ -239,4 +238,4 @@ class JsonWriter {
 }  // namespace utils
 }  // namespace fidl
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_JSON_WRITER_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_JSON_WRITER_H_

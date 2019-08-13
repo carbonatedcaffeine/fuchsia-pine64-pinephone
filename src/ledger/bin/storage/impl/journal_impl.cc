@@ -14,7 +14,7 @@
 
 #include "src/ledger/bin/storage/impl/btree/builder.h"
 #include "src/ledger/bin/storage/impl/btree/tree_node.h"
-#include "src/ledger/bin/storage/impl/commit_impl.h"
+#include "src/ledger/bin/storage/impl/commit_factory.h"
 #include "src/ledger/bin/storage/public/commit.h"
 #include "src/lib/fxl/memory/ref_ptr.h"
 
@@ -75,8 +75,11 @@ Status JournalImpl::Commit(coroutine::CoroutineHandler* handler,
     // recorded on the journal need to be executed over the content of
     // the first parent.
     ObjectIdentifier root_identifier = parents[0]->GetRootIdentifier();
-    return CreateCommitFromChanges(handler, std::move(parents), std::move(root_identifier),
-                                   std::move(changes), commit, objects_to_sync);
+    std::string parent_id = parents[0]->GetId();
+    return CreateCommitFromChanges(
+        handler, std::move(parents),
+        {std::move(root_identifier), PageStorage::Location::TreeNodeFromNetwork(parent_id)},
+        std::move(changes), commit, objects_to_sync);
   }
 
   // The journal contains the clear operation. The changes recorded on the
@@ -94,7 +97,8 @@ Status JournalImpl::Commit(coroutine::CoroutineHandler* handler,
   if (status != Status::OK) {
     return status;
   }
-  return CreateCommitFromChanges(handler, std::move(parents), std::move(root_identifier),
+  return CreateCommitFromChanges(handler, std::move(parents),
+                                 {std::move(root_identifier), PageStorage::Location::Local()},
                                  std::move(changes), commit, objects_to_sync);
 }
 
@@ -102,7 +106,7 @@ void JournalImpl::Put(convert::ExtendedStringView key, ObjectIdentifier object_i
                       KeyPriority priority) {
   FXL_DCHECK(!committed_);
   EntryChange change;
-  change.entry = {key.ToString(), std::move(object_identifier), priority};
+  change.entry = {key.ToString(), std::move(object_identifier), priority, EntryId()};
   change.deleted = false;
   journal_entries_[key.ToString()] = std::move(change);
 }
@@ -110,7 +114,7 @@ void JournalImpl::Put(convert::ExtendedStringView key, ObjectIdentifier object_i
 void JournalImpl::Delete(convert::ExtendedStringView key) {
   FXL_DCHECK(!committed_);
   EntryChange change;
-  change.entry = {key.ToString(), ObjectIdentifier(), KeyPriority::EAGER};
+  change.entry = {key.ToString(), ObjectIdentifier(), KeyPriority::EAGER, EntryId()};
   change.deleted = true;
   journal_entries_[key.ToString()] = std::move(change);
 }
@@ -123,8 +127,9 @@ void JournalImpl::Clear() {
 
 Status JournalImpl::CreateCommitFromChanges(
     coroutine::CoroutineHandler* handler,
-    std::vector<std::unique_ptr<const storage::Commit>> parents, ObjectIdentifier root_identifier,
-    std::vector<EntryChange> changes, std::unique_ptr<const storage::Commit>* commit,
+    std::vector<std::unique_ptr<const storage::Commit>> parents,
+    btree::LocatedObjectIdentifier root_identifier, std::vector<EntryChange> changes,
+    std::unique_ptr<const storage::Commit>* commit,
     std::vector<ObjectIdentifier>* objects_to_sync) {
   ObjectIdentifier object_identifier;
   std::set<ObjectIdentifier> new_nodes;
@@ -147,8 +152,8 @@ Status JournalImpl::CreateCommitFromChanges(
   }
 
   std::unique_ptr<const storage::Commit> new_commit =
-      CommitImpl::FromContentAndParents(page_storage_->GetCommitTracker(), environment_->clock(),
-                                        object_identifier, std::move(parents));
+      page_storage_->GetCommitFactory()->FromContentAndParents(
+          environment_->clock(), object_identifier, std::move(parents));
 
   if (coroutine::SyncCall(
           handler,

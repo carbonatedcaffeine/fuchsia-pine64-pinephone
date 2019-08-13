@@ -3,14 +3,15 @@
 // found in the LICENSE file.
 
 use {
-    crate::framework_services::RealFrameworkServiceHost,
-    crate::model::testing::mocks::*,
-    crate::model::testing::routing_test_helpers::*,
+    crate::{
+        framework::RealFrameworkServiceHost,
+        model::testing::{mocks::*, routing_test_helpers::*},
+    },
     cm_rust::{
-        self, Capability, CapabilityPath, ChildDecl, CollectionDecl, ComponentDecl, ExposeDecl,
-        ExposeDirectoryDecl, ExposeServiceDecl, ExposeSource, OfferDecl, OfferDirectoryDecl,
-        OfferDirectorySource, OfferServiceDecl, OfferServiceSource, OfferTarget, UseDecl,
-        UseDirectoryDecl, UseServiceDecl, UseSource,
+        self, CapabilityPath, ChildDecl, CollectionDecl, ComponentDecl, ExposeDecl,
+        ExposeDirectoryDecl, ExposeLegacyServiceDecl, ExposeSource, OfferDecl, OfferDirectoryDecl,
+        OfferDirectorySource, OfferLegacyServiceDecl, OfferServiceSource, OfferTarget, UseDecl,
+        UseDirectoryDecl, UseLegacyServiceDecl, UseSource,
     },
     fidl_fuchsia_sys2 as fsys,
     std::convert::{TryFrom, TryInto},
@@ -38,7 +39,7 @@ async fn use_framework_service() {
         (
             "b",
             ComponentDecl {
-                uses: vec![UseDecl::Service(UseServiceDecl {
+                uses: vec![UseDecl::LegacyService(UseLegacyServiceDecl {
                     source: UseSource::Framework,
                     source_path: CapabilityPath::try_from("/svc/fuchsia.sys2.Realm").unwrap(),
                     target_path: CapabilityPath::try_from("/svc/fuchsia.sys2.Realm").unwrap(),
@@ -50,7 +51,7 @@ async fn use_framework_service() {
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let bind_calls = framework_services.bind_calls.clone();
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use_realm(vec!["b"].into(), bind_calls));
+    test.check_use_realm(vec!["b"].into(), bind_calls).await;
 }
 
 ///   a
@@ -59,8 +60,15 @@ async fn use_framework_service() {
 ///
 /// a: offers directory /data/foo from self as /data/bar
 /// a: offers service /svc/foo from self as /svc/bar
+/// a: offers service /svc/file from self as /svc/device
 /// b: uses directory /data/bar as /data/hippo
 /// b: uses service /svc/bar as /svc/hippo
+/// b: uses service /svc/device
+///
+/// The test related to `/svc/file` is used to verify that services that require
+/// extended flags, like `OPEN_FLAG_DESCRIBE`, work correctly. This often
+/// happens for fuchsia.hardware protocols that compose fuchsia.io protocols,
+/// and expect that `fdio_open` should operate correctly.
 #[fuchsia_async::run_singlethreaded(test)]
 async fn use_from_parent() {
     let components = vec![
@@ -74,10 +82,16 @@ async fn use_from_parent() {
                         target_path: CapabilityPath::try_from("/data/bar").unwrap(),
                         target: OfferTarget::Child("b".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source: OfferServiceSource::Self_,
                         source_path: CapabilityPath::try_from("/svc/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/bar").unwrap(),
+                        target: OfferTarget::Child("b".to_string()),
+                    }),
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
+                        source: OfferServiceSource::Self_,
+                        source_path: CapabilityPath::try_from("/svc/file").unwrap(),
+                        target_path: CapabilityPath::try_from("/svc/device").unwrap(),
                         target: OfferTarget::Child("b".to_string()),
                     }),
                 ],
@@ -98,10 +112,15 @@ async fn use_from_parent() {
                         source_path: CapabilityPath::try_from("/data/bar").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/bar").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
+                    }),
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
+                        source: UseSource::Realm,
+                        source_path: CapabilityPath::try_from("/svc/device").unwrap(),
+                        target_path: CapabilityPath::try_from("/svc/device").unwrap(),
                     }),
                 ],
                 ..default_component_decl()
@@ -110,14 +129,15 @@ async fn use_from_parent() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use(
+    test.check_use(
         vec!["b"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: true }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: true },
+    ).await;
+    test.check_use(
         vec!["b"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: true }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: true },
+    ).await;
+    test.check_open_file(vec!["b"].into(), "/svc/device".try_into().unwrap()).await
 }
 
 ///   a
@@ -145,7 +165,7 @@ async fn use_from_grandparent() {
                         target_path: CapabilityPath::try_from("/data/bar").unwrap(),
                         target: OfferTarget::Child("b".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source: OfferServiceSource::Self_,
                         source_path: CapabilityPath::try_from("/svc/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/bar").unwrap(),
@@ -170,7 +190,7 @@ async fn use_from_grandparent() {
                         target_path: CapabilityPath::try_from("/data/baz").unwrap(),
                         target: OfferTarget::Child("c".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source: OfferServiceSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/bar").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/baz").unwrap(),
@@ -194,7 +214,7 @@ async fn use_from_grandparent() {
                         source_path: CapabilityPath::try_from("/data/baz").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/baz").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -206,14 +226,14 @@ async fn use_from_grandparent() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use(
+    test.check_use(
         vec!["b", "c"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: true }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: true },
+    ).await;
+    test.check_use(
         vec!["b", "c"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: true }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: true },
+    ).await;
 }
 
 ///     a
@@ -249,7 +269,7 @@ async fn use_from_sibling_no_root() {
                         target_path: CapabilityPath::try_from("/data/foobar").unwrap(),
                         target: OfferTarget::Child("c".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source: OfferServiceSource::Child("d".to_string()),
                         source_path: CapabilityPath::try_from("/svc/bar").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/foobar").unwrap(),
@@ -280,7 +300,7 @@ async fn use_from_sibling_no_root() {
                         source_path: CapabilityPath::try_from("/data/foobar").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/foobar").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -298,7 +318,7 @@ async fn use_from_sibling_no_root() {
                         source_path: CapabilityPath::try_from("/data/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/bar").unwrap(),
                     }),
-                    ExposeDecl::Service(ExposeServiceDecl {
+                    ExposeDecl::LegacyService(ExposeLegacyServiceDecl {
                         source: ExposeSource::Self_,
                         source_path: CapabilityPath::try_from("/svc/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/bar").unwrap(),
@@ -310,14 +330,14 @@ async fn use_from_sibling_no_root() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use(
+    test.check_use(
         vec!["b", "c"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: true }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: true },
+    ).await;
+    test.check_use(
         vec!["b", "c"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: true }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: true },
+    ).await;
 }
 
 ///   a
@@ -340,7 +360,7 @@ async fn use_from_sibling_root() {
                         target_path: CapabilityPath::try_from("/data/baz").unwrap(),
                         target: OfferTarget::Child("c".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source: OfferServiceSource::Child("b".to_string()),
                         source_path: CapabilityPath::try_from("/svc/bar").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/baz").unwrap(),
@@ -371,7 +391,7 @@ async fn use_from_sibling_root() {
                         source_path: CapabilityPath::try_from("/data/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/bar").unwrap(),
                     }),
-                    ExposeDecl::Service(ExposeServiceDecl {
+                    ExposeDecl::LegacyService(ExposeLegacyServiceDecl {
                         source: ExposeSource::Self_,
                         source_path: CapabilityPath::try_from("/svc/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/bar").unwrap(),
@@ -389,7 +409,7 @@ async fn use_from_sibling_root() {
                         source_path: CapabilityPath::try_from("/data/baz").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/baz").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -401,14 +421,14 @@ async fn use_from_sibling_root() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use(
+    test.check_use(
         vec!["c"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: true }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: true },
+    ).await;
+    test.check_use(
         vec!["c"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: true }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: true },
+    ).await;
 }
 
 ///     a
@@ -434,7 +454,7 @@ async fn use_from_niece() {
                         target_path: CapabilityPath::try_from("/data/foobar").unwrap(),
                         target: OfferTarget::Child("c".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source: OfferServiceSource::Child("b".to_string()),
                         source_path: CapabilityPath::try_from("/svc/baz").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/foobar").unwrap(),
@@ -465,7 +485,7 @@ async fn use_from_niece() {
                         source_path: CapabilityPath::try_from("/data/bar").unwrap(),
                         target_path: CapabilityPath::try_from("/data/baz").unwrap(),
                     }),
-                    ExposeDecl::Service(ExposeServiceDecl {
+                    ExposeDecl::LegacyService(ExposeLegacyServiceDecl {
                         source: ExposeSource::Child("d".to_string()),
                         source_path: CapabilityPath::try_from("/svc/bar").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/baz").unwrap(),
@@ -488,7 +508,7 @@ async fn use_from_niece() {
                         source_path: CapabilityPath::try_from("/data/foobar").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/foobar").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -506,7 +526,7 @@ async fn use_from_niece() {
                         source_path: CapabilityPath::try_from("/data/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/bar").unwrap(),
                     }),
-                    ExposeDecl::Service(ExposeServiceDecl {
+                    ExposeDecl::LegacyService(ExposeLegacyServiceDecl {
                         source: ExposeSource::Self_,
                         source_path: CapabilityPath::try_from("/svc/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/bar").unwrap(),
@@ -518,14 +538,14 @@ async fn use_from_niece() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use(
+    test.check_use(
         vec!["c"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: true }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: true },
+    ).await;
+    test.check_use(
         vec!["c"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: true }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: true },
+    ).await;
 }
 
 ///      a
@@ -547,7 +567,7 @@ async fn use_kitchen_sink() {
             "a",
             ComponentDecl {
                 offers: vec![
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source: OfferServiceSource::Self_,
                         source_path: CapabilityPath::try_from("/svc/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/foo_from_a").unwrap(),
@@ -586,7 +606,7 @@ async fn use_kitchen_sink() {
                         target_path: CapabilityPath::try_from("/data/foo_from_d").unwrap(),
                         target: OfferTarget::Child("e".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source: OfferServiceSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/foo_from_a").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/foo_from_a").unwrap(),
@@ -624,7 +644,7 @@ async fn use_kitchen_sink() {
                         target_path: CapabilityPath::try_from("/data/foo_from_d").unwrap(),
                         target: OfferTarget::Child("f".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source: OfferServiceSource::Child("g".to_string()),
                         source_path: CapabilityPath::try_from("/svc/foo_from_h").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/foo_from_h").unwrap(),
@@ -666,7 +686,7 @@ async fn use_kitchen_sink() {
                         source_path: CapabilityPath::try_from("/data/foo_from_d").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/foo_from_a").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -684,7 +704,7 @@ async fn use_kitchen_sink() {
                         source_path: CapabilityPath::try_from("/data/foo_from_d").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/foo_from_h").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -697,7 +717,7 @@ async fn use_kitchen_sink() {
             "g",
             ComponentDecl {
                 program: None,
-                exposes: vec![ExposeDecl::Service(ExposeServiceDecl {
+                exposes: vec![ExposeDecl::LegacyService(ExposeLegacyServiceDecl {
                     source: ExposeSource::Child("h".to_string()),
                     source_path: CapabilityPath::try_from("/svc/foo_from_h").unwrap(),
                     target_path: CapabilityPath::try_from("/svc/foo_from_h").unwrap(),
@@ -713,7 +733,7 @@ async fn use_kitchen_sink() {
         (
             "h",
             ComponentDecl {
-                exposes: vec![ExposeDecl::Service(ExposeServiceDecl {
+                exposes: vec![ExposeDecl::LegacyService(ExposeLegacyServiceDecl {
                     source: ExposeSource::Self_,
                     source_path: CapabilityPath::try_from("/svc/foo").unwrap(),
                     target_path: CapabilityPath::try_from("/svc/foo_from_h").unwrap(),
@@ -724,22 +744,22 @@ async fn use_kitchen_sink() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use(
+    test.check_use(
         vec!["b", "e"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: true }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: true },
+    ).await;
+    test.check_use(
         vec!["b", "e"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: true }
-    ));
-    await!(test.check_use(
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: true },
+    ).await;
+    test.check_use(
         vec!["c", "f"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: true }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: true },
+    ).await;
+    test.check_use(
         vec!["c", "f"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: true }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: true },
+    ).await;
 }
 
 ///  component manager's namespace
@@ -765,7 +785,7 @@ async fn use_from_component_manager_namespace() {
                         target_path: CapabilityPath::try_from("/foo").unwrap(),
                         target: OfferTarget::Child("b".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source: OfferServiceSource::Realm,
                         source_path: CapabilityPath::try_from("/hippo/svc/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/echo/echo").unwrap(),
@@ -789,7 +809,7 @@ async fn use_from_component_manager_namespace() {
                         source_path: CapabilityPath::try_from("/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/echo/echo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -802,14 +822,14 @@ async fn use_from_component_manager_namespace() {
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
     test.install_hippo_dir();
-    await!(test.check_use(
+    test.check_use(
         vec!["b"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: true }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: true },
+    ).await;
+    test.check_use(
         vec!["b"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: true }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: true },
+    ).await;
 }
 
 ///   a
@@ -842,7 +862,7 @@ async fn use_not_offered() {
                         source_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -854,14 +874,14 @@ async fn use_not_offered() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use(
+    test.check_use(
         vec!["b"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: false }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: false },
+    ).await;
+    test.check_use(
         vec!["b"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: false }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: false },
+    ).await;
 }
 
 ///   a
@@ -886,7 +906,7 @@ async fn use_offer_source_not_exposed() {
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target: OfferTarget::Child("c".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         source: OfferServiceSource::Child("b".to_string()),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -918,7 +938,7 @@ async fn use_offer_source_not_exposed() {
                         source_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -930,14 +950,14 @@ async fn use_offer_source_not_exposed() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use(
+    test.check_use(
         vec!["c"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: false }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: false },
+    ).await;
+    test.check_use(
         vec!["c"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: false }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: false },
+    ).await;
 }
 
 ///   a
@@ -975,7 +995,7 @@ async fn use_offer_source_not_offered() {
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target: OfferTarget::Child("c".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         source: OfferServiceSource::Realm,
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -999,7 +1019,7 @@ async fn use_offer_source_not_offered() {
                         source_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1011,14 +1031,14 @@ async fn use_offer_source_not_offered() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use(
+    test.check_use(
         vec!["b", "c"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: false }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: false },
+    ).await;
+    test.check_use(
         vec!["b", "c"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: false }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: false },
+    ).await;
 }
 
 ///   a
@@ -1055,7 +1075,7 @@ async fn use_from_expose() {
                         source_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1078,7 +1098,7 @@ async fn use_from_expose() {
                         source: ExposeSource::Self_,
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    ExposeDecl::Service(ExposeServiceDecl {
+                    ExposeDecl::LegacyService(ExposeLegacyServiceDecl {
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         source: ExposeSource::Self_,
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1090,14 +1110,14 @@ async fn use_from_expose() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use(
+    test.check_use(
         vec!["b"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: false }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: false },
+    ).await;
+    test.check_use(
         vec!["b"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: false }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: false },
+    ).await;
 }
 
 ///   a
@@ -1122,7 +1142,7 @@ async fn offer_from_non_executable() {
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target: OfferTarget::Child("b".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         source: OfferServiceSource::Self_,
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1146,7 +1166,7 @@ async fn offer_from_non_executable() {
                         source_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1158,14 +1178,14 @@ async fn offer_from_non_executable() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use(
+    test.check_use(
         vec!["b"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: false }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: false },
+    ).await;
+    test.check_use(
         vec!["b"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: false }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: false },
+    ).await;
 }
 
 ///   a
@@ -1190,7 +1210,7 @@ async fn use_in_collection() {
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target: OfferTarget::Child("b".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source_path: CapabilityPath::try_from("/svc/foo").unwrap(),
                         source: OfferServiceSource::Self_,
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1208,7 +1228,7 @@ async fn use_in_collection() {
         (
             "b",
             ComponentDecl {
-                uses: vec![UseDecl::Service(UseServiceDecl {
+                uses: vec![UseDecl::LegacyService(UseLegacyServiceDecl {
                     source: UseSource::Framework,
                     source_path: CapabilityPath::try_from("/svc/fuchsia.sys2.Realm").unwrap(),
                     target_path: CapabilityPath::try_from("/svc/fuchsia.sys2.Realm").unwrap(),
@@ -1220,7 +1240,7 @@ async fn use_in_collection() {
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target: OfferTarget::Collection("coll".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         source: OfferServiceSource::Realm,
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1248,7 +1268,7 @@ async fn use_in_collection() {
         (
             "d",
             ComponentDecl {
-                uses: vec![UseDecl::Service(UseServiceDecl {
+                uses: vec![UseDecl::LegacyService(UseLegacyServiceDecl {
                     source: UseSource::Realm,
                     source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                     target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1260,32 +1280,32 @@ async fn use_in_collection() {
     // `RealFrameworkServiceHost` is needed to create dynamic children.
     let framework_services = Box::new(RealFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.create_dynamic_child(
+    test.create_dynamic_child(
         vec!["b"].into(),
         "coll",
         ChildDecl {
             name: "c".to_string(),
             url: "test:///c".to_string(),
             startup: fsys::StartupMode::Lazy,
-        }
-    ));
-    await!(test.create_dynamic_child(
+        },
+    ).await;
+    test.create_dynamic_child(
         vec!["b"].into(),
         "coll",
         ChildDecl {
             name: "d".to_string(),
             url: "test:///d".to_string(),
             startup: fsys::StartupMode::Lazy,
-        }
-    ));
-    await!(test.check_use(
+        },
+    ).await;
+    test.check_use(
         vec!["b", "coll:c"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: true }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: true },
+    ).await;
+    test.check_use(
         vec!["b", "coll:d"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: true }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: true },
+    ).await;
 }
 
 ///   a
@@ -1309,7 +1329,7 @@ async fn use_in_collection_not_offered() {
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target: OfferTarget::Child("b".to_string()),
                     }),
-                    OfferDecl::Service(OfferServiceDecl {
+                    OfferDecl::LegacyService(OfferLegacyServiceDecl {
                         source_path: CapabilityPath::try_from("/svc/foo").unwrap(),
                         source: OfferServiceSource::Self_,
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1327,7 +1347,7 @@ async fn use_in_collection_not_offered() {
         (
             "b",
             ComponentDecl {
-                uses: vec![UseDecl::Service(UseServiceDecl {
+                uses: vec![UseDecl::LegacyService(UseLegacyServiceDecl {
                     source: UseSource::Framework,
                     source_path: CapabilityPath::try_from("/svc/fuchsia.sys2.Realm").unwrap(),
                     target_path: CapabilityPath::try_from("/svc/fuchsia.sys2.Realm").unwrap(),
@@ -1348,7 +1368,7 @@ async fn use_in_collection_not_offered() {
                         source_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    UseDecl::Service(UseServiceDecl {
+                    UseDecl::LegacyService(UseLegacyServiceDecl {
                         source: UseSource::Realm,
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1361,23 +1381,23 @@ async fn use_in_collection_not_offered() {
     // `RealFrameworkServiceHost` is needed to create dynamic children.
     let framework_services = Box::new(RealFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.create_dynamic_child(
+    test.create_dynamic_child(
         vec!["b"].into(),
         "coll",
         ChildDecl {
             name: "c".to_string(),
             url: "test:///c".to_string(),
             startup: fsys::StartupMode::Lazy,
-        }
-    ));
-    await!(test.check_use(
+        },
+    ).await;
+    test.check_use(
         vec!["b", "coll:c"].into(),
-        CheckUse::Directory { path: default_directory_capability(), should_succeed: false }
-    ));
-    await!(test.check_use(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: false },
+    ).await;
+    test.check_use(
         vec!["b", "coll:c"].into(),
-        CheckUse::Service { path: default_service_capability(), should_succeed: false }
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: false },
+    ).await;
 }
 
 #[fuchsia_async::run_singlethreaded(test)]
@@ -1403,7 +1423,7 @@ async fn expose_from_self_and_child() {
                         source_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/bar/hippo").unwrap(),
                     }),
-                    ExposeDecl::Service(ExposeServiceDecl {
+                    ExposeDecl::LegacyService(ExposeLegacyServiceDecl {
                         source: ExposeSource::Child("c".to_string()),
                         source_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/bar/hippo").unwrap(),
@@ -1426,7 +1446,7 @@ async fn expose_from_self_and_child() {
                         source_path: CapabilityPath::try_from("/data/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    ExposeDecl::Service(ExposeServiceDecl {
+                    ExposeDecl::LegacyService(ExposeLegacyServiceDecl {
                         source: ExposeSource::Self_,
                         source_path: CapabilityPath::try_from("/svc/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1438,26 +1458,25 @@ async fn expose_from_self_and_child() {
     ];
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
-    await!(test.check_use_exposed_dir(
+    test.check_use_exposed_dir(
         vec!["b"].into(),
-        Capability::Directory("/data/bar/hippo".try_into().unwrap()),
-        true
-    ));
-    await!(test.check_use_exposed_dir(
+        CheckUse::Directory { path: "/data/bar/hippo".try_into().unwrap(), should_succeed: true },
+    ).await;
+    test.check_use_exposed_dir(
         vec!["b"].into(),
-        Capability::Service("/svc/bar/hippo".try_into().unwrap()),
-        true
-    ));
-    await!(test.check_use_exposed_dir(
+        CheckUse::LegacyService {
+            path: "/svc/bar/hippo".try_into().unwrap(),
+            should_succeed: true,
+        },
+    ).await;
+    test.check_use_exposed_dir(
         vec!["b", "c"].into(),
-        Capability::Directory(default_directory_capability()),
-        true
-    ));
-    await!(test.check_use_exposed_dir(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: true },
+    ).await;
+    test.check_use_exposed_dir(
         vec!["b", "c"].into(),
-        Capability::Service(default_service_capability()),
-        true
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: true },
+    ).await;
 }
 
 #[fuchsia_async::run_singlethreaded(test)]
@@ -1494,7 +1513,7 @@ async fn use_not_exposed() {
                         source_path: CapabilityPath::try_from("/data/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/data/hippo").unwrap(),
                     }),
-                    ExposeDecl::Service(ExposeServiceDecl {
+                    ExposeDecl::LegacyService(ExposeLegacyServiceDecl {
                         source: ExposeSource::Self_,
                         source_path: CapabilityPath::try_from("/svc/foo").unwrap(),
                         target_path: CapabilityPath::try_from("/svc/hippo").unwrap(),
@@ -1507,24 +1526,20 @@ async fn use_not_exposed() {
     let framework_services = Box::new(MockFrameworkServiceHost::new());
     let test = RoutingTest::new("a", components, framework_services);
     // Capability is only exposed from "c", so it only be usable from there.
-    await!(test.check_use_exposed_dir(
+    test.check_use_exposed_dir(
         vec!["b"].into(),
-        Capability::Directory(default_directory_capability()),
-        false,
-    ));
-    await!(test.check_use_exposed_dir(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: false },
+    ).await;
+    test.check_use_exposed_dir(
         vec!["b"].into(),
-        Capability::Service(default_service_capability()),
-        false,
-    ));
-    await!(test.check_use_exposed_dir(
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: false },
+    ).await;
+    test.check_use_exposed_dir(
         vec!["b", "c"].into(),
-        Capability::Directory(default_directory_capability()),
-        true
-    ));
-    await!(test.check_use_exposed_dir(
+        CheckUse::Directory { path: default_directory_capability(), should_succeed: true },
+    ).await;
+    test.check_use_exposed_dir(
         vec!["b", "c"].into(),
-        Capability::Service(default_service_capability()),
-        true
-    ));
+        CheckUse::LegacyService { path: default_service_capability(), should_succeed: true },
+    ).await;
 }

@@ -7,11 +7,12 @@
 #include <lib/async/cpp/task.h>
 #include <lib/async/default.h>
 #include <lib/zx/time.h>
-#include <trace/event.h>
 
 #include <set>
 #include <string>
 #include <unordered_set>
+
+#include <trace/event.h>
 
 #include "garnet/lib/ui/gfx/engine/frame_scheduler.h"
 #include "garnet/lib/ui/gfx/engine/frame_timings.h"
@@ -29,16 +30,14 @@
 namespace scenic_impl {
 namespace gfx {
 
-Engine::Engine(sys::ComponentContext* component_context,
-               const std::shared_ptr<FrameScheduler>& frame_scheduler,
+Engine::Engine(const std::shared_ptr<FrameScheduler>& frame_scheduler,
                DisplayManager* display_manager, escher::EscherWeakPtr weak_escher,
-               inspect::Node inspect_node)
+               inspect_deprecated::Node inspect_node)
     : display_manager_(display_manager),
       escher_(std::move(weak_escher)),
       engine_renderer_(std::make_unique<EngineRenderer>(
           escher_, escher_->device()->caps().GetMatchingDepthStencilFormat(
                        {vk::Format::eD24UnormS8Uint, vk::Format::eD32SfloatS8Uint}))),
-      event_timestamper_(component_context),
       image_factory_(std::make_unique<escher::ImageFactoryAdapter>(escher()->gpu_allocator(),
                                                                    escher()->resource_recycler())),
       rounded_rect_factory_(std::make_unique<escher::RoundedRectFactory>(escher_)),
@@ -47,25 +46,20 @@ Engine::Engine(sys::ComponentContext* component_context,
       frame_scheduler_(frame_scheduler),
       inspect_node_(std::move(inspect_node)),
       weak_factory_(this) {
-  FXL_DCHECK(display_manager_);
   FXL_DCHECK(escher_);
 
   InitializeInspectObjects();
 }
 
-Engine::Engine(sys::ComponentContext* component_context,
-               const std::shared_ptr<FrameScheduler>& frame_scheduler,
+Engine::Engine(const std::shared_ptr<FrameScheduler>& frame_scheduler,
                DisplayManager* display_manager,
                std::unique_ptr<escher::ReleaseFenceSignaller> release_fence_signaller,
                escher::EscherWeakPtr weak_escher)
     : display_manager_(display_manager),
       escher_(std::move(weak_escher)),
-      event_timestamper_(component_context),
       release_fence_signaller_(std::move(release_fence_signaller)),
       frame_scheduler_(frame_scheduler),
       weak_factory_(this) {
-  FXL_DCHECK(display_manager_);
-
   InitializeInspectObjects();
 }
 
@@ -108,12 +102,13 @@ std::optional<HardwareLayerAssignment> GetHardwareLayerAssignment(const Composit
   };
 }
 
-bool Engine::RenderFrame(const FrameTimingsPtr& timings, zx_time_t presentation_time) {
+bool Engine::RenderFrame(const FrameTimingsPtr& timings, zx::time presentation_time) {
   uint64_t frame_number = timings->frame_number();
 
   // NOTE: this name is important for benchmarking.  Do not remove or modify it
   // without also updating the "process_gfx_trace.go" script.
-  TRACE_DURATION("gfx", "RenderFrame", "frame_number", frame_number, "time", presentation_time);
+  TRACE_DURATION("gfx", "RenderFrame", "frame_number", frame_number, "time",
+                 presentation_time.get());
 
   TRACE_FLOW_BEGIN("gfx", "scenic_frame", frame_number);
 
@@ -157,7 +152,7 @@ bool Engine::RenderFrame(const FrameTimingsPtr& timings, zx_time_t presentation_
     success &= hla.swapchain->DrawAndPresentFrame(
         timings, hla,
         [is_last_hla, &frame, escher{escher_}, engine_renderer{engine_renderer_.get()}](
-            zx_time_t target_presentation_time, const escher::ImagePtr& output_image,
+            zx::time target_presentation_time, const escher::ImagePtr& output_image,
             const HardwareLayerAssignment::Item hla_item,
             const escher::SemaphorePtr& acquire_semaphore,
             const escher::SemaphorePtr& frame_done_semaphore) {
@@ -192,10 +187,10 @@ bool Engine::RenderFrame(const FrameTimingsPtr& timings, zx_time_t presentation_
   return true;
 }
 
-void Engine::UpdateAndDeliverMetrics(uint64_t presentation_time) {
+void Engine::UpdateAndDeliverMetrics(zx::time presentation_time) {
   // NOTE: this name is important for benchmarking.  Do not remove or modify it
   // without also updating the "process_gfx_trace.go" script.
-  TRACE_DURATION("gfx", "UpdateAndDeliverMetrics", "time", presentation_time);
+  TRACE_DURATION("gfx", "UpdateAndDeliverMetrics", "time", presentation_time.get());
 
   // Gather all of the scene which might need to be updated.
   std::set<Scene*> scenes;
@@ -221,12 +216,12 @@ void Engine::UpdateAndDeliverMetrics(uint64_t presentation_time) {
   // handle delivery of other kinds of events.  We should probably also
   // have some kind of backpointer from a session to its handler.
   for (auto node : updated_nodes) {
-    if (node->session()) {
+    if (auto event_reporter = node->event_reporter()) {
       fuchsia::ui::gfx::Event event;
       event.set_metrics(::fuchsia::ui::gfx::MetricsEvent());
       event.metrics().node_id = node->id();
       event.metrics().metrics = node->reported_metrics();
-      node->session()->EnqueueEvent(std::move(event));
+      event_reporter->EnqueueEvent(std::move(event));
     }
   }
 }

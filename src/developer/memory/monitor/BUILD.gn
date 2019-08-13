@@ -7,11 +7,13 @@ import("//build/package.gni")
 
 source_set("lib") {
   sources = [
+    "high_water.cc",
+    "high_water.h",
     "monitor.cc",
     "monitor.h",
   ]
   public_deps = [
-    "//garnet/public/lib/inspect",
+    "//garnet/public/lib/inspect_deprecated",
     "//sdk/fidl/fuchsia.memory",
     "//sdk/lib/sys/cpp",
     "//src/developer/memory/metrics",
@@ -19,7 +21,7 @@ source_set("lib") {
   deps = [
     "//garnet/public/lib/fsl",
     "//src/lib/fxl",
-    "//zircon/public/fidl/fuchsia-sysinfo:fuchsia-sysinfo_c",
+    "//zircon/public/fidl/fuchsia-boot:fuchsia-boot_c",
     "//zircon/public/lib/async-loop-cpp",
     "//zircon/public/lib/trace-provider-with-fdio",
   ]
@@ -41,6 +43,7 @@ executable("bin") {
 }
 
 package("monitor") {
+  rootresource_svc = "//build"
   package_name = "memory_monitor"
   deps = [
     ":bin",

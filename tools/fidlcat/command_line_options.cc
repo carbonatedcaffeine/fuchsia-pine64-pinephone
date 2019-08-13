@@ -4,17 +4,22 @@
 
 #include "tools/fidlcat/command_line_options.h"
 
-#include <cmdline/args_parser.h>
 #include <stdio.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
 #include <filesystem>
 #include <fstream>
+#include <regex>
 #include <set>
 #include <string>
 #include <vector>
 
+#include <cmdline/args_parser.h>
+
+#include "src/lib/fxl/log_settings.h"
+#include "src/lib/fxl/strings/string_number_conversions.h"
+#include "tools/fidlcat/lib/decode_options.h"
 #include "tools/fidlcat/lib/display_options.h"
 
 namespace fidlcat {
@@ -65,6 +70,21 @@ const char kSymbolPathHelp[] = R"(  --symbol-path=<path>
       as a mapping database from build ID to file path. Otherwise, the path
       will be loaded as an ELF file (if possible).)";
 
+const char kSyscallFilterHelp[] = R"(  --syscalls
+      A regular expression which selects the syscalls to decode and display.
+      Can be passed multiple times.
+      By default, only zx_channel_.* syscalls are displayed.
+      To display all the syscalls, use: --syscalls ".*"
+      This option is under development (we are adding the syscalls).)";
+
+const char kExcludeSyscallFilterHelp[] = R"(  --exclude-syscalls
+      A regular expression which selects the syscalls to not decode and display.
+      Can be passed multiple times.
+      To be displayed, a syscall must verify --syscalls and not verify
+      --exclude-syscalls.
+      To display all the syscalls but the zx_handle syscalls, use:
+        --syscalls ".*" --exclude-syscalls "zx_handle_.*")";
+
 const char kPrettyPrintHelp[] = R"(  --pretty-print
       Use a formated print instead of JSON.)";
 
@@ -81,12 +101,64 @@ const char kColumnsHelp[] = R"(  --columns=<size>
       For pretty print, width of the display. By default, on a terminal, use
       the terminal width.)";
 
+const char kVerbosityHelp[] = R"(  --verbose=<number or log level>
+      The log verbosity.  Legal values are "info", "warning", "error", "fatal",
+      or a number, starting from 0. Extra verbosity comes with higher levels)";
+
+const char kQuietHelp[] = R"(  --quiet=<number or log level>
+      The log verbosity.  Legal values are "info", "warning", "error", "fatal",
+      or a number, starting from 0. Extra verbosity comes with lower levels.)";
+
+const char kLogFileHelp[] = R"(  --log-file=<pathspec>
+      The name of a file to which the log should be written.)";
+
 const char kHelpHelp[] = R"(  --help
   -h
       Prints all command-line switches.)";
 
+// Sets the process log settings.  The |level| is the value of the setting (as
+// passed to --quiet or --verbose), |multiplier| is a value by which a numerical
+// setting will be multiplied (basically, -1 for verbose and 1 for quiet), and
+// |settings| contains the output.
+bool SetLogSettings(const std::string& level, int multiplier, fxl::LogSettings& settings) {
+  if (level == "info") {
+    settings.min_log_level = fxl::LOG_INFO;
+  } else if (level == "warning") {
+    settings.min_log_level = fxl::LOG_WARNING;
+  } else if (level == "error") {
+    settings.min_log_level = fxl::LOG_ERROR;
+  } else if (level == "fatal") {
+    settings.min_log_level = fxl::LOG_FATAL;
+  } else if (fxl::StringToNumberWithError(level, &settings.min_log_level)) {
+    settings.min_log_level *= multiplier;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+cmdline::Status ProcessLogOptions(const CommandLineOptions* options) {
+  fxl::LogSettings settings;
+  if (options->verbose) {
+    if (!SetLogSettings(*options->verbose, -1, settings)) {
+      return cmdline::Status::Error("Unable to parse verbose setting \"" + *options->verbose +
+                                    "\"");
+    }
+  }
+  if (options->quiet) {
+    if (!SetLogSettings(*options->quiet, 1, settings)) {
+      return cmdline::Status::Error("Unable to parse quiet setting \"" + *options->quiet + "\"");
+    }
+  }
+  if (options->log_file) {
+    settings.log_file = *options->log_file;
+  }
+  fxl::SetLogSettings(settings);
+  return cmdline::Status::Ok();
+}
+
 cmdline::Status ParseCommandLine(int argc, const char* argv[], CommandLineOptions* options,
-                                 DisplayOptions* display_options,
+                                 DecodeOptions* decode_options, DisplayOptions* display_options,
                                  std::vector<std::string>* params) {
   cmdline::ArgsParser<CommandLineOptions> parser;
 
@@ -95,17 +167,28 @@ cmdline::Status ParseCommandLine(int argc, const char* argv[], CommandLineOption
   parser.AddSwitch("remote-name", 'f', kRemoteNameHelp, &CommandLineOptions::remote_name);
   parser.AddSwitch("fidl-ir-path", 0, kFidlIrPathHelp, &CommandLineOptions::fidl_ir_paths);
   parser.AddSwitch("symbol-path", 's', kSymbolPathHelp, &CommandLineOptions::symbol_paths);
+  parser.AddSwitch("syscalls", 0, kSyscallFilterHelp, &CommandLineOptions::syscall_filters);
+  parser.AddSwitch("exclude-syscalls", 0, kExcludeSyscallFilterHelp,
+                   &CommandLineOptions::exclude_syscall_filters);
   parser.AddSwitch("pretty-print", 0, kPrettyPrintHelp, &CommandLineOptions::pretty_print);
   parser.AddSwitch("with-process-info", 0, kWithProcessInfoHelp,
                    &CommandLineOptions::with_process_info);
   parser.AddSwitch("colors", 0, kColorsHelp, &CommandLineOptions::colors);
   parser.AddSwitch("columns", 0, kColumnsHelp, &CommandLineOptions::columns);
+  parser.AddSwitch("verbose", 'v', kVerbosityHelp, &CommandLineOptions::verbose);
+  parser.AddSwitch("quiet", 'q', kQuietHelp, &CommandLineOptions::quiet);
+  parser.AddSwitch("log-file", 0, kLogFileHelp, &CommandLineOptions::log_file);
   bool requested_help = false;
   parser.AddGeneralSwitch("help", 'h', kHelpHelp, [&requested_help]() { requested_help = true; });
 
   cmdline::Status status = parser.Parse(argc, argv, options, params);
   if (status.has_error()) {
     return status;
+  }
+
+  cmdline::Status log_status = ProcessLogOptions(options);
+  if (log_status.has_error()) {
+    return log_status;
   }
 
   if (requested_help || (options->remote_name.empty() && options->remote_pid.empty() &&
@@ -115,6 +198,17 @@ cmdline::Status ParseCommandLine(int argc, const char* argv[], CommandLineOption
 
   if (!options->remote_name.empty() && !options->remote_pid.empty()) {
     return cmdline::Status::Error("Cannot specify both a remote pid and name.");
+  }
+
+  if (options->syscall_filters.empty()) {
+    decode_options->syscall_filters.push_back(std::regex("zx_channel_.*"));
+  } else if ((options->syscall_filters.size() != 1) || (options->syscall_filters[0] != ".*")) {
+    for (const auto& filter : options->syscall_filters) {
+      decode_options->syscall_filters.push_back(std::regex(filter));
+    }
+  }
+  for (const auto& filter : options->exclude_syscall_filters) {
+    decode_options->exclude_syscall_filters.push_back(std::regex(filter));
   }
 
   display_options->pretty_print = options->pretty_print;

@@ -719,6 +719,32 @@ fuchsia::ui::gfx::Command NewSetOpacityCmd(uint32_t node_id, float opacity) {
   return command;
 }
 
+fuchsia::ui::gfx::Command NewSetEnableDebugViewBoundsCmd(uint32_t view_id, bool enable) {
+  fuchsia::ui::gfx::SetEnableDebugViewBoundsCmd enable_cmd;
+  enable_cmd.view_id = view_id;
+  enable_cmd.enable = enable;
+
+  fuchsia::ui::gfx::Command command;
+  command.set_set_enable_view_debug_bounds(std::move(enable_cmd));
+  return command;
+}
+
+fuchsia::ui::gfx::Command NewSetViewHolderBoundsColorCmd(uint32_t view_holder_id, uint8_t red,
+                                                         uint8_t green, uint8_t blue) {
+  fuchsia::ui::gfx::ColorRgbValue color;
+  color.value.red = red;
+  color.value.green = green;
+  color.value.blue = blue;
+
+  fuchsia::ui::gfx::SetViewHolderBoundsColorCmd bounds_color_cmd;
+  bounds_color_cmd.view_holder_id = view_holder_id;
+  bounds_color_cmd.color = std::move(color);
+
+  fuchsia::ui::gfx::Command command;
+  command.set_set_view_holder_bounds_color(std::move(bounds_color_cmd));
+  return command;
+}
+
 fuchsia::ui::gfx::Command NewSetDisplayColorConversionCmdHACK(
     uint32_t compositor_id, const std::array<float, 3>& preoffsets,
     const std::array<float, 9>& matrix, const std::array<float, 3>& postoffsets) {
@@ -1045,6 +1071,13 @@ fuchsia::ui::gfx::Command NewSetCameraPoseBufferCmd(uint32_t camera_id, uint32_t
   command.set_set_camera_pose_buffer(std::move(set_command));
 
   return command;
+}
+
+fuchsia::ui::gfx::Command NewSetCameraPoseBufferCmd(uint32_t camera_id, uint32_t buffer_id,
+                                                    uint32_t num_entries, zx::time base_time,
+                                                    zx::duration time_interval) {
+  return NewSetCameraPoseBufferCmd(camera_id, buffer_id, num_entries, base_time.get(),
+                                   time_interval.get());
 }
 
 fuchsia::ui::gfx::Command NewSetLightColorCmd(uint32_t light_id, const float rgb[3]) {

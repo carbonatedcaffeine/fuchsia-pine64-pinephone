@@ -32,16 +32,13 @@ constexpr char kDifferentTestUtilURL[] =
 
 using test::appmgr::integration::DataFileReaderWriterPtr;
 
-class IsolatedPersistentStorageTest
-    : virtual public sys::testing::TestWithEnvironment,
-      public component::testing::DataFileReaderWriterUtil {
+class IsolatedPersistentStorageTest : virtual public sys::testing::TestWithEnvironment,
+                                      public component::testing::DataFileReaderWriterUtil {
  protected:
   IsolatedPersistentStorageTest()
       : TestWithEnvironment(),
-        env1_(CreateNewEnclosingEnvironment(kEnvironmentLabel1,
-                                            CreateServices())),
-        env2_(CreateNewEnclosingEnvironment(kEnvironmentLabel2,
-                                            CreateServices())) {}
+        env1_(CreateNewEnclosingEnvironment(kEnvironmentLabel1, CreateServices())),
+        env2_(CreateNewEnclosingEnvironment(kEnvironmentLabel2, CreateServices())) {}
 
   void SetUp() override {
     TestWithEnvironment::SetUp();
@@ -65,8 +62,8 @@ class IsolatedPersistentStorageTest
     // Can't use ASSERT_TRUE/ASSERT_EQ macros here since this isn't the test
     // body, and ASSERT_* macros just 'return;' to exit the test.
     EXPECT_EQ(WriteFileSync(util1, kTestFileName, test_file_content_), ZX_OK);
-    EXPECT_EQ(ReadFileSync(util1, kTestFileName).get(), test_file_content_);
-    EXPECT_NE(ReadFileSync(util2, kTestFileName).get(), test_file_content_);
+    EXPECT_EQ(ReadFileSync(util1, kTestFileName).value(), test_file_content_);
+    EXPECT_NE(ReadFileSync(util2, kTestFileName).value(), test_file_content_);
   }
 
   std::unique_ptr<sys::testing::EnclosingEnvironment> env1_;
@@ -82,10 +79,10 @@ TEST_F(IsolatedPersistentStorageTest, SameComponentDifferentEnvironments) {
   auto services2 = sys::ServiceDirectory::CreateWithRequest(&request2);
 
   fuchsia::sys::ComponentControllerPtr ctrl1, ctrl2;
-  fuchsia::sys::LaunchInfo launch_info1{
-      .url = kTestUtilURL, .directory_request = std::move(request1)};
-  fuchsia::sys::LaunchInfo launch_info2{
-      .url = kTestUtilURL, .directory_request = std::move(request2)};
+  fuchsia::sys::LaunchInfo launch_info1{.url = kTestUtilURL,
+                                        .directory_request = std::move(request1)};
+  fuchsia::sys::LaunchInfo launch_info2{.url = kTestUtilURL,
+                                        .directory_request = std::move(request2)};
   env1_->CreateComponent(std::move(launch_info1), ctrl1.NewRequest());
   env2_->CreateComponent(std::move(launch_info2), ctrl2.NewRequest());
 
@@ -95,8 +92,7 @@ TEST_F(IsolatedPersistentStorageTest, SameComponentDifferentEnvironments) {
 TEST_F(IsolatedPersistentStorageTest, SameComponentNestedEnvironments) {
   // Create a nested environment inside the environment created by the test
   // fixture, using the same label.
-  auto env1_nested =
-      env1_->CreateNestedEnclosingEnvironment(kEnvironmentLabel1);
+  auto env1_nested = env1_->CreateNestedEnclosingEnvironment(kEnvironmentLabel1);
 
   // Create two instances of the same utility component in the parent and child
   // environments.
@@ -104,10 +100,10 @@ TEST_F(IsolatedPersistentStorageTest, SameComponentNestedEnvironments) {
   auto services1 = sys::ServiceDirectory::CreateWithRequest(&request1);
   auto services2 = sys::ServiceDirectory::CreateWithRequest(&request2);
   fuchsia::sys::ComponentControllerPtr ctrl1, ctrl2;
-  fuchsia::sys::LaunchInfo launch_info1{
-      .url = kTestUtilURL, .directory_request = std::move(request1)};
-  fuchsia::sys::LaunchInfo launch_info2{
-      .url = kTestUtilURL, .directory_request = std::move(request2)};
+  fuchsia::sys::LaunchInfo launch_info1{.url = kTestUtilURL,
+                                        .directory_request = std::move(request1)};
+  fuchsia::sys::LaunchInfo launch_info2{.url = kTestUtilURL,
+                                        .directory_request = std::move(request2)};
   env1_->CreateComponent(std::move(launch_info1), ctrl1.NewRequest());
   env1_nested->CreateComponent(std::move(launch_info2), ctrl2.NewRequest());
 
@@ -121,10 +117,10 @@ TEST_F(IsolatedPersistentStorageTest, DifferentComponentsSameEnvironment) {
   auto services1 = sys::ServiceDirectory::CreateWithRequest(&request1);
   auto services2 = sys::ServiceDirectory::CreateWithRequest(&request2);
   fuchsia::sys::ComponentControllerPtr ctrl1, ctrl2;
-  fuchsia::sys::LaunchInfo launch_info1{
-      .url = kTestUtilURL, .directory_request = std::move(request1)};
-  fuchsia::sys::LaunchInfo launch_info2{
-      .url = kDifferentTestUtilURL, .directory_request = std::move(request2)};
+  fuchsia::sys::LaunchInfo launch_info1{.url = kTestUtilURL,
+                                        .directory_request = std::move(request1)};
+  fuchsia::sys::LaunchInfo launch_info2{.url = kDifferentTestUtilURL,
+                                        .directory_request = std::move(request2)};
   env1_->CreateComponent(std::move(launch_info1), ctrl1.NewRequest());
   env1_->CreateComponent(std::move(launch_info2), ctrl2.NewRequest());
 
@@ -143,18 +139,18 @@ TEST_F(IsolatedPersistentStorageTest, SameComponentSameEnvironment) {
   services->Connect(util.NewRequest());
 
   EXPECT_EQ(WriteFileSync(util, kTestFileName, test_file_content_), ZX_OK);
-  EXPECT_EQ(ReadFileSync(util, kTestFileName).get(), test_file_content_);
+  EXPECT_EQ(ReadFileSync(util, kTestFileName).value(), test_file_content_);
 
   // Kill the component and then recreate it in the same environment.
   services = sys::ServiceDirectory::CreateWithRequest(&request);
   ctrl->Kill();
-  launch_info = fuchsia::sys::LaunchInfo{
-      .url = kTestUtilURL, .directory_request = std::move(request)};
+  launch_info =
+      fuchsia::sys::LaunchInfo{.url = kTestUtilURL, .directory_request = std::move(request)};
   env1_->CreateComponent(std::move(launch_info), ctrl.NewRequest());
   services->Connect(util.NewRequest());
 
   // File should still exist.
-  EXPECT_EQ(ReadFileSync(util, kTestFileName).get(), test_file_content_);
+  EXPECT_EQ(ReadFileSync(util, kTestFileName).value(), test_file_content_);
 }
 
 }  // namespace

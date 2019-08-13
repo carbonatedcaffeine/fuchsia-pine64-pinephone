@@ -5,7 +5,6 @@
 #ifndef SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_ASYNC_OUTPUT_BUFFER_H_
 #define SRC_DEVELOPER_DEBUG_ZXDB_CONSOLE_ASYNC_OUTPUT_BUFFER_H_
 
-#include <functional>
 #include <variant>
 
 #include "lib/fit/function.h"
@@ -76,7 +75,7 @@ class AsyncOutputBuffer : public fxl::RefCountedThreadSafe<AsyncOutputBuffer> {
   // complete children are independent events.
   bool is_complete() { return pending_resolution_ == 0 && marked_complete_; }
 
-  // Mirrors the OutputBuffer API with the addition of being aboe to append AsyncOutputBuffers.
+  // Mirrors the OutputBuffer API with the addition of being able to append AsyncOutputBuffers.
   void Append(std::string str, TextForegroundColor fg = TextForegroundColor::kDefault,
               TextBackgroundColor bg = TextBackgroundColor::kDefault);
   void Append(fxl::RefPtr<AsyncOutputBuffer> buf);
@@ -87,7 +86,7 @@ class AsyncOutputBuffer : public fxl::RefCountedThreadSafe<AsyncOutputBuffer> {
   // Call to mark this output buffer complete. This will issue the callback if there is one
   // registered. See is_complete() for additional discussion.
   //
-  // Doing additional appends or making it complete again after this call wil trigger a debug
+  // Doing additional appends or making it complete again after this call will trigger a debug
   // assertion.
   void Complete();
 
@@ -115,7 +114,7 @@ class AsyncOutputBuffer : public fxl::RefCountedThreadSafe<AsyncOutputBuffer> {
   // Called when something happened that could have affected is_complete() to issue the callback.
   void CheckComplete();
 
-  // Retursive callback for DestructiveFlatten() that destructively moves all spans out of this node
+  // Recursive callback for DestructiveFlatten() that destructively moves all spans out of this node
   // and its children into the given output buffer.
   void DestructiveCollectNodes(OutputBuffer* out);
 

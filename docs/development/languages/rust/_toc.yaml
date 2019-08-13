@@ -1,0 +1,20 @@
+# Please, read https://fuchsia.dev/fuchsia-src/best-practices/documentation_navigation_toc
+# before making changes to this file, and add a member of the fuchsia.dev
+# team as reviewer.
+toc:
+- title: "Overview"
+  path: /docs/development/languages/rust
+- title: "Fuchsia Rust crates"
+  path: /docs/development/languages/rust/crates.md
+- title: "Rust editor configurations"
+  path: /docs/development/languages/rust/editors.md
+- title: "Syslog"
+  path: /docs/development/languages/rust/syslog.md
+- title: "Testing Rust Code"
+  path: /docs/development/languages/rust/testing.md
+- title: "Third-party Rust crates"
+  path: /docs/development/languages/rust/third_party.md
+- title: "Unsafe code in Rust"
+  path: /docs/development/languages/rust/unsafe.md
+- title: "Unstable Rust features"
+  path: /docs/development/languages/rust/unstable.md

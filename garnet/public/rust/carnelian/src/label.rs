@@ -14,7 +14,7 @@ use lazy_static::lazy_static;
 // This font creation method isn't ideal. The correct method would be to ask the Fuchsia
 // font service for the font data.
 static FONT_DATA: &'static [u8] =
-    include_bytes!("../../../../bin/fonts/third_party/robotoslab/RobotoSlab-Regular.ttf");
+    include_bytes!("../../../../../prebuilt/third_party/fonts/robotoslab/RobotoSlab-Regular.ttf");
 
 lazy_static! {
     pub static ref FONT_FACE: FontFace<'static> =
@@ -23,7 +23,8 @@ lazy_static! {
 
 const BASELINE: i32 = 0;
 
-fn make_font_description<'a, 'b>(size: u32, baseline: i32) -> FontDescription<'a, 'b> {
+/// Make a font description for the one included font
+pub fn make_font_description<'a, 'b>(size: u32, baseline: i32) -> FontDescription<'a, 'b> {
     FontDescription { face: &FONT_FACE, size: size, baseline: baseline }
 }
 
@@ -67,9 +68,9 @@ impl Label {
             let guard = self.image_cycler.acquire(info).context("failed to allocate buffer")?;
 
             // Create a canvas to render into the buffer
-            let mut canvas = Canvas::<MappingPixelSink>::new(
+            let mut canvas = Canvas::new(
                 IntSize::new(w, h),
-                guard.image().mapping().clone(),
+                MappingPixelSink::new(&guard.image().mapping()),
                 stride,
                 4,
             );

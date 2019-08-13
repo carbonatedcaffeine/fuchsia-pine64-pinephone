@@ -3,10 +3,6 @@
 // found in the LICENSE file.
 
 //! Common utilities used by pseudo-file related tests.
-//!
-//! Most assertions are macros as they need to call async functions themselves.  As a typical test
-//! will have multiple assertions, it save a bit of typing to write `assert_something!(arg)`
-//! instead of `await!(assert_something(arg))`.
 
 use {
     crate::{common::AsyncFnOnce, directory::entry::DirectoryEntry},
@@ -70,7 +66,7 @@ pub fn run_server_client_with_executor<GetClientRes>(
     exec: Executor,
     server: impl DirectoryEntry,
     get_client: impl FnOnce(FileProxy) -> GetClientRes,
-    executor: impl FnOnce(&mut FnMut(bool) -> ()),
+    executor: impl FnOnce(&mut dyn FnMut(bool) -> ()),
 ) where
     GetClientRes: Future<Output = ()>,
 {
@@ -202,7 +198,7 @@ pub fn run_server_client_with_open_requests_channel_and_executor<GetClientRes>(
     exec: Executor,
     server: impl DirectoryEntry,
     get_client: impl FnOnce(OpenRequestSender) -> GetClientRes,
-    executor: impl FnOnce(&mut FnMut(bool)),
+    executor: impl FnOnce(&mut dyn FnMut(bool)),
 ) where
     GetClientRes: Future<Output = ()>,
 {

@@ -9,6 +9,7 @@ library("debuglog") {
   ]
   deps = [
     "$zx/kernel/dev/udisplay:headers",
+    "$zx/kernel/lib/cmdline",
     "$zx/kernel/lib/crashlog",
     "$zx/kernel/lib/version",
   ]

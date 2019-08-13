@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <fuchsia/boot/cpp/fidl.h>
+#include <fuchsia/device/cpp/fidl.h>
 #include <fuchsia/device/manager/cpp/fidl.h>
 #include <fuchsia/kernel/cpp/fidl.h>
 #include <fuchsia/paver/cpp/fidl.h>
@@ -20,8 +22,13 @@ namespace {
 
 std::vector<std::string> RootRealmServices() {
   return std::vector<std::string>{
+      fuchsia::boot::FactoryItems::Name_,
+      fuchsia::boot::RootJob::Name_,
+      fuchsia::boot::RootResource::Name_,
+      fuchsia::device::NameProvider::Name_,
       fuchsia::device::manager::Administrator::Name_,
       fuchsia::device::manager::DebugDumper::Name_,
+      fuchsia::kernel::Counter::Name_,
       fuchsia::kernel::DebugBroker::Name_,
       fuchsia::paver::Paver::Name_,
       fuchsia::scheduler::ProfileProvider::Name_,
@@ -40,22 +47,19 @@ int main(int argc, char** argv) {
   // Certain services in appmgr's /svc, which is served by svchost, are added to
   // the root realm so they can be routed into a nested environment (such as the
   // sys realm in sysmgr) and used in components.
-  fuchsia::sys::ServiceListPtr root_realm_services(
-      new fuchsia::sys::ServiceList);
+  fuchsia::sys::ServiceListPtr root_realm_services(new fuchsia::sys::ServiceList);
   root_realm_services->names = RootRealmServices();
-  root_realm_services->host_directory =
-      environment_services->CloneChannel().TakeChannel();
+  root_realm_services->host_directory = environment_services->CloneChannel().TakeChannel();
 
   trace::TraceProviderWithFdio trace_provider(loop.dispatcher());
 
-  component::AppmgrArgs args{
-      .pa_directory_request = std::move(request),
-      .root_realm_services = std::move(root_realm_services),
-      .environment_services = std::move(environment_services),
-      .sysmgr_url = "fuchsia-pkg://fuchsia.com/sysmgr#meta/sysmgr.cmx",
-      .sysmgr_args = {},
-      .run_virtual_console = true,
-      .retry_sysmgr_crash = true};
+  component::AppmgrArgs args{.pa_directory_request = std::move(request),
+                             .root_realm_services = std::move(root_realm_services),
+                             .environment_services = std::move(environment_services),
+                             .sysmgr_url = "fuchsia-pkg://fuchsia.com/sysmgr#meta/sysmgr.cmx",
+                             .sysmgr_args = {},
+                             .run_virtual_console = true,
+                             .retry_sysmgr_crash = true};
   component::Appmgr appmgr(loop.dispatcher(), std::move(args));
 
   loop.Run();

@@ -2,11 +2,13 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("$zx/public/gn/fuzzer.gni")
 group("test") {
   testonly = true
   deps = [
     ":blobfs-integration",
     ":blobfs-unit",
+    ":zstd-fuzzer",
   ]
 }
 
@@ -17,20 +19,25 @@ test("blobfs-unit") {
     "allocator-test.cc",
     "background-executor-test.cc",
     "blob-cache-test.cc",
+    "block-buffer-view-test.cc",
+    "blocking-ring-buffer-test.cc",
     "compressor-test.cc",
     "create-tests.cc",
     "extent-reserver-test.cc",
     "format-test.cc",
     "get-allocated-regions-test.cc",
+    "journal-entry-view-test.cc",
+    "journal-superblock-test.cc",
     "journal-test.cc",
+    "journal2-test.cc",
     "node-populator-test.cc",
     "node-reserver-test.cc",
+    "replay-test.cc",
     "ring-buffer-test.cc",
     "unbuffered-operations-builder-test.cc",
     "utils.cc",
     "vector-extent-iterator-test.cc",
     "vmo-buffer-test.cc",
-    "vmo-buffer-view-test.cc",
     "writeback-test.cc",
   ]
   deps = [
@@ -40,8 +47,11 @@ test("blobfs-unit") {
     "$zx/system/ulib/block-client:fake-device",
     "$zx/system/ulib/fidl-utils",
     "$zx/system/ulib/zxtest",
+    "$zx/third_party/ulib/cksum",
     "$zx/third_party/ulib/safemath",
   ]
+
+  include_dirs = [ ".." ]
 }
 
 test("blobfs-host") {
@@ -74,5 +84,14 @@ test("blobfs-integration") {
     "$zx/system/ulib/fzl",
     "$zx/system/ulib/memfs",
     "$zx/system/ulib/zxtest",
+  ]
+}
+
+fuzzer("zstd-fuzzer") {
+  sources = [
+    "zstd-fuzzer.cc",
+  ]
+  deps = [
+    "$zx/system/ulib/blobfs",
   ]
 }

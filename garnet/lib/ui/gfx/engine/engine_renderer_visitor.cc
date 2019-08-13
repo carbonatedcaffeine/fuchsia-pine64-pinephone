@@ -15,6 +15,8 @@
 #include "garnet/lib/ui/gfx/resources/nodes/traversal.h"
 #include "garnet/lib/ui/gfx/resources/nodes/view_node.h"
 #include "garnet/lib/ui/gfx/resources/shapes/circle_shape.h"
+#include "garnet/lib/ui/gfx/resources/shapes/mesh_shape.h"
+#include "garnet/lib/ui/gfx/resources/shapes/rectangle_shape.h"
 #include "garnet/lib/ui/gfx/resources/shapes/rounded_rectangle_shape.h"
 #include "garnet/lib/ui/gfx/resources/shapes/shape.h"
 #include "garnet/lib/ui/gfx/resources/view.h"
@@ -41,7 +43,10 @@ void EngineRendererVisitor::Visit(View* r) { FXL_CHECK(false); }
 
 void EngineRendererVisitor::Visit(ViewNode* r) {
   const size_t previous_count = draw_call_count_;
-
+  const bool previous_should_render_debug_bounds = should_render_debug_bounds_;
+  if (auto view = r->GetView()) {
+    should_render_debug_bounds_ = view->should_render_bounding_box();
+  }
   VisitNode(r);
 
   bool view_is_rendering_element = draw_call_count_ > previous_count;
@@ -50,9 +55,30 @@ void EngineRendererVisitor::Visit(ViewNode* r) {
     // view is not rendering.
     r->GetView()->SignalRender();
   }
+
+  should_render_debug_bounds_ = previous_should_render_debug_bounds;
 }
 
-void EngineRendererVisitor::Visit(ViewHolder* r) { VisitNode(r); }
+void EngineRendererVisitor::Visit(ViewHolder* r) {
+  escher::PaperTransformStack* transform_stack = renderer_->transform_stack();
+  transform_stack->PushTransform(static_cast<escher::mat4>(r->transform()));
+  transform_stack->AddClipPlanes(r->clip_planes());
+
+  // A view holder should render its bounds if either its embedding view has
+  // debug rendering turned on (which will mean should_render_debug_bounds_=true)
+  // or if its own view specifies that debug bounds should be rendered.
+  if (should_render_debug_bounds_ || (r->view() && r->view()->should_render_bounding_box())) {
+    auto bbox = r->GetLocalBoundingBox();
+    // Create material and submit draw call.
+    escher::PaperMaterialPtr escher_material = escher::Material::New(r->bounds_color());
+    escher_material->set_type(escher::Material::Type::kWireframe);
+    renderer_->DrawBoundingBox(bbox, escher_material, escher::PaperDrawableFlags());
+    ++draw_call_count_;
+  }
+
+  ForEachDirectDescendantFrontToBack(*r, [this](Node* node) { node->Accept(this); });
+  transform_stack->Pop();
+}
 
 void EngineRendererVisitor::Visit(EntityNode* r) { VisitNode(r); }
 
@@ -111,20 +137,33 @@ void EngineRendererVisitor::Visit(ShapeNode* r) {
     glm::vec4 color = escher_material->color();
     color.a *= opacity_;
     escher_material = escher::Material::New(color, escher_material->texture());
-    escher_material->set_opaque(false);
+    escher_material->set_type(escher::Material::Type::kTranslucent);
   }
+
+  escher::PaperTransformStack* transform_stack = renderer_->transform_stack();
+  transform_stack->PushTransform(static_cast<escher::mat4>(r->transform()));
 
   escher::PaperDrawableFlags flags{};
-  escher::mat4 transform(r->transform());
-
   if (shape->IsKindOf<RoundedRectangleShape>()) {
     auto rect = static_cast<RoundedRectangleShape*>(shape.get());
+    renderer_->DrawRoundedRect(rect->spec(), escher_material, flags);
+  } else if (shape->IsKindOf<RectangleShape>()) {
+    auto rect = static_cast<RectangleShape*>(shape.get());
+    renderer_->DrawRect(rect->width(), rect->height(), escher_material, flags);
+  } else if (shape->IsKindOf<CircleShape>()) {
+    auto circle = static_cast<CircleShape*>(shape.get());
 
-    renderer_->DrawRoundedRect(rect->spec(), escher_material, flags, &transform);
+    // Only draw the circle if its radius is greater than epsilon.
+    if (circle->radius() > escher::kEpsilon) {
+      renderer_->DrawCircle(circle->radius(), escher_material, flags);
+    }
+  } else if (shape->IsKindOf<MeshShape>()) {
+    auto mesh_shape = static_cast<MeshShape*>(shape.get());
+    renderer_->DrawMesh(mesh_shape->escher_mesh(), escher_material, flags);
   } else {
-    auto escher_object = shape->GenerateRenderObject(transform, escher_material);
-    renderer_->DrawLegacyObject(escher_object, flags);
+    FXL_LOG(ERROR) << "Unsupported shape type encountered.";
   }
+  transform_stack->Pop();
 
   ++draw_call_count_;
 }

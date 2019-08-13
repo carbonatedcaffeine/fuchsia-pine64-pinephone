@@ -8,7 +8,6 @@
 #include <stdio.h>
 
 #include <algorithm>
-#include <regex>
 #include <sstream>
 
 #include "fidl/attributes.h"
@@ -78,8 +77,7 @@ struct MethodScope {
 // A helper class to track when a Decl is compiling and compiled.
 class Compiling {
  public:
-  explicit Compiling(Decl* decl)
-      : decl_(decl) { decl_->compiling = true; }
+  explicit Compiling(Decl* decl) : decl_(decl) { decl_->compiling = true; }
 
   ~Compiling() {
     decl_->compiling = false;
@@ -92,111 +90,80 @@ class Compiling {
 
 }  // namespace
 
-constexpr uint32_t kMessageAlign = 8u;
-
-uint32_t AlignTo(uint64_t size, uint64_t alignment) {
-  return static_cast<uint32_t>(
-      std::min((size + alignment - 1) & -alignment,
-               static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
-}
-
-uint32_t ClampedMultiply(uint32_t a, uint32_t b) {
-  return static_cast<uint32_t>(
-      std::min(static_cast<uint64_t>(a) * static_cast<uint64_t>(b),
-               static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
-}
-
-uint32_t ClampedAdd(uint32_t a, uint32_t b) {
-  return static_cast<uint32_t>(
-      std::min(static_cast<uint64_t>(a) + static_cast<uint64_t>(b),
-               static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
-}
-
 TypeShape AlignTypeshape(TypeShape shape, std::vector<FieldShape*>* fields, uint32_t alignment) {
   uint32_t new_alignment = std::max(shape.Alignment(), alignment);
-  uint32_t new_size = AlignTo(shape.Size(), new_alignment);
+  uint32_t new_size = AlignTo(shape.InlineSize(), new_alignment);
   auto typeshape =
-      TypeShape(new_size, new_alignment, shape.Depth(), shape.MaxHandles(), shape.MaxOutOfLine(),
-                // If alignment happened, we've got padding
-                shape.HasPadding() || (new_size != shape.Size()));
+      TypeShape({.inline_size = new_size,
+                 .alignment = new_alignment,
+                 .recursive = {
+                     .depth = shape.Depth(),
+                     .max_handles = shape.MaxHandles(),
+                     .max_out_of_line = shape.MaxOutOfLine(),
+                     // If alignment happened, we've got padding
+                     .has_padding = shape.HasPadding() || (new_size != shape.InlineSize()),
+                     .has_flexible_envelope = shape.HasFlexibleEnvelope(),
+                 }});
   // Fix-up padding in the last field according to the new typeshape.
   if (!fields->empty()) {
     auto& last = fields->back();
-    last->SetPadding(typeshape.Size() - last->Offset() - last->Size());
+    last->SetPadding(typeshape.InlineSize() - last->Offset() - last->InlineSize());
   }
   return typeshape;
 }
 
 TypeShape Struct::Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles) {
-  uint32_t size = 0u;
-  uint32_t alignment = 1u;
-  uint32_t depth = 0u;
-  uint32_t max_handles = 0u;
-  uint32_t max_out_of_line = 0u;
-  bool has_padding = false;
-
+  TypeShapeBuilder builder;
   for (FieldShape* field : *fields) {
-    TypeShape typeshape = field->Typeshape();
-    alignment = std::max(alignment, typeshape.Alignment());
-    size = AlignTo(size, typeshape.Alignment());
-    field->SetOffset(size);
-    size += typeshape.Size();
-    depth = std::max(depth, typeshape.Depth());
-    max_handles = ClampedAdd(max_handles, typeshape.MaxHandles());
-    max_out_of_line = ClampedAdd(max_out_of_line, typeshape.MaxOutOfLine());
-    has_padding |= typeshape.HasPadding();
+    const auto& typeshape = field->Typeshape();
+    builder.alignment = std::max(builder.alignment, typeshape.Alignment());
+    builder.inline_size = AlignTo(builder.inline_size, typeshape.Alignment());
+    field->SetOffset(builder.inline_size);
+    builder.inline_size += typeshape.InlineSize();
+    builder.recursive.AddStructLike(typeshape);
   }
 
-  max_handles = ClampedAdd(max_handles, extra_handles);
+  builder.recursive.max_handles = ClampedAdd(builder.recursive.max_handles, extra_handles);
 
-  size = AlignTo(size, alignment);
+  builder.inline_size = AlignTo(builder.inline_size, builder.alignment);
 
   if (fields->empty()) {
-    assert(size == 0);
-    assert(alignment == 1);
+    assert(builder.inline_size == 0);
+    assert(builder.alignment == 1);
 
     // Empty structs are defined to have a size of 1 (a single byte).
-    size = 1;
+    builder.inline_size = 1;
   }
 
   // Struct padding is between one member and the next, or the end of the struct.
   for (size_t i = 0; i + 1 < fields->size(); i++) {
     auto& current = fields->at(i);
     auto& next = fields->at(i + 1);
-    current->SetPadding(next->Offset() - current->Offset() - current->Size());
-    has_padding |= current->Padding() > 0;
+    current->SetPadding(next->Offset() - current->Offset() - current->InlineSize());
+    builder.recursive.has_padding |= current->Padding() > 0;
   }
   if (!fields->empty()) {
     auto& last = fields->back();
-    last->SetPadding(size - last->Offset() - last->Size());
-    has_padding |= last->Padding() > 0;
+    last->SetPadding(builder.inline_size - last->Offset() - last->InlineSize());
+    builder.recursive.has_padding |= last->Padding() > 0;
   }
 
-  return TypeShape(size, alignment, depth, max_handles, max_out_of_line, has_padding);
+  return TypeShape(builder);
 }
 
 TypeShape Union::Shape(std::vector<FieldShape*>* fields) {
-  uint32_t size = 0u;
-  uint32_t alignment = 1u;
-  uint32_t depth = 0u;
-  uint32_t max_handles = 0u;
-  uint32_t max_out_of_line = 0u;
-  bool has_padding = false;
-
+  TypeShapeBuilder builder;
   for (const auto& field : *fields) {
-    auto& fieldshape = *field;
-    size = std::max(size, fieldshape.Size());
-    alignment = std::max(alignment, fieldshape.Alignment());
-    depth = std::max(depth, fieldshape.Depth());
-    max_handles = std::max(max_handles, fieldshape.Typeshape().MaxHandles());
-    max_out_of_line = std::max(max_out_of_line, fieldshape.Typeshape().MaxOutOfLine());
-    has_padding |= fieldshape.Typeshape().HasPadding();
+    const auto& typeshape = field->Typeshape();
+    builder.inline_size = std::max(builder.inline_size, typeshape.InlineSize());
+    builder.alignment = std::max(builder.alignment, typeshape.Alignment());
+    builder.recursive.AddUnionLike(typeshape);
   }
 
-  size = AlignTo(size, alignment);
+  builder.inline_size = AlignTo(builder.inline_size, builder.alignment);
 
   // Calculate offset of the union tag.
-  auto member_typeshape = TypeShape(size, alignment, depth, max_handles, max_out_of_line);
+  auto member_typeshape = TypeShape(builder);
   auto member_fieldshape = FieldShape(member_typeshape);
   auto tag = FieldShape(PrimitiveType::Shape(types::PrimitiveSubtype::kUint32));
   std::vector<FieldShape*> fidl_union = {&tag, &member_fieldshape};
@@ -214,16 +181,16 @@ TypeShape Union::Shape(std::vector<FieldShape*>* fields) {
   // and the first union member if the union member has an alignment greater than 4.
   // Union member alignment is either 4 or 8.
   if (offset == 8) {
-    has_padding = true;
+    builder.recursive.has_padding = true;
   }
 
   // Union padding is from end of member to end of the entire union.
   for (auto& field : *fields) {
-    field->SetPadding(typeshape.Size() - offset - field->Size());
-    has_padding |= field->Padding() > 0;
+    field->SetPadding(typeshape.InlineSize() - offset - field->InlineSize());
+    builder.recursive.has_padding |= field->Padding() > 0;
   }
 
-  return TypeShape(size, alignment, depth, max_handles, max_out_of_line, has_padding);
+  return TypeShape(builder);
 }
 
 TypeShape FidlMessageTypeShape(std::vector<FieldShape*>* fields) {
@@ -242,20 +209,33 @@ TypeShape PointerTypeShape(const TypeShape& element, uint32_t max_element_count 
   // because recursive data structures have a depth pegged at the numeric
   // limit.
   uint32_t depth = std::numeric_limits<uint32_t>::max();
-  if (element.Size() > 0 && element.Depth() < std::numeric_limits<uint32_t>::max())
+  if (element.InlineSize() > 0 && element.Depth() < std::numeric_limits<uint32_t>::max())
     depth = ClampedAdd(element.Depth(), 1);
 
   // The element(s) will be stored out-of-line.
-  uint32_t elements_size = ClampedMultiply(element.Size(), max_element_count);
+  uint32_t elements_size = ClampedMultiply(element.InlineSize(), max_element_count);
   // Out-of-line data is aligned to 8 bytes.
-  elements_size = AlignTo(elements_size, 8);
+  uint32_t aligned_elements_size = AlignTo(elements_size, 8);
   // The elements may each carry their own out-of-line data.
   uint32_t elements_out_of_line = ClampedMultiply(element.MaxOutOfLine(), max_element_count);
 
   uint32_t max_handles = ClampedMultiply(element.MaxHandles(), max_element_count);
-  uint32_t max_out_of_line = ClampedAdd(elements_size, elements_out_of_line);
+  uint32_t max_out_of_line = ClampedAdd(aligned_elements_size, elements_out_of_line);
 
-  return TypeShape(8u, 8u, depth, max_handles, max_out_of_line, element.HasPadding());
+  // Out-of-line objects in FIDL are always padded to |kMessageAlign| alignment.
+  // Therefore, if the element size do not end on an alignment boundary, there is padding.
+  bool trailing_padding = max_element_count == 1 ? elements_size != aligned_elements_size
+                                                 : element.InlineSize() % kMessageAlign != 0;
+
+  return TypeShape({.inline_size = 8u,
+                    .alignment = 8u,
+                    .recursive = {
+                        .depth = depth,
+                        .max_handles = max_handles,
+                        .max_out_of_line = max_out_of_line,
+                        .has_padding = element.HasPadding() || trailing_padding,
+                        .has_flexible_envelope = element.HasFlexibleEnvelope(),
+                    }});
 }
 
 TypeShape CEnvelopeTypeShape(const TypeShape& contained_type) {
@@ -265,60 +245,64 @@ TypeShape CEnvelopeTypeShape(const TypeShape& contained_type) {
   return Struct::Shape(&header);
 }
 
-TypeShape Table::Shape(std::vector<TypeShape*>* fields, uint32_t extra_handles) {
-  uint32_t element_depth = 0u;
-  uint32_t max_handles = 0u;
-  uint32_t max_out_of_line = 0u;
-  uint32_t array_size = 0u;
+TypeShape Table::Shape(std::vector<TypeShape*>* fields, types::Strictness strictness,
+                       uint32_t extra_handles) {
+  TypeShapeBuilder builder{.alignment = 8};
   for (auto field : *fields) {
     if (field == nullptr) {
       continue;
     }
-    auto envelope = CEnvelopeTypeShape(*field);
-    element_depth = std::max(element_depth, envelope.Depth());
-    array_size = ClampedAdd(array_size, envelope.Size());
-    max_handles = ClampedAdd(max_handles, envelope.MaxHandles());
-    max_out_of_line = ClampedAdd(max_out_of_line, envelope.MaxOutOfLine());
+    const auto& envelope = CEnvelopeTypeShape(*field);
     assert(envelope.Alignment() == 8u);
+    builder.inline_size = ClampedAdd(builder.inline_size, envelope.InlineSize());
+    builder.recursive.AddStructLike(envelope);
   }
-  auto pointer_element = TypeShape(array_size, 8u, 1 + element_depth, max_handles, max_out_of_line);
+  builder.recursive.depth += 1;
+  builder.recursive.has_flexible_envelope |= strictness == types::Strictness::kFlexible;
+  auto pointer_element = TypeShape(builder);
   // A table is a vector of envelopes, hence has the same header as a vector.
-  auto num_fields = FieldShape(PrimitiveType::Shape(types::PrimitiveSubtype::kUint32));
+  auto num_fields = FieldShape(PrimitiveType::Shape(types::PrimitiveSubtype::kUint64));
   auto data_field = FieldShape(PointerTypeShape(pointer_element));
   std::vector<FieldShape*> header{&num_fields, &data_field};
   return Struct::Shape(&header, extra_handles);
 }
 
-TypeShape XUnion::Shape(std::vector<FieldShape*>* fields, uint32_t extra_handles) {
-  uint32_t depth = 0u;
-  uint32_t max_handles = 0u;
-  uint32_t max_out_of_line = 0u;
-  bool has_padding = false;
-
+TypeShape XUnion::Shape(std::vector<FieldShape*>* fields,
+                        types::Strictness strictness,
+                        uint32_t extra_handles) {  
+  TypeShapeBuilder builder{.inline_size = 24, .alignment = 8};
   for (auto& field : *fields) {
     const auto& envelope = CEnvelopeTypeShape(field->Typeshape());
-
-    depth = ClampedAdd(depth, envelope.Depth());
-    max_handles = ClampedAdd(max_handles, envelope.MaxHandles());
-    max_out_of_line = std::max(max_out_of_line, envelope.MaxOutOfLine());
-    has_padding |= field->Typeshape().HasPadding();
+    builder.recursive.AddUnionLike(envelope);
   }
+
+  // TODO(FIDL-648): Increase xunion ordinal size to 64 bits, to make it consistent with
+  // CEnvelopeTypeShape. Right now there is always padding after the 32 bit ordinal.
+  builder.recursive.has_padding = true;
 
   // XUnion payload is aligned to 8 bytes.
   for (auto& field : *fields) {
-    field->SetPadding(AlignTo(field->Size(), 8) - field->Size());
-    has_padding |= field->Padding() > 0;
+    field->SetPadding(AlignTo(field->InlineSize(), 8) - field->InlineSize());
+    builder.recursive.has_padding |= field->Padding() > 0;
   }
 
-  return TypeShape(24u, 8u, depth, max_handles, max_out_of_line, has_padding);
+  builder.recursive.max_handles = ClampedAdd(builder.recursive.max_handles, extra_handles);
+  builder.recursive.has_flexible_envelope |= strictness == types::Strictness::kFlexible;
+  return TypeShape(builder);
 }
 
 TypeShape ArrayType::Shape(TypeShape element, uint32_t count) {
   // TODO(FIDL-345): once TypeShape builders are done and methods can fail, do a
   // __builtin_mul_overflow and fail on overflow instead of ClampedMultiply(element.Size(), count)
-  return TypeShape(ClampedMultiply(element.Size(), count), element.Alignment(), element.Depth(),
-                   ClampedMultiply(element.MaxHandles(), count),
-                   ClampedMultiply(element.MaxOutOfLine(), count), element.HasPadding());
+  return TypeShape({.inline_size = ClampedMultiply(element.InlineSize(), count),
+                    .alignment = element.Alignment(),
+                    .recursive = {
+                        .depth = element.Depth(),
+                        .max_handles = ClampedMultiply(element.MaxHandles(), count),
+                        .max_out_of_line = ClampedMultiply(element.MaxOutOfLine(), count),
+                        .has_padding = element.HasPadding(),
+                        .has_flexible_envelope = element.HasFlexibleEnvelope(),
+                    }});
 }
 
 TypeShape VectorType::Shape(TypeShape element, uint32_t max_element_count) {
@@ -336,7 +320,13 @@ TypeShape StringType::Shape(uint32_t max_length) {
   return Struct::Shape(&header, 0);
 }
 
-TypeShape HandleType::Shape() { return TypeShape(4u, 4u, 0u, 1u); }
+TypeShape HandleType::Shape() {
+  return TypeShape({.inline_size = 4,
+                    .alignment = 4,
+                    .recursive = {
+                        .max_handles = 1,
+                    }});
+}
 
 uint32_t PrimitiveType::SubtypeSize(types::PrimitiveSubtype subtype) {
   switch (subtype) {
@@ -362,7 +352,10 @@ uint32_t PrimitiveType::SubtypeSize(types::PrimitiveSubtype subtype) {
 }
 
 TypeShape PrimitiveType::Shape(types::PrimitiveSubtype subtype) {
-  return TypeShape(SubtypeSize(subtype), SubtypeSize(subtype));
+  return TypeShape({
+      .inline_size = SubtypeSize(subtype),
+      .alignment = SubtypeSize(subtype),
+  });
 }
 
 bool Decl::HasAttribute(std::string_view name) const {
@@ -453,7 +446,7 @@ bool Typespace::CreateNotOwned(const flat::Name& name, const Type* arg_type,
   auto type_template = LookupTemplate(name);
   if (type_template == nullptr) {
     std::string message("unknown type ");
-    message.append(name.name_part());
+    message.append(name.name_full());
     error_reporter_->ReportError(maybe_location, message);
     return false;
   }
@@ -682,6 +675,9 @@ class TypeDeclTypeTemplate : public TypeTemplate {
     }
     auto typeshape = type_decl_->typeshape;
     switch (type_decl_->kind) {
+      case Decl::Kind::kService:
+        return Fail(maybe_location, "cannot use services in other declarations");
+
       case Decl::Kind::kProtocol:
         typeshape = HandleType::Shape();
         break;
@@ -916,22 +912,22 @@ bool MaxBytesConstraint(ErrorReporter* error_reporter, const raw::Attribute& att
   switch (decl->kind) {
     case Decl::Kind::kStruct: {
       auto struct_decl = static_cast<const Struct*>(decl);
-      max_bytes = struct_decl->typeshape.Size() + struct_decl->typeshape.MaxOutOfLine();
+      max_bytes = struct_decl->typeshape.InlineSize() + struct_decl->typeshape.MaxOutOfLine();
       break;
     }
     case Decl::Kind::kTable: {
       auto table_decl = static_cast<const Table*>(decl);
-      max_bytes = table_decl->typeshape.Size() + table_decl->typeshape.MaxOutOfLine();
+      max_bytes = table_decl->typeshape.InlineSize() + table_decl->typeshape.MaxOutOfLine();
       break;
     }
     case Decl::Kind::kUnion: {
       auto union_decl = static_cast<const Union*>(decl);
-      max_bytes = union_decl->typeshape.Size() + union_decl->typeshape.MaxOutOfLine();
+      max_bytes = union_decl->typeshape.InlineSize() + union_decl->typeshape.MaxOutOfLine();
       break;
     }
     case Decl::Kind::kXUnion: {
       auto xunion_decl = static_cast<const XUnion*>(decl);
-      max_bytes = xunion_decl->typeshape.Size() + xunion_decl->typeshape.MaxOutOfLine();
+      max_bytes = xunion_decl->typeshape.InlineSize() + xunion_decl->typeshape.MaxOutOfLine();
       break;
     }
     default:
@@ -1054,9 +1050,9 @@ bool TransportConstraint(ErrorReporter* error_reporter, const raw::Attribute& at
   // is allowed by styleguide
   static const auto kValidTransports = new std::set<std::string>{
       "Channel",
-      "SocketControl",
       "OvernetEmbedded",
       "OvernetInternal",
+      "Syscall",
   };
   for (auto transport : transports) {
     if (kValidTransports->count(transport) == 0) {
@@ -1266,6 +1262,16 @@ bool Dependencies::InsertByName(std::string_view filename,
   return insert.second;
 }
 
+bool Dependencies::Contains(std::string_view filename, const std::vector<std::string_view>& name) {
+  auto iter1 = dependencies_.find(std::string(filename));
+  if (iter1 == dependencies_.end()) {
+    return false;
+  }
+
+  auto iter2 = iter1->second->find(name);
+  return iter2 != iter1->second->end();
+}
+
 bool Dependencies::LookupAndUse(std::string_view filename,
                                 const std::vector<std::string_view>& name, Library** out_library) {
   auto iter1 = dependencies_.find(std::string(filename));
@@ -1379,6 +1385,7 @@ std::optional<Name> Library::CompileCompoundIdentifier(
 
   SourceLocation decl_name = components.back()->location();
 
+  // First try resolving the identifier in the library.
   if (components.size() == 1) {
     return Name(this, decl_name);
   }
@@ -1390,16 +1397,35 @@ std::optional<Name> Library::CompileCompoundIdentifier(
 
   auto filename = compound_identifier->location().source_file().filename();
   Library* dep_library = nullptr;
-  if (!dependencies_.LookupAndUse(filename, library_name, &dep_library)) {
-    std::string message("Unknown dependent library ");
-    message += NameLibrary(library_name);
-    message += ". Did you require it with `using`?";
-    const auto& location = components[0]->location();
-    Fail(location, message);
-    return std::nullopt;
+  if (dependencies_.LookupAndUse(filename, library_name, &dep_library)) {
+    return Name(dep_library, decl_name);
   }
 
-  return Name(dep_library, decl_name);
+  // If the identifier is not found in the library it might refer to a
+  // declaration with a member (e.g. library.EnumX.val or BitsY.val).
+  SourceLocation member_name = decl_name;
+  SourceLocation member_decl_name = components.rbegin()[1]->location();
+
+  if (components.size() == 2) {
+    return Name(this, member_decl_name, std::string(member_name.data()));
+  }
+
+  std::vector<std::string_view> member_library_name(library_name);
+  member_library_name.pop_back();
+
+  Library* member_dep_library = nullptr;
+  if (dependencies_.LookupAndUse(filename, member_library_name, &member_dep_library)) {
+    return Name(member_dep_library, member_decl_name, std::string(member_name.data()));
+  }
+
+  std::string message("Unknown dependent library ");
+  message += NameLibrary(library_name);
+  message += " or reference to member of library";
+  message += NameLibrary(member_library_name);
+  message += ". Did you require it with `using`?";
+  const auto& location = components[0]->location();
+  Fail(location, message);
+  return std::nullopt;
 }
 
 namespace {
@@ -1431,6 +1457,9 @@ bool Library::RegisterDecl(std::unique_ptr<Decl> decl) {
     case Decl::Kind::kProtocol:
       StoreDecl(decl_ptr, &protocol_declarations_);
       break;
+    case Decl::Kind::kService:
+      StoreDecl(decl_ptr, &service_declarations_);
+      break;
     case Decl::Kind::kStruct:
       StoreDecl(decl_ptr, &struct_declarations_);
       break;
@@ -1455,10 +1484,22 @@ bool Library::RegisterDecl(std::unique_ptr<Decl> decl) {
     message.append(name->name_part());
     return Fail(*name, message);
   }
+  if (name->maybe_location()) {
+    if (dependencies_.Contains(name->maybe_location()->source_file().filename(),
+                               {name->maybe_location()->data()})) {
+      std::string message = "Declaration name '";
+      message.append(name->name_full());
+      message.append(
+          "' conflicts with a library import; consider using the "
+          "'as' keyword to import the library under a different name.");
+      return Fail(*name, message);
+    }
+  }
 
   switch (kind) {
     case Decl::Kind::kBits:
     case Decl::Kind::kEnum:
+    case Decl::Kind::kService:
     case Decl::Kind::kStruct:
     case Decl::Kind::kTable:
     case Decl::Kind::kUnion:
@@ -1621,9 +1662,9 @@ bool Library::ConsumeBitsDeclaration(std::unique_ptr<raw::BitsDeclaration> bits_
         types::Nullability::kNonnullable);
   }
 
-  return RegisterDecl(std::make_unique<Bits>(std::move(bits_declaration->attributes),
-                                             Name(this, bits_declaration->identifier->location()),
-                                             std::move(type_ctor), std::move(members)));
+  return RegisterDecl(std::make_unique<Bits>(
+      std::move(bits_declaration->attributes), Name(this, bits_declaration->identifier->location()),
+      std::move(type_ctor), std::move(members), bits_declaration->strictness));
 }
 
 bool Library::ConsumeConstDeclaration(std::unique_ptr<raw::ConstDeclaration> const_declaration) {
@@ -1667,9 +1708,9 @@ bool Library::ConsumeEnumDeclaration(std::unique_ptr<raw::EnumDeclaration> enum_
         types::Nullability::kNonnullable);
   }
 
-  return RegisterDecl(std::make_unique<Enum>(std::move(enum_declaration->attributes),
-                                             Name(this, enum_declaration->identifier->location()),
-                                             std::move(type_ctor), std::move(members)));
+  return RegisterDecl(std::make_unique<Enum>(
+      std::move(enum_declaration->attributes), Name(this, enum_declaration->identifier->location()),
+      std::move(type_ctor), std::move(members), enum_declaration->strictness));
 }
 
 bool Library::CreateMethodResult(const Name& protocol_name, raw::ProtocolMethod* method,
@@ -1803,6 +1844,24 @@ bool Library::ConsumeParameterList(Name name, std::unique_ptr<raw::ParameterList
   return true;
 }
 
+bool Library::ConsumeServiceDeclaration(std::unique_ptr<raw::ServiceDeclaration> service_decl) {
+  auto attributes = std::move(service_decl->attributes);
+  auto name = Name(this, service_decl->identifier->location());
+
+  std::vector<Service::Member> members;
+  for (auto& member : service_decl->members) {
+    std::unique_ptr<TypeConstructor> type_ctor;
+    auto location = member->identifier->location();
+    if (!ConsumeTypeConstructor(std::move(member->type_ctor), location, &type_ctor))
+      return false;
+    members.emplace_back(std::move(type_ctor), member->identifier->location(),
+                         std::move(member->attributes));
+  }
+
+  return RegisterDecl(
+      std::make_unique<Service>(std::move(attributes), std::move(name), std::move(members)));
+}
+
 bool Library::ConsumeStructDeclaration(std::unique_ptr<raw::StructDeclaration> struct_declaration) {
   auto attributes = std::move(struct_declaration->attributes);
   auto name = Name(this, struct_declaration->identifier->location());
@@ -1859,8 +1918,8 @@ bool Library::ConsumeTableDeclaration(std::unique_ptr<raw::TableDeclaration> tab
     }
   }
 
-  return RegisterDecl(
-      std::make_unique<Table>(std::move(attributes), std::move(name), std::move(members)));
+  return RegisterDecl(std::make_unique<Table>(std::move(attributes), std::move(name),
+                                              std::move(members), table_declaration->strictness));
 }
 
 bool Library::ConsumeUnionDeclaration(std::unique_ptr<raw::UnionDeclaration> union_declaration) {
@@ -1973,6 +2032,13 @@ bool Library::ConsumeFile(std::unique_ptr<raw::File> file) {
     }
   }
 
+  auto service_declaration_list = std::move(file->service_declaration_list);
+  for (auto& service_declaration : service_declaration_list) {
+    if (!ConsumeServiceDeclaration(std::move(service_declaration))) {
+      return false;
+    }
+  }
+
   auto struct_declaration_list = std::move(file->struct_declaration_list);
   for (auto& struct_declaration : struct_declaration_list) {
     if (!ConsumeStructDeclaration(std::move(struct_declaration))) {
@@ -2031,80 +2097,126 @@ bool Library::ResolveIdentifierConstant(IdentifierConstant* identifier_constant,
   assert(TypeCanBeConst(type) &&
          "Compiler bug: resolving identifier constant to non-const-able type!");
 
-  auto decl = LookupDeclByName(identifier_constant->name);
-  if (!decl || decl->kind != Decl::Kind::kConst)
+  auto decl = LookupDeclByName(identifier_constant->name.memberless_name());
+  if (!decl)
     return false;
 
-  // Recursively resolve constants
-  auto const_decl = static_cast<Const*>(decl);
-  if (!CompileConst(const_decl))
+  if (!CompileDecl(decl)) {
     return false;
-  assert(const_decl->value->IsResolved());
+  }
 
-  const ConstantValue& const_val = const_decl->value->Value();
+  const TypeConstructor* const_type_ctor;
+  const ConstantValue* const_val;
+  switch (decl->kind) {
+    case Decl::Kind::kConst: {
+      auto const_decl = static_cast<Const*>(decl);
+      const_type_ctor = const_decl->type_ctor.get();
+      const_val = &const_decl->value->Value();
+      break;
+    }
+    case Decl::Kind::kEnum: {
+      auto enum_decl = static_cast<Enum*>(decl);
+      const_type_ctor = enum_decl->subtype_ctor.get();
+      for (auto& member : enum_decl->members) {
+        if (member.name.data() == identifier_constant->name.member_name()) {
+          const_val = &member.value->Value();
+        }
+      }
+      break;
+    }
+    case Decl::Kind::kBits: {
+      auto bits_decl = static_cast<Bits*>(decl);
+      const_type_ctor = bits_decl->subtype_ctor.get();
+      for (auto& member : bits_decl->members) {
+        if (member.name.data() == identifier_constant->name.member_name()) {
+          const_val = &member.value->Value();
+        }
+      }
+      break;
+    }
+    default: {
+      assert(false && "unexpected kind");
+    }
+  }
+
+  auto constant_kind = [](const types::PrimitiveSubtype primitive_subtype) {
+    switch (primitive_subtype) {
+      case types::PrimitiveSubtype::kBool:
+        return ConstantValue::Kind::kBool;
+      case types::PrimitiveSubtype::kInt8:
+        return ConstantValue::Kind::kInt8;
+      case types::PrimitiveSubtype::kInt16:
+        return ConstantValue::Kind::kInt16;
+      case types::PrimitiveSubtype::kInt32:
+        return ConstantValue::Kind::kInt32;
+      case types::PrimitiveSubtype::kInt64:
+        return ConstantValue::Kind::kInt64;
+      case types::PrimitiveSubtype::kUint8:
+        return ConstantValue::Kind::kUint8;
+      case types::PrimitiveSubtype::kUint16:
+        return ConstantValue::Kind::kUint16;
+      case types::PrimitiveSubtype::kUint32:
+        return ConstantValue::Kind::kUint32;
+      case types::PrimitiveSubtype::kUint64:
+        return ConstantValue::Kind::kUint64;
+      case types::PrimitiveSubtype::kFloat32:
+        return ConstantValue::Kind::kFloat32;
+      case types::PrimitiveSubtype::kFloat64:
+        return ConstantValue::Kind::kFloat64;
+    }
+    assert(false && "Compiler bug: unhandled primitive subtype");
+  };
+
   std::unique_ptr<ConstantValue> resolved_val;
   switch (type->kind) {
     case Type::Kind::kString: {
-      if (!TypeIsConvertibleTo(const_decl->type_ctor->type, type))
+      if (!TypeIsConvertibleTo(const_type_ctor->type, type))
         goto fail_cannot_convert;
 
-      if (!const_val.Convert(ConstantValue::Kind::kString, &resolved_val))
+      if (!const_val->Convert(ConstantValue::Kind::kString, &resolved_val))
         goto fail_cannot_convert;
       break;
     }
     case Type::Kind::kPrimitive: {
       auto primitive_type = static_cast<const PrimitiveType*>(type);
-      switch (primitive_type->subtype) {
-        case types::PrimitiveSubtype::kBool:
-          if (!const_val.Convert(ConstantValue::Kind::kBool, &resolved_val))
-            goto fail_cannot_convert;
+      if (!const_val->Convert(constant_kind(primitive_type->subtype), &resolved_val))
+        goto fail_cannot_convert;
+      break;
+    }
+    case Type::Kind::kIdentifier: {
+      auto identifier_type = static_cast<const IdentifierType*>(type);
+      const PrimitiveType* primitive_type;
+      switch (identifier_type->type_decl->kind) {
+        case Decl::Kind::kEnum: {
+          auto enum_decl = static_cast<const Enum*>(identifier_type->type_decl);
+          assert(enum_decl->subtype_ctor->type->kind == Type::Kind::kPrimitive);
+          primitive_type = static_cast<const PrimitiveType*>(enum_decl->subtype_ctor->type);
           break;
-        case types::PrimitiveSubtype::kInt8:
-          if (!const_val.Convert(ConstantValue::Kind::kInt8, &resolved_val))
-            goto fail_cannot_convert;
+        }
+        case Decl::Kind::kBits: {
+          auto bits_decl = static_cast<const Bits*>(identifier_type->type_decl);
+          assert(bits_decl->subtype_ctor->type->kind == Type::Kind::kPrimitive);
+          primitive_type = static_cast<const PrimitiveType*>(bits_decl->subtype_ctor->type);
           break;
-        case types::PrimitiveSubtype::kInt16:
-          if (!const_val.Convert(ConstantValue::Kind::kInt16, &resolved_val))
-            goto fail_cannot_convert;
-          break;
-        case types::PrimitiveSubtype::kInt32:
-          if (!const_val.Convert(ConstantValue::Kind::kInt32, &resolved_val))
-            goto fail_cannot_convert;
-          break;
-        case types::PrimitiveSubtype::kInt64:
-          if (!const_val.Convert(ConstantValue::Kind::kInt64, &resolved_val))
-            goto fail_cannot_convert;
-          break;
-        case types::PrimitiveSubtype::kUint8:
-          if (!const_val.Convert(ConstantValue::Kind::kUint8, &resolved_val))
-            goto fail_cannot_convert;
-          break;
-        case types::PrimitiveSubtype::kUint16:
-          if (!const_val.Convert(ConstantValue::Kind::kUint16, &resolved_val))
-            goto fail_cannot_convert;
-          break;
-        case types::PrimitiveSubtype::kUint32:
-          if (!const_val.Convert(ConstantValue::Kind::kUint32, &resolved_val))
-            goto fail_cannot_convert;
-          break;
-        case types::PrimitiveSubtype::kUint64:
-          if (!const_val.Convert(ConstantValue::Kind::kUint64, &resolved_val))
-            goto fail_cannot_convert;
-          break;
-        case types::PrimitiveSubtype::kFloat32:
-          if (!const_val.Convert(ConstantValue::Kind::kFloat32, &resolved_val))
-            goto fail_cannot_convert;
-          break;
-        case types::PrimitiveSubtype::kFloat64:
-          if (!const_val.Convert(ConstantValue::Kind::kFloat64, &resolved_val))
-            goto fail_cannot_convert;
-          break;
+        }
+        default: {
+          assert(false && "Compiler bug: identifier not of const-able type.");
+        }
       }
+      if (decl->name != identifier_type->type_decl->name) {
+        std::ostringstream msg;
+        msg << "mismatched named type assignment: cannot define a constant or default value of "
+               "type "
+            << decl->name.name_full() << " using a value of type "
+            << identifier_type->type_decl->name.name_full();
+        return Fail(msg.str());
+      }
+      if (!const_val->Convert(constant_kind(primitive_type->subtype), &resolved_val))
+        goto fail_cannot_convert;
       break;
     }
     default: {
-      assert(false &&
-             "Compiler bug: const-able type not handled during identifier constant resolution!");
+      assert(false && "Compiler bug: identifier not of const-able type.");
     }
   }
 
@@ -2114,7 +2226,7 @@ bool Library::ResolveIdentifierConstant(IdentifierConstant* identifier_constant,
 fail_cannot_convert:
   std::ostringstream msg_stream;
   msg_stream << NameFlatConstant(identifier_constant) << ", of type ";
-  msg_stream << NameFlatTypeConstructor(const_decl->type_ctor.get());
+  msg_stream << NameFlatTypeConstructor(const_type_ctor);
   msg_stream << ", cannot be converted to type " << NameFlatType(type);
   return Fail(msg_stream.str());
 }
@@ -2267,6 +2379,16 @@ bool Library::TypeCanBeConst(const Type* type) {
       return type->nullability != types::Nullability::kNullable;
     case flat::Type::Kind::kPrimitive:
       return true;
+    case flat::Type::Kind::kIdentifier: {
+      auto identifier_type = static_cast<const IdentifierType*>(type);
+      switch (identifier_type->type_decl->kind) {
+        case Decl::Kind::kEnum:
+        case Decl::Kind::kBits:
+          return true;
+        default:
+          return false;
+      }
+    }
     default:
       return false;
   }  // switch
@@ -2310,32 +2432,6 @@ bool Library::TypeIsConvertibleTo(const Type* from_type, const Type* to_type) {
     default:
       return false;
   }  // switch
-}
-
-Decl* Library::LookupConstant(const TypeConstructor* type_ctor, const Name& name) {
-  // TODO(FIDL-486): Improve handling to make it consistent (and spec'ed).
-  auto decl = LookupDeclByName(type_ctor->name);
-  if (!decl || decl->kind == Decl::Kind::kTypeAlias) {
-    // This wasn't a named type. Thus we are looking up a
-    // top-level constant, of string, primitive type, or alias thereof.
-    auto iter = constants_.find(&name);
-    if (iter == constants_.end()) {
-      return nullptr;
-    }
-    return iter->second;
-  }
-  // We must otherwise be looking for an enum member.
-  if (decl->kind != Decl::Kind::kEnum) {
-    return nullptr;
-  }
-  auto enum_decl = static_cast<Enum*>(decl);
-  for (auto& member : enum_decl->members) {
-    if (member.name.data() == name.name_part()) {
-      return enum_decl;
-    }
-  }
-  // The enum didn't have a member of that name!
-  return nullptr;
 }
 
 // Library resolution is concerned with resolving identifiers to their
@@ -2407,10 +2503,10 @@ bool Library::DeclDependencies(Decl* decl, std::set<Decl*>* out_edges) {
     switch (constant->kind) {
       case Constant::Kind::kIdentifier: {
         auto identifier = static_cast<const flat::IdentifierConstant*>(constant);
-        auto decl = LookupConstant(type_ctor, identifier->name);
+        auto decl = LookupDeclByName(identifier->name.memberless_name());
         if (decl == nullptr) {
           std::string message("Unable to find the constant named: ");
-          message += identifier->name.name_part();
+          message += identifier->name.name_full();
           return Fail(identifier->name, message.data());
         }
         edges.insert(decl);
@@ -2458,6 +2554,13 @@ bool Library::DeclDependencies(Decl* decl, std::set<Decl*>* out_edges) {
         if (method.maybe_response != nullptr) {
           edges.insert(method.maybe_response);
         }
+      }
+      break;
+    }
+    case Decl::Kind::kService: {
+      auto service_decl = static_cast<const Service*>(decl);
+      for (const auto& member : service_decl->members) {
+        maybe_add_decl(member.type_ctor.get());
       }
       break;
     }
@@ -2613,6 +2716,12 @@ bool Library::CompileDecl(Decl* decl) {
         return false;
       break;
     }
+    case Decl::Kind::kService: {
+      auto service_decl = static_cast<Service*>(decl);
+      if (!CompileService(service_decl))
+        return false;
+      break;
+    }
     case Decl::Kind::kStruct: {
       auto struct_decl = static_cast<Struct*>(decl);
       if (!CompileStruct(struct_decl))
@@ -2712,6 +2821,21 @@ bool Library::VerifyDeclAttributes(Decl* decl) {
             ValidateAttributesConstraints(method.maybe_response, method.attributes.get());
           }
         }
+      }
+      break;
+    }
+    case Decl::Kind::kService: {
+      auto service_decl = static_cast<Service*>(decl);
+      // Attributes: check placement.
+      ValidateAttributesPlacement(AttributeSchema::Placement::kServiceDecl,
+                                  service_decl->attributes.get());
+      for (const auto& member : service_decl->members) {
+        ValidateAttributesPlacement(AttributeSchema::Placement::kServiceMember,
+                                    member.attributes.get());
+      }
+      if (placement_ok.NoNewErrors()) {
+        // Attributes: check constraint.
+        ValidateAttributesConstraints(service_decl, service_decl->attributes.get());
       }
       break;
     }
@@ -2935,7 +3059,7 @@ bool Library::CompileProtocol(Protocol* protocol_declaration) {
       // protocols.
       if (!decl) {
         std::string message("unknown type ");
-        message.append(name.name_part());
+        message.append(name.name_full());
         return Fail(name, message);
       }
       if (decl->kind != Decl::Kind::kProtocol)
@@ -3015,6 +3139,26 @@ bool Library::CompileProtocol(Protocol* protocol_declaration) {
   return true;
 }
 
+bool Library::CompileService(Service* service_decl) {
+  Scope<std::string_view> scope;
+  for (auto& member : service_decl->members) {
+    auto name_result = scope.Insert(member.name.data(), member.name);
+    if (!name_result.ok())
+      return Fail(member.name, "multiple service members with the same name; previous was at " +
+                                   name_result.previous_occurrence().position_str());
+    if (!CompileTypeConstructor(member.type_ctor.get(), nullptr /* out_typeshape */))
+      return false;
+    if (member.type_ctor->type->kind != Type::Kind::kIdentifier)
+      return Fail(member.name, "only protocol members are allowed");
+    auto member_identifier_type = static_cast<const IdentifierType*>(member.type_ctor->type);
+    if (member_identifier_type->type_decl->kind != Decl::Kind::kProtocol)
+      return Fail(member.name, "only protocol members are allowed");
+    if (member.type_ctor->nullability != types::Nullability::kNonnullable)
+      return Fail(member.name, "service members cannot be nullable");
+  }
+  return true;
+}
+
 bool Library::CompileStruct(Struct* struct_declaration) {
   Scope<std::string_view> scope;
   std::vector<FieldShape*> fidl_struct;
@@ -3027,8 +3171,18 @@ bool Library::CompileStruct(Struct* struct_declaration) {
                                    name_result.previous_occurrence().position_str());
     if (!CompileTypeConstructor(member.type_ctor.get(), &member.fieldshape.Typeshape()))
       return false;
-    // TODO(FIDL-486): When a default value is present, we must resolve the
-    // constant properly.
+    if (member.maybe_default_value) {
+      const auto* default_value_type = member.type_ctor.get()->type;
+      if (!TypeCanBeConst(default_value_type)) {
+        std::ostringstream msg_stream;
+        msg_stream << "struct field  " << member.name.data() << " has an invalid default type"
+                   << NameFlatType(default_value_type);
+        return Fail(*struct_declaration, msg_stream.str());
+      }
+      if (!ResolveConstant(member.maybe_default_value.get(), default_value_type)) {
+        return false;
+      }
+    }
     fidl_struct.push_back(&member.fieldshape);
   }
 
@@ -3090,7 +3244,8 @@ bool Library::CompileTable(Table* table_declaration) {
     }
   }
 
-  table_declaration->typeshape = Table::Shape(&fields, max_member_handles);
+  table_declaration->typeshape =
+      Table::Shape(&fields, table_declaration->strictness, max_member_handles);
 
   return true;
 }
@@ -3154,7 +3309,8 @@ bool Library::CompileXUnion(XUnion* xunion_declaration) {
   for (auto& member : xunion_declaration->members) {
     fields.push_back(&member.fieldshape);
   }
-  xunion_declaration->typeshape = XUnion::Shape(&fields, max_member_handles);
+  xunion_declaration->typeshape =
+      XUnion::Shape(&fields, xunion_declaration->strictness, max_member_handles);
 
   return true;
 }
@@ -3190,25 +3346,9 @@ bool Library::CompileTypeAlias(TypeAlias* decl) {
   return true;
 }
 
-bool Library::CompileLibraryName() {
-  const std::regex pattern("^[a-z][a-z0-9]*$");
-  for (const auto& part_view : library_name_) {
-    std::string part(part_view);
-    if (!std::regex_match(part, pattern)) {
-      return Fail("Invalid library name part " + part);
-    }
-  }
-  return true;
-}
-
 bool Library::Compile() {
   for (const auto& dep_library : dependencies_.dependencies()) {
     constants_.insert(dep_library->constants_.begin(), dep_library->constants_.end());
-  }
-
-  // Verify that the library's name is valid.
-  if (!CompileLibraryName()) {
-    return false;
   }
 
   if (!SortDeclarations()) {
@@ -3234,7 +3374,10 @@ bool Library::Compile() {
   for (auto& protocol_decl : protocol_declarations_) {
     for (auto& method_with_info : protocol_decl->all_methods) {
       auto FixupMessage = [&](Struct* message) {
-        auto header_field_shape = FieldShape(TypeShape(16u, 4u));
+        auto header_field_shape = FieldShape(TypeShape({
+            .inline_size = 16u,
+            .alignment = 4u,
+        }));
         std::vector<FieldShape*> message_struct;
         message_struct.push_back(&header_field_shape);
         for (auto& param : message->members)

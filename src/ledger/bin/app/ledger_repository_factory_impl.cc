@@ -16,10 +16,11 @@
 #include <lib/inspect_deprecated/deprecated/object_dir.h>
 #include <lib/inspect_deprecated/inspect.h>
 #include <stdio.h>
-#include <trace/event.h>
 #include <unistd.h>
 #include <zircon/processargs.h>
 #include <zircon/syscalls.h>
+
+#include <trace/event.h>
 
 #include "src/ledger/bin/app/constants.h"
 #include "src/ledger/bin/app/disk_cleanup_manager_impl.h"
@@ -115,14 +116,14 @@ bool GetRepositoryName(rng::Random* random, const DetachedPath& content_path, st
 // requests and callbacks and fires them when the repository is available.
 class LedgerRepositoryFactoryImpl::LedgerRepositoryContainer {
  public:
-  explicit LedgerRepositoryContainer(fxl::UniqueFD root_fd) : root_fd_(std::move(root_fd)) {
+  explicit LedgerRepositoryContainer(fbl::unique_fd root_fd) : root_fd_(std::move(root_fd)) {
     // Ensure that we close the repository if the underlying filesystem closes
     // too. This prevents us from trying to write on disk when there's no disk
     // anymore. This situation can happen when the Ledger is shut down, if the
     // storage is shut down at the same time.
     fd_chan_ = fsl::CloneChannelFromFileDescriptor(root_fd_.get());
     fd_wait_ = std::make_unique<async::Wait>(
-        fd_chan_.get(), ZX_CHANNEL_PEER_CLOSED,
+        fd_chan_.get(), ZX_CHANNEL_PEER_CLOSED, 0,
         [this](async_dispatcher_t* dispatcher, async::WaitBase* wait, zx_status_t status,
                const zx_packet_signal* signal) { on_empty(); });
     zx_status_t status = fd_wait_->Begin(async_get_default_dispatcher());
@@ -199,7 +200,7 @@ class LedgerRepositoryFactoryImpl::LedgerRepositoryContainer {
     }
   }
 
-  fxl::UniqueFD root_fd_;
+  fbl::unique_fd root_fd_;
   zx::channel fd_chan_;
   std::unique_ptr<async::Wait> fd_wait_;
   std::unique_ptr<LedgerRepositoryImpl> ledger_repository_;
@@ -254,7 +255,7 @@ void LedgerRepositoryFactoryImpl::GetRepository(
     fidl::InterfaceHandle<cloud_provider::CloudProvider> cloud_provider, std::string user_id,
     fidl::InterfaceRequest<ledger_internal::LedgerRepository> repository_request,
     fit::function<void(Status)> callback) {
-  fxl::UniqueFD root_fd = fsl::OpenChannelAsFileDescriptor(std::move(repository_handle));
+  fbl::unique_fd root_fd = fsl::OpenChannelAsFileDescriptor(std::move(repository_handle));
   if (!root_fd.is_valid()) {
     callback(Status::IO_ERROR);
     return;
@@ -264,7 +265,7 @@ void LedgerRepositoryFactoryImpl::GetRepository(
 }
 
 void LedgerRepositoryFactoryImpl::GetRepositoryByFD(
-    fxl::UniqueFD root_fd, fidl::InterfaceHandle<cloud_provider::CloudProvider> cloud_provider,
+    fbl::unique_fd root_fd, fidl::InterfaceHandle<cloud_provider::CloudProvider> cloud_provider,
     std::string user_id,
     fidl::InterfaceRequest<ledger_internal::LedgerRepository> repository_request,
     fit::function<void(Status)> callback) {
@@ -307,7 +308,8 @@ void LedgerRepositoryFactoryImpl::GetRepositoryByFD(
   DiskCleanupManagerImpl* disk_cleanup_manager_ptr = disk_cleanup_manager.get();
   auto repository = std::make_unique<LedgerRepositoryImpl>(
       repository_information.ledgers_path, environment_, std::move(db_factory), std::move(watchers),
-      std::move(user_sync), std::move(disk_cleanup_manager), disk_cleanup_manager_ptr,
+      std::move(user_sync), std::move(disk_cleanup_manager),
+      std::vector<PageUsageListener*>{disk_cleanup_manager_ptr},
       inspect_node_.CreateChild(convert::ToHex(repository_information.name)));
   disk_cleanup_manager_ptr->SetPageEvictionDelegate(repository.get());
   container->SetRepository(Status::OK, std::move(repository));

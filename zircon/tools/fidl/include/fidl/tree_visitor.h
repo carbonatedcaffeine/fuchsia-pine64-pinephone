@@ -4,8 +4,8 @@
 
 #include "raw_ast.h"
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_TREE_VISITOR_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_TREE_VISITOR_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_TREE_VISITOR_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_TREE_VISITOR_H_
 
 namespace fidl {
 namespace raw {
@@ -135,6 +135,12 @@ class TreeVisitor {
   virtual void OnProtocolDeclaration(std::unique_ptr<ProtocolDeclaration> const& element) {
     element->Accept(this);
   }
+  virtual void OnServiceMember(std::unique_ptr<ServiceMember> const& element) {
+    element->Accept(this);
+  }
+  virtual void OnServiceDeclaration(std::unique_ptr<ServiceDeclaration> const& element) {
+    element->Accept(this);
+  }
   virtual void OnStructMember(std::unique_ptr<StructMember> const& element) {
     element->Accept(this);
   }
@@ -174,4 +180,4 @@ class DeclarationOrderTreeVisitor : public TreeVisitor {
 }  // namespace raw
 }  // namespace fidl
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_TREE_VISITOR_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_TREE_VISITOR_H_

@@ -48,6 +48,8 @@ source_set("object_identifier_lib") {
     "object_digest.h",
     "object_identifier_encoding.cc",
     "object_identifier_encoding.h",
+    "object_identifier_factory_impl.cc",
+    "object_identifier_factory_impl.h",
   ]
 
   deps = [
@@ -58,19 +60,6 @@ source_set("object_identifier_lib") {
   public_deps = [
     ":object_identifier",
     "//src/ledger/bin/storage/public",
-  ]
-
-  configs += [ "//src/ledger:ledger_config" ]
-}
-
-source_set("piece_tracker") {
-  sources = [
-    "piece_tracker.cc",
-    "piece_tracker.h",
-  ]
-
-  public_deps = [
-    "//src/ledger/bin/storage/public",
     "//src/ledger/bin/synchronization:dispatcher_checker",
     "//src/lib/fxl",
   ]
@@ -78,13 +67,22 @@ source_set("piece_tracker") {
   configs += [ "//src/ledger:ledger_config" ]
 }
 
+source_set("data_serialization") {
+  sources = [
+    "data_serialization.h",
+  ]
+
+  public_deps = [
+    "//src/lib/fxl",
+  ]
+}
+
 source_set("lib") {
   sources = [
-    "commit_impl.cc",
-    "commit_impl.h",
+    "commit_factory.cc",
+    "commit_factory.h",
     "commit_pruner.cc",
     "commit_pruner.h",
-    "data_serialization.h",
     "db_serialization.cc",
     "db_serialization.h",
     "file_index.cc",
@@ -97,7 +95,6 @@ source_set("lib") {
     "leveldb.h",
     "leveldb_factory.cc",
     "leveldb_factory.h",
-    "live_commit_tracker.cc",
     "live_commit_tracker.h",
     "object_impl.cc",
     "object_impl.h",
@@ -135,7 +132,7 @@ source_set("lib") {
 
   public_deps = [
     ":object_identifier_lib",
-    ":piece_tracker",
+    ":data_serialization",
     "//peridot/lib/convert",
     "//src/ledger/lib/coroutine",
     "//src/ledger/third_party/bup",
@@ -158,6 +155,7 @@ source_set("test_utils") {
     "//garnet/public/lib/callback",
     "//src/ledger/bin/encryption/fake",
     "//src/ledger/bin/encryption/primitives",
+    "//src/ledger/bin/storage/fake:lib",
   ]
 
   public_deps = [
@@ -176,7 +174,7 @@ source_set("unittests") {
   testonly = true
 
   sources = [
-    "commit_impl_unittest.cc",
+    "commit_factory_unittest.cc",
     "commit_pruner_unittest.cc",
     "commit_random_impl.cc",
     "commit_random_impl.h",
@@ -185,14 +183,13 @@ source_set("unittests") {
     "journal_unittest.cc",
     "ledger_storage_unittest.cc",
     "leveldb_factory_unittest.cc",
-    "live_commit_tracker_unittest.cc",
     "object_digest_unittest.cc",
+    "object_identifier_factory_impl_unittest.cc",
     "object_impl_unittest.cc",
     "page_db_empty_impl.cc",
     "page_db_empty_impl.h",
     "page_db_unittest.cc",
     "page_storage_unittest.cc",
-    "piece_tracker_unittest.cc",
     "split_unittest.cc",
   ]
 

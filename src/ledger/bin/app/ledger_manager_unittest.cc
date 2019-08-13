@@ -37,6 +37,7 @@
 #include "src/ledger/bin/storage/public/ledger_storage.h"
 #include "src/ledger/bin/storage/testing/page_storage_empty_impl.h"
 #include "src/ledger/bin/sync_coordinator/public/ledger_sync.h"
+#include "src/ledger/bin/sync_coordinator/testing/fake_ledger_sync.h"
 #include "src/ledger/bin/testing/fake_disk_cleanup_manager.h"
 #include "src/ledger/bin/testing/inspect.h"
 #include "src/ledger/bin/testing/test_with_environment.h"
@@ -224,24 +225,6 @@ class FakeLedgerStorage : public storage::LedgerStorage, public DelayingCallback
   FXL_DISALLOW_COPY_AND_ASSIGN(FakeLedgerStorage);
 };
 
-class FakeLedgerSync : public sync_coordinator::LedgerSync {
- public:
-  FakeLedgerSync() {}
-  ~FakeLedgerSync() override {}
-
-  std::unique_ptr<sync_coordinator::PageSync> CreatePageSync(
-      storage::PageStorage* /*page_storage*/,
-      storage::PageSyncClient* /*page_sync_client*/) override {
-    called = true;
-    return nullptr;
-  }
-
-  bool called = false;
-
- private:
-  FXL_DISALLOW_COPY_AND_ASSIGN(FakeLedgerSync);
-};
-
 class LedgerManagerTest : public TestWithEnvironment {
  public:
   LedgerManagerTest() {}
@@ -253,7 +236,8 @@ class LedgerManagerTest : public TestWithEnvironment {
     TestWithEnvironment::SetUp();
     std::unique_ptr<FakeLedgerStorage> storage = std::make_unique<FakeLedgerStorage>(&environment_);
     storage_ptr = storage.get();
-    std::unique_ptr<FakeLedgerSync> sync = std::make_unique<FakeLedgerSync>();
+    std::unique_ptr<sync_coordinator::FakeLedgerSync> sync =
+        std::make_unique<sync_coordinator::FakeLedgerSync>();
     sync_ptr = sync.get();
     top_level_node_ = inspect_deprecated::Node(kTestTopLevelNodeName.ToString());
     disk_cleanup_manager_ = std::make_unique<FakeDiskCleanupManager>();
@@ -261,7 +245,7 @@ class LedgerManagerTest : public TestWithEnvironment {
         &environment_, kLedgerName.ToString(),
         top_level_node_.CreateChild(kInspectPathComponent.ToString()),
         std::make_unique<encryption::FakeEncryptionService>(dispatcher()), std::move(storage),
-        std::move(sync), disk_cleanup_manager_.get());
+        std::move(sync), std::vector<PageUsageListener*>{disk_cleanup_manager_.get()});
     ResetLedgerPtr();
   }
 
@@ -269,7 +253,7 @@ class LedgerManagerTest : public TestWithEnvironment {
 
  protected:
   FakeLedgerStorage* storage_ptr;
-  FakeLedgerSync* sync_ptr;
+  sync_coordinator::FakeLedgerSync* sync_ptr;
   inspect_deprecated::Node top_level_node_;
   std::unique_ptr<FakeDiskCleanupManager> disk_cleanup_manager_;
   std::unique_ptr<LedgerManager> ledger_manager_;
@@ -300,15 +284,15 @@ class StubConflictResolverFactory : public ConflictResolverFactory {
 // Verifies that LedgerImpl proxies vended by LedgerManager work correctly,
 // that is, make correct calls to ledger storage.
 TEST_F(LedgerManagerTest, LedgerImpl) {
-  EXPECT_EQ(0u, storage_ptr->create_page_calls.size());
-  EXPECT_EQ(0u, storage_ptr->get_page_calls.size());
+  EXPECT_EQ(storage_ptr->create_page_calls.size(), 0u);
+  EXPECT_EQ(storage_ptr->get_page_calls.size(), 0u);
 
   PagePtr page;
   storage_ptr->should_get_page_fail = true;
   ledger_->GetPage(nullptr, page.NewRequest());
   RunLoopUntilIdle();
-  EXPECT_EQ(1u, storage_ptr->create_page_calls.size());
-  EXPECT_EQ(1u, storage_ptr->get_page_calls.size());
+  EXPECT_EQ(storage_ptr->create_page_calls.size(), 1u);
+  EXPECT_EQ(storage_ptr->get_page_calls.size(), 1u);
   EXPECT_FALSE(ledger_);
   page.Unbind();
   storage_ptr->ClearCalls();
@@ -317,8 +301,8 @@ TEST_F(LedgerManagerTest, LedgerImpl) {
   storage_ptr->should_get_page_fail = true;
   ledger_->GetRootPage(page.NewRequest());
   RunLoopUntilIdle();
-  EXPECT_EQ(1u, storage_ptr->create_page_calls.size());
-  EXPECT_EQ(1u, storage_ptr->get_page_calls.size());
+  EXPECT_EQ(storage_ptr->create_page_calls.size(), 1u);
+  EXPECT_EQ(storage_ptr->get_page_calls.size(), 1u);
   EXPECT_FALSE(ledger_);
   page.Unbind();
   storage_ptr->ClearCalls();
@@ -327,10 +311,10 @@ TEST_F(LedgerManagerTest, LedgerImpl) {
   PageId id = RandomId(environment_);
   ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
   RunLoopUntilIdle();
-  EXPECT_EQ(1u, storage_ptr->create_page_calls.size());
-  ASSERT_EQ(1u, storage_ptr->get_page_calls.size());
+  EXPECT_EQ(storage_ptr->create_page_calls.size(), 1u);
+  ASSERT_EQ(storage_ptr->get_page_calls.size(), 1u);
   EXPECT_FALSE(ledger_);
-  EXPECT_EQ(convert::ToString(id.id), storage_ptr->get_page_calls[0]);
+  EXPECT_EQ(storage_ptr->get_page_calls[0], convert::ToString(id.id));
   page.Unbind();
   storage_ptr->ClearCalls();
 }
@@ -408,335 +392,8 @@ TEST_F(LedgerManagerTest, NonEmptyDuringDeletion) {
   RunLoopUntilIdle();
 
   EXPECT_TRUE(delete_page_called);
-  EXPECT_EQ(Status::OK, delete_page_status);
+  EXPECT_EQ(delete_page_status, Status::OK);
   EXPECT_TRUE(on_empty_called);
-}
-
-TEST_F(LedgerManagerTest, PageIsClosedAndSyncedCheckNotFound) {
-  bool called;
-  Status status;
-  PagePredicateResult is_closed_and_synced;
-
-  PageId id = RandomId(environment_);
-
-  // Check for a page that doesn't exist.
-  storage_ptr->should_get_page_fail = true;
-  ledger_manager_->PageIsClosedAndSynced(
-      id.id, callback::Capture(callback::SetWhenCalled(&called), &status, &is_closed_and_synced));
-  RunLoopUntilIdle();
-  EXPECT_TRUE(called);
-  EXPECT_EQ(Status::PAGE_NOT_FOUND, status);
-}
-
-// Check for a page that exists, is synced and open. PageIsClosedAndSynced
-// should be false.
-TEST_F(LedgerManagerTest, PageIsClosedAndSyncedCheckClosed) {
-  bool called;
-  PagePredicateResult is_closed_and_synced;
-
-  storage_ptr->should_get_page_fail = false;
-  PagePtr page;
-  PageId id = RandomId(environment_);
-  storage::PageIdView storage_page_id = convert::ExtendedStringView(id.id);
-
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-
-  Status storage_status;
-  storage_ptr->set_page_storage_synced(storage_page_id, true);
-  ledger_manager_->PageIsClosedAndSynced(
-      storage_page_id,
-      callback::Capture(callback::SetWhenCalled(&called), &storage_status, &is_closed_and_synced));
-  RunLoopUntilIdle();
-  EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, storage_status);
-  EXPECT_EQ(PagePredicateResult::PAGE_OPENED, is_closed_and_synced);
-
-  // Close the page. PageIsClosedAndSynced should now be true.
-  page.Unbind();
-  RunLoopUntilIdle();
-
-  ledger_manager_->PageIsClosedAndSynced(
-      storage_page_id,
-      callback::Capture(callback::SetWhenCalled(&called), &storage_status, &is_closed_and_synced));
-  RunLoopUntilIdle();
-  EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, storage_status);
-  EXPECT_EQ(PagePredicateResult::YES, is_closed_and_synced);
-}
-
-// Check for a page that exists, is synced and open. PageIsClosedAndSynced
-// should be false.
-TEST_F(LedgerManagerTest, PageIsClosedAndSyncedCallOnEmpty) {
-  storage_ptr->should_get_page_fail = false;
-  PagePtr page;
-  PageId id = RandomId(environment_);
-  storage::PageIdView storage_page_id = convert::ExtendedStringView(id.id);
-
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-
-  bool is_empty;
-  ledger_manager_->set_on_empty(callback::SetWhenCalled(&is_empty));
-
-  RunLoopUntilIdle();
-  EXPECT_FALSE(is_empty);
-
-  // Close the page and the ledger connection.
-  page.Unbind();
-  ledger_.Unbind();
-  RunLoopUntilIdle();
-
-  EXPECT_TRUE(is_empty);
-  is_empty = false;
-
-  storage_ptr->DelayIsSyncedCallback(storage_page_id, true);
-
-  bool called;
-  PagePredicateResult is_closed_and_synced;
-  storage::Status storage_status;
-
-  ledger_manager_->PageIsClosedAndSynced(
-      storage_page_id,
-      callback::Capture(callback::SetWhenCalled(&called), &storage_status, &is_closed_and_synced));
-  RunLoopUntilIdle();
-  EXPECT_FALSE(called);
-
-  storage_ptr->CallIsSyncedCallback(storage_page_id);
-
-  RunLoopUntilIdle();
-  EXPECT_TRUE(called);
-  EXPECT_EQ(storage::Status::OK, storage_status);
-  EXPECT_TRUE(is_empty);
-}
-
-// Check for a page that exists, is closed, but is not synced.
-// PageIsClosedAndSynced should be false.
-TEST_F(LedgerManagerTest, PageIsClosedAndSyncedCheckSynced) {
-  bool called;
-  PagePredicateResult is_closed_and_synced;
-
-  storage_ptr->should_get_page_fail = false;
-  PagePtr page;
-  PageId id = RandomId(environment_);
-  storage::PageIdView storage_page_id = convert::ExtendedStringView(id.id);
-
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-
-  // Mark the page as unsynced and close it.
-  storage_ptr->set_page_storage_synced(storage_page_id, false);
-  page.Unbind();
-  RunLoopUntilIdle();
-
-  Status storage_status;
-  ledger_manager_->PageIsClosedAndSynced(
-      storage_page_id,
-      callback::Capture(callback::SetWhenCalled(&called), &storage_status, &is_closed_and_synced));
-  RunLoopUntilIdle();
-  EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, storage_status);
-  EXPECT_EQ(PagePredicateResult::NO, is_closed_and_synced);
-}
-
-// Check for a page that exists, is closed, and synced, but was opened during
-// the PageIsClosedAndSynced call. Expect an |PAGE_OPENED| result.
-TEST_F(LedgerManagerTest, PageIsClosedAndSyncedCheckPageOpened) {
-  PagePredicateResult is_closed_and_synced;
-
-  storage_ptr->should_get_page_fail = false;
-  PagePtr page;
-  PageId id = RandomId(environment_);
-  storage::PageIdView storage_page_id = convert::ExtendedStringView(id.id);
-
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-  // Mark the page as synced and close it.
-  storage_ptr->set_page_storage_synced(storage_page_id, true);
-  page.Unbind();
-  RunLoopUntilIdle();
-
-  // Call PageIsClosedAndSynced but don't let it terminate.
-  bool page_is_closed_and_synced_called = false;
-  storage_ptr->DelayIsSyncedCallback(storage_page_id, true);
-  Status storage_status;
-  ledger_manager_->PageIsClosedAndSynced(
-      storage_page_id, callback::Capture(callback::SetWhenCalled(&page_is_closed_and_synced_called),
-                                         &storage_status, &is_closed_and_synced));
-  RunLoopUntilIdle();
-  EXPECT_FALSE(page_is_closed_and_synced_called);
-
-  // Open and close the page.
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-  page.Unbind();
-  RunLoopUntilIdle();
-
-  // Make sure PageIsClosedAndSynced terminates with a |PAGE_OPENED| result.
-  storage_ptr->CallIsSyncedCallback(storage_page_id);
-  RunLoopUntilIdle();
-
-  EXPECT_TRUE(page_is_closed_and_synced_called);
-  EXPECT_EQ(Status::OK, storage_status);
-  EXPECT_EQ(PagePredicateResult::PAGE_OPENED, is_closed_and_synced);
-}
-
-// Check for a page that exists, is closed, and synced. Test two concurrent
-// calls to PageIsClosedAndSynced, where the second one will start and terminate
-// without the page being opened by external requests.
-TEST_F(LedgerManagerTest, PageIsClosedAndSyncedConcurrentCalls) {
-  storage_ptr->should_get_page_fail = false;
-  PagePtr page;
-  PageId id = RandomId(environment_);
-  storage::PageIdView storage_page_id = convert::ExtendedStringView(id.id);
-
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-  // Mark the page as synced and close it.
-  storage_ptr->set_page_storage_synced(storage_page_id, true);
-  page.Unbind();
-  RunLoopUntilIdle();
-
-  // Make a first call to PageIsClosedAndSynced but don't let it terminate.
-  bool called1 = false;
-  Status status1;
-  PagePredicateResult is_closed_and_synced1;
-  storage_ptr->DelayIsSyncedCallback(storage_page_id, true);
-  ledger_manager_->PageIsClosedAndSynced(
-      storage_page_id,
-      callback::Capture(callback::SetWhenCalled(&called1), &status1, &is_closed_and_synced1));
-  RunLoopUntilIdle();
-
-  // Prepare for the second call: it will return immediately and the expected
-  // result is |YES|.
-  bool called2 = false;
-  Status status2;
-  PagePredicateResult is_closed_and_synced2;
-  storage_ptr->DelayIsSyncedCallback(storage_page_id, false);
-  ledger_manager_->PageIsClosedAndSynced(
-      storage_page_id,
-      callback::Capture(callback::SetWhenCalled(&called2), &status2, &is_closed_and_synced2));
-  RunLoopUntilIdle();
-  EXPECT_FALSE(called1);
-  EXPECT_TRUE(called2);
-  EXPECT_EQ(Status::OK, status2);
-  EXPECT_EQ(PagePredicateResult::YES, is_closed_and_synced2);
-
-  // Open and close the page.
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-  page.Unbind();
-  RunLoopUntilIdle();
-
-  // Call the callback and let the first call to PageIsClosedAndSynced
-  // terminate. The expected returned result is |PAGE_OPENED|.
-  storage_ptr->CallIsSyncedCallback(storage_page_id);
-  RunLoopUntilIdle();
-
-  EXPECT_TRUE(called1);
-  EXPECT_EQ(Status::OK, status1);
-  EXPECT_EQ(PagePredicateResult::PAGE_OPENED, is_closed_and_synced1);
-}
-
-TEST_F(LedgerManagerTest, PageIsClosedOfflineAndEmptyCheckNotFound) {
-  bool called;
-  Status status;
-  PagePredicateResult is_closed_offline_empty;
-
-  PageId id = RandomId(environment_);
-
-  // Check for a page that doesn't exist.
-  storage_ptr->should_get_page_fail = true;
-  ledger_manager_->PageIsClosedOfflineAndEmpty(
-      id.id,
-      callback::Capture(callback::SetWhenCalled(&called), &status, &is_closed_offline_empty));
-  RunLoopUntilIdle();
-  EXPECT_TRUE(called);
-  EXPECT_EQ(Status::PAGE_NOT_FOUND, status);
-}
-
-TEST_F(LedgerManagerTest, PageIsClosedOfflineAndEmptyCheckClosed) {
-  bool called;
-  PagePredicateResult is_closed_offline_empty;
-
-  storage_ptr->should_get_page_fail = false;
-  PagePtr page;
-  PageId id = RandomId(environment_);
-  storage::PageIdView storage_page_id = convert::ExtendedStringView(id.id);
-
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-
-  storage_ptr->set_page_storage_offline_empty(storage_page_id, true);
-  Status storage_status;
-  ledger_manager_->PageIsClosedOfflineAndEmpty(
-      storage_page_id, callback::Capture(callback::SetWhenCalled(&called), &storage_status,
-                                         &is_closed_offline_empty));
-  RunLoopUntilIdle();
-  EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, storage_status);
-  EXPECT_EQ(PagePredicateResult::PAGE_OPENED, is_closed_offline_empty);
-
-  // Close the page. PagePredicateResult should now be true.
-  page.Unbind();
-  RunLoopUntilIdle();
-
-  ledger_manager_->PageIsClosedOfflineAndEmpty(
-      storage_page_id, callback::Capture(callback::SetWhenCalled(&called), &storage_status,
-                                         &is_closed_offline_empty));
-  RunLoopUntilIdle();
-  EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, storage_status);
-  EXPECT_EQ(PagePredicateResult::YES, is_closed_offline_empty);
-}
-
-TEST_F(LedgerManagerTest, PageIsClosedOfflineAndEmptyCanDeletePageOnCallback) {
-  bool page_is_empty_called = false;
-  Status page_is_empty_status;
-  PagePredicateResult is_closed_offline_empty;
-  bool delete_page_called = false;
-  Status delete_page_status;
-  PageId id = RandomId(environment_);
-
-  // The page is closed, offline and empty. Try to delete the page storage in
-  // the callback.
-  storage_ptr->set_page_storage_offline_empty(id.id, true);
-  ledger_manager_->PageIsClosedOfflineAndEmpty(
-      id.id, [&](Status status, PagePredicateResult result) {
-        page_is_empty_called = true;
-        page_is_empty_status = status;
-        is_closed_offline_empty = result;
-
-        ledger_manager_->DeletePageStorage(
-            id.id,
-            callback::Capture(callback::SetWhenCalled(&delete_page_called), &delete_page_status));
-      });
-  RunLoopUntilIdle();
-  // Make sure the deletion finishes successfully.
-  ASSERT_NE(nullptr, storage_ptr->delete_page_storage_callback);
-  storage_ptr->delete_page_storage_callback(Status::OK);
-  RunLoopUntilIdle();
-
-  EXPECT_TRUE(page_is_empty_called);
-  EXPECT_EQ(Status::OK, page_is_empty_status);
-  EXPECT_EQ(PagePredicateResult::YES, is_closed_offline_empty);
-
-  EXPECT_TRUE(delete_page_called);
-  EXPECT_EQ(Status::OK, delete_page_status);
-}
-
-// Verifies that two successive calls to GetPage do not create 2 storages.
-TEST_F(LedgerManagerTest, CallGetPageTwice) {
-  PageId id = RandomId(environment_);
-
-  PagePtr page1;
-  ledger_->GetPage(fidl::MakeOptional(id), page1.NewRequest());
-  PagePtr page2;
-  ledger_->GetPage(fidl::MakeOptional(id), page2.NewRequest());
-  RunLoopUntilIdle();
-  EXPECT_EQ(0u, storage_ptr->create_page_calls.size());
-  ASSERT_EQ(1u, storage_ptr->get_page_calls.size());
-  EXPECT_EQ(convert::ToString(id.id), storage_ptr->get_page_calls[0]);
 }
 
 // Cloud should never be queried.
@@ -754,9 +411,9 @@ TEST_F(LedgerManagerTest, GetPageDoNotCallTheCloud) {
   RunLoopUntilIdle();
   EXPECT_FALSE(ledger_.is_bound());
   EXPECT_TRUE(called);
-  EXPECT_EQ(ZX_ERR_IO, status);
+  EXPECT_EQ(status, ZX_ERR_IO);
   EXPECT_FALSE(ledger_);
-  EXPECT_FALSE(sync_ptr->called);
+  EXPECT_FALSE(sync_ptr->IsCalled());
 
   page.Unbind();
   ResetLedgerPtr();
@@ -768,9 +425,9 @@ TEST_F(LedgerManagerTest, GetPageDoNotCallTheCloud) {
   RunLoopUntilIdle();
   EXPECT_FALSE(ledger_.is_bound());
   EXPECT_TRUE(called);
-  EXPECT_EQ(ZX_ERR_IO, status);
+  EXPECT_EQ(status, ZX_ERR_IO);
   EXPECT_FALSE(ledger_);
-  EXPECT_FALSE(sync_ptr->called);
+  EXPECT_FALSE(sync_ptr->IsCalled());
 
   page.Unbind();
   ResetLedgerPtr();
@@ -782,159 +439,9 @@ TEST_F(LedgerManagerTest, GetPageDoNotCallTheCloud) {
   RunLoopUntilIdle();
   EXPECT_FALSE(ledger_.is_bound());
   EXPECT_TRUE(called);
-  EXPECT_EQ(ZX_ERR_IO, status);
+  EXPECT_EQ(status, ZX_ERR_IO);
   EXPECT_FALSE(ledger_);
-  EXPECT_FALSE(sync_ptr->called);
-}
-
-TEST_F(LedgerManagerTest, OnPageOpenedClosedCalls) {
-  PagePtr page1;
-  PagePtr page2;
-  PageId id = RandomId(environment_);
-
-  EXPECT_EQ(0, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_unused_count);
-
-  // Open a page and check that OnPageOpened was called once.
-  ledger_->GetPage(fidl::MakeOptional(id), page1.NewRequest());
-  RunLoopUntilIdle();
-  EXPECT_EQ(1, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_unused_count);
-
-  // Open the page again and check that there is no new call to OnPageOpened.
-  ledger_->GetPage(fidl::MakeOptional(id), page2.NewRequest());
-  RunLoopUntilIdle();
-  EXPECT_EQ(1, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_unused_count);
-
-  // Close one of the two connections and check that there is still no call to
-  // OnPageClosed.
-  page1.Unbind();
-  RunLoopUntilIdle();
-  EXPECT_EQ(1, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_unused_count);
-
-  // Close the second connection and check that OnPageClosed was called once.
-  page2.Unbind();
-  RunLoopUntilIdle();
-  EXPECT_EQ(1, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(1, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(1, disk_cleanup_manager_->page_unused_count);
-}
-
-TEST_F(LedgerManagerTest, OnPageOpenedClosedCallInternalRequest) {
-  PagePtr page;
-  PageId id = RandomId(environment_);
-
-  EXPECT_EQ(0, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_unused_count);
-
-  // Make an internal request by calling PageIsClosedAndSynced. No calls to page
-  // opened/closed should be made.
-  bool called;
-  Status storage_status;
-  PagePredicateResult page_state;
-  ledger_manager_->PageIsClosedAndSynced(
-      convert::ToString(id.id),
-      callback::Capture(callback::SetWhenCalled(&called), &storage_status, &page_state));
-  RunLoopUntilIdle();
-  EXPECT_TRUE(called);
-  EXPECT_EQ(Status::OK, storage_status);
-  EXPECT_EQ(PagePredicateResult::NO, page_state);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_unused_count);
-
-  // Open the same page with an external request and check that OnPageOpened
-  // was called once.
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-  EXPECT_EQ(1, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_unused_count);
-}
-
-TEST_F(LedgerManagerTest, OnPageOpenedClosedUnused) {
-  PagePtr page;
-  PageId id = RandomId(environment_);
-  storage::PageIdView storage_page_id = convert::ExtendedStringView(id.id);
-
-  EXPECT_EQ(0, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(0, disk_cleanup_manager_->page_unused_count);
-
-  // Open and close the page through an external request.
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-  // Mark the page as synced and close it.
-  storage_ptr->set_page_storage_synced(storage_page_id, true);
-  page.Unbind();
-  RunLoopUntilIdle();
-  EXPECT_EQ(1, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(1, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(1, disk_cleanup_manager_->page_unused_count);
-
-  // Start an internal request but don't let it terminate. Nothing should have
-  // changed in the notifications received.
-  PagePredicateResult is_synced;
-  bool page_is_synced_called = false;
-  storage_ptr->DelayIsSyncedCallback(storage_page_id, true);
-  Status storage_status;
-  ledger_manager_->PageIsClosedAndSynced(
-      storage_page_id, callback::Capture(callback::SetWhenCalled(&page_is_synced_called),
-                                         &storage_status, &is_synced));
-  RunLoopUntilIdle();
-  EXPECT_FALSE(page_is_synced_called);
-  EXPECT_EQ(1, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(1, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(1, disk_cleanup_manager_->page_unused_count);
-
-  // Open the same page with an external request and check that OnPageOpened
-  // was called once.
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-  EXPECT_EQ(2, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(1, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(1, disk_cleanup_manager_->page_unused_count);
-
-  // Close the page. We should get the page closed notification, but not the
-  // unused one: the internal request is still running.
-  page.Unbind();
-  RunLoopUntilIdle();
-  EXPECT_EQ(2, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(2, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(1, disk_cleanup_manager_->page_unused_count);
-
-  // Terminate the internal request. We should now see the unused page
-  // notification.
-  storage_ptr->CallIsSyncedCallback(storage_page_id);
-  RunLoopUntilIdle();
-
-  EXPECT_EQ(2, disk_cleanup_manager_->page_opened_count);
-  EXPECT_EQ(2, disk_cleanup_manager_->page_closed_count);
-  EXPECT_EQ(2, disk_cleanup_manager_->page_unused_count);
-}
-
-TEST_F(LedgerManagerTest, DeletePageStorageWhenPageOpenFails) {
-  PagePtr page;
-  PageId id = RandomId(environment_);
-  bool called;
-
-  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
-  RunLoopUntilIdle();
-
-  // Try to delete the page while it is open. Expect to get an error.
-  Status storage_status;
-  ledger_manager_->DeletePageStorage(
-      id.id, callback::Capture(callback::SetWhenCalled(&called), &storage_status));
-  RunLoopUntilIdle();
-  EXPECT_TRUE(called);
-  EXPECT_EQ(Status::ILLEGAL_STATE, storage_status);
+  EXPECT_FALSE(sync_ptr->IsCalled());
 }
 
 TEST_F(LedgerManagerTest, OpenPageWithDeletePageStorageInProgress) {
@@ -962,7 +469,7 @@ TEST_F(LedgerManagerTest, OpenPageWithDeletePageStorageInProgress) {
 
   RunLoopUntilIdle();
   EXPECT_TRUE(delete_called);
-  EXPECT_EQ(Status::OK, delete_status);
+  EXPECT_EQ(delete_status, Status::OK);
 
   EXPECT_TRUE(get_page_done);
 }
@@ -998,6 +505,55 @@ TEST_F(LedgerManagerTest, MultipleConflictResolvers) {
   RunLoopUntilIdle();
   EXPECT_FALSE(factory1.disconnected);
   EXPECT_FALSE(factory2.disconnected);
+}
+
+// Verifies that the LedgerManager triggers page sync for a page that exists and was closed.
+TEST_F(LedgerManagerTest, TrySyncClosedPageSyncStarted) {
+  storage_ptr->should_get_page_fail = false;
+  PagePtr page;
+  PageId id = RandomId(environment_);
+  storage::PageIdView storage_page_id = convert::ExtendedStringView(id.id);
+  storage::PageId page_id = convert::ExtendedStringView(id.id).ToString();
+
+  EXPECT_EQ(sync_ptr->GetSyncCallsCount(page_id), 0);
+
+  // Opens the page and starts the sync with the cloud for the first time.
+  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
+  RunLoopUntilIdle();
+
+  EXPECT_EQ(sync_ptr->GetSyncCallsCount(page_id), 1);
+
+  page.Unbind();
+  RunLoopUntilIdle();
+
+  // Reopens closed page and starts the sync.
+  ledger_manager_->TrySyncClosedPage(storage_page_id);
+  RunLoopUntilIdle();
+
+  EXPECT_EQ(sync_ptr->GetSyncCallsCount(page_id), 2);
+}
+
+// Verifies that the LedgerManager does not triggers the sync for a currently open page.
+TEST_F(LedgerManagerTest, TrySyncClosedPageWithOpenedPage) {
+  storage_ptr->should_get_page_fail = false;
+  PagePtr page;
+  PageId id = RandomId(environment_);
+  storage::PageIdView storage_page_id = convert::ExtendedStringView(id.id);
+  storage::PageId page_id = convert::ExtendedStringView(id.id).ToString();
+
+  EXPECT_EQ(sync_ptr->GetSyncCallsCount(page_id), 0);
+
+  // Opens the page and starts the sync with the cloud for the first time.
+  ledger_->GetPage(fidl::MakeOptional(id), page.NewRequest());
+  RunLoopUntilIdle();
+
+  EXPECT_EQ(sync_ptr->GetSyncCallsCount(page_id), 1);
+
+  // Tries to reopen the already-open page.
+  ledger_manager_->TrySyncClosedPage(storage_page_id);
+  RunLoopUntilIdle();
+
+  EXPECT_EQ(sync_ptr->GetSyncCallsCount(page_id), 1);
 }
 
 class DelayingLedgerStorage : public storage::LedgerStorage {
@@ -1043,13 +599,14 @@ TEST_F(LedgerManagerTest, GetPageDisconnect) {
   // Setup
   std::unique_ptr<DelayingLedgerStorage> storage = std::make_unique<DelayingLedgerStorage>();
   auto storage_ptr = storage.get();
-  std::unique_ptr<FakeLedgerSync> sync = std::make_unique<FakeLedgerSync>();
+  std::unique_ptr<sync_coordinator::FakeLedgerSync> sync =
+      std::make_unique<sync_coordinator::FakeLedgerSync>();
   auto disk_cleanup_manager = std::make_unique<FakeDiskCleanupManager>();
   auto ledger_manager = std::make_unique<LedgerManager>(
       &environment_, kLedgerName.ToString(),
       top_level_node_.CreateChild(kInspectPathComponent.ToString()),
       std::make_unique<encryption::FakeEncryptionService>(dispatcher()), std::move(storage),
-      std::move(sync), disk_cleanup_manager_.get());
+      std::move(sync), std::vector<PageUsageListener*>{disk_cleanup_manager_.get()});
 
   LedgerPtr ledger;
   ledger_manager->BindLedger(ledger.NewRequest());
@@ -1100,8 +657,8 @@ testing::Matcher<const inspect_deprecated::ObjectHierarchy&> HierarchyMatcher(
                         ChildrenMatch(ElementsAreArray(page_expectations)))))));
 }
 
-// TODO(https://fuchsia.atlassian.net/browse/LE-800): Make FakeLedgerStorage
-// usable as a real LedgerStorage and unify this class with LedgerManagerTest.
+// TODO(LE-800): Make FakeLedgerStorage usable as a real LedgerStorage and unify this class with
+// LedgerManagerTest.
 class LedgerManagerWithRealStorageTest : public TestWithEnvironment {
  public:
   LedgerManagerWithRealStorageTest() = default;
@@ -1115,7 +672,8 @@ class LedgerManagerWithRealStorageTest : public TestWithEnvironment {
     auto ledger_storage = std::make_unique<storage::LedgerStorageImpl>(
         &environment_, encryption_service.get(), db_factory_.get(), DetachedPath(tmpfs_.root_fd()),
         storage::CommitPruningPolicy::NEVER);
-    std::unique_ptr<FakeLedgerSync> sync = std::make_unique<FakeLedgerSync>();
+    std::unique_ptr<sync_coordinator::FakeLedgerSync> sync =
+        std::make_unique<sync_coordinator::FakeLedgerSync>();
     top_level_node_ = inspect_deprecated::Node(kTestTopLevelNodeName.ToString());
     attachment_node_ =
         top_level_node_.CreateChild(kSystemUnderTestAttachmentPointPathComponent.ToString());
@@ -1124,7 +682,7 @@ class LedgerManagerWithRealStorageTest : public TestWithEnvironment {
         &environment_, kLedgerName.ToString(),
         attachment_node_.CreateChild(kInspectPathComponent.ToString()),
         std::move(encryption_service), std::move(ledger_storage), std::move(sync),
-        disk_cleanup_manager_.get());
+        std::vector<PageUsageListener*>{disk_cleanup_manager_.get()});
   }
 
  protected:

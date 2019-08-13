@@ -23,8 +23,7 @@
 namespace component {
 
 constexpr char kDeprecatedDataName[] = "deprecated-data";
-
-NamespaceBuilder::NamespaceBuilder() = default;
+constexpr char kBlockedDataName[] = "data";
 
 NamespaceBuilder::~NamespaceBuilder() = default;
 
@@ -69,13 +68,15 @@ void NamespaceBuilder::AddSandbox(const SandboxMetadata& sandbox,
       [] {
         FXL_NOTREACHED() << "IsolatedCachePathFactory unexpectedly used";
         return "";
-      });
+      },
+      [] { return "/tmp"; });
 }
 
 void NamespaceBuilder::AddSandbox(const SandboxMetadata& sandbox,
                                   const HubDirectoryFactory& hub_directory_factory,
                                   const IsolatedDataPathFactory& isolated_data_path_factory,
-                                  const IsolatedCachePathFactory& isolated_cache_path_factory) {
+                                  const IsolatedCachePathFactory& isolated_cache_path_factory,
+                                  const IsolatedTempPathFactory& isolated_temp_path_factory) {
   for (const auto& path : sandbox.dev()) {
     if (path == "class") {
       FXL_LOG(WARNING) << "Ignoring request for all device classes";
@@ -87,9 +88,14 @@ void NamespaceBuilder::AddSandbox(const SandboxMetadata& sandbox,
   for (const auto& path : sandbox.system()) {
     // 'deprecated-data' is the value used to access /system/data
     // to request a directory inside /system/data 'deprecated-data/some/path' is supplied
-    if (path == kDeprecatedDataName || path.find(fxl::Concatenate({kDeprecatedDataName, "/"})) == 0) {
-      PushDirectoryFromPath("/system/data" +
-                            path.substr(strlen(kDeprecatedDataName), std::string::npos));
+    if (path == kDeprecatedDataName ||
+        path.find(fxl::Concatenate({kDeprecatedDataName, "/"})) == 0) {
+      FXL_LOG(ERROR) << "Request for 'deprecated-data' by " << ns_id
+                     << " ignored, this feature is no longer available";
+    } else if (path == kBlockedDataName ||
+               path.find(fxl::Concatenate({kBlockedDataName, "/"})) == 0) {
+      FXL_LOG(ERROR) << "Request for 'data' in namespace '" << ns_id
+                     << "' ignored, this feature is no longer available";
     } else {
       PushDirectoryFromPath("/system/" + path);
     }
@@ -154,9 +160,10 @@ void NamespaceBuilder::AddSandbox(const SandboxMetadata& sandbox,
       PushDirectoryFromPath("/dev/class/gpu");
       PushDirectoryFromPathAs("/pkgfs/packages/config-data/0/data/vulkan-icd/icd.d",
                               "/config/vulkan/icd.d");
+    } else if (feature == "isolated-temp") {
+      PushDirectoryFromPathAs(isolated_temp_path_factory(), "/tmp");
     }
   }
-
   for (const auto& path : sandbox.boot())
     PushDirectoryFromPath("/boot/" + path);
 }
@@ -168,7 +175,7 @@ void NamespaceBuilder::PushDirectoryFromPath(std::string path) {
 void NamespaceBuilder::PushDirectoryFromPathAs(std::string src_path, std::string dst_path) {
   if (std::find(paths_.begin(), paths_.end(), dst_path) != paths_.end())
     return;
-  fxl::UniqueFD dir(open(src_path.c_str(), O_DIRECTORY | O_RDONLY));
+  fbl::unique_fd dir(open(src_path.c_str(), O_DIRECTORY | O_RDONLY));
   if (!dir.is_valid())
     return;
   zx::channel handle = fsl::CloneChannelFromFileDescriptor(dir.get());

@@ -7,31 +7,104 @@
 use std::collections::{BinaryHeap, HashMap};
 use std::fmt::{self, Debug, Formatter};
 use std::hash::Hash;
+use std::num::NonZeroU16;
 use std::ops;
 use std::sync::Once;
 use std::time::Duration;
 
 use byteorder::{ByteOrder, NativeEndian};
 use log::debug;
-use packet::{ParsablePacket, ParseBuffer};
-use rand::SeedableRng;
+use net_types::ethernet::Mac;
+use net_types::ip::{AddrSubnet, Ip, IpAddr, IpAddress, Ipv4Addr, Ipv6Addr, Subnet, SubnetEither};
+use packet::{Buf, BufferMut, ParsablePacket, ParseBuffer, Serializer};
+use rand::{self, CryptoRng, RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
-use crate::device::ethernet::{EtherType, Mac};
+use crate::device::ethernet::EtherType;
 use crate::device::{DeviceId, DeviceLayerEventDispatcher};
 use crate::error::{IpParseResult, ParseError, ParseResult};
-use crate::ip::icmp::IcmpEventDispatcher;
-use crate::ip::{
-    AddrSubnet, Ip, IpAddr, IpAddress, IpExtByteSlice, IpLayerEventDispatcher, IpPacket, IpProto,
-    Ipv4Addr, Ipv6Addr, Subnet, SubnetEither, IPV6_MIN_MTU,
-};
+use crate::ip::icmp::{IcmpConnId, IcmpEventDispatcher};
+use crate::ip::{IpExtByteSlice, IpLayerEventDispatcher, IpProto, IPV6_MIN_MTU};
+use crate::transport::tcp::TcpOption;
 use crate::transport::udp::UdpEventDispatcher;
 use crate::transport::TransportLayerEventDispatcher;
 use crate::wire::ethernet::EthernetFrame;
-use crate::wire::icmp::{IcmpMessage, IcmpPacket, IcmpParseArgs};
+use crate::wire::icmp::{IcmpIpExt, IcmpMessage, IcmpPacket, IcmpParseArgs};
+use crate::wire::ipv4::Ipv4Packet;
+use crate::wire::ipv6::Ipv6Packet;
+use crate::wire::tcp::TcpSegment;
+use crate::wire::udp::UdpPacket;
 use crate::{handle_timeout, Context, EventDispatcher, Instant, StackStateBuilder, TimerId};
 
 use specialize_ip_macro::specialize_ip_address;
+
+/// Utilities to allow running benchmarks as tests.
+///
+/// Our benchmarks rely on the unstable `test` feature, which is disallowed in
+/// Fuchisa's build system. In order to ensure that our benchmarks are always
+/// compiled and tested, this module provides mocks that allow us to run our
+/// benchmarks as normal tests when the `benchmark` feature is disabled.
+///
+/// See the `bench!` macro for details on how this module is used.
+pub(crate) mod benchmarks {
+    /// A trait to allow mocking of the `test::Bencher` type.
+    pub(crate) trait Bencher {
+        fn iter<T, F: FnMut() -> T>(&mut self, inner: F);
+    }
+
+    #[cfg(feature = "benchmark")]
+    impl Bencher for test::Bencher {
+        fn iter<T, F: FnMut() -> T>(&mut self, inner: F) {
+            test::Bencher::iter(self, inner)
+        }
+    }
+
+    /// A `Bencher` whose `iter` method runs the provided argument once.
+    #[cfg(not(feature = "benchmark"))]
+    pub(crate) struct TestBencher;
+
+    #[cfg(not(feature = "benchmark"))]
+    impl Bencher for TestBencher {
+        fn iter<T, F: FnMut() -> T>(&mut self, mut inner: F) {
+            inner();
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn black_box<T>(dummy: T) -> T {
+        #[cfg(feature = "benchmark")]
+        return test::black_box(dummy);
+        #[cfg(not(feature = "benchmark"))]
+        return dummy;
+    }
+}
+
+/// A wrapper which implements `RngCore` and `CryptoRng` for any `RngCore`.
+///
+/// This is used to satisfy [`EventDispatcher`]'s requirement that the
+/// associated `Rng` type implements `CryptoRng`.
+///
+/// # Security
+///
+/// This is obviously insecure. Don't use it except in testing!
+pub(crate) struct FakeCryptoRng<R>(R);
+
+impl<R: RngCore> RngCore for FakeCryptoRng<R> {
+    fn next_u32(&mut self) -> u32 {
+        self.0.next_u32()
+    }
+    fn next_u64(&mut self) -> u64 {
+        self.0.next_u64()
+    }
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        self.0.fill_bytes(dest)
+    }
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
+        self.0.try_fill_bytes(dest)
+    }
+}
+
+impl<R: RngCore> CryptoRng for FakeCryptoRng<R> {}
 
 /// Create a new deterministic RNG from a seed.
 pub(crate) fn new_rng(mut seed: u64) -> XorShiftRng {
@@ -165,6 +238,150 @@ pub(crate) fn trigger_timers_until<F: Fn(&TimerId) -> bool>(
     }
 }
 
+/// Metadata of an Ethernet frame.
+pub(crate) struct EthernetFrameMetadata {
+    pub(crate) src_mac: Mac,
+    pub(crate) dst_mac: Mac,
+    pub(crate) ethertype: Option<EtherType>,
+}
+
+/// Metadata of an IPv4 packet.
+pub(crate) struct Ipv4PacketMetadata {
+    pub(crate) dscp: u8,
+    pub(crate) ecn: u8,
+    pub(crate) id: u16,
+    pub(crate) dont_fragment: bool,
+    pub(crate) more_fragments: bool,
+    pub(crate) fragment_offset: u16,
+    pub(crate) ttl: u8,
+    pub(crate) proto: IpProto,
+    pub(crate) src_ip: Ipv4Addr,
+    pub(crate) dst_ip: Ipv4Addr,
+}
+
+/// Metadata of an IPv6 packet.
+pub(crate) struct Ipv6PacketMetadata {
+    pub(crate) ds: u8,
+    pub(crate) ecn: u8,
+    pub(crate) flowlabel: u32,
+    pub(crate) hop_limit: u8,
+    pub(crate) src_ip: Ipv6Addr,
+    pub(crate) dst_ip: Ipv6Addr,
+}
+
+/// Metadata of a TCP segment.
+pub(crate) struct TcpSegmentMetadata {
+    pub(crate) src_port: u16,
+    pub(crate) dst_port: u16,
+    pub(crate) seq_num: u32,
+    pub(crate) ack_num: Option<u32>,
+    pub(crate) flags: u16,
+    pub(crate) psh: bool,
+    pub(crate) rst: bool,
+    pub(crate) syn: bool,
+    pub(crate) fin: bool,
+    pub(crate) window_size: u16,
+    pub(crate) options: &'static [TcpOption<'static>],
+}
+
+/// Metadata of a UDP packet.
+pub(crate) struct UdpPacketMetadata {
+    pub(crate) src_port: u16,
+    pub(crate) dst_port: u16,
+}
+
+/// Represents a packet (usually from a live capture) used for testing.
+///
+/// Includes the raw bytes, metadata of the packet (currently just fields from the packet header)
+/// and the range which indicates where the body is.
+pub(crate) struct TestPacket<M> {
+    pub(crate) bytes: &'static [u8],
+    pub(crate) metadata: M,
+    pub(crate) body_range: ops::Range<usize>,
+}
+
+/// Verify that a parsed Ethernet frame is as expected.
+///
+/// Ensures the parsed packet's header fields and body are equal to those in the test packet.
+pub(crate) fn verify_ethernet_frame(
+    frame: &EthernetFrame<&[u8]>,
+    expected: TestPacket<EthernetFrameMetadata>,
+) {
+    assert_eq!(frame.src_mac(), expected.metadata.src_mac);
+    assert_eq!(frame.dst_mac(), expected.metadata.dst_mac);
+    assert_eq!(frame.ethertype(), expected.metadata.ethertype);
+    assert_eq!(frame.body(), &expected.bytes[expected.body_range]);
+}
+
+/// Verify that a parsed IPv4 packet is as expected.
+///
+/// Ensures the parsed packet's header fields and body are equal to those in the test packet.
+pub(crate) fn verify_ipv4_packet(
+    packet: &Ipv4Packet<&[u8]>,
+    expected: TestPacket<Ipv4PacketMetadata>,
+) {
+    use crate::wire::ipv4::Ipv4Header;
+
+    assert_eq!(packet.dscp(), expected.metadata.dscp);
+    assert_eq!(packet.ecn(), expected.metadata.ecn);
+    assert_eq!(packet.id(), expected.metadata.id);
+    assert_eq!(packet.df_flag(), expected.metadata.dont_fragment);
+    assert_eq!(packet.mf_flag(), expected.metadata.more_fragments);
+    assert_eq!(packet.fragment_offset(), expected.metadata.fragment_offset);
+    assert_eq!(packet.ttl(), expected.metadata.ttl);
+    assert_eq!(packet.proto(), expected.metadata.proto);
+    assert_eq!(packet.src_ip(), expected.metadata.src_ip);
+    assert_eq!(packet.dst_ip(), expected.metadata.dst_ip);
+    assert_eq!(packet.body(), &expected.bytes[expected.body_range]);
+}
+
+/// Verify that a parsed IPv6 packet is as expected.
+///
+/// Ensures the parsed packet's header fields and body are equal to those in the test packet.
+pub(crate) fn verify_ipv6_packet(
+    packet: &Ipv6Packet<&[u8]>,
+    expected: TestPacket<Ipv6PacketMetadata>,
+) {
+    assert_eq!(packet.ds(), expected.metadata.ds);
+    assert_eq!(packet.ecn(), expected.metadata.ecn);
+    assert_eq!(packet.flowlabel(), expected.metadata.flowlabel);
+    assert_eq!(packet.hop_limit(), expected.metadata.hop_limit);
+    assert_eq!(packet.src_ip(), expected.metadata.src_ip);
+    assert_eq!(packet.dst_ip(), expected.metadata.dst_ip);
+    assert_eq!(packet.body(), &expected.bytes[expected.body_range]);
+}
+
+/// Verify that a parsed UDP packet is as expected.
+///
+/// Ensures the parsed packet's header fields and body are equal to those in the test packet.
+pub(crate) fn verify_udp_packet(
+    packet: &UdpPacket<&[u8]>,
+    expected: TestPacket<UdpPacketMetadata>,
+) {
+    assert_eq!(packet.src_port().map(NonZeroU16::get).unwrap_or(0), expected.metadata.src_port);
+    assert_eq!(packet.dst_port().get(), expected.metadata.dst_port);
+    assert_eq!(packet.body(), &expected.bytes[expected.body_range]);
+}
+
+/// Verify that a parsed TCP segment is as expected.
+///
+/// Ensures the parsed packet's header fields and body are equal to those in the test packet.
+pub(crate) fn verify_tcp_segment(
+    segment: &TcpSegment<&[u8]>,
+    expected: TestPacket<TcpSegmentMetadata>,
+) {
+    assert_eq!(segment.src_port().get(), expected.metadata.src_port);
+    assert_eq!(segment.dst_port().get(), expected.metadata.dst_port);
+    assert_eq!(segment.seq_num(), expected.metadata.seq_num);
+    assert_eq!(segment.ack_num(), expected.metadata.ack_num);
+    assert_eq!(segment.rst(), expected.metadata.rst);
+    assert_eq!(segment.syn(), expected.metadata.syn);
+    assert_eq!(segment.fin(), expected.metadata.fin);
+    assert_eq!(segment.window_size(), expected.metadata.window_size);
+    assert_eq!(segment.iter_options().collect::<Vec<_>>().as_slice(), expected.metadata.options);
+    assert_eq!(segment.body(), &expected.bytes[expected.body_range]);
+}
+
 /// Parse an ethernet frame.
 ///
 /// `parse_ethernet_frame` parses an ethernet frame, returning the body along
@@ -187,6 +404,8 @@ pub(crate) fn parse_ethernet_frame(
 pub(crate) fn parse_ip_packet<I: Ip>(
     mut buf: &[u8],
 ) -> IpParseResult<I, (&[u8], I::Addr, I::Addr, IpProto)> {
+    use crate::ip::IpPacket;
+
     let packet = (&mut buf).parse::<<I as IpExtByteSlice<_>>::Packet>()?;
     let src_ip = packet.src_ip();
     let dst_ip = packet.dst_ip();
@@ -206,7 +425,7 @@ pub(crate) fn parse_ip_packet<I: Ip>(
 /// some important fields. Before returning, it invokes the callback `f` on the
 /// parsed packet.
 pub(crate) fn parse_icmp_packet<
-    I: Ip,
+    I: IcmpIpExt,
     C,
     M: for<'a> IcmpMessage<I, &'a [u8], Code = C>,
     F: for<'a> Fn(&IcmpPacket<I, &'a [u8], M>),
@@ -256,7 +475,7 @@ pub(crate) fn parse_ip_packet_in_ethernet_frame<I: Ip>(
 /// headers. Before returning, it invokes the callback `f` on the parsed packet.
 #[allow(clippy::type_complexity)]
 pub(crate) fn parse_icmp_packet_in_ip_packet_in_ethernet_frame<
-    I: Ip,
+    I: IcmpIpExt,
     C,
     M: for<'a> IcmpMessage<I, &'a [u8], Code = C>,
     F: for<'a> Fn(&IcmpPacket<I, &'a [u8], M>),
@@ -268,12 +487,10 @@ where
     for<'a> IcmpPacket<I, &'a [u8], M>:
         ParsablePacket<&'a [u8], IcmpParseArgs<I::Addr>, Error = ParseError>,
 {
-    use crate::wire::icmp::IcmpIpExt;
-
     let (mut body, src_mac, dst_mac, src_ip, dst_ip, proto) =
         parse_ip_packet_in_ethernet_frame::<I>(buf)?;
-    if proto != <I as IcmpIpExt<&[u8]>>::IP_PROTO {
-        debug!("unexpected IP protocol: {} (wanted {})", proto, <I as IcmpIpExt<&[u8]>>::IP_PROTO);
+    if proto != I::IP_PROTO {
+        debug!("unexpected IP protocol: {} (wanted {})", proto, I::IP_PROTO);
         return Err(ParseError::NotExpected.into());
     }
     let (message, code) = parse_icmp_packet(body, src_ip, dst_ip, f)?;
@@ -281,7 +498,7 @@ where
 }
 
 /// Get a DummyEventDispatcherConfig depending on the `IpAddress`
-/// `get_dummy_config` is specialied with.
+/// `get_dummy_config` is specialized with.
 #[specialize_ip_address]
 pub(crate) fn get_dummy_config<A: IpAddress>() -> DummyEventDispatcherConfig<A> {
     #[ipv4addr]
@@ -293,6 +510,26 @@ pub(crate) fn get_dummy_config<A: IpAddress>() -> DummyEventDispatcherConfig<A> 
     {
         DUMMY_CONFIG_V6
     }
+}
+
+/// Get the counter value for a `key`.
+pub(crate) fn get_counter_val(ctx: &mut Context<DummyEventDispatcher>, key: &str) -> usize {
+    *ctx.state.test_counters.get(key)
+}
+
+/// Get a IP address in the same subnet as [`DUMMY_CONFIG_V4`] (for IPv4 addresses) or
+/// [`DUMMY_CONFIG_V6`] (for IPv6 addresses).
+///
+/// `last` is the value to be put in the last octet of the IP address.
+#[specialize_ip_address]
+pub(crate) fn get_other_ip_address<A: IpAddress>(last: u8) -> A {
+    #[ipv4addr]
+    let ret = Ipv4Addr::new([192, 168, 0, last]);
+
+    #[ipv6addr]
+    let ret = Ipv6Addr::new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 168, 0, last]);
+
+    ret
 }
 
 /// A configuration for a simple network.
@@ -375,8 +612,8 @@ impl DummyEventDispatcherBuilder {
     pub(crate) fn from_config<A: IpAddress>(
         cfg: DummyEventDispatcherConfig<A>,
     ) -> DummyEventDispatcherBuilder {
-        assert!(cfg.subnet.contains(cfg.local_ip));
-        assert!(cfg.subnet.contains(cfg.remote_ip));
+        assert!(cfg.subnet.contains(&cfg.local_ip));
+        assert!(cfg.subnet.contains(&cfg.remote_ip));
 
         let mut builder = DummyEventDispatcherBuilder::default();
         builder.devices.push((cfg.local_mac, Some((cfg.local_ip.into(), cfg.subnet.into()))));
@@ -390,7 +627,7 @@ impl DummyEventDispatcherBuilder {
         // pre-cached.
         builder.ndp_table_entries.push((
             0,
-            cfg.remote_mac.to_ipv6_link_local(None),
+            cfg.remote_mac.to_ipv6_link_local().get(),
             cfg.remote_mac,
         ));
 
@@ -443,13 +680,18 @@ impl DummyEventDispatcherBuilder {
         self.device_routes.push((subnet.into(), device));
     }
 
-    /// Build a `Context` from the present configuration with a default state
-    /// and dispatcher.
-    ///
-    /// `b.build()` is equivalent to `b.build_with(StackStateBuilder::default(),
-    /// D::default())`.
+    /// Build a `Context` from the present configuration with a default dispatcher,
+    /// and stack state set to disable NDP's Duplicate Address Detection by default.
     pub(crate) fn build<D: EventDispatcher + Default>(self) -> Context<D> {
-        self.build_with(StackStateBuilder::default(), D::default())
+        let mut stack_builder = StackStateBuilder::default();
+
+        // Most tests do not need NDP's DAD or router solicitation so disable it here.
+        let mut ndp_configs = crate::device::ndp::NdpConfigurations::default();
+        ndp_configs.set_dup_addr_detect_transmits(None);
+        ndp_configs.set_max_router_solicitations(None);
+        stack_builder.device_builder().set_default_ndp_configs(ndp_configs);
+
+        self.build_with(stack_builder, D::default())
     }
 
     /// Build a `Context` from the present configuration with a caller-provided
@@ -471,8 +713,9 @@ impl DummyEventDispatcherBuilder {
         let mut idx_to_device_id =
             HashMap::<_, _, std::collections::hash_map::RandomState>::default();
         for (idx, (mac, ip_subnet)) in devices.into_iter().enumerate() {
-            let id = ctx.state_mut().add_ethernet_device(mac, IPV6_MIN_MTU);
+            let id = ctx.state.add_ethernet_device(mac, IPV6_MIN_MTU);
             idx_to_device_id.insert(idx, id);
+            crate::device::initialize_device(&mut ctx, id);
             match ip_subnet {
                 Some((IpAddr::V4(ip), SubnetEither::V4(subnet))) => {
                     let addr_sub = AddrSubnet::new(ip, subnet.prefix()).unwrap();
@@ -515,6 +758,21 @@ impl DummyEventDispatcherBuilder {
 
         ctx
     }
+}
+
+/// Add either an NDP entry (if IPv6) or ARP entry (if IPv4) to a `DummyEventDispatcherBuilder`.
+#[specialize_ip_address]
+pub(crate) fn add_arp_or_ndp_table_entry<A: IpAddress>(
+    builder: &mut DummyEventDispatcherBuilder,
+    device: usize,
+    ip: A,
+    mac: Mac,
+) {
+    #[ipv4addr]
+    builder.add_arp_table_entry(device, ip, mac);
+
+    #[ipv6addr]
+    builder.add_ndp_table_entry(device, ip, mac);
 }
 
 /// A dummy implementation of `Instant` for use in testing.
@@ -607,12 +865,24 @@ type PendingTimer = InstantAndData<TimerId>;
 /// A `DummyEventDispatcher` implements the `EventDispatcher` interface for
 /// testing purposes. It provides facilities to inspect the history of what
 /// events have been emitted to the system.
-#[derive(Default)]
 pub(crate) struct DummyEventDispatcher {
     frames_sent: Vec<(DeviceId, Vec<u8>)>,
     timer_events: BinaryHeap<PendingTimer>,
     current_time: DummyInstant,
-    icmp_replies: HashMap<u64, Vec<(u16, Vec<u8>)>>,
+    rng: FakeCryptoRng<XorShiftRng>,
+    icmp_replies: HashMap<IcmpConnId, Vec<(u16, Vec<u8>)>>,
+}
+
+impl Default for DummyEventDispatcher {
+    fn default() -> DummyEventDispatcher {
+        DummyEventDispatcher {
+            frames_sent: Default::default(),
+            timer_events: Default::default(),
+            current_time: Default::default(),
+            rng: FakeCryptoRng(new_rng(0)),
+            icmp_replies: Default::default(),
+        }
+    }
 }
 
 impl DummyEventDispatcher {
@@ -622,6 +892,9 @@ impl DummyEventDispatcher {
 
     /// Get an ordered list of all scheduled timer events
     pub(crate) fn timer_events(&self) -> impl Iterator<Item = (&'_ DummyInstant, &'_ TimerId)> {
+        // TODO(joshlf): `iter` doesn't actually guarantee an ordering, so this
+        // is a bug. We plan on removing this soon once we migrate to using the
+        // utilities in the `context` module, so this is left as-is.
         self.timer_events.iter().map(|t| (&t.0, &t.1))
     }
 
@@ -638,37 +911,38 @@ impl DummyEventDispatcher {
         F: Fn(DeviceId) -> DeviceId,
     {
         for (device_id, mut data) in self.frames_sent.drain(..) {
-            crate::receive_frame(other, mapper(device_id), &mut data);
+            crate::receive_frame(other, mapper(device_id), Buf::new(data.to_vec(), ..));
         }
     }
 
     /// Takes all the received icmp replies for a given `conn`.
-    pub(crate) fn take_icmp_replies(&mut self, conn: u64) -> Vec<(u16, Vec<u8>)> {
+    pub(crate) fn take_icmp_replies(&mut self, conn: IcmpConnId) -> Vec<(u16, Vec<u8>)> {
         self.icmp_replies.remove(&conn).unwrap_or_else(Vec::default)
     }
 }
 
-impl UdpEventDispatcher for DummyEventDispatcher {
-    type UdpConn = ();
-    type UdpListener = ();
-}
+impl UdpEventDispatcher for DummyEventDispatcher {}
 
 impl TransportLayerEventDispatcher for DummyEventDispatcher {}
 
-impl IcmpEventDispatcher for DummyEventDispatcher {
-    type IcmpConn = u64;
-
-    fn receive_icmp_echo_reply(&mut self, conn: &Self::IcmpConn, seq_num: u16, data: &[u8]) {
-        let replies = self.icmp_replies.entry(*conn).or_insert_with(Vec::default);
-        replies.push((seq_num, data.to_owned()))
+impl<B: BufferMut> IcmpEventDispatcher<B> for DummyEventDispatcher {
+    fn receive_icmp_echo_reply(&mut self, conn: IcmpConnId, seq_num: u16, data: B) {
+        let replies = self.icmp_replies.entry(conn).or_insert_with(Vec::default);
+        replies.push((seq_num, data.as_ref().to_owned()))
     }
 }
 
-impl IpLayerEventDispatcher for DummyEventDispatcher {}
+impl<B: BufferMut> IpLayerEventDispatcher<B> for DummyEventDispatcher {}
 
-impl DeviceLayerEventDispatcher for DummyEventDispatcher {
-    fn send_frame(&mut self, device: DeviceId, frame: &[u8]) {
-        self.frames_sent.push((device, frame.to_vec()));
+impl<B: BufferMut> DeviceLayerEventDispatcher<B> for DummyEventDispatcher {
+    fn send_frame<S: Serializer<Buffer = B>>(
+        &mut self,
+        device: DeviceId,
+        frame: S,
+    ) -> Result<(), S> {
+        let frame = frame.serialize_vec_outer().map_err(|(_, ser)| ser)?;
+        self.frames_sent.push((device, frame.as_ref().to_vec()));
+        Ok(())
     }
 }
 
@@ -711,6 +985,17 @@ impl EventDispatcher for DummyEventDispatcher {
             .collect::<Vec<_>>()
             .into();
         r
+    }
+
+    fn cancel_timeouts_with<F: FnMut(&TimerId) -> bool>(&mut self, mut f: F) {
+        self.timer_events =
+            self.timer_events.drain().filter(|t| !f(&t.1)).collect::<Vec<_>>().into();
+    }
+
+    type Rng = FakeCryptoRng<XorShiftRng>;
+
+    fn rng(&mut self) -> &mut FakeCryptoRng<XorShiftRng> {
+        &mut self.rng
     }
 }
 
@@ -897,7 +1182,7 @@ where
             crate::receive_frame(
                 self.context(frame.dst_context),
                 frame.dst_device,
-                &mut frame.data,
+                Buf::new(&mut frame.data, ..),
             );
             ret.frames_sent += 1;
         }
@@ -1079,25 +1364,27 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use net_types::ip::{Ipv4, Ipv4Addr, Ipv6, Ipv6Addr};
+    use packet::{Buf, Serializer};
+    use std::time::Duration;
 
-    use crate::ip::{self, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr};
+    use super::*;
+    use crate::ip;
     use crate::wire::icmp::{
         IcmpDestUnreachable, IcmpEchoReply, IcmpEchoRequest, IcmpPacketBuilder, IcmpUnusedCode,
         Icmpv4DestUnreachableCode,
     };
     use crate::TimerIdInner;
-    use packet::{Buf, BufferSerializer, Serializer};
-    use std::time::Duration;
 
     #[test]
     fn test_parse_ethernet_frame() {
-        use crate::wire::testdata::ARP_REQUEST;
-        let (body, src_mac, dst_mac, ethertype) = parse_ethernet_frame(ARP_REQUEST).unwrap();
-        assert_eq!(body, &ARP_REQUEST[14..]);
-        assert_eq!(src_mac, Mac::new([20, 171, 197, 116, 32, 52]));
-        assert_eq!(dst_mac, Mac::new([255, 255, 255, 255, 255, 255]));
-        assert_eq!(ethertype, Some(EtherType::Arp));
+        use crate::wire::testdata::arp_request::*;
+        let (body, src_mac, dst_mac, ethertype) =
+            parse_ethernet_frame(ETHERNET_FRAME.bytes).unwrap();
+        assert_eq!(body, &ETHERNET_FRAME.bytes[14..]);
+        assert_eq!(src_mac, ETHERNET_FRAME.metadata.src_mac);
+        assert_eq!(dst_mac, ETHERNET_FRAME.metadata.dst_mac);
+        assert_eq!(ethertype, ETHERNET_FRAME.metadata.ethertype);
     }
 
     #[test]
@@ -1120,15 +1407,15 @@ mod tests {
 
     #[test]
     fn test_parse_ip_packet_in_ethernet_frame() {
-        use crate::wire::testdata::tls_client_hello::*;
+        use crate::wire::testdata::tls_client_hello_v4::*;
         let (body, src_mac, dst_mac, src_ip, dst_ip, proto) =
-            parse_ip_packet_in_ethernet_frame::<Ipv4>(ETHERNET_FRAME_BYTES).unwrap();
-        assert_eq!(body, &(ETHERNET_FRAME_BYTES[ETHERNET_BODY_RANGE])[IP_BODY_RANGE]);
-        assert_eq!(src_mac, ETHERNET_SRC_MAC);
-        assert_eq!(dst_mac, ETHERNET_DST_MAC);
-        assert_eq!(src_ip, IP_SRC_IP);
-        assert_eq!(dst_ip, IP_DST_IP);
-        assert_eq!(proto, IpProto::Tcp);
+            parse_ip_packet_in_ethernet_frame::<Ipv4>(ETHERNET_FRAME.bytes).unwrap();
+        assert_eq!(body, &IPV4_PACKET.bytes[IPV4_PACKET.body_range]);
+        assert_eq!(src_mac, ETHERNET_FRAME.metadata.src_mac);
+        assert_eq!(dst_mac, ETHERNET_FRAME.metadata.dst_mac);
+        assert_eq!(src_ip, IPV4_PACKET.metadata.src_ip);
+        assert_eq!(dst_ip, IPV4_PACKET.metadata.dst_ip);
+        assert_eq!(proto, IPV4_PACKET.metadata.proto);
     }
 
     #[test]
@@ -1175,7 +1462,7 @@ mod tests {
             |_| {
                 let req = IcmpEchoRequest::new(0, 0);
                 let req_body = &[1, 2, 3, 4];
-                BufferSerializer::new_vec(Buf::new(req_body.to_vec(), ..)).encapsulate(
+                Buf::new(req_body.to_vec(), ..).encapsulate(
                     IcmpPacketBuilder::<Ipv4, &[u8], _>::new(
                         DUMMY_CONFIG_V4.local_ip,
                         DUMMY_CONFIG_V4.remote_ip,
@@ -1321,7 +1608,7 @@ mod tests {
             |_| {
                 let req = IcmpEchoRequest::new(0, 0);
                 let req_body = &[1, 2, 3, 4];
-                BufferSerializer::new_vec(Buf::new(req_body.to_vec(), ..)).encapsulate(
+                Buf::new(req_body.to_vec(), ..).encapsulate(
                     IcmpPacketBuilder::<Ipv4, &[u8], _>::new(
                         DUMMY_CONFIG_V4.local_ip,
                         DUMMY_CONFIG_V4.remote_ip,
@@ -1360,14 +1647,14 @@ mod tests {
             let alice = net.context("alice");
             assert_eq!(*alice.state.test_counters.get("timer::nop"), alice_nop);
             assert_eq!(
-                *alice.state.test_counters.get("receive_icmp_packet::echo_reply"),
+                *alice.state.test_counters.get("receive_icmpv4_packet::echo_reply"),
                 alice_echo_response
             );
 
             let bob = net.context("bob");
             assert_eq!(*bob.state.test_counters.get("timer::nop"), bob_nop);
             assert_eq!(
-                *bob.state.test_counters.get("receive_icmp_packet::echo_request"),
+                *bob.state.test_counters.get("receive_icmpv4_packet::echo_request"),
                 bob_echo_request
             );
         }

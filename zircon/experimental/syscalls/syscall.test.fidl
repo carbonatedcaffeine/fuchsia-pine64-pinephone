@@ -1,0 +1,39 @@
+// Copyright 2019 The Fuchsia Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+// !!! THIS FILE IS NOT YET USED !!!
+// See //zircon/system/public/zircon/syscalls.banjo.
+// !!! THIS FILE IS NOT YET USED !!!
+
+library zz;
+
+[Transport="Syscall"]
+protocol Syscall {
+    Test_0() -> (status status);
+
+    [TestCategory1]
+    Test_1(int32 a) -> (status status);
+
+    [TestCategory1]
+    Test_2(int32 a, int32 b) -> (status status);
+
+    [TestCategory2]
+    Test_3(int32 a, int32 b, int32 c) -> (status status);
+
+    Test_4(int32 a, int32 b, int32 c, int32 d) -> (status status);
+
+    Test_5(int32 a, int32 b, int32 c, int32 d, int32 e) -> (status status);
+
+    Test_6(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) -> (status status);
+
+    Test_7(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f, int32 g) -> (status status);
+
+    Test_8(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f, int32 g, int32 h) ->
+        (status status);
+
+    TestWrapper(int32 a, int32 b, int32 c) -> (status status);
+
+    [Out1="handle<event>:acquire"]
+    TestHandleCreate(status return_value) -> (status status, handle<event> out);
+};

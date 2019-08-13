@@ -13,8 +13,6 @@ struct PdevDeviceInfo {
     uint32 did;
     uint32 mmio_count;
     uint32 irq_count;
-    uint32 gpio_count;
-    uint32 clk_count;
     uint32 bti_count;
     uint32 smc_count;
     uint32 metadata_count;
@@ -27,7 +25,8 @@ struct PdevBoardInfo {
     uint32 vid;
     /// Product ID for the board.
     uint32 pid;
-    /// Board name from the boot image platform ID record.
+    /// Board name from the boot image platform ID record,
+    /// (or from the BIOS on x86 platforms).
     string:32 board_name;
     /// Board specific revision number.
     uint32 board_revision;
@@ -49,5 +48,4 @@ protocol PDev {
     GetSmc(uint32 index) -> (zx.status s, handle<resource> smc);
     GetDeviceInfo() -> (zx.status s, PdevDeviceInfo info);
     GetBoardInfo() -> (zx.status s, PdevBoardInfo info);
-    GetProtocol(uint32 proto_id, uint32 index) -> (zx.status s, vector<voidptr> out_protocol);
 };

@@ -89,8 +89,8 @@ receiving Testability+1.
     that contract is worth testing. This can also apply to other forms of
     instrumentation, such as Tracing. This does not apply to instrumentation
     when it is used as a contract, for instance Inspect usage can be tested, and
-    should be if you rely on it working as intended (for instance in fx
-    debug-report or Feedback).
+    should be if you rely on it working as intended (for instance in fx iquery
+    or feedback reports).
 *   **Code that we don’t own** (the source of truth is not in Fuchsia tree).
     Changes that pick up an update to source code that’s copied from elsewhere
     don’t bear testability requirements.
@@ -126,3 +126,8 @@ change that.
     term, such code should be refactored to use Rust or modern C++ idioms to
     reduce the chances of leaks, and automation should exist that is capable of
     automatically detecting leaks.
+*   **Gigaboot** is a UEFI bootloader in //zircon/bootloader that predates
+    testabiltiy policy. At present there is not an infrastructure available
+    to write integration tests for the UEFI code. Introducing that
+    infrastructure is tracked in ZX-4704. A testability exception is granted
+    until ZX-4704 is addressed.

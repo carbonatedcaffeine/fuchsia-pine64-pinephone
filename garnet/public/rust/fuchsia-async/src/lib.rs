@@ -4,7 +4,7 @@
 
 //! A futures-rs executor design specifically for Fuchsia OS.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 #![deny(missing_docs)]
 
 // Set the system allocator for anything using this crate
@@ -20,12 +20,13 @@ pub use self::on_signals::OnSignals;
 mod rwhandle;
 pub use self::rwhandle::RWHandle;
 mod socket;
-pub use self::socket::{Socket, SocketControl};
+pub use self::socket::Socket;
 mod timer;
 pub use self::timer::{Interval, OnTimeout, TimeoutExt, Timer};
 mod executor;
 pub use self::executor::{
     spawn, spawn_local, DurationExt, EHandle, Executor, PacketReceiver, ReceiverRegistration, Time,
+    WaitState,
 };
 mod fifo;
 pub use self::fifo::{Fifo, FifoEntry, FifoReadable, FifoWritable, ReadEntry, WriteEntry};

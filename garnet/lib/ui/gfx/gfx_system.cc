@@ -4,17 +4,19 @@
 
 #include "garnet/lib/ui/gfx/gfx_system.h"
 
+#include <lib/async/cpp/task.h>
+#include <lib/async/default.h>
 #include <lib/sys/cpp/component_context.h>
 #include <lib/syslog/cpp/logger.h>
 #include <lib/vfs/cpp/pseudo_file.h>
-#include <trace/event.h>
 #include <zircon/assert.h>
 
-#include "garnet/lib/ui/gfx/engine/default_frame_scheduler.h"
-#include "garnet/lib/ui/gfx/engine/frame_predictor.h"
+#include <trace/event.h>
+
 #include "garnet/lib/ui/gfx/engine/session_handler.h"
 #include "garnet/lib/ui/gfx/resources/dump_visitor.h"
 #include "garnet/lib/ui/gfx/screenshotter.h"
+#include "garnet/lib/ui/gfx/util/collection_utils.h"
 #include "garnet/lib/ui/scenic/scenic.h"
 #include "src/ui/lib/escher/escher_process_init.h"
 #include "src/ui/lib/escher/fs/hack_filesystem.h"
@@ -26,64 +28,45 @@ namespace gfx {
 static const uint32_t kDumpScenesBufferCapacity = 1024 * 64;
 const char* GfxSystem::kName = "GfxSystem";
 
-GfxSystem::GfxSystem(SystemContext context, std::unique_ptr<DisplayManager> display_manager)
-    : TempSystemDelegate(std::move(context), false),
-      display_manager_(std::move(display_manager)),
+GfxSystem::GfxSystem(SystemContext context, Display* display, Engine* engine,
+                     escher::EscherWeakPtr escher)
+    : System(std::move(context)),
+      escher_(std::move(escher)),
+      display_(display),
+      engine_(engine),
+      session_manager_(this->context()->inspect_node()->CreateChild("SessionManager")),
       weak_factory_(this) {
-  // TODO(SCN-1111): what are the intended implications of there being a test
-  // display?  In this case, could we make DisplayManager signal that the
-  // display is ready, even though it it is a test display?
-  if (display_manager_->default_display() &&
-      display_manager_->default_display()->is_test_display()) {
-    async::PostTask(async_get_default_dispatcher(), DelayedInitClosure());
-    return;
-  }
+  FXL_DCHECK(display_);
+  FXL_DCHECK(engine_);
 
-  display_manager_->WaitForDefaultDisplayController(DelayedInitClosure());
-}
-
-GfxSystem::~GfxSystem() {
-  if (escher_) {
-    // It's possible that |escher_| never got created (and therefore
-    // escher::GlslangInitializeProcess() was never called).
-    escher::GlslangFinalizeProcess();
-  }
-  if (vulkan_instance_) {
-    vulkan_instance_->proc_addrs().DestroyDebugReportCallbackEXT(vulkan_instance_->vk_instance(),
-                                                                 debug_report_callback_, nullptr);
-  }
+  // Create a pseudo-file that dumps alls the Scenic scenes.
+  this->context()->app_context()->outgoing()->debug_dir()->AddEntry(
+      "dump-scenes", std::make_unique<vfs::PseudoFile>(
+                         kDumpScenesBufferCapacity,
+                         [this](std::vector<uint8_t>* output, size_t max_file_size) {
+                           std::ostringstream ostream;
+                           std::unordered_set<GlobalId, GlobalId::Hash> visited_resources;
+                           engine_->DumpScenes(ostream, &visited_resources);
+                           DumpSessionMapResources(ostream, &visited_resources);
+                           auto outstr = ostream.str();
+                           ZX_DEBUG_ASSERT(outstr.length() <= max_file_size);
+                           output->resize(outstr.length());
+                           std::copy(outstr.begin(), outstr.end(), output->begin());
+                           return ZX_OK;
+                         },
+                         nullptr));
 }
 
 CommandDispatcherUniquePtr GfxSystem::CreateCommandDispatcher(CommandDispatcherContext context) {
-  return session_manager_->CreateCommandDispatcher(std::move(context), engine_->session_context());
+  return session_manager_.CreateCommandDispatcher(std::move(context), engine_->session_context());
 }
 
-std::unique_ptr<SessionManager> GfxSystem::InitializeSessionManager() {
-  return std::make_unique<SessionManager>(context()->inspect_node()->CreateChild("SessionManager"));
-}
-
-std::unique_ptr<Engine> GfxSystem::InitializeEngine() {
-  return std::make_unique<Engine>(context()->app_context(), frame_scheduler_,
-                                  display_manager_.get(), escher_->GetWeakPtr(),
-                                  context()->inspect_node()->CreateChild("Engine"));
-}
-
-std::unique_ptr<escher::Escher> GfxSystem::InitializeEscher() {
+escher::EscherUniquePtr GfxSystem::CreateEscher(sys::ComponentContext* app_context) {
   // TODO(SCN-1109): VulkanIsSupported() should not be used in production.
   // It tries to create a VkInstance and VkDevice, and immediately deletes them
   // regardless of success/failure.
   if (!escher::VulkanIsSupported()) {
     return nullptr;
-  }
-
-  if (!display_manager_->is_initialized()) {
-    FXL_LOG(ERROR) << "No sysmem allocator available";
-    return nullptr;
-  }
-
-  if (vulkan_instance_) {
-    FXL_LOG(WARNING) << "GfxSystem::InitializeEscher called twice, previous "
-                        "Vulkan instance will be deleted.";
   }
 
   // Initialize Vulkan.
@@ -103,8 +86,7 @@ std::unique_ptr<escher::Escher> GfxSystem::InitializeEscher() {
 #if !defined(NDEBUG)
   instance_params.layer_names.insert("VK_LAYER_LUNARG_standard_validation");
 #endif
-  FXL_DCHECK(!vulkan_instance_);
-  vulkan_instance_ = escher::VulkanInstance::New(std::move(instance_params));
+  auto vulkan_instance = escher::VulkanInstance::New(std::move(instance_params));
 
   // Tell Escher not to filter out queues that don't support presentation.
   // The display manager only supports a single connection, so none of the
@@ -125,30 +107,15 @@ std::unique_ptr<escher::Escher> GfxSystem::InitializeEscher() {
        {
            VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
        },
-       surface_,
+       vk::SurfaceKHR(),
        escher::VulkanDeviceQueues::Params::kDisableQueueFilteringForPresent});
 
-  FXL_DCHECK(!vulkan_device_queues_);
-  vulkan_device_queues_ = escher::VulkanDeviceQueues::New(vulkan_instance_, device_queues_params);
-
-  {
-    VkDebugReportCallbackCreateInfoEXT dbgCreateInfo;
-    dbgCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
-    dbgCreateInfo.pNext = NULL;
-    dbgCreateInfo.pfnCallback = RedirectDebugReport;
-    dbgCreateInfo.pUserData = this;
-    dbgCreateInfo.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT |
-                          VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
-
-    // We use the C API here due to dynamically loading the extension function.
-    VkResult result = vulkan_instance_->proc_addrs().CreateDebugReportCallbackEXT(
-        vulkan_instance_->vk_instance(), &dbgCreateInfo, nullptr, &debug_report_callback_);
-    FXL_CHECK(result == VK_SUCCESS);
-  }
+  auto vulkan_device_queues =
+      escher::VulkanDeviceQueues::New(vulkan_instance, device_queues_params);
 
   // Provide a PseudoDir where the gfx system can register debugging services.
   auto debug_dir = std::make_shared<vfs::PseudoDir>();
-  context()->app_context()->outgoing()->debug_dir()->AddSharedEntry("gfx", debug_dir);
+  app_context->outgoing()->debug_dir()->AddSharedEntry("gfx", debug_dir);
   auto shader_fs = escher::HackFilesystem::New(debug_dir);
   {
     bool success = shader_fs->InitializeWithRealFiles(
@@ -165,86 +132,36 @@ std::unique_ptr<escher::Escher> GfxSystem::InitializeEscher() {
     FXL_DCHECK(success) << "Failed to init shader files.";
   }
 
+  VkDebugReportCallbackEXT debug_report_callback;
+  {
+    VkDebugReportCallbackCreateInfoEXT dbgCreateInfo;
+    dbgCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
+    dbgCreateInfo.pNext = NULL;
+    dbgCreateInfo.pfnCallback = HandleDebugReport;
+    dbgCreateInfo.pUserData = NULL;
+    dbgCreateInfo.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT |
+                          VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
+
+    // We use the C API here due to dynamically loading the extension function.
+    VkResult result = vulkan_instance->proc_addrs().CreateDebugReportCallbackEXT(
+        vulkan_instance->vk_instance(), &dbgCreateInfo, nullptr, &debug_report_callback);
+    FXL_CHECK(result == VK_SUCCESS);
+  }
+
   // Initialize Escher.
   escher::GlslangInitializeProcess();
-  return std::make_unique<escher::Escher>(vulkan_device_queues_, std::move(shader_fs));
+  return escher::EscherUniquePtr(new escher::Escher(vulkan_device_queues, std::move(shader_fs)),
+                                 // Custom deleter.
+                                 // The vulkan instance is a stack variable, but it is a
+                                 // fxl::RefPtr, so we can store by value.
+                                 [=](escher::Escher* escher) {
+                                   escher::GlslangFinalizeProcess();
+                                   vulkan_instance->proc_addrs().DestroyDebugReportCallbackEXT(
+                                       vulkan_instance->vk_instance(), debug_report_callback,
+                                       nullptr);
+                                   delete escher;
+                                 });
 }
-
-fit::closure GfxSystem::DelayedInitClosure() {
-  // This must *not* be executed  directly in the constructor, due to the use of
-  // virtual methods, such as InitializeEscher() inside Initialize().
-  return [this] {
-    // Don't initialize Vulkan and the system until display is ready.
-    Initialize();
-    initialized_ = true;
-
-    for (auto& closure : run_after_initialized_) {
-      closure();
-    }
-    run_after_initialized_.clear();
-  };
-}
-
-void GfxSystem::Initialize() {
-  Display* display = display_manager_->default_display();
-  if (!display) {
-    FXL_LOG(ERROR) << "No default display, Graphics system exiting";
-    context()->Quit();
-    return;
-  }
-
-  FXL_CHECK(!frame_scheduler_);
-  frame_scheduler_ = std::make_shared<DefaultFrameScheduler>(
-      display_manager_->default_display(),
-      std::make_unique<FramePredictor>(DefaultFrameScheduler::kInitialRenderDuration,
-                                       DefaultFrameScheduler::kInitialUpdateDuration),
-      this->context()->inspect_node()->CreateChild("FrameScheduler"));
-  frame_scheduler_->AddSessionUpdater(weak_factory_.GetWeakPtr());
-
-  // This is virtual, allowing tests to inject a SessionManager.
-  FXL_DCHECK(!session_manager_);
-  session_manager_ = InitializeSessionManager();
-
-  // This is virtual, allowing tests to avoid instantiating an Escher.
-  FXL_DCHECK(!escher_);
-  escher_ = InitializeEscher();
-  if (!escher_ || !escher_->device()) {
-    if (display->is_test_display()) {
-      FXL_LOG(INFO) << "No Vulkan found, but using a test-only \"display\".";
-    } else {
-      FXL_LOG(ERROR) << "No Vulkan on device, Graphics system exiting.";
-      context()->Quit();
-      return;
-    }
-  }
-
-  // Initialize the Scenic engine. All subclasses must return a valid engine.
-  FXL_DCHECK(!engine_);
-  engine_ = InitializeEngine();
-  FXL_DCHECK(engine_);
-
-  FXL_DCHECK(frame_scheduler_);
-  frame_scheduler_->SetFrameRenderer(engine_->GetWeakPtr());
-
-  // Create a pseudo-file that dumps alls the Scenic scenes.
-  context()->app_context()->outgoing()->debug_dir()->AddEntry(
-      "dump-scenes", std::make_unique<vfs::PseudoFile>(
-                         kDumpScenesBufferCapacity,
-                         [this](std::vector<uint8_t>* output, size_t max_file_size) {
-                           std::ostringstream ostream;
-                           std::unordered_set<GlobalId, GlobalId::Hash> visited_resources;
-                           engine_->DumpScenes(ostream, &visited_resources);
-                           DumpSessionMapResources(ostream, &visited_resources);
-                           auto outstr = ostream.str();
-                           ZX_DEBUG_ASSERT(outstr.length() <= max_file_size);
-                           output->resize(outstr.length());
-                           std::copy(outstr.begin(), outstr.end(), output->begin());
-                           return ZX_OK;
-                         },
-                         nullptr));
-
-  SetToInitialized();
-};
 
 void GfxSystem::DumpSessionMapResources(
     std::ostream& output, std::unordered_set<GlobalId, GlobalId::Hash>* visited_resources) {
@@ -257,7 +174,7 @@ void GfxSystem::DumpSessionMapResources(
   output << "============================================================\n";
   output << "============================================================\n\n";
   output << "Detached Nodes (unreachable by any Compositor): \n";
-  for (auto& [session_id, session_handler] : session_manager_->sessions()) {
+  for (auto& [session_id, session_handler] : session_manager_.sessions()) {
     const std::unordered_map<ResourceId, ResourcePtr>& resources =
         session_handler->session()->resources()->map();
     for (auto& [resource_id, resource_ptr] : resources) {
@@ -294,7 +211,7 @@ void GfxSystem::DumpSessionMapResources(
   output << "============================================================\n";
   output << "============================================================\n\n";
   output << "Other Detached Resources (unreachable by any Compositor): \n";
-  for (auto& [session_id, session_handler] : session_manager_->sessions()) {
+  for (auto& [session_id, session_handler] : session_manager_.sessions()) {
     const std::unordered_map<ResourceId, ResourcePtr>& resources =
         session_handler->session()->resources()->map();
     for (auto& [resource_id, resource_ptr] : resources) {
@@ -311,75 +228,37 @@ void GfxSystem::DumpSessionMapResources(
   }
 }
 
-void GfxSystem::GetDisplayInfoImmediately(
-    fuchsia::ui::scenic::Scenic::GetDisplayInfoCallback callback) {
-  FXL_DCHECK(initialized_);
-  Display* display = display_manager_->default_display();
-  FXL_CHECK(display) << "There must be a default display.";
-
+void GfxSystem::GetDisplayInfo(fuchsia::ui::scenic::Scenic::GetDisplayInfoCallback callback) {
   auto info = ::fuchsia::ui::gfx::DisplayInfo();
-  info.width_in_px = display->width_in_px();
-  info.height_in_px = display->height_in_px();
+  info.width_in_px = display_->width_in_px();
+  info.height_in_px = display_->height_in_px();
 
   callback(std::move(info));
-}
-
-void GfxSystem::GetDisplayInfo(fuchsia::ui::scenic::Scenic::GetDisplayInfoCallback callback) {
-  if (initialized_) {
-    GetDisplayInfoImmediately(std::move(callback));
-  } else {
-    run_after_initialized_.push_back([this, callback = std::move(callback)]() mutable {
-      GetDisplayInfoImmediately(std::move(callback));
-    });
-  }
 };
 
 void GfxSystem::TakeScreenshot(fuchsia::ui::scenic::Scenic::TakeScreenshotCallback callback) {
-  if (initialized_) {
-    Screenshotter::TakeScreenshot(engine_.get(), std::move(callback));
-  } else {
-    run_after_initialized_.push_back([this, callback = std::move(callback)]() mutable {
-      Screenshotter::TakeScreenshot(engine_.get(), std::move(callback));
-    });
-  }
+  Screenshotter::TakeScreenshot(engine_, std::move(callback));
 }
 
-void GfxSystem::GetDisplayOwnershipEventImmediately(
+void GfxSystem::GetDisplayOwnershipEvent(
     fuchsia::ui::scenic::Scenic::GetDisplayOwnershipEventCallback callback) {
-  FXL_DCHECK(initialized_);
-  Display* display = display_manager_->default_display();
-
-  // TODO(SCN-1109):VulkanIsSupported() should not be called by production code.
-  if (escher::VulkanIsSupported()) {
-    FXL_CHECK(display) << "There must be a default display.";
-  }
-
+  // These constants are defined as raw hex in the FIDL file, so we confirm here that they are the
+  // same values as the expected constants in the ZX headers.
   static_assert(fuchsia::ui::scenic::displayNotOwnedSignal == ZX_USER_SIGNAL_0, "Bad constant");
   static_assert(fuchsia::ui::scenic::displayOwnedSignal == ZX_USER_SIGNAL_1, "Bad constant");
 
   zx::event dup;
-  if (display->ownership_event().duplicate(ZX_RIGHTS_BASIC, &dup) != ZX_OK) {
+  if (display_->ownership_event().duplicate(ZX_RIGHTS_BASIC, &dup) != ZX_OK) {
     FXL_LOG(ERROR) << "## Vulkan display event dup error";
   } else {
     callback(std::move(dup));
   }
 }
 
-void GfxSystem::GetDisplayOwnershipEvent(
-    fuchsia::ui::scenic::Scenic::GetDisplayOwnershipEventCallback callback) {
-  if (initialized_) {
-    GetDisplayOwnershipEventImmediately(std::move(callback));
-  } else {
-    run_after_initialized_.push_back([this, callback = std::move(callback)]() mutable {
-      GetDisplayOwnershipEventImmediately(std::move(callback));
-    });
-  }
-}
-
 // Applies scheduled updates to a session. If the update fails, the session is
 // killed. Returns true if a new render is needed, false otherwise.
 SessionUpdater::UpdateResults GfxSystem::UpdateSessions(
-    std::unordered_set<SessionId> sessions_to_update, zx_time_t presentation_time,
+    std::unordered_set<SessionId> sessions_to_update, zx::time presentation_time,
     uint64_t trace_id) {
   SessionUpdater::UpdateResults update_results;
 
@@ -390,8 +269,8 @@ SessionUpdater::UpdateResults GfxSystem::UpdateSessions(
 
   for (auto session_id : sessions_to_update) {
     TRACE_DURATION("gfx", "GfxSystem::UpdateSessions", "session_id", session_id,
-                   "target_presentation_time", presentation_time);
-    auto session_handler = session_manager_->FindSessionHandler(session_id);
+                   "target_presentation_time", presentation_time.get());
+    auto session_handler = session_manager_.FindSessionHandler(session_id);
     if (!session_handler) {
       // This means the session that requested the update died after the
       // request. Requiring the scene to be re-rendered to reflect the session's
@@ -426,10 +305,9 @@ SessionUpdater::UpdateResults GfxSystem::UpdateSessions(
         // callbacks.
       }
       //  Collect the callbacks to be passed back in the |UpdateResults|.
-      SessionUpdater::MoveCallbacksFromTo(&apply_results.callbacks,
-                                          &update_results.present_callbacks);
-      SessionUpdater::MoveCallbacksFromTo(&apply_results.image_pipe_callbacks,
-                                          &update_results.present_callbacks);
+      MoveAllItemsFromQueueToQueue(&apply_results.callbacks, &update_results.present_callbacks);
+      MoveAllItemsFromQueueToQueue(&apply_results.image_pipe_callbacks,
+                                   &update_results.present_callbacks);
     }
 
     if (apply_results.needs_render) {
@@ -442,7 +320,7 @@ SessionUpdater::UpdateResults GfxSystem::UpdateSessions(
   return update_results;
 }
 
-void GfxSystem::PrepareFrame(zx_time_t presentation_time, uint64_t trace_id) {
+void GfxSystem::PrepareFrame(zx::time presentation_time, uint64_t trace_id) {
   while (processed_needs_render_count_ < needs_render_count_) {
     TRACE_FLOW_END("gfx", "needs_render", processed_needs_render_count_);
     ++processed_needs_render_count_;
@@ -457,7 +335,8 @@ void GfxSystem::PrepareFrame(zx_time_t presentation_time, uint64_t trace_id) {
 VkBool32 GfxSystem::HandleDebugReport(VkDebugReportFlagsEXT flags_in,
                                       VkDebugReportObjectTypeEXT object_type_in, uint64_t object,
                                       size_t location, int32_t message_code,
-                                      const char* pLayerPrefix, const char* pMessage) {
+                                      const char* pLayerPrefix, const char* pMessage,
+                                      void* pUserData) {
   vk::DebugReportFlagsEXT flags(static_cast<vk::DebugReportFlagBitsEXT>(flags_in));
   vk::DebugReportObjectTypeEXT object_type(
       static_cast<vk::DebugReportObjectTypeEXT>(object_type_in));
@@ -498,19 +377,6 @@ VkBool32 GfxSystem::HandleDebugReport(VkDebugReportFlagsEXT flags_in,
   return false;
 
 #undef VK_DEBUG_REPORT_MESSAGE
-}
-
-CompositorWeakPtr GfxSystem::GetCompositor(GlobalId compositor_id) const {
-  return engine_->scene_graph()->GetCompositor(compositor_id);
-}
-
-gfx::Session* GfxSystem::GetSession(SessionId session_id) const {
-  SessionHandler* handler = session_manager_->FindSessionHandler(session_id);
-  return handler ? handler->session() : nullptr;
-}
-
-void GfxSystem::AddInitClosure(fit::closure closure) {
-  run_after_initialized_.push_back(std::move(closure));
 }
 
 }  // namespace gfx

@@ -5,12 +5,6 @@
 #include "aml-canvas.h"
 
 #include <assert.h>
-#include <ddk/binding.h>
-#include <ddk/debug.h>
-#include <ddk/device.h>
-#include <ddk/driver.h>
-#include <ddk/platform-defs.h>
-#include <ddk/protocol/platform/device.h>
 #include <lib/device-protocol/platform-device.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -19,6 +13,14 @@
 #include <threads.h>
 #include <unistd.h>
 #include <zircon/pixelformat.h>
+
+#include <ddk/binding.h>
+#include <ddk/debug.h>
+#include <ddk/device.h>
+#include <ddk/driver.h>
+#include <ddk/platform-defs.h>
+#include <ddk/protocol/amlogiccanvas.h>
+#include <ddk/protocol/platform/device.h>
 
 static void aml_canvas_release(void* ctx) {
   aml_canvas_t* canvas = ctx;
@@ -174,12 +176,6 @@ static zx_status_t aml_canvas_bind(void* ctx, zx_device_t* parent) {
     goto fail;
   }
 
-  pbus_protocol_t pbus;
-  if ((status = device_get_protocol(parent, ZX_PROTOCOL_PBUS, &pbus)) != ZX_OK) {
-    CANVAS_ERROR("ZX_PROTOCOL_PBUS not available %d \n", status);
-    goto fail;
-  }
-
   // Get BTI handle
   status = pdev_get_bti(&canvas->pdev, 0, &canvas->bti);
   if (status != ZX_OK) {
@@ -204,6 +200,7 @@ static zx_status_t aml_canvas_bind(void* ctx, zx_device_t* parent) {
       .ops = &aml_canvas_device_protocol,
       .proto_id = ZX_PROTOCOL_AMLOGIC_CANVAS,
       .proto_ops = &canvas_ops,
+      .flags = DEVICE_ADD_ALLOW_MULTI_COMPOSITE,
   };
 
   status = device_add(parent, &args, &canvas->zxdev);
@@ -211,12 +208,6 @@ static zx_status_t aml_canvas_bind(void* ctx, zx_device_t* parent) {
     goto fail;
   }
 
-  canvas->canvas.ops = &canvas_ops;
-  canvas->canvas.ctx = canvas;
-
-  // Register the canvas protocol with the platform bus
-  pbus_register_protocol(&pbus, ZX_PROTOCOL_AMLOGIC_CANVAS, &canvas->canvas,
-                         sizeof(canvas->canvas));
   return ZX_OK;
 fail:
   aml_canvas_release(canvas);
@@ -230,8 +221,8 @@ static zx_driver_ops_t aml_canvas_driver_ops = {
 
 // clang-format off
 ZIRCON_DRIVER_BEGIN(aml_canvas, aml_canvas_driver_ops, "zircon", "0.1", 4)
-    BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_PDEV),
-    BI_ABORT_IF(NE, BIND_PLATFORM_DEV_VID, PDEV_VID_AMLOGIC),
-    BI_ABORT_IF(NE, BIND_PLATFORM_DEV_PID, PDEV_PID_GENERIC),
-    BI_MATCH_IF(EQ, BIND_PLATFORM_DEV_DID, PDEV_DID_AMLOGIC_CANVAS),
+  BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_PDEV),
+  BI_ABORT_IF(NE, BIND_PLATFORM_DEV_VID, PDEV_VID_AMLOGIC),
+  BI_ABORT_IF(NE, BIND_PLATFORM_DEV_PID, PDEV_PID_GENERIC),
+  BI_MATCH_IF(EQ, BIND_PLATFORM_DEV_DID, PDEV_DID_AMLOGIC_CANVAS),
 ZIRCON_DRIVER_END(aml_canvas)

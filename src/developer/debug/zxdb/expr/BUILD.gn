@@ -8,6 +8,7 @@ static_library("expr") {
     "builtin_types.h",
     "cast.cc",
     "cast.h",
+    "eval_callback.h",
     "eval_context.h",
     "eval_context_impl.cc",
     "eval_context_impl.h",
@@ -45,6 +46,14 @@ static_library("expr") {
     "number_parser.h",
     "parsed_identifier.cc",
     "parsed_identifier.h",
+    "pretty_std_string.cc",
+    "pretty_std_string.h",
+    "pretty_tree.cc",
+    "pretty_tree.h",
+    "pretty_type.cc",
+    "pretty_type.h",
+    "pretty_type_manager.cc",
+    "pretty_type_manager.h",
     "resolve_array.cc",
     "resolve_array.h",
     "resolve_collection.cc",
@@ -55,6 +64,8 @@ static_library("expr") {
     "resolve_variant.h",
     "template_type_extractor.cc",
     "template_type_extractor.h",
+    "type_glob.cc",
+    "type_glob.h",
   ]
 
   public_deps = [
@@ -99,11 +110,14 @@ source_set("tests") {
     "mock_expr_node.h",
     "number_parser_unittest.cc",
     "parsed_identifier_unittest.cc",
+    "pretty_std_string_unittest.cc",
+    "pretty_type_manager_unittest.cc",
     "resolve_array_unittest.cc",
     "resolve_collection_unittest.cc",
     "resolve_ptr_ref_unittest.cc",
     "resolve_variant_unittest.cc",
     "template_type_extractor_unittest.cc",
+    "type_glob_unittest.cc",
   ]
 
   deps = [

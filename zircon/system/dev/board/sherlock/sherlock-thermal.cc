@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <ddk/binding.h>
 #include <ddk/debug.h>
 #include <ddk/device.h>
 #include <ddk/metadata.h>
@@ -57,28 +58,19 @@ static const pbus_bti_t thermal_btis[] = {
     },
 };
 
-static const pbus_clk_t thermal_clk_gates[] = {
-    {
-        .clk = G12B_CLK_SYS_PLL_DIV16,
-    },
-    {
-        .clk = G12B_CLK_SYS_CPU_CLK_DIV16,
-    },
-};
-
-constexpr fuchsia_hardware_thermal_ThermalTemperatureInfo TripPoint(uint32_t temp_c,
+constexpr fuchsia_hardware_thermal_ThermalTemperatureInfo TripPoint(float temp_c,
                                                                     int32_t cpu_opp,
                                                                     int32_t gpu_opp) {
-    constexpr uint32_t kHysteresis = 2;
+  constexpr float kHysteresis = 2.0f;
 
-    return {
-        .up_temp = temp_c + kHysteresis,
-        .down_temp = temp_c - kHysteresis,
-        .fan_level = 0,
-        .big_cluster_dvfs_opp = cpu_opp,
-        .little_cluster_dvfs_opp = 0,
-        .gpu_clk_freq_source = gpu_opp,
-    };
+  return {
+      .up_temp_celsius = temp_c + kHysteresis,
+      .down_temp_celsius = temp_c - kHysteresis,
+      .fan_level = 0,
+      .big_cluster_dvfs_opp = cpu_opp,
+      .little_cluster_dvfs_opp = 0,
+      .gpu_clk_freq_source = gpu_opp,
+  };
 }
 
 /*
@@ -114,110 +106,87 @@ static fuchsia_hardware_thermal_ThermalDeviceInfo aml_sherlock_config = {
     .gpu_throttling                     = true,
     .num_trip_points                    = 7,
     .big_little                         = false,
-    .critical_temp                      = 102,
+    .critical_temp_celsius              = 102.0f,
     .trip_point_info                    = {
-        TripPoint(55, 10, 4),
-        TripPoint(75, 9, 4),
-        TripPoint(80, 7, 3),
-        TripPoint(90, 6, 3),
-        TripPoint(95, 5, 3),
-        TripPoint(100, 4, 2),
+        TripPoint(55.0f, 10, 4),
+        TripPoint(75.0f, 9, 4),
+        TripPoint(80.0f, 7, 3),
+        TripPoint(90.0f, 6, 3),
+        TripPoint(95.0f, 5, 3),
+        TripPoint(100.0f, 4, 2),
     },
     .opps = {},
 };
 
 // clang-format on
 static aml_opp_info_t aml_opp_info = {
-    .opps = {
+    .opps =
         {
-            // 0
-            .freq_hz = 100000000,
-            .volt_mv = 731000,
+            {
+                // 0
+                .freq_hz = 100000000,
+                .volt_mv = 731000,
+            },
+            {
+                // 1
+                .freq_hz = 250000000,
+                .volt_mv = 731000,
+            },
+            {
+                // 2
+                .freq_hz = 500000000,
+                .volt_mv = 731000,
+            },
+            {
+                // 3
+                .freq_hz = 667000000,
+                .volt_mv = 731000,
+            },
+            {
+                // 4
+                .freq_hz = 1000000000,
+                .volt_mv = 731000,
+            },
+            {
+                // 5
+                .freq_hz = 1200000000,
+                .volt_mv = 731000,
+            },
+            {
+                // 6
+                .freq_hz = 1398000000,
+                .volt_mv = 761000,
+            },
+            {
+                // 7
+                .freq_hz = 1512000000,
+                .volt_mv = 791000,
+            },
+            {
+                // 8
+                .freq_hz = 1608000000,
+                .volt_mv = 831000,
+            },
+            {
+                // 9
+                .freq_hz = 1704000000,
+                .volt_mv = 861000,
+            },
+            {
+                // 10
+                .freq_hz = 1896000000,
+                .volt_mv = 981000,
+            },
         },
+    .voltage_table =
         {
-            // 1
-            .freq_hz = 250000000,
-            .volt_mv = 731000,
+            {1022000, 0},  {1011000, 3}, {1001000, 6}, {991000, 10}, {981000, 13}, {971000, 16},
+            {961000, 20},  {951000, 23}, {941000, 26}, {931000, 30}, {921000, 33}, {911000, 36},
+            {901000, 40},  {891000, 43}, {881000, 46}, {871000, 50}, {861000, 53}, {851000, 56},
+            {841000, 60},  {831000, 63}, {821000, 67}, {811000, 70}, {801000, 73}, {791000, 76},
+            {781000, 80},  {771000, 83}, {761000, 86}, {751000, 90}, {741000, 93}, {731000, 96},
+            {721000, 100},
         },
-        {
-            // 2
-            .freq_hz = 500000000,
-            .volt_mv = 731000,
-        },
-        {
-            // 3
-            .freq_hz = 667000000,
-            .volt_mv = 731000,
-        },
-        {
-            // 4
-            .freq_hz = 1000000000,
-            .volt_mv = 731000,
-        },
-        {
-            // 5
-            .freq_hz = 1200000000,
-            .volt_mv = 731000,
-        },
-        {
-            // 6
-            .freq_hz = 1398000000,
-            .volt_mv = 761000,
-        },
-        {
-            // 7
-            .freq_hz = 1512000000,
-            .volt_mv = 791000,
-        },
-        {
-            // 8
-            .freq_hz = 1608000000,
-            .volt_mv = 831000,
-        },
-        {
-            // 9
-            .freq_hz = 1704000000,
-            .volt_mv = 861000,
-        },
-        {
-            // 10
-            .freq_hz = 1896000000,
-            .volt_mv = 981000,
-        },
-    },
-    .voltage_table = {
-        {1022000, 0},
-        {1011000, 3},
-        {1001000, 6},
-        {991000, 10},
-        {981000, 13},
-        {971000, 16},
-        {961000, 20},
-        {951000, 23},
-        {941000, 26},
-        {931000, 30},
-        {921000, 33},
-        {911000, 36},
-        {901000, 40},
-        {891000, 43},
-        {881000, 46},
-        {871000, 50},
-        {861000, 53},
-        {851000, 56},
-        {841000, 60},
-        {831000, 63},
-        {821000, 67},
-        {811000, 70},
-        {801000, 73},
-        {791000, 76},
-        {781000, 80},
-        {771000, 83},
-        {761000, 86},
-        {751000, 90},
-        {741000, 93},
-        {731000, 96},
-        {721000, 100},
-    },
 };
 
 static const pbus_metadata_t thermal_metadata[] = {
@@ -233,45 +202,67 @@ static const pbus_metadata_t thermal_metadata[] = {
     },
 };
 
-static pbus_dev_t thermal_dev = []() {
-    pbus_dev_t dev = {};
-    dev.name = "aml-thermal";
-    dev.vid = PDEV_VID_AMLOGIC;
-    dev.pid = PDEV_PID_AMLOGIC_S905D2;
-    dev.did = PDEV_DID_AMLOGIC_THERMAL;
-    dev.mmio_list = thermal_mmios;
-    dev.mmio_count = countof(thermal_mmios);
-    dev.clk_list = thermal_clk_gates;
-    dev.clk_count = countof(thermal_clk_gates);
-    dev.irq_list = thermal_irqs;
-    dev.irq_count = countof(thermal_irqs);
-    dev.bti_list = thermal_btis;
-    dev.bti_count = countof(thermal_btis);
-    dev.metadata_list = thermal_metadata;
-    dev.metadata_count = countof(thermal_metadata);
-    return dev;
+constexpr pbus_dev_t thermal_dev = []() {
+  pbus_dev_t dev = {};
+  dev.name = "aml-thermal";
+  dev.vid = PDEV_VID_AMLOGIC;
+  dev.pid = PDEV_PID_AMLOGIC_S905D2;
+  dev.did = PDEV_DID_AMLOGIC_THERMAL;
+  dev.mmio_list = thermal_mmios;
+  dev.mmio_count = countof(thermal_mmios);
+  dev.irq_list = thermal_irqs;
+  dev.irq_count = countof(thermal_irqs);
+  dev.bti_list = thermal_btis;
+  dev.bti_count = countof(thermal_btis);
+  dev.metadata_list = thermal_metadata;
+  dev.metadata_count = countof(thermal_metadata);
+  return dev;
 }();
 
-} // namespace
+static const zx_bind_inst_t root_match[] = {
+    BI_MATCH(),
+};
+static const zx_bind_inst_t clk1_match[] = {
+    BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_CLOCK),
+    BI_MATCH_IF(EQ, BIND_CLOCK_ID, G12B_CLK_SYS_PLL_DIV16),
+};
+static const zx_bind_inst_t clk2_match[] = {
+    BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_CLOCK),
+    BI_MATCH_IF(EQ, BIND_CLOCK_ID, G12B_CLK_SYS_CPU_CLK_DIV16),
+};
+static const device_component_part_t clk1_component[] = {
+    {countof(root_match), root_match},
+    {countof(clk1_match), clk1_match},
+};
+static const device_component_part_t clk2_component[] = {
+    {countof(root_match), root_match},
+    {countof(clk2_match), clk2_match},
+};
+static const device_component_t components[] = {
+    {countof(clk1_component), clk1_component},
+    {countof(clk2_component), clk2_component},
+};
+
+}  // namespace
 
 zx_status_t Sherlock::ThermalInit() {
-    // Configure the GPIO to be Output & set it to alternate
-    // function 3 which puts in PWM_D mode.
-    gpio_impl_.SetAltFunction(T931_GPIOE(1), kPwmDFn);
+  // Configure the GPIO to be Output & set it to alternate
+  // function 3 which puts in PWM_D mode.
+  gpio_impl_.SetAltFunction(T931_GPIOE(1), kPwmDFn);
 
-    zx_status_t status = gpio_impl_.ConfigOut(T931_GPIOE(1), 0);
-    if (status != ZX_OK) {
-        zxlogf(ERROR, "%s: ConfigOut failed: %d\n", __func__, status);
-        return status;
-    }
-
-    status = pbus_.DeviceAdd(&thermal_dev);
-    if (status != ZX_OK) {
-        zxlogf(ERROR, "%s: DeviceAdd failed %d\n", __func__, status);
-        return status;
-    }
-
+  zx_status_t status = gpio_impl_.ConfigOut(T931_GPIOE(1), 0);
+  if (status != ZX_OK) {
+    zxlogf(ERROR, "%s: ConfigOut failed: %d\n", __func__, status);
     return status;
+  }
+
+  status = pbus_.CompositeDeviceAdd(&thermal_dev, components, countof(components), UINT32_MAX);
+  if (status != ZX_OK) {
+    zxlogf(ERROR, "%s: DeviceAdd failed %d\n", __func__, status);
+    return status;
+  }
+
+  return status;
 }
 
-} // namespace sherlock
+}  // namespace sherlock

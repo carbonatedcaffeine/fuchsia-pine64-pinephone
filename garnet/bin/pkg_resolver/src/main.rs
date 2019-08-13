@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
-#![deny(warnings)]
+#![feature(async_await)]
 
 use {
     failure::{Error, ResultExt},
@@ -19,8 +18,9 @@ use {
     std::sync::Arc,
 };
 
-mod amber;
 mod amber_connector;
+mod experiment;
+mod font_package_manager;
 mod repository_manager;
 mod repository_service;
 mod resolver_service;
@@ -31,6 +31,8 @@ mod rewrite_service;
 mod test_util;
 
 use crate::amber_connector::AmberConnector;
+use crate::experiment::Experiments;
+use crate::font_package_manager::{FontPackageManager, FontPackageManagerBuilder};
 use crate::repository_manager::{RepositoryManager, RepositoryManagerBuilder};
 use crate::repository_service::RepositoryService;
 use crate::rewrite_manager::{RewriteManager, RewriteManagerBuilder};
@@ -44,6 +46,8 @@ const DYNAMIC_REPO_PATH: &str = "/data/repositories.json";
 const STATIC_RULES_PATH: &str = "/config/data/rewrites.json";
 const DYNAMIC_RULES_PATH: &str = "/data/rewrites.json";
 
+const STATIC_FONT_REGISTRY_PATH: &str = "/config/data/font_packages.json";
+
 fn main() -> Result<(), Error> {
     fuchsia_syslog::init_with_tags(&["pkg_resolver"]).expect("can't init logger");
     fx_log_info!("starting package resolver");
@@ -55,22 +59,28 @@ fn main() -> Result<(), Error> {
 
     let inspector = fuchsia_inspect::Inspector::new();
     let rewrite_inspect_node = inspector.root().create_child("rewrite_manager");
+    let experiment_inspect_node = inspector.root().create_child("experiments");
 
     let amber_connector = AmberConnector::new();
 
-    let repo_manager = Arc::new(RwLock::new(load_repo_manager(amber_connector.clone())));
+    let experiment_state = Arc::new(RwLock::new(experiment::State::new(experiment_inspect_node)));
+    let experiments = Arc::clone(&experiment_state).into();
+
+    let font_package_manager = Arc::new(load_font_package_manager());
+    let repo_manager = Arc::new(RwLock::new(load_repo_manager(amber_connector, experiments)));
     let rewrite_manager = Arc::new(RwLock::new(load_rewrite_manager(rewrite_inspect_node)));
 
     let resolver_cb = {
         // Capture a clone of repo and rewrite manager's Arc so the new client callback has a copy
         // from which to make new clones.
-        let repo_manager = repo_manager.clone();
-        let rewrite_manager = rewrite_manager.clone();
+        let repo_manager = Arc::clone(&repo_manager);
+        let rewrite_manager = Arc::clone(&rewrite_manager);
+        let cache = cache.clone();
         move |stream| {
             fasync::spawn(
                 resolver_service::run_resolver_service(
-                    rewrite_manager.clone(),
-                    repo_manager.clone(),
+                    Arc::clone(&rewrite_manager),
+                    Arc::clone(&repo_manager),
                     cache.clone(),
                     stream,
                 )
@@ -79,33 +89,61 @@ fn main() -> Result<(), Error> {
         }
     };
 
+    let font_resolver_fb = {
+        let repo_manager = Arc::clone(&repo_manager);
+        let rewrite_manager = Arc::clone(&rewrite_manager);
+        let cache = cache.clone();
+        move |stream| {
+            fasync::spawn(
+                resolver_service::run_font_resolver_service(
+                    Arc::clone(&font_package_manager),
+                    Arc::clone(&rewrite_manager),
+                    Arc::clone(&repo_manager),
+                    cache.clone(),
+                    stream,
+                )
+                .unwrap_or_else(|e| fx_log_err!("Failed to spawn font_resolver_service {:?}", e)),
+            )
+        }
+    };
+
     let repo_cb = move |stream| {
-        let repo_manager = repo_manager.clone();
+        let repo_manager = Arc::clone(&repo_manager);
 
         fasync::spawn(
             async move {
                 let mut repo_service = RepositoryService::new(repo_manager);
-                await!(repo_service.run(stream))
+                repo_service.run(stream).await
             }
                 .unwrap_or_else(|e| fx_log_err!("error encountered: {:?}", e)),
         )
     };
 
     let rewrite_cb = move |stream| {
-        let mut rewrite_service =
-            RewriteService::new(rewrite_manager.clone(), amber_connector.clone());
+        let mut rewrite_service = RewriteService::new(Arc::clone(&rewrite_manager));
 
         fasync::spawn(
-            async move { await!(rewrite_service.handle_client(stream)) }
+            async move { rewrite_service.handle_client(stream).await }
                 .unwrap_or_else(|e| fx_log_err!("while handling rewrite client {:?}", e)),
         )
+    };
+
+    let admin_cb = move |stream| {
+        let experiment_state = Arc::clone(&experiment_state);
+        fasync::spawn(async move {
+            experiment::run_admin_service(experiment_state, stream)
+                .await
+                .unwrap_or_else(|e| fx_log_err!("while handling admin client {:?}", e))
+        });
     };
 
     let mut fs = ServiceFs::new();
     fs.dir("svc")
         .add_fidl_service(resolver_cb)
+        .add_fidl_service(font_resolver_fb)
         .add_fidl_service(repo_cb)
-        .add_fidl_service(rewrite_cb);
+        .add_fidl_service(rewrite_cb)
+        .add_fidl_service(admin_cb);
 
     inspector.export(&mut fs);
 
@@ -116,10 +154,13 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
-fn load_repo_manager(amber_connector: AmberConnector) -> RepositoryManager<AmberConnector> {
+fn load_repo_manager(
+    amber_connector: AmberConnector,
+    experiments: Experiments,
+) -> RepositoryManager<AmberConnector> {
     // report any errors we saw, but don't error out because otherwise we won't be able
     // to update the system.
-    RepositoryManagerBuilder::new(DYNAMIC_REPO_PATH, amber_connector)
+    RepositoryManagerBuilder::new(DYNAMIC_REPO_PATH, amber_connector, experiments)
         .unwrap_or_else(|(builder, err)| {
             fx_log_err!("error loading dynamic repo config: {}", err);
             builder
@@ -151,6 +192,20 @@ fn load_rewrite_manager(node: inspect::Node) -> RewriteManager {
             if err.kind() != io::ErrorKind::NotFound {
                 fx_log_err!("unable to load static rewrite rules from disk: {}", err);
             }
+            builder
+        })
+        .build()
+}
+
+fn load_font_package_manager() -> FontPackageManager {
+    FontPackageManagerBuilder::new()
+        .add_registry_file(STATIC_FONT_REGISTRY_PATH)
+        .unwrap_or_else(|(builder, errs)| {
+            fx_log_err!(
+                "error(s) loading font package registry:{}",
+                errs.iter()
+                    .fold(String::new(), |acc, err| acc + "\n" + format!("{}", err).as_str())
+            );
             builder
         })
         .build()

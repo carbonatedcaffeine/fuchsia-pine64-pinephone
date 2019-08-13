@@ -35,13 +35,18 @@ class DebugAgent : public RemoteAPI,
   // The stream must outlive this class. It will be used to send data to the
   // client. It will not be read (that's the job of the provider of the
   // RemoteAPI).
-  explicit DebugAgent(debug_ipc::StreamBuffer* stream,
-                      std::shared_ptr<sys::ServiceDirectory> services);
+  explicit DebugAgent(std::shared_ptr<sys::ServiceDirectory> services);
   ~DebugAgent();
 
   fxl::WeakPtr<DebugAgent> GetWeakPtr();
 
-  debug_ipc::StreamBuffer* stream() { return stream_; }
+  // Connects the debug agent to a stream buffer.
+  // The buffer can be disconnected and the debug agent will remain intact until the moment a new
+  // buffer is connected and messages start flowing through again.
+  void Connect(debug_ipc::StreamBuffer*);
+  void Disconnect();
+
+  debug_ipc::StreamBuffer* stream();
 
   void RemoveDebuggedProcess(zx_koid_t process_koid);
 
@@ -117,7 +122,7 @@ class DebugAgent : public RemoteAPI,
   zx_status_t AddDebuggedJob(zx_koid_t job_koid, zx::job zx_job);
   DebuggedJob* GetDebuggedJob(zx_koid_t koid);
 
-  zx_status_t AddDebuggedProcess(DebuggedProcessCreateInfo&&);
+  zx_status_t AddDebuggedProcess(DebuggedProcessCreateInfo&&, DebuggedProcess** added);
   DebuggedProcess* GetDebuggedProcess(zx_koid_t koid);
 
   DebuggedThread* GetDebuggedThread(zx_koid_t process_koid, zx_koid_t thread_koid);
@@ -132,7 +137,7 @@ class DebugAgent : public RemoteAPI,
   void OnComponentTerminated(int64_t return_code, const ComponentDescription& description,
                              fuchsia::sys::TerminationReason reason);
 
-  debug_ipc::StreamBuffer* stream_;
+  debug_ipc::StreamBuffer* stream_ = nullptr;
 
   std::shared_ptr<sys::ServiceDirectory> services_;
 
@@ -151,10 +156,10 @@ class DebugAgent : public RemoteAPI,
   //                so we can only filter on that.
   zx_koid_t attached_root_job_koid_ = 0;
 
-  // Each component launch is asigned an unique filter and id. This is because
+  // Each component launch is assigned an unique filter and id. This is because
   // new components are attached via the job filter mechanism. When a particular
   // filter attached, we use this id to know which component launch just
-  // happened and we can comunicate it to the client.
+  // happened and we can communicate it to the client.
   struct ExpectedComponent {
     ComponentDescription description;
     ComponentHandles handles;

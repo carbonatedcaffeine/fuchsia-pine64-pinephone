@@ -36,12 +36,17 @@ uint64_t CommitEmptyImpl::GetGeneration() const {
 
 ObjectIdentifier CommitEmptyImpl::GetRootIdentifier() const {
   FXL_NOTIMPLEMENTED();
-  return {0u, 0u, ObjectDigest()};
+  return ObjectIdentifier();
 }
 
 fxl::StringView CommitEmptyImpl::GetStorageBytes() const {
   FXL_NOTIMPLEMENTED();
   return "NOT_IMPLEMENTED";
+}
+
+bool CommitEmptyImpl::IsAlive() const {
+  FXL_NOTIMPLEMENTED();
+  return true;
 }
 
 }  // namespace storage

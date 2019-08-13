@@ -37,24 +37,22 @@
 namespace component {
 
 struct RealmArgs {
-  static RealmArgs Make(
-      Realm* parent, std::string label, std::string data_path,
-      std::string cache_path,
-      const std::shared_ptr<sys::ServiceDirectory>& env_services,
-      bool run_virtual_console, fuchsia::sys::EnvironmentOptions options);
+  static RealmArgs Make(Realm* parent, std::string label, std::string data_path,
+                        std::string cache_path, std::string temp_path,
+                        const std::shared_ptr<sys::ServiceDirectory>& env_services,
+                        bool run_virtual_console, fuchsia::sys::EnvironmentOptions options);
 
   static RealmArgs MakeWithAdditionalServices(
-      Realm* parent, std::string label, std::string data_path,
-      std::string cache_path,
-      const std::shared_ptr<sys::ServiceDirectory>& env_services,
-      bool run_virtual_console,
-      fuchsia::sys::ServiceListPtr additional_services,
+      Realm* parent, std::string label, std::string data_path, std::string cache_path,
+      std::string temp_path, const std::shared_ptr<sys::ServiceDirectory>& env_services,
+      bool run_virtual_console, fuchsia::sys::ServiceListPtr additional_services,
       fuchsia::sys::EnvironmentOptions options);
 
   Realm* parent;
   std::string label;
   std::string data_path;
   std::string cache_path;
+  std::string temp_path;
   std::shared_ptr<sys::ServiceDirectory> environment_services;
   bool run_virtual_console;
   fuchsia::sys::ServiceListPtr additional_services;
@@ -74,6 +72,7 @@ class Realm : public ComponentContainer<ComponentControllerImpl> {
   const std::string& label() const { return label_; }
   const std::string& data_path() const { return data_path_; }
   const std::string& cache_path() const { return cache_path_; }
+  const std::string& temp_path() const { return temp_path_; }
   const std::string& koid() const { return koid_; }
 
   const fbl::RefPtr<fs::PseudoDir>& hub_dir() const { return hub_.dir(); }
@@ -90,18 +89,16 @@ class Realm : public ComponentContainer<ComponentControllerImpl> {
 
   void CreateNestedEnvironment(
       fidl::InterfaceRequest<fuchsia::sys::Environment> environment,
-      fidl::InterfaceRequest<fuchsia::sys::EnvironmentController>
-          controller_request,
+      fidl::InterfaceRequest<fuchsia::sys::EnvironmentController> controller_request,
       std::string label, fuchsia::sys::ServiceListPtr additional_services,
       fuchsia::sys::EnvironmentOptions options);
 
   using ComponentObjectCreatedCallback =
       fit::function<void(std::weak_ptr<ComponentControllerImpl> component)>;
 
-  void CreateComponent(
-      fuchsia::sys::LaunchInfo launch_info,
-      fidl::InterfaceRequest<fuchsia::sys::ComponentController> controller,
-      ComponentObjectCreatedCallback callback = nullptr);
+  void CreateComponent(fuchsia::sys::LaunchInfo launch_info,
+                       fidl::InterfaceRequest<fuchsia::sys::ComponentController> controller,
+                       ComponentObjectCreatedCallback callback = nullptr);
 
   // Removes the child realm from this realm and returns the owning
   // reference to the child's controller. The caller of this function
@@ -117,8 +114,7 @@ class Realm : public ComponentContainer<ComponentControllerImpl> {
   std::shared_ptr<ComponentControllerImpl> ExtractComponent(
       ComponentControllerImpl* controller) override;
 
-  void AddBinding(
-      fidl::InterfaceRequest<fuchsia::sys::Environment> environment);
+  void AddBinding(fidl::InterfaceRequest<fuchsia::sys::Environment> environment);
 
   // Binds the given channel to the services directory (/svc) for the very first
   // nested realm created. This function is only supported for the root realm,
@@ -127,8 +123,7 @@ class Realm : public ComponentContainer<ComponentControllerImpl> {
 
   void CreateShell(const std::string& path, zx::channel svc);
 
-  void Resolve(fidl::StringPtr name,
-               fuchsia::process::Resolver::ResolveCallback callback);
+  void Resolve(fidl::StringPtr name, fuchsia::process::Resolver::ResolveCallback callback);
 
  private:
   static uint32_t next_numbered_label_;
@@ -136,22 +131,23 @@ class Realm : public ComponentContainer<ComponentControllerImpl> {
   RunnerHolder* GetOrCreateRunner(const std::string& runner);
   RunnerHolder* GetRunnerRecursive(const std::string& runner) const;
 
-  void CreateComponentWithRunnerForScheme(
-      std::string runner_url, fuchsia::sys::LaunchInfo launch_info,
-      ComponentRequestWrapper component_request,
-      ComponentObjectCreatedCallback callback);
+  void CreateComponentWithRunnerForScheme(std::string runner_url,
+                                          fuchsia::sys::LaunchInfo launch_info,
+                                          ComponentRequestWrapper component_request,
+                                          ComponentObjectCreatedCallback callback);
 
   void CreateComponentFromPackage(fuchsia::sys::PackagePtr package,
                                   fuchsia::sys::LaunchInfo launch_info,
                                   ComponentRequestWrapper component_request,
                                   ComponentObjectCreatedCallback callback);
 
-  void CreateElfBinaryComponentFromPackage(
-      fuchsia::sys::LaunchInfo launch_info, fsl::SizedVmo& app_data,
-      const std::string& app_argv0, const std::vector<std::string>& env_vars,
-      zx::channel loader_service, fdio_flat_namespace_t* flat,
-      ComponentRequestWrapper component_request, fxl::RefPtr<Namespace> ns,
-      ComponentObjectCreatedCallback callback);
+  void CreateElfBinaryComponentFromPackage(fuchsia::sys::LaunchInfo launch_info,
+                                           fsl::SizedVmo& app_data, const std::string& app_argv0,
+                                           const std::vector<std::string>& env_vars,
+                                           zx::channel loader_service, fdio_flat_namespace_t* flat,
+                                           ComponentRequestWrapper component_request,
+                                           fxl::RefPtr<Namespace> ns,
+                                           ComponentObjectCreatedCallback callback);
 
   void CreateRunnerComponentFromPackage(
       fuchsia::sys::PackagePtr package, fuchsia::sys::LaunchInfo launch_info,
@@ -161,14 +157,14 @@ class Realm : public ComponentContainer<ComponentControllerImpl> {
 
   zx::channel OpenInfoDir();
 
-  std::string IsolatedPathForPackage(std::string path_prefix,
-                                     const FuchsiaPkgUrl& fp);
+  std::string IsolatedPathForPackage(std::string path_prefix, const FuchsiaPkgUrl& fp);
 
   Realm* const parent_;
   fuchsia::sys::LoaderPtr loader_;
   std::string label_;
   std::string data_path_;
   std::string cache_path_;
+  std::string temp_path_;
   std::string koid_;
   const bool run_virtual_console_;
   std::unique_ptr<component::PackageLoader> package_loader_;
@@ -181,11 +177,9 @@ class Realm : public ComponentContainer<ComponentControllerImpl> {
   RealmHub hub_;
   fs::SynchronousVfs info_vfs_;
 
-  std::unordered_map<Realm*, std::unique_ptr<EnvironmentControllerImpl>>
-      children_;
+  std::unordered_map<Realm*, std::unique_ptr<EnvironmentControllerImpl>> children_;
 
-  std::unordered_map<ComponentControllerImpl*,
-                     std::shared_ptr<ComponentControllerImpl>>
+  std::unordered_map<ComponentControllerImpl*, std::shared_ptr<ComponentControllerImpl>>
       applications_;
 
   std::unordered_map<std::string, std::unique_ptr<RunnerHolder>> runners_;

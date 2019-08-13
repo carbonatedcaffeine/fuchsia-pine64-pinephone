@@ -27,15 +27,13 @@ class TestHarnessFixture : public sys::testing::TestWithEnvironment {
   }
 
  private:
-  TestHarnessLauncher test_harness_launcher_;
+  modular_testing::TestHarnessLauncher test_harness_launcher_;
 };
 
 // Starts a new mod by the given |intent| and |mod_name| in a new story given
 // by |story_name|.
-void AddModToStory(
-    const fuchsia::modular::testing::TestHarnessPtr& test_harness,
-    std::string story_name, std::string mod_name,
-    fuchsia::modular::Intent intent);
+void AddModToStory(const fuchsia::modular::testing::TestHarnessPtr& test_harness,
+                   std::string story_name, std::string mod_name, fuchsia::modular::Intent intent);
 
 }  // namespace testing
 }  // namespace modular

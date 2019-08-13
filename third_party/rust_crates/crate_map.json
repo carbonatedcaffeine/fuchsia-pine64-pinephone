@@ -146,6 +146,11 @@
             "package_name": "hyper-rustls"
         },
         {
+            "crate_name": "id_tree",
+            "crate_type": "lib",
+            "package_name": "id_tree"
+        },
+        {
             "crate_name": "itertools",
             "crate_type": "lib",
             "package_name": "itertools"
@@ -264,6 +269,11 @@
             "crate_name": "pretty_assertions",
             "crate_type": "lib",
             "package_name": "pretty_assertions"
+        },
+        {
+            "crate_name": "prettytable",
+            "crate_type": "lib",
+            "package_name": "prettytable-rs"
         },
         {
             "crate_name": "proc_macro_hack",
@@ -498,6 +508,11 @@
             "package_name": "bitfield"
         },
         {
+            "crate_name": "bitflags",
+            "crate_type": "lib",
+            "package_name": "bitflags"
+        },
+        {
             "crate_name": "byteorder",
             "crate_type": "lib",
             "package_name": "byteorder"
@@ -528,6 +543,16 @@
             "package_name": "flate2"
         },
         {
+            "crate_name": "futures",
+            "crate_type": "lib",
+            "package_name": "futures-preview"
+        },
+        {
+            "crate_name": "futures_test",
+            "crate_type": "lib",
+            "package_name": "futures-test-preview"
+        },
+        {
             "crate_name": "handlebars",
             "crate_type": "lib",
             "package_name": "handlebars"
@@ -536,6 +561,11 @@
             "crate_name": "heck",
             "crate_type": "lib",
             "package_name": "heck"
+        },
+        {
+            "crate_name": "indoc",
+            "crate_type": "lib",
+            "package_name": "indoc"
         },
         {
             "crate_name": "json5",
@@ -556,6 +586,21 @@
             "crate_name": "log",
             "crate_type": "lib",
             "package_name": "log"
+        },
+        {
+            "crate_name": "matches",
+            "crate_type": "lib",
+            "package_name": "matches"
+        },
+        {
+            "crate_name": "memchr",
+            "crate_type": "lib",
+            "package_name": "memchr"
+        },
+        {
+            "crate_name": "nom",
+            "crate_type": "lib",
+            "package_name": "nom"
         },
         {
             "crate_name": "num",
@@ -603,6 +648,21 @@
             "package_name": "quote"
         },
         {
+            "crate_name": "rand",
+            "crate_type": "lib",
+            "package_name": "rand"
+        },
+        {
+            "crate_name": "rand_core",
+            "crate_type": "lib",
+            "package_name": "rand_core"
+        },
+        {
+            "crate_name": "rand_os",
+            "crate_type": "lib",
+            "package_name": "rand_os"
+        },
+        {
             "crate_name": "rayon",
             "crate_type": "lib",
             "package_name": "rayon"
@@ -611,6 +671,11 @@
             "crate_name": "regex",
             "crate_type": "lib",
             "package_name": "regex"
+        },
+        {
+            "crate_name": "scopeguard",
+            "crate_type": "lib",
+            "package_name": "scopeguard"
         },
         {
             "crate_name": "serde",
@@ -626,6 +691,11 @@
             "crate_name": "serde_json",
             "crate_type": "lib",
             "package_name": "serde_json"
+        },
+        {
+            "crate_name": "slab",
+            "crate_type": "lib",
+            "package_name": "slab"
         },
         {
             "crate_name": "structopt",
@@ -661,6 +731,11 @@
             "crate_name": "unic_ucd_block",
             "crate_type": "lib",
             "package_name": "unic-ucd-block"
+        },
+        {
+            "crate_name": "url",
+            "crate_type": "lib",
+            "package_name": "url"
         },
         {
             "crate_name": "uuid",

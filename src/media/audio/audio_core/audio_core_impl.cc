@@ -11,7 +11,7 @@
 #include "src/media/audio/audio_core/audio_capturer_impl.h"
 #include "src/media/audio/audio_core/audio_device_manager.h"
 #include "src/media/audio/audio_core/audio_renderer_impl.h"
-#include "src/media/audio/audio_core/logging.h"
+#include "src/media/audio/lib/logging/logging.h"
 
 namespace media::audio {
 namespace {
@@ -26,14 +26,22 @@ constexpr zx_vm_option_t kAudioRendererVmarFlags =
 
 constexpr float AudioCoreImpl::kMaxSystemAudioGainDb;
 
-AudioCoreImpl::AudioCoreImpl(std::unique_ptr<sys::ComponentContext> startup_context)
+AudioCoreImpl::AudioCoreImpl(std::unique_ptr<sys::ComponentContext> startup_context,
+                             CommandLineOptions options)
     : device_manager_(this),
       ctx_(std::move(startup_context)),
       vmar_manager_(
           fzl::VmarManager::Create(kAudioRendererVmarSize, nullptr, kAudioRendererVmarFlags)) {
   FXL_DCHECK(vmar_manager_ != nullptr) << "Failed to allocate VMAR";
 
-  Logging::Init();
+  AudioDeviceSettings::EnableDeviceSettings(options.enable_device_settings_writeback);
+
+#ifdef NDEBUG
+  Logging::Init(fxl::LOG_WARNING);
+#else
+  // For verbose logging, set to -media::audio::TRACE or -media::audio::SPEW
+  Logging::Init(fxl::LOG_INFO);
+#endif
 
   // Stash a pointer to our async object.
   dispatcher_ = async_get_default_dispatcher();
@@ -206,7 +214,7 @@ void AudioCoreImpl::SetRoutingPolicy(fuchsia::media::AudioOutputRoutingPolicy po
 
 void AudioCoreImpl::EnableDeviceSettings(bool enabled) {
   AUD_VLOG(TRACE) << " (enabled: " << enabled << ")";
-  device_manager_.EnableDeviceSettings(enabled);
+  AudioDeviceSettings::EnableDeviceSettings(enabled);
 }
 
 void AudioCoreImpl::DoPacketCleanup() {

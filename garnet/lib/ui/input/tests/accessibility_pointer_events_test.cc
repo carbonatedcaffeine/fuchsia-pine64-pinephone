@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include <fuchsia/ui/input/accessibility/cpp/fidl.h>
 #include <fuchsia/ui/input/cpp/fidl.h>
 #include <lib/async/cpp/time.h>
+#include <lib/zx/clock.h>
 #include <lib/zx/eventpair.h>
-
-#include <memory>
 
 #include "garnet/lib/ui/input/tests/util.h"
 #include "gmock/gmock.h"
@@ -125,7 +126,7 @@ class AccessibilityPointerEventListenerSessionWrapper
 
     scenic::ShapeNode shape(session);
     shape.SetTranslation(2, 2, 0);  // Center the shape within the View.
-    root_node->AddPart(shape);
+    root_node->AddChild(shape);
 
     scenic::Rectangle rec(session, 5, 5);  // Simple; no real GPU work.
     shape.SetShape(rec);

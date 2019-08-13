@@ -12,7 +12,7 @@ namespace DynamicLibraryLoader {
 
 static async_loop_t* ld_loop = nullptr;
 
-zx_status_t Start(fxl::UniqueFD fd, zx::channel* result) {
+zx_status_t Start(fbl::unique_fd fd, zx::channel* result) {
   zx_status_t status = ZX_OK;
 
   if (!ld_loop) {
@@ -26,8 +26,7 @@ zx_status_t Start(fxl::UniqueFD fd, zx::channel* result) {
   }
 
   loader_service_t* svc = nullptr;
-  status = loader_service_create_fd(async_loop_get_dispatcher(ld_loop),
-                                    fd.release(), &svc);
+  status = loader_service_create_fd(async_loop_get_dispatcher(ld_loop), fd.release(), &svc);
   if (status != ZX_OK)
     return status;
   status = loader_service_connect(svc, result->reset_and_get_address());

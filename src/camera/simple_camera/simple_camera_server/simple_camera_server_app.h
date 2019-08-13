@@ -7,6 +7,7 @@
 
 #include <fuchsia/images/cpp/fidl.h>
 #include <fuchsia/simplecamera/cpp/fidl.h>
+
 #include <src/camera/simple_camera/simple_camera_lib/video_display.h>
 
 #include "lib/component/cpp/startup_context.h"
@@ -16,9 +17,8 @@ namespace simple_camera {
 class SimpleCameraApp : public fuchsia::simplecamera::SimpleCamera {
  public:
   SimpleCameraApp();
-  virtual void ConnectToCamera(
-      uint32_t camera_id,
-      fidl::InterfaceHandle<fuchsia::images::ImagePipe> image_pipe);
+  virtual void ConnectToCamera(uint32_t camera_id,
+                               fidl::InterfaceHandle<fuchsia::images::ImagePipe> image_pipe);
 
  private:
   SimpleCameraApp(const SimpleCameraApp&) = delete;

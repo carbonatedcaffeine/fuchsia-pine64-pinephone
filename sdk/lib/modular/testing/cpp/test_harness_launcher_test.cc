@@ -48,9 +48,8 @@ class TestHarnessLauncherTest : public gtest::RealLoopFixture {
  public:
   TestHarnessLauncherTest() {
     fake_launcher_.RegisterComponent(
-        kTestHarnessUrl,
-        [this](fuchsia::sys::LaunchInfo info,
-               fidl::InterfaceRequest<fuchsia::sys::ComponentController> ctrl) {
+        kTestHarnessUrl, [this](fuchsia::sys::LaunchInfo info,
+                                fidl::InterfaceRequest<fuchsia::sys::ComponentController> ctrl) {
           info_ = std::move(info);
           fake_ctrl_ = std::make_unique<FakeController>(std::move(ctrl));
         });
@@ -73,7 +72,7 @@ class TestHarnessLauncherTest : public gtest::RealLoopFixture {
 
 // Test that the TestHarnessLauncher is able to launch modular_test_harness.cmx.
 TEST_F(TestHarnessLauncherTest, CanLaunchTestHarness) {
-  modular::testing::TestHarnessLauncher launcher(GetTestHarnessLauncher());
+  modular_testing::TestHarnessLauncher launcher(GetTestHarnessLauncher());
   RunLoopUntil([this] { return is_running(); });
 }
 
@@ -82,7 +81,7 @@ TEST_F(TestHarnessLauncherTest, CanLaunchTestHarness) {
 TEST_F(TestHarnessLauncherTest, CleanupInDestructor) {
   // Test that modular_test_harness.cmx is not running.
   {
-    modular::testing::TestHarnessLauncher launcher(GetTestHarnessLauncher());
+    modular_testing::TestHarnessLauncher launcher(GetTestHarnessLauncher());
     RunLoopUntil([this] { return is_running(); });
   }
   // Test that the modular_test_harness.cmx is no longer running after

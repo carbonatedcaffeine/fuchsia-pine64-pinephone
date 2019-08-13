@@ -37,6 +37,7 @@ typedef uint32_t zx_object_info_topic_t;
 #define ZX_INFO_SOCKET                  ((zx_object_info_topic_t) 22u) // zx_info_socket_t[1]
 #define ZX_INFO_VMO                     ((zx_object_info_topic_t) 23u) // zx_info_vmo_t[1]
 #define ZX_INFO_JOB                     ((zx_object_info_topic_t) 24u) // zx_info_job_t[1]
+#define ZX_INFO_TIMER                   ((zx_object_info_topic_t) 25u) // zx_info_timer_t[1]
 
 typedef uint32_t zx_obj_props_t;
 #define ZX_OBJ_PROP_NONE                ((zx_obj_props_t) 0u)
@@ -48,6 +49,9 @@ typedef uint32_t zx_obj_props_t;
 #define ZX_TASK_RETCODE_POLICY_KILL     ((int64_t) -1026)   // by the Job policy.
 #define ZX_TASK_RETCODE_VDSO_KILL       ((int64_t) -1027)   // by the VDSO.
 #define ZX_TASK_RETCODE_EXCEPTION_KILL  ((int64_t) -1028)   // Exception not handled.
+
+// Sentinel indicating an invalid or missing CPU.
+#define ZX_INFO_INVALID_CPU             ((uint32_t)0xFFFFFFFFu)
 
 
 typedef struct zx_info_handle_basic {
@@ -116,6 +120,26 @@ typedef struct zx_info_job {
     bool debugger_attached;
 } zx_info_job_t;
 
+typedef struct zx_info_timer {
+    // The options passed to zx_timer_create().
+    uint32_t options;
+
+    // The deadline with respect to ZX_CLOCK_MONOTONIC at which the timer will
+    // fire next.
+    //
+    // This value will be zero if the timer is not set to fire.
+    zx_time_t deadline;
+
+    // Specifies a range from deadline - slack to deadline + slack during which
+    // the timer is allowed to fire. The system uses this parameter as a hint to
+    // coalesce nearby timers.
+    //
+    // The precise coalescing behavior is controlled by the options parameter
+    // specified when the timer was created.
+    //
+    // This value will be zero if the timer is not set to fire.
+    zx_duration_t slack;
+} zx_info_timer_t;
 
 typedef uint32_t zx_thread_state_t;
 
@@ -134,11 +158,25 @@ typedef struct zx_info_thread {
         // TODO(ZX-4031): remove this once everyone is switched to channels.
         uint32_t wait_exception_port_type;
     };
+
+    // CPUs this thread may be scheduled on, as specified by
+    // a profile object applied to this thread.
+    //
+    // The kernel may not internally store invalid CPUs in the mask, so
+    // this may not exactly match the mask applied to the thread for
+    // CPUs beyond what the system is able to use.
+    zx_cpu_set_t cpu_affinity_mask;
 } zx_info_thread_t;
 
 typedef struct zx_info_thread_stats {
     // Total accumulated running time of the thread.
     zx_duration_t total_runtime;
+
+    // CPU number that this thread was last scheduled on, or ZX_INFO_INVALID_CPU
+    // if the thread has never been scheduled on a CPU. By the time this call
+    // returns, the thread may have been scheduled elsewhere, so this
+    // information should only be used as a hint or for statistics.
+    uint32_t last_scheduled_cpu;
 } zx_info_thread_stats_t;
 
 // Statistics about resources (e.g., memory) used by a task. Can be relatively

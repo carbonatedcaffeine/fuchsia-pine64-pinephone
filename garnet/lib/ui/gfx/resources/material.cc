@@ -51,7 +51,8 @@ void Material::SetColor(float red, float green, float blue, float alpha) {
   // TODO(rosswang): This and related affordances are not enough to allow
   // transparent textures to work on opaque materials. It may be worthwhile to
   // surface the |opaque| flag on the Scenic client API to support this.
-  escher_material_->set_opaque(alpha == 1);
+  escher_material_->set_type(alpha == 1 ? escher::Material::Type::kOpaque
+                                        : escher::Material::Type::kTranslucent);
 }
 
 void Material::SetTexture(ImageBasePtr texture_image) { texture_ = std::move(texture_image); }
@@ -68,7 +69,7 @@ void Material::UpdateEscherMaterial(escher::BatchGpuUploader* gpu_uploader) {
   if (!escher_texture || escher_image != escher_texture->image()) {
     escher::TexturePtr texture;
     if (escher_image) {
-      auto recycler = session()->resource_context().escher_resource_recycler;
+      auto recycler = resource_context().escher_resource_recycler;
       // TODO(SCN-1403): Technically, eG8B8R82Plane420Unorm is not enough to
       // assume NV12, but it's currently the only format we support at the
       // sampler level.

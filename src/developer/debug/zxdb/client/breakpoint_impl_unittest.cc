@@ -22,31 +22,36 @@ using debug_ipc::MessageLoop;
 
 class BreakpointSink : public RemoteAPI {
  public:
-  using AddPair = std::pair<debug_ipc::AddOrChangeBreakpointRequest,
-                            std::function<void(const Err&, debug_ipc::AddOrChangeBreakpointReply)>>;
-  using RemovePair = std::pair<debug_ipc::RemoveBreakpointRequest,
-                               std::function<void(const Err&, debug_ipc::RemoveBreakpointReply)>>;
-
   void AddOrChangeBreakpoint(
       const debug_ipc::AddOrChangeBreakpointRequest& request,
-      std::function<void(const Err&, debug_ipc::AddOrChangeBreakpointReply)> cb) override {
-    adds.push_back(std::make_pair(request, cb));
+      fit::callback<void(const Err&, debug_ipc::AddOrChangeBreakpointReply)> cb) override {
+    adds.push_back(request);
 
-    MessageLoop::Current()->PostTask(
-        FROM_HERE, [cb]() { cb(Err(), debug_ipc::AddOrChangeBreakpointReply()); });
+    MessageLoop::Current()->PostTask(FROM_HERE, [cb = std::move(cb)]() mutable {
+      cb(Err(), debug_ipc::AddOrChangeBreakpointReply());
+    });
   }
 
   void RemoveBreakpoint(
       const debug_ipc::RemoveBreakpointRequest& request,
-      std::function<void(const Err&, debug_ipc::RemoveBreakpointReply)> cb) override {
-    removes.push_back(std::make_pair(request, cb));
+      fit::callback<void(const Err&, debug_ipc::RemoveBreakpointReply)> cb) override {
+    removes.push_back(request);
 
-    MessageLoop::Current()->PostTask(FROM_HERE,
-                                     [cb]() { cb(Err(), debug_ipc::RemoveBreakpointReply()); });
+    MessageLoop::Current()->PostTask(FROM_HERE, [cb = std::move(cb)]() mutable {
+      cb(Err(), debug_ipc::RemoveBreakpointReply());
+    });
   }
 
-  std::vector<AddPair> adds;
-  std::vector<RemovePair> removes;
+  // No-op.
+  void Threads(const debug_ipc::ThreadsRequest& request,
+               fit::callback<void(const Err&, debug_ipc::ThreadsReply)> cb) override {
+    thread_request_made = true;
+  }
+
+  std::vector<debug_ipc::AddOrChangeBreakpointRequest> adds;
+  std::vector<debug_ipc::RemoveBreakpointRequest> removes;
+
+  bool thread_request_made = false;
 };
 
 class BreakpointImplTest : public RemoteAPITest {
@@ -130,6 +135,9 @@ TEST_F(BreakpointImplTest, DynamicLoading) {
   fxl::RefPtr<SystemSymbols::ModuleRef> module2_ref =
       session().system().GetSymbols()->InjectModuleForTesting(kBuildID2, std::move(module2));
 
+  // Before modules no thread request should be made.
+  EXPECT_FALSE(sink().thread_request_made);
+
   // Cause the process to load module 1.
   std::vector<debug_ipc::Module> modules;
   debug_ipc::Module load1;
@@ -139,10 +147,13 @@ TEST_F(BreakpointImplTest, DynamicLoading) {
   modules.push_back(load1);
   target->process()->OnModules(modules, std::vector<uint64_t>());
 
+  // After adding modules, the client should have asked for threads.
+  EXPECT_TRUE(sink().thread_request_made);
+
   // That should have notified the breakpoint which should have added the two
   // addresses to the backend.
   ASSERT_FALSE(sink().adds.empty());
-  debug_ipc::AddOrChangeBreakpointRequest out = sink().adds[0].first;
+  debug_ipc::AddOrChangeBreakpointRequest out = sink().adds[0];
   EXPECT_FALSE(out.breakpoint.one_shot);
   EXPECT_EQ(debug_ipc::Stop::kAll, out.breakpoint.stop);
 
@@ -177,7 +188,7 @@ TEST_F(BreakpointImplTest, DynamicLoading) {
   EXPECT_FALSE(err.has_error());
   ASSERT_TRUE(sink().adds.empty());
   ASSERT_EQ(1u, sink().removes.size());
-  EXPECT_EQ(out.breakpoint.id, sink().removes[0].first.breakpoint_id);
+  EXPECT_EQ(out.breakpoint.id, sink().removes[0].breakpoint_id);
 }
 
 // Tests that address breakpoints are enabled immediately even when no symbols
@@ -205,7 +216,7 @@ TEST_F(BreakpointImplTest, Address) {
 
   // Check the message was sent.
   ASSERT_EQ(1u, sink().adds.size());
-  debug_ipc::AddOrChangeBreakpointRequest out = sink().adds[0].first;
+  debug_ipc::AddOrChangeBreakpointRequest out = sink().adds[0];
   EXPECT_FALSE(out.breakpoint.one_shot);
   EXPECT_EQ(debug_ipc::Stop::kAll, out.breakpoint.stop);
   EXPECT_EQ(1u, out.breakpoint.locations.size());
@@ -234,7 +245,7 @@ TEST_F(BreakpointImplTest, Watchpoint) {
 
   // Check the message was sent.
   ASSERT_EQ(1u, sink().adds.size());
-  debug_ipc::AddOrChangeBreakpointRequest& out = sink().adds[0].first;
+  debug_ipc::AddOrChangeBreakpointRequest& out = sink().adds[0];
   EXPECT_EQ(out.breakpoint_type, debug_ipc::BreakpointType::kWatchpoint);
   EXPECT_FALSE(out.breakpoint.one_shot);
   EXPECT_EQ(debug_ipc::Stop::kAll, out.breakpoint.stop);

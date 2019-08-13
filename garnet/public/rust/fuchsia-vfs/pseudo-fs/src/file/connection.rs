@@ -29,10 +29,16 @@ use {
     std::{io::Write, iter, mem, pin::Pin},
 };
 
-/// return type for handle_request functions
+/// Return type for [`handle_request`] functions.
 pub enum ConnectionState {
+    /// Connection is still alive.
     Alive,
+    /// Connection have received Node::Close message and the [`handle_close`] method has been
+    /// already called for this connection.
     Closed,
+    /// Connection has been dropped by the peer or an error has occured.  [`handle_close`] still
+    /// need to be called (though it would not be able to report the status to the peer).
+    Dropped,
 }
 
 /// FileConnection represents the buffered connection of a single client to a pseudo file. It
@@ -323,7 +329,7 @@ impl FileConnection {
     /// error directly.
     fn handle_read<R>(&mut self, count: u64, responder: R) -> Result<(), fidl::Error>
     where
-        R: FnOnce(Status, &mut ExactSizeIterator<Item = u8>) -> Result<(), fidl::Error>,
+        R: FnOnce(Status, &mut dyn ExactSizeIterator<Item = u8>) -> Result<(), fidl::Error>,
     {
         let actual = self.handle_read_at(self.seek, count, responder)?;
         self.seek += actual;
@@ -342,7 +348,7 @@ impl FileConnection {
         responder: R,
     ) -> Result<u64, fidl::Error>
     where
-        R: FnOnce(Status, &mut ExactSizeIterator<Item = u8>) -> Result<(), fidl::Error>,
+        R: FnOnce(Status, &mut dyn ExactSizeIterator<Item = u8>) -> Result<(), fidl::Error>,
     {
         if self.flags & OPEN_RIGHT_READABLE == 0 {
             responder(Status::ACCESS_DENIED, &mut iter::empty())?;

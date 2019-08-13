@@ -24,9 +24,9 @@ A `block_header` consists of 16 bytes as follows:
 # Type headers
 
 There are currently 11 types defined in
-[//zircon/system/ulib/inspect-vmo/include/lib/inspect-vmo/block.h][block.h]:
+[//zircon/system/ulib/inspect/include/lib/inspect/cpp/vmo/block.h][block.h]:
 
-enum             | value | type name 
+enum             | value | type name
 -----------------|-------|----------------
 `kFree`          | 0     | `FREE`
 `kReserved`      | 1     | `RESERVED`
@@ -375,6 +375,6 @@ practice.
 
 <!-- xrefs -->
 [buddy]: https://en.wikipedia.org/wiki/Buddy_memory_allocation
-[VMO]: /zircon/docs/objects/vm_object.md
-[block.h]: /zircon/system/ulib/inspect-vmo/include/lib/inspect-vmo/block.h
+[VMO]: /docs/zircon/objects/vm_object.md
+[block.h]: /zircon/system/ulib/inspect/include/lib/inspect/cpp/vmo/block.h
 

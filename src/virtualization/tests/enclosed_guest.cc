@@ -4,11 +4,15 @@
 
 #include "src/virtualization/tests/enclosed_guest.h"
 
+#include <fcntl.h>
 #include <fuchsia/netstack/cpp/fidl.h>
 #include <fuchsia/ui/scenic/cpp/fidl.h>
-#include <lib/zx/time.h>
-#include <src/lib/fxl/logging.h>
-#include <src/lib/fxl/strings/string_printf.h>
+#include <lib/fdio/directory.h>
+#include <lib/fit/single_threaded_executor.h>
+#include <lib/zx/clock.h>
+#include <string.h>
+#include <sys/mount.h>
+#include <unistd.h>
 #include <zircon/errors.h>
 #include <zircon/status.h>
 
@@ -16,6 +20,10 @@
 #include <optional>
 #include <string>
 
+#include <src/lib/fxl/logging.h>
+#include <src/lib/fxl/strings/string_printf.h>
+
+#include "src/virtualization/lib/grpc/grpc_vsock_stub.h"
 #include "src/virtualization/tests/logger.h"
 #include "src/virtualization/tests/periodic_logger.h"
 
@@ -30,11 +38,12 @@ static constexpr zx::duration kLoopTimeout = zx::sec(300);
 static constexpr zx::duration kLoopConditionStep = zx::msec(10);
 static constexpr size_t kNumRetries = 40;
 static constexpr zx::duration kRetryStep = zx::msec(200);
+static constexpr uint32_t kTerminaStartupListenerPort = 7777;
+static constexpr uint32_t kTerminaMaitredPort = 8888;
 
 static bool RunLoopUntil(async::Loop* loop, fit::function<bool()> condition,
                          std::optional<PeriodicLogger> logger = std::nullopt) {
   const zx::time deadline = zx::deadline_after(kLoopTimeout);
-
   while (zx::clock::get_monotonic() < deadline) {
     // Check our condition.
     if (condition()) {
@@ -64,7 +73,13 @@ static std::string JoinArgVector(const std::vector<std::string>& argv) {
 }
 
 // Execute |command| on the guest serial and wait for the |result|.
-zx_status_t EnclosedGuest::Execute(const std::vector<std::string>& argv, std::string* result) {
+zx_status_t EnclosedGuest::Execute(const std::vector<std::string>& argv,
+                                   const std::unordered_map<std::string, std::string>& env,
+                                   std::string* result, int32_t* return_code) {
+  if (env.size() > 0) {
+    FXL_LOG(ERROR) << "Only TerminaEnclosedGuest::Execute accepts environment variables.";
+    return ZX_ERR_NOT_SUPPORTED;
+  }
   auto command = JoinArgVector(argv);
   return console_->ExecuteBlocking(command, ShellPrompt(), result);
 }
@@ -121,6 +136,11 @@ zx_status_t EnclosedGuest::Start() {
   enclosing_environment_->ConnectToService(manager_.NewRequest());
   manager_->Create(env_label, realm_.NewRequest());
 
+  status = SetupVsockServices();
+  if (status != ZX_OK) {
+    return status;
+  }
+
   // Launch the guest.
   bool launch_complete = false;
   realm_->LaunchInstance(std::move(guest_launch_info), guest_.NewRequest(),
@@ -161,12 +181,12 @@ zx_status_t EnclosedGuest::Start() {
 
 zx_status_t EnclosedGuest::RunUtil(const std::string& util, const std::vector<std::string>& argv,
                                    std::string* result) {
-  return Execute(GetTestUtilCommand(util, argv), result);
+  return Execute(GetTestUtilCommand(util, argv), {}, result);
 }
 
 zx_status_t ZirconEnclosedGuest::LaunchInfo(fuchsia::virtualization::LaunchInfo* launch_info) {
   launch_info->url = kZirconGuestUrl;
-  launch_info->args.push_back("--cmdline-add=kernel.serial=none");
+  launch_info->args.emplace({"--cmdline-add=kernel.serial=none"});
   return ZX_OK;
 }
 
@@ -175,7 +195,7 @@ zx_status_t ZirconEnclosedGuest::WaitForSystemReady() {
   for (size_t i = 0; i != kNumRetries; ++i) {
     logger.LogIfRequired();
     std::string ps;
-    zx_status_t status = Execute({"ps"}, &ps);
+    zx_status_t status = Execute({"ps"}, {}, &ps);
     if (status != ZX_OK) {
       continue;
     }
@@ -208,7 +228,7 @@ zx_status_t DebianEnclosedGuest::WaitForSystemReady() {
   for (size_t i = 0; i != kNumRetries; ++i) {
     logger.LogIfRequired();
     std::string response;
-    zx_status_t status = Execute({"echo", "guest ready"}, &response);
+    zx_status_t status = Execute({"echo", "guest ready"}, {}, &response);
     if (status != ZX_OK) {
       continue;
     }
@@ -230,4 +250,191 @@ std::vector<std::string> DebianEnclosedGuest::GetTestUtilCommand(
   std::vector<std::string> exec_argv = {bin_path};
   exec_argv.insert(exec_argv.end(), argv.begin(), argv.end());
   return exec_argv;
+}
+
+zx_status_t TerminaEnclosedGuest::LaunchInfo(fuchsia::virtualization::LaunchInfo* launch_info) {
+  launch_info->url = kTerminaGuestUrl;
+  launch_info->args.emplace({"--virtio-gpu=false"});
+
+  // Add the block device that contains the test binaries.
+  int fd = open("/pkg/data/linux_tests.img", O_RDONLY);
+  if (fd < 0) {
+    return ZX_ERR_BAD_STATE;
+  }
+  zx_handle_t handle;
+  zx_status_t status = fdio_get_service_handle(fd, &handle);
+  if (status != ZX_OK) {
+    return status;
+  }
+  launch_info->block_devices.emplace();
+  launch_info->block_devices->push_back({
+      "linux_tests",
+      fuchsia::virtualization::BlockMode::READ_ONLY,
+      fuchsia::virtualization::BlockFormat::RAW,
+      fidl::InterfaceHandle<fuchsia::io::File>(zx::channel(handle)),
+  });
+  // Add non-prebuilt test extras.
+  fd = open("/pkg/data/extras.img", O_RDONLY);
+  if (fd < 0) {
+    return ZX_ERR_BAD_STATE;
+  }
+  status = fdio_get_service_handle(fd, &handle);
+  if (status != ZX_OK) {
+    return status;
+  }
+  launch_info->block_devices.push_back({
+      "extras",
+      fuchsia::virtualization::BlockMode::READ_ONLY,
+      fuchsia::virtualization::BlockFormat::RAW,
+      fidl::InterfaceHandle<fuchsia::io::File>(zx::channel(handle)),
+  });
+  return ZX_OK;
+}
+
+zx_status_t TerminaEnclosedGuest::SetupVsockServices() {
+  fuchsia::virtualization::HostVsockEndpointPtr grpc_endpoint;
+  GetHostVsockEndpoint(vsock_.NewRequest());
+  GetHostVsockEndpoint(grpc_endpoint.NewRequest());
+
+  GrpcVsockServerBuilder builder(std::move(grpc_endpoint));
+  builder.AddListenPort(kTerminaStartupListenerPort);
+  builder.RegisterService(this);
+
+  executor_.schedule_task(
+      builder.Build().and_then([this](std::unique_ptr<GrpcVsockServer>& result) mutable {
+        server_ = std::move(result);
+        return fit::ok();
+      }));
+  if (!RunLoopUntil(&loop_, [this] { return server_ != nullptr; })) {
+    return ZX_ERR_TIMED_OUT;
+  }
+
+  return ZX_OK;
+}
+
+grpc::Status TerminaEnclosedGuest::VmReady(grpc::ServerContext* context,
+                                           const vm_tools::EmptyMessage* request,
+                                           vm_tools::EmptyMessage* response) {
+  auto p = NewGrpcVsockStub<vm_tools::Maitred>(vsock_, GetGuestCid(), kTerminaMaitredPort);
+  auto result = fit::run_single_threaded(std::move(p));
+  if (result.is_ok()) {
+    maitred_ = std::move(result.value());
+  } else {
+    FXL_PLOG(ERROR, result.error()) << "Failed to connect to maitred";
+  }
+  return grpc::Status::OK;
+}
+
+zx_status_t TerminaEnclosedGuest::WaitForSystemReady() {
+  // The VM will connect to the StartupListener port when it's ready and we'll
+  // create the maitred stub in |VmReady|.
+  if (!RunLoopUntil(
+          &loop_, [this] { return maitred_ != nullptr; },
+          PeriodicLogger("Wait for maitred", zx::sec(1)))) {
+    return ZX_ERR_TIMED_OUT;
+  }
+  FXL_CHECK(maitred_) << "No maitred connection";
+
+  // Connect to vshd.
+  fuchsia::virtualization::HostVsockEndpointPtr endpoint;
+  GetHostVsockEndpoint(endpoint.NewRequest());
+  command_runner_ =
+      std::make_unique<vsh::BlockingCommandRunner>(std::move(endpoint), GetGuestCid());
+
+  // Create mountpoints for test utils and extras. The root filesystem is read only so we
+  // put these under /tmp.
+  {
+    for (auto dir : {"/tmp/test_utils", "/tmp/extras"}) {
+      auto command_result = command_runner_->Execute({
+          {"mkdir", "-p", dir},
+          {},
+      });
+      if (!command_result.is_ok()) {
+        FXL_LOG(ERROR) << "Command fails with error "
+                       << zx_status_get_string(command_result.error());
+        return command_result.error();
+      }
+    }
+  }
+
+  // Mount the test_utils disk image.
+  {
+    grpc::ClientContext context;
+    vm_tools::MountRequest request;
+    vm_tools::MountResponse response;
+
+    request.mutable_source()->assign("/dev/vdb");
+    request.mutable_target()->assign("/tmp/test_utils");
+    request.mutable_fstype()->assign("ext2");
+    request.set_mountflags(MS_RDONLY);
+
+    auto grpc_status = maitred_->Mount(&context, request, &response);
+    if (!grpc_status.ok()) {
+      FXL_LOG(ERROR) << "Failed to mount test_utils filesystem: " << grpc_status.error_message();
+      return ZX_ERR_IO;
+    }
+    if (response.error() != 0) {
+      FXL_LOG(ERROR) << "test_utils mount failed: " << response.error();
+      return ZX_ERR_IO;
+    }
+  }
+
+  // Mount the extras disk image.
+  {
+    grpc::ClientContext context;
+    vm_tools::MountRequest request;
+    vm_tools::MountResponse response;
+
+    request.mutable_source()->assign("/dev/vdc");
+    request.mutable_target()->assign("/tmp/extras");
+    request.mutable_fstype()->assign("romfs");
+    request.set_mountflags(MS_RDONLY);
+
+    auto grpc_status = maitred_->Mount(&context, request, &response);
+    if (!grpc_status.ok()) {
+      FXL_LOG(ERROR) << "Failed to mount extras filesystem: " << grpc_status.error_message();
+      return ZX_ERR_IO;
+    }
+    if (response.error() != 0) {
+      FXL_LOG(ERROR) << "extras mount failed: " << response.error();
+      return ZX_ERR_IO;
+    }
+  }
+
+  return ZX_OK;
+}
+
+void TerminaEnclosedGuest::WaitForSystemStopped() {
+  if (server_) {
+    server_->inner()->Shutdown();
+    server_->inner()->Wait();
+  }
+}
+
+zx_status_t TerminaEnclosedGuest::Execute(const std::vector<std::string>& argv,
+                                          const std::unordered_map<std::string, std::string>& env,
+                                          std::string* result, int32_t* return_code) {
+  auto command_result = command_runner_->Execute({argv, env});
+  if (command_result.is_error()) {
+    return command_result.error();
+  }
+  if (result) {
+    *result = std::move(command_result.value().out);
+    if (!command_result.value().err.empty()) {
+      *result += "\n";
+      *result += std::move(command_result.value().err);
+    }
+  }
+  if (return_code) {
+    *return_code = command_result.value().return_code;
+  }
+  return ZX_OK;
+}
+
+std::vector<std::string> TerminaEnclosedGuest::GetTestUtilCommand(
+    const std::string& util, const std::vector<std::string>& args) {
+  std::vector<std::string> argv;
+  argv.emplace_back("/tmp/test_utils/" + util);
+  argv.insert(argv.end(), args.begin(), args.end());
+  return argv;
 }

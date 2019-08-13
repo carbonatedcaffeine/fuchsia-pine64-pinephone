@@ -11,39 +11,75 @@ namespace sysinfo {
 namespace {
 
 [[maybe_unused]]
-constexpr uint64_t kDevice_GetRootJob_Ordinal = 1695053783lu << 32;
+constexpr uint64_t kDevice_GetRootJob_GenOrdinal = 0x650877d700000000lu;
 extern "C" const fidl_type_t fuchsia_sysinfo_DeviceGetRootJobResponseTable;
 [[maybe_unused]]
-constexpr uint64_t kDevice_GetRootResource_Ordinal = 149620396lu << 32;
-extern "C" const fidl_type_t fuchsia_sysinfo_DeviceGetRootResourceResponseTable;
-[[maybe_unused]]
-constexpr uint64_t kDevice_GetHypervisorResource_Ordinal = 946381163lu << 32;
+constexpr uint64_t kDevice_GetHypervisorResource_GenOrdinal = 0x3868a16b00000000lu;
 extern "C" const fidl_type_t fuchsia_sysinfo_DeviceGetHypervisorResourceResponseTable;
 [[maybe_unused]]
-constexpr uint64_t kDevice_GetBoardName_Ordinal = 1752599405lu << 32;
+constexpr uint64_t kDevice_GetBoardName_GenOrdinal = 0x68768b6d00000000lu;
 extern "C" const fidl_type_t fuchsia_sysinfo_DeviceGetBoardNameResponseTable;
 [[maybe_unused]]
-constexpr uint64_t kDevice_GetInterruptControllerInfo_Ordinal = 1602992612lu << 32;
+constexpr uint64_t kDevice_GetInterruptControllerInfo_GenOrdinal = 0x5f8bb9e400000000lu;
 extern "C" const fidl_type_t fuchsia_sysinfo_DeviceGetInterruptControllerInfoResponseTable;
 
 }  // namespace
-
-zx_status_t Device::SyncClient::GetRootJob(int32_t* out_status, ::zx::job* out_job) {
-  return Device::Call::GetRootJob(zx::unowned_channel(this->channel_), out_status, out_job);
+template <>
+Device::ResultOf::GetRootJob_Impl<Device::GetRootJobResponse>::GetRootJob_Impl(zx::unowned_channel _client_end) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetRootJobRequest, ::fidl::MessageDirection::kSending>();
+  ::fidl::internal::AlignedBuffer<_kWriteAllocSize> _write_bytes_inlined;
+  auto& _write_bytes_array = _write_bytes_inlined;
+  uint8_t* _write_bytes = _write_bytes_array.view().data();
+  memset(_write_bytes, 0, GetRootJobRequest::PrimarySize);
+  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(GetRootJobRequest));
+  ::fidl::DecodedMessage<GetRootJobRequest> _decoded_request(std::move(_request_bytes));
+  Super::SetResult(
+      Device::InPlace::GetRootJob(std::move(_client_end), Super::response_buffer()));
 }
 
-zx_status_t Device::Call::GetRootJob(zx::unowned_channel _client_end, int32_t* out_status, ::zx::job* out_job) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetRootJobRequest>();
+Device::ResultOf::GetRootJob Device::SyncClient::GetRootJob() {
+  return ResultOf::GetRootJob(zx::unowned_channel(this->channel_));
+}
+
+Device::ResultOf::GetRootJob Device::Call::GetRootJob(zx::unowned_channel _client_end) {
+  return ResultOf::GetRootJob(std::move(_client_end));
+}
+
+template <>
+Device::UnownedResultOf::GetRootJob_Impl<Device::GetRootJobResponse>::GetRootJob_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer) {
+  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetRootJobRequest)] = {};
+  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
+  memset(_request_buffer.data(), 0, GetRootJobRequest::PrimarySize);
+  _request_buffer.set_actual(sizeof(GetRootJobRequest));
+  ::fidl::DecodedMessage<GetRootJobRequest> _decoded_request(std::move(_request_buffer));
+  Super::SetResult(
+      Device::InPlace::GetRootJob(std::move(_client_end), std::move(_response_buffer)));
+}
+
+Device::UnownedResultOf::GetRootJob Device::SyncClient::GetRootJob(::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::GetRootJob(zx::unowned_channel(this->channel_), std::move(_response_buffer));
+}
+
+Device::UnownedResultOf::GetRootJob Device::Call::GetRootJob(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::GetRootJob(std::move(_client_end), std::move(_response_buffer));
+}
+
+zx_status_t Device::SyncClient::GetRootJob_Deprecated(int32_t* out_status, ::zx::job* out_job) {
+  return Device::Call::GetRootJob_Deprecated(zx::unowned_channel(this->channel_), out_status, out_job);
+}
+
+zx_status_t Device::Call::GetRootJob_Deprecated(zx::unowned_channel _client_end, int32_t* out_status, ::zx::job* out_job) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetRootJobRequest, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _request = *reinterpret_cast<GetRootJobRequest*>(_write_bytes);
-  _request._hdr.ordinal = kDevice_GetRootJob_Ordinal;
+  _request._hdr.ordinal = kDevice_GetRootJob_GenOrdinal;
   ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(GetRootJobRequest));
   ::fidl::DecodedMessage<GetRootJobRequest> _decoded_request(std::move(_request_bytes));
   auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
   if (_encode_request_result.status != ZX_OK) {
     return _encode_request_result.status;
   }
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<GetRootJobResponse>();
+  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<GetRootJobResponse, ::fidl::MessageDirection::kReceiving>();
   FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
   ::fidl::BytePart _response_bytes(_read_bytes, _kReadAllocSize);
   auto _call_result = ::fidl::Call<GetRootJobRequest, GetRootJobResponse>(
@@ -61,15 +97,15 @@ zx_status_t Device::Call::GetRootJob(zx::unowned_channel _client_end, int32_t* o
   return ZX_OK;
 }
 
-::fidl::DecodeResult<Device::GetRootJobResponse> Device::SyncClient::GetRootJob(::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::job* out_job) {
-  return Device::Call::GetRootJob(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_status, out_job);
+::fidl::DecodeResult<Device::GetRootJobResponse> Device::SyncClient::GetRootJob_Deprecated(::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::job* out_job) {
+  return Device::Call::GetRootJob_Deprecated(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_status, out_job);
 }
 
-::fidl::DecodeResult<Device::GetRootJobResponse> Device::Call::GetRootJob(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::job* out_job) {
+::fidl::DecodeResult<Device::GetRootJobResponse> Device::Call::GetRootJob_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::job* out_job) {
   FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetRootJobRequest)] = {};
   ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
   auto& _request = *reinterpret_cast<GetRootJobRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kDevice_GetRootJob_Ordinal;
+  _request._hdr.ordinal = kDevice_GetRootJob_GenOrdinal;
   _request_buffer.set_actual(sizeof(GetRootJobRequest));
   ::fidl::DecodedMessage<GetRootJobRequest> _decoded_request(std::move(_request_buffer));
   auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
@@ -91,145 +127,84 @@ zx_status_t Device::Call::GetRootJob(zx::unowned_channel _client_end, int32_t* o
   return _decode_result;
 }
 
-::fidl::DecodeResult<Device::GetRootJobResponse> Device::SyncClient::GetRootJob(::fidl::BytePart response_buffer) {
-  return Device::Call::GetRootJob(zx::unowned_channel(this->channel_), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<Device::GetRootJobResponse> Device::Call::GetRootJob(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetRootJobRequest)] = {};
+::fidl::DecodeResult<Device::GetRootJobResponse> Device::InPlace::GetRootJob(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
   constexpr uint32_t _write_num_bytes = sizeof(GetRootJobRequest);
-  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes), _write_num_bytes);
+  ::fidl::internal::AlignedBuffer<_write_num_bytes> _write_bytes;
+  ::fidl::BytePart _request_buffer = _write_bytes.view();
+  _request_buffer.set_actual(_write_num_bytes);
   ::fidl::DecodedMessage<GetRootJobRequest> params(std::move(_request_buffer));
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kDevice_GetRootJob_Ordinal;
+  params.message()->_hdr.ordinal = kDevice_GetRootJob_GenOrdinal;
   auto _encode_request_result = ::fidl::Encode(std::move(params));
   if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<Device::GetRootJobResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<Device::GetRootJobResponse>());
+    return ::fidl::DecodeResult<Device::GetRootJobResponse>::FromFailure(
+        std::move(_encode_request_result));
   }
   auto _call_result = ::fidl::Call<GetRootJobRequest, GetRootJobResponse>(
     std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
   if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<Device::GetRootJobResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<Device::GetRootJobResponse>());
+    return ::fidl::DecodeResult<Device::GetRootJobResponse>::FromFailure(
+        std::move(_call_result));
   }
   return ::fidl::Decode(std::move(_call_result.message));
 }
 
-
-zx_status_t Device::SyncClient::GetRootResource(int32_t* out_status, ::zx::resource* out_resource) {
-  return Device::Call::GetRootResource(zx::unowned_channel(this->channel_), out_status, out_resource);
+template <>
+Device::ResultOf::GetHypervisorResource_Impl<Device::GetHypervisorResourceResponse>::GetHypervisorResource_Impl(zx::unowned_channel _client_end) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetHypervisorResourceRequest, ::fidl::MessageDirection::kSending>();
+  ::fidl::internal::AlignedBuffer<_kWriteAllocSize> _write_bytes_inlined;
+  auto& _write_bytes_array = _write_bytes_inlined;
+  uint8_t* _write_bytes = _write_bytes_array.view().data();
+  memset(_write_bytes, 0, GetHypervisorResourceRequest::PrimarySize);
+  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(GetHypervisorResourceRequest));
+  ::fidl::DecodedMessage<GetHypervisorResourceRequest> _decoded_request(std::move(_request_bytes));
+  Super::SetResult(
+      Device::InPlace::GetHypervisorResource(std::move(_client_end), Super::response_buffer()));
 }
 
-zx_status_t Device::Call::GetRootResource(zx::unowned_channel _client_end, int32_t* out_status, ::zx::resource* out_resource) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetRootResourceRequest>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _request = *reinterpret_cast<GetRootResourceRequest*>(_write_bytes);
-  _request._hdr.ordinal = kDevice_GetRootResource_Ordinal;
-  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(GetRootResourceRequest));
-  ::fidl::DecodedMessage<GetRootResourceRequest> _decoded_request(std::move(_request_bytes));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return _encode_request_result.status;
-  }
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<GetRootResourceResponse>();
-  FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
-  ::fidl::BytePart _response_bytes(_read_bytes, _kReadAllocSize);
-  auto _call_result = ::fidl::Call<GetRootResourceRequest, GetRootResourceResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_bytes));
-  if (_call_result.status != ZX_OK) {
-    return _call_result.status;
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result.status;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_status = std::move(_response.status);
-  *out_resource = std::move(_response.resource);
-  return ZX_OK;
+Device::ResultOf::GetHypervisorResource Device::SyncClient::GetHypervisorResource() {
+  return ResultOf::GetHypervisorResource(zx::unowned_channel(this->channel_));
 }
 
-::fidl::DecodeResult<Device::GetRootResourceResponse> Device::SyncClient::GetRootResource(::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::resource* out_resource) {
-  return Device::Call::GetRootResource(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_status, out_resource);
+Device::ResultOf::GetHypervisorResource Device::Call::GetHypervisorResource(zx::unowned_channel _client_end) {
+  return ResultOf::GetHypervisorResource(std::move(_client_end));
 }
 
-::fidl::DecodeResult<Device::GetRootResourceResponse> Device::Call::GetRootResource(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::resource* out_resource) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetRootResourceRequest)] = {};
+template <>
+Device::UnownedResultOf::GetHypervisorResource_Impl<Device::GetHypervisorResourceResponse>::GetHypervisorResource_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer) {
+  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetHypervisorResourceRequest)] = {};
   ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
-  auto& _request = *reinterpret_cast<GetRootResourceRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kDevice_GetRootResource_Ordinal;
-  _request_buffer.set_actual(sizeof(GetRootResourceRequest));
-  ::fidl::DecodedMessage<GetRootResourceRequest> _decoded_request(std::move(_request_buffer));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<GetRootResourceResponse>(_encode_request_result.status, _encode_request_result.error);
-  }
-  auto _call_result = ::fidl::Call<GetRootResourceRequest, GetRootResourceResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<GetRootResourceResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_status = std::move(_response.status);
-  *out_resource = std::move(_response.resource);
-  return _decode_result;
+  memset(_request_buffer.data(), 0, GetHypervisorResourceRequest::PrimarySize);
+  _request_buffer.set_actual(sizeof(GetHypervisorResourceRequest));
+  ::fidl::DecodedMessage<GetHypervisorResourceRequest> _decoded_request(std::move(_request_buffer));
+  Super::SetResult(
+      Device::InPlace::GetHypervisorResource(std::move(_client_end), std::move(_response_buffer)));
 }
 
-::fidl::DecodeResult<Device::GetRootResourceResponse> Device::SyncClient::GetRootResource(::fidl::BytePart response_buffer) {
-  return Device::Call::GetRootResource(zx::unowned_channel(this->channel_), std::move(response_buffer));
+Device::UnownedResultOf::GetHypervisorResource Device::SyncClient::GetHypervisorResource(::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::GetHypervisorResource(zx::unowned_channel(this->channel_), std::move(_response_buffer));
 }
 
-::fidl::DecodeResult<Device::GetRootResourceResponse> Device::Call::GetRootResource(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetRootResourceRequest)] = {};
-  constexpr uint32_t _write_num_bytes = sizeof(GetRootResourceRequest);
-  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes), _write_num_bytes);
-  ::fidl::DecodedMessage<GetRootResourceRequest> params(std::move(_request_buffer));
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kDevice_GetRootResource_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<Device::GetRootResourceResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<Device::GetRootResourceResponse>());
-  }
-  auto _call_result = ::fidl::Call<GetRootResourceRequest, GetRootResourceResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<Device::GetRootResourceResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<Device::GetRootResourceResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
+Device::UnownedResultOf::GetHypervisorResource Device::Call::GetHypervisorResource(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::GetHypervisorResource(std::move(_client_end), std::move(_response_buffer));
 }
 
-
-zx_status_t Device::SyncClient::GetHypervisorResource(int32_t* out_status, ::zx::resource* out_resource) {
-  return Device::Call::GetHypervisorResource(zx::unowned_channel(this->channel_), out_status, out_resource);
+zx_status_t Device::SyncClient::GetHypervisorResource_Deprecated(int32_t* out_status, ::zx::resource* out_resource) {
+  return Device::Call::GetHypervisorResource_Deprecated(zx::unowned_channel(this->channel_), out_status, out_resource);
 }
 
-zx_status_t Device::Call::GetHypervisorResource(zx::unowned_channel _client_end, int32_t* out_status, ::zx::resource* out_resource) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetHypervisorResourceRequest>();
+zx_status_t Device::Call::GetHypervisorResource_Deprecated(zx::unowned_channel _client_end, int32_t* out_status, ::zx::resource* out_resource) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetHypervisorResourceRequest, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _request = *reinterpret_cast<GetHypervisorResourceRequest*>(_write_bytes);
-  _request._hdr.ordinal = kDevice_GetHypervisorResource_Ordinal;
+  _request._hdr.ordinal = kDevice_GetHypervisorResource_GenOrdinal;
   ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(GetHypervisorResourceRequest));
   ::fidl::DecodedMessage<GetHypervisorResourceRequest> _decoded_request(std::move(_request_bytes));
   auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
   if (_encode_request_result.status != ZX_OK) {
     return _encode_request_result.status;
   }
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<GetHypervisorResourceResponse>();
+  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<GetHypervisorResourceResponse, ::fidl::MessageDirection::kReceiving>();
   FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
   ::fidl::BytePart _response_bytes(_read_bytes, _kReadAllocSize);
   auto _call_result = ::fidl::Call<GetHypervisorResourceRequest, GetHypervisorResourceResponse>(
@@ -247,15 +222,15 @@ zx_status_t Device::Call::GetHypervisorResource(zx::unowned_channel _client_end,
   return ZX_OK;
 }
 
-::fidl::DecodeResult<Device::GetHypervisorResourceResponse> Device::SyncClient::GetHypervisorResource(::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::resource* out_resource) {
-  return Device::Call::GetHypervisorResource(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_status, out_resource);
+::fidl::DecodeResult<Device::GetHypervisorResourceResponse> Device::SyncClient::GetHypervisorResource_Deprecated(::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::resource* out_resource) {
+  return Device::Call::GetHypervisorResource_Deprecated(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_status, out_resource);
 }
 
-::fidl::DecodeResult<Device::GetHypervisorResourceResponse> Device::Call::GetHypervisorResource(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::resource* out_resource) {
+::fidl::DecodeResult<Device::GetHypervisorResourceResponse> Device::Call::GetHypervisorResource_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::zx::resource* out_resource) {
   FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetHypervisorResourceRequest)] = {};
   ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
   auto& _request = *reinterpret_cast<GetHypervisorResourceRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kDevice_GetHypervisorResource_Ordinal;
+  _request._hdr.ordinal = kDevice_GetHypervisorResource_GenOrdinal;
   _request_buffer.set_actual(sizeof(GetHypervisorResourceRequest));
   ::fidl::DecodedMessage<GetHypervisorResourceRequest> _decoded_request(std::move(_request_buffer));
   auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
@@ -277,45 +252,77 @@ zx_status_t Device::Call::GetHypervisorResource(zx::unowned_channel _client_end,
   return _decode_result;
 }
 
-::fidl::DecodeResult<Device::GetHypervisorResourceResponse> Device::SyncClient::GetHypervisorResource(::fidl::BytePart response_buffer) {
-  return Device::Call::GetHypervisorResource(zx::unowned_channel(this->channel_), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<Device::GetHypervisorResourceResponse> Device::Call::GetHypervisorResource(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetHypervisorResourceRequest)] = {};
+::fidl::DecodeResult<Device::GetHypervisorResourceResponse> Device::InPlace::GetHypervisorResource(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
   constexpr uint32_t _write_num_bytes = sizeof(GetHypervisorResourceRequest);
-  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes), _write_num_bytes);
+  ::fidl::internal::AlignedBuffer<_write_num_bytes> _write_bytes;
+  ::fidl::BytePart _request_buffer = _write_bytes.view();
+  _request_buffer.set_actual(_write_num_bytes);
   ::fidl::DecodedMessage<GetHypervisorResourceRequest> params(std::move(_request_buffer));
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kDevice_GetHypervisorResource_Ordinal;
+  params.message()->_hdr.ordinal = kDevice_GetHypervisorResource_GenOrdinal;
   auto _encode_request_result = ::fidl::Encode(std::move(params));
   if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<Device::GetHypervisorResourceResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<Device::GetHypervisorResourceResponse>());
+    return ::fidl::DecodeResult<Device::GetHypervisorResourceResponse>::FromFailure(
+        std::move(_encode_request_result));
   }
   auto _call_result = ::fidl::Call<GetHypervisorResourceRequest, GetHypervisorResourceResponse>(
     std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
   if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<Device::GetHypervisorResourceResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<Device::GetHypervisorResourceResponse>());
+    return ::fidl::DecodeResult<Device::GetHypervisorResourceResponse>::FromFailure(
+        std::move(_call_result));
   }
   return ::fidl::Decode(std::move(_call_result.message));
 }
 
-
-::fidl::DecodeResult<Device::GetBoardNameResponse> Device::SyncClient::GetBoardName(::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_name) {
-  return Device::Call::GetBoardName(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_status, out_name);
+template <>
+Device::ResultOf::GetBoardName_Impl<Device::GetBoardNameResponse>::GetBoardName_Impl(zx::unowned_channel _client_end) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetBoardNameRequest, ::fidl::MessageDirection::kSending>();
+  ::fidl::internal::AlignedBuffer<_kWriteAllocSize> _write_bytes_inlined;
+  auto& _write_bytes_array = _write_bytes_inlined;
+  uint8_t* _write_bytes = _write_bytes_array.view().data();
+  memset(_write_bytes, 0, GetBoardNameRequest::PrimarySize);
+  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(GetBoardNameRequest));
+  ::fidl::DecodedMessage<GetBoardNameRequest> _decoded_request(std::move(_request_bytes));
+  Super::SetResult(
+      Device::InPlace::GetBoardName(std::move(_client_end), Super::response_buffer()));
 }
 
-::fidl::DecodeResult<Device::GetBoardNameResponse> Device::Call::GetBoardName(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_name) {
+Device::ResultOf::GetBoardName Device::SyncClient::GetBoardName() {
+  return ResultOf::GetBoardName(zx::unowned_channel(this->channel_));
+}
+
+Device::ResultOf::GetBoardName Device::Call::GetBoardName(zx::unowned_channel _client_end) {
+  return ResultOf::GetBoardName(std::move(_client_end));
+}
+
+template <>
+Device::UnownedResultOf::GetBoardName_Impl<Device::GetBoardNameResponse>::GetBoardName_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer) {
+  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetBoardNameRequest)] = {};
+  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
+  memset(_request_buffer.data(), 0, GetBoardNameRequest::PrimarySize);
+  _request_buffer.set_actual(sizeof(GetBoardNameRequest));
+  ::fidl::DecodedMessage<GetBoardNameRequest> _decoded_request(std::move(_request_buffer));
+  Super::SetResult(
+      Device::InPlace::GetBoardName(std::move(_client_end), std::move(_response_buffer)));
+}
+
+Device::UnownedResultOf::GetBoardName Device::SyncClient::GetBoardName(::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::GetBoardName(zx::unowned_channel(this->channel_), std::move(_response_buffer));
+}
+
+Device::UnownedResultOf::GetBoardName Device::Call::GetBoardName(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::GetBoardName(std::move(_client_end), std::move(_response_buffer));
+}
+
+::fidl::DecodeResult<Device::GetBoardNameResponse> Device::SyncClient::GetBoardName_Deprecated(::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_name) {
+  return Device::Call::GetBoardName_Deprecated(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_status, out_name);
+}
+
+::fidl::DecodeResult<Device::GetBoardNameResponse> Device::Call::GetBoardName_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::StringView* out_name) {
   FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetBoardNameRequest)] = {};
   ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
   auto& _request = *reinterpret_cast<GetBoardNameRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kDevice_GetBoardName_Ordinal;
+  _request._hdr.ordinal = kDevice_GetBoardName_GenOrdinal;
   _request_buffer.set_actual(sizeof(GetBoardNameRequest));
   ::fidl::DecodedMessage<GetBoardNameRequest> _decoded_request(std::move(_request_buffer));
   auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
@@ -337,45 +344,77 @@ zx_status_t Device::Call::GetHypervisorResource(zx::unowned_channel _client_end,
   return _decode_result;
 }
 
-::fidl::DecodeResult<Device::GetBoardNameResponse> Device::SyncClient::GetBoardName(::fidl::BytePart response_buffer) {
-  return Device::Call::GetBoardName(zx::unowned_channel(this->channel_), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<Device::GetBoardNameResponse> Device::Call::GetBoardName(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetBoardNameRequest)] = {};
+::fidl::DecodeResult<Device::GetBoardNameResponse> Device::InPlace::GetBoardName(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
   constexpr uint32_t _write_num_bytes = sizeof(GetBoardNameRequest);
-  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes), _write_num_bytes);
+  ::fidl::internal::AlignedBuffer<_write_num_bytes> _write_bytes;
+  ::fidl::BytePart _request_buffer = _write_bytes.view();
+  _request_buffer.set_actual(_write_num_bytes);
   ::fidl::DecodedMessage<GetBoardNameRequest> params(std::move(_request_buffer));
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kDevice_GetBoardName_Ordinal;
+  params.message()->_hdr.ordinal = kDevice_GetBoardName_GenOrdinal;
   auto _encode_request_result = ::fidl::Encode(std::move(params));
   if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<Device::GetBoardNameResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<Device::GetBoardNameResponse>());
+    return ::fidl::DecodeResult<Device::GetBoardNameResponse>::FromFailure(
+        std::move(_encode_request_result));
   }
   auto _call_result = ::fidl::Call<GetBoardNameRequest, GetBoardNameResponse>(
     std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
   if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<Device::GetBoardNameResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<Device::GetBoardNameResponse>());
+    return ::fidl::DecodeResult<Device::GetBoardNameResponse>::FromFailure(
+        std::move(_call_result));
   }
   return ::fidl::Decode(std::move(_call_result.message));
 }
 
-
-::fidl::DecodeResult<Device::GetInterruptControllerInfoResponse> Device::SyncClient::GetInterruptControllerInfo(::fidl::BytePart _response_buffer, int32_t* out_status, InterruptControllerInfo** out_info) {
-  return Device::Call::GetInterruptControllerInfo(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_status, out_info);
+template <>
+Device::ResultOf::GetInterruptControllerInfo_Impl<Device::GetInterruptControllerInfoResponse>::GetInterruptControllerInfo_Impl(zx::unowned_channel _client_end) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetInterruptControllerInfoRequest, ::fidl::MessageDirection::kSending>();
+  ::fidl::internal::AlignedBuffer<_kWriteAllocSize> _write_bytes_inlined;
+  auto& _write_bytes_array = _write_bytes_inlined;
+  uint8_t* _write_bytes = _write_bytes_array.view().data();
+  memset(_write_bytes, 0, GetInterruptControllerInfoRequest::PrimarySize);
+  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(GetInterruptControllerInfoRequest));
+  ::fidl::DecodedMessage<GetInterruptControllerInfoRequest> _decoded_request(std::move(_request_bytes));
+  Super::SetResult(
+      Device::InPlace::GetInterruptControllerInfo(std::move(_client_end), Super::response_buffer()));
 }
 
-::fidl::DecodeResult<Device::GetInterruptControllerInfoResponse> Device::Call::GetInterruptControllerInfo(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, InterruptControllerInfo** out_info) {
+Device::ResultOf::GetInterruptControllerInfo Device::SyncClient::GetInterruptControllerInfo() {
+  return ResultOf::GetInterruptControllerInfo(zx::unowned_channel(this->channel_));
+}
+
+Device::ResultOf::GetInterruptControllerInfo Device::Call::GetInterruptControllerInfo(zx::unowned_channel _client_end) {
+  return ResultOf::GetInterruptControllerInfo(std::move(_client_end));
+}
+
+template <>
+Device::UnownedResultOf::GetInterruptControllerInfo_Impl<Device::GetInterruptControllerInfoResponse>::GetInterruptControllerInfo_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer) {
+  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetInterruptControllerInfoRequest)] = {};
+  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
+  memset(_request_buffer.data(), 0, GetInterruptControllerInfoRequest::PrimarySize);
+  _request_buffer.set_actual(sizeof(GetInterruptControllerInfoRequest));
+  ::fidl::DecodedMessage<GetInterruptControllerInfoRequest> _decoded_request(std::move(_request_buffer));
+  Super::SetResult(
+      Device::InPlace::GetInterruptControllerInfo(std::move(_client_end), std::move(_response_buffer)));
+}
+
+Device::UnownedResultOf::GetInterruptControllerInfo Device::SyncClient::GetInterruptControllerInfo(::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::GetInterruptControllerInfo(zx::unowned_channel(this->channel_), std::move(_response_buffer));
+}
+
+Device::UnownedResultOf::GetInterruptControllerInfo Device::Call::GetInterruptControllerInfo(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::GetInterruptControllerInfo(std::move(_client_end), std::move(_response_buffer));
+}
+
+::fidl::DecodeResult<Device::GetInterruptControllerInfoResponse> Device::SyncClient::GetInterruptControllerInfo_Deprecated(::fidl::BytePart _response_buffer, int32_t* out_status, InterruptControllerInfo** out_info) {
+  return Device::Call::GetInterruptControllerInfo_Deprecated(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_status, out_info);
+}
+
+::fidl::DecodeResult<Device::GetInterruptControllerInfoResponse> Device::Call::GetInterruptControllerInfo_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int32_t* out_status, InterruptControllerInfo** out_info) {
   FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetInterruptControllerInfoRequest)] = {};
   ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
   auto& _request = *reinterpret_cast<GetInterruptControllerInfoRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kDevice_GetInterruptControllerInfo_Ordinal;
+  _request._hdr.ordinal = kDevice_GetInterruptControllerInfo_GenOrdinal;
   _request_buffer.set_actual(sizeof(GetInterruptControllerInfoRequest));
   ::fidl::DecodedMessage<GetInterruptControllerInfoRequest> _decoded_request(std::move(_request_buffer));
   auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
@@ -397,31 +436,24 @@ zx_status_t Device::Call::GetHypervisorResource(zx::unowned_channel _client_end,
   return _decode_result;
 }
 
-::fidl::DecodeResult<Device::GetInterruptControllerInfoResponse> Device::SyncClient::GetInterruptControllerInfo(::fidl::BytePart response_buffer) {
-  return Device::Call::GetInterruptControllerInfo(zx::unowned_channel(this->channel_), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<Device::GetInterruptControllerInfoResponse> Device::Call::GetInterruptControllerInfo(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetInterruptControllerInfoRequest)] = {};
+::fidl::DecodeResult<Device::GetInterruptControllerInfoResponse> Device::InPlace::GetInterruptControllerInfo(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
   constexpr uint32_t _write_num_bytes = sizeof(GetInterruptControllerInfoRequest);
-  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes), _write_num_bytes);
+  ::fidl::internal::AlignedBuffer<_write_num_bytes> _write_bytes;
+  ::fidl::BytePart _request_buffer = _write_bytes.view();
+  _request_buffer.set_actual(_write_num_bytes);
   ::fidl::DecodedMessage<GetInterruptControllerInfoRequest> params(std::move(_request_buffer));
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kDevice_GetInterruptControllerInfo_Ordinal;
+  params.message()->_hdr.ordinal = kDevice_GetInterruptControllerInfo_GenOrdinal;
   auto _encode_request_result = ::fidl::Encode(std::move(params));
   if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<Device::GetInterruptControllerInfoResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<Device::GetInterruptControllerInfoResponse>());
+    return ::fidl::DecodeResult<Device::GetInterruptControllerInfoResponse>::FromFailure(
+        std::move(_encode_request_result));
   }
   auto _call_result = ::fidl::Call<GetInterruptControllerInfoRequest, GetInterruptControllerInfoResponse>(
     std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
   if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<Device::GetInterruptControllerInfoResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<Device::GetInterruptControllerInfoResponse>());
+    return ::fidl::DecodeResult<Device::GetInterruptControllerInfoResponse>::FromFailure(
+        std::move(_call_result));
   }
   return ::fidl::Decode(std::move(_call_result.message));
 }
@@ -435,7 +467,8 @@ bool Device::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* 
   }
   fidl_message_header_t* hdr = reinterpret_cast<fidl_message_header_t*>(msg->bytes);
   switch (hdr->ordinal) {
-    case kDevice_GetRootJob_Ordinal: {
+    case kDevice_GetRootJob_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<GetRootJobRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);
@@ -445,17 +478,8 @@ bool Device::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* 
         Interface::GetRootJobCompleter::Sync(txn));
       return true;
     }
-    case kDevice_GetRootResource_Ordinal: {
-      auto result = ::fidl::DecodeAs<GetRootResourceRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      impl->GetRootResource(
-        Interface::GetRootResourceCompleter::Sync(txn));
-      return true;
-    }
-    case kDevice_GetHypervisorResource_Ordinal: {
+    case kDevice_GetHypervisorResource_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<GetHypervisorResourceRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);
@@ -465,7 +489,8 @@ bool Device::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* 
         Interface::GetHypervisorResourceCompleter::Sync(txn));
       return true;
     }
-    case kDevice_GetBoardName_Ordinal: {
+    case kDevice_GetBoardName_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<GetBoardNameRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);
@@ -475,7 +500,8 @@ bool Device::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* 
         Interface::GetBoardNameCompleter::Sync(txn));
       return true;
     }
-    case kDevice_GetInterruptControllerInfo_Ordinal: {
+    case kDevice_GetInterruptControllerInfo_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<GetInterruptControllerInfoRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);
@@ -502,10 +528,10 @@ bool Device::Dispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* txn
 
 
 void Device::Interface::GetRootJobCompleterBase::Reply(int32_t status, ::zx::job job) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetRootJobResponse>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetRootJobResponse, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _response = *reinterpret_cast<GetRootJobResponse*>(_write_bytes);
-  _response._hdr.ordinal = kDevice_GetRootJob_Ordinal;
+  _response._hdr.ordinal = kDevice_GetRootJob_GenOrdinal;
   _response.status = std::move(status);
   _response.job = std::move(job);
   ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(GetRootJobResponse));
@@ -518,7 +544,7 @@ void Device::Interface::GetRootJobCompleterBase::Reply(::fidl::BytePart _buffer,
     return;
   }
   auto& _response = *reinterpret_cast<GetRootJobResponse*>(_buffer.data());
-  _response._hdr.ordinal = kDevice_GetRootJob_Ordinal;
+  _response._hdr.ordinal = kDevice_GetRootJob_GenOrdinal;
   _response.status = std::move(status);
   _response.job = std::move(job);
   _buffer.set_actual(sizeof(GetRootJobResponse));
@@ -527,47 +553,16 @@ void Device::Interface::GetRootJobCompleterBase::Reply(::fidl::BytePart _buffer,
 
 void Device::Interface::GetRootJobCompleterBase::Reply(::fidl::DecodedMessage<GetRootJobResponse> params) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kDevice_GetRootJob_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
-void Device::Interface::GetRootResourceCompleterBase::Reply(int32_t status, ::zx::resource resource) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetRootResourceResponse>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _response = *reinterpret_cast<GetRootResourceResponse*>(_write_bytes);
-  _response._hdr.ordinal = kDevice_GetRootResource_Ordinal;
-  _response.status = std::move(status);
-  _response.resource = std::move(resource);
-  ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(GetRootResourceResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<GetRootResourceResponse>(std::move(_response_bytes)));
-}
-
-void Device::Interface::GetRootResourceCompleterBase::Reply(::fidl::BytePart _buffer, int32_t status, ::zx::resource resource) {
-  if (_buffer.capacity() < GetRootResourceResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  auto& _response = *reinterpret_cast<GetRootResourceResponse*>(_buffer.data());
-  _response._hdr.ordinal = kDevice_GetRootResource_Ordinal;
-  _response.status = std::move(status);
-  _response.resource = std::move(resource);
-  _buffer.set_actual(sizeof(GetRootResourceResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<GetRootResourceResponse>(std::move(_buffer)));
-}
-
-void Device::Interface::GetRootResourceCompleterBase::Reply(::fidl::DecodedMessage<GetRootResourceResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kDevice_GetRootResource_Ordinal;
+  params.message()->_hdr.ordinal = kDevice_GetRootJob_GenOrdinal;
   CompleterBase::SendReply(std::move(params));
 }
 
 
 void Device::Interface::GetHypervisorResourceCompleterBase::Reply(int32_t status, ::zx::resource resource) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetHypervisorResourceResponse>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetHypervisorResourceResponse, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _response = *reinterpret_cast<GetHypervisorResourceResponse*>(_write_bytes);
-  _response._hdr.ordinal = kDevice_GetHypervisorResource_Ordinal;
+  _response._hdr.ordinal = kDevice_GetHypervisorResource_GenOrdinal;
   _response.status = std::move(status);
   _response.resource = std::move(resource);
   ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(GetHypervisorResourceResponse));
@@ -580,7 +575,7 @@ void Device::Interface::GetHypervisorResourceCompleterBase::Reply(::fidl::BytePa
     return;
   }
   auto& _response = *reinterpret_cast<GetHypervisorResourceResponse*>(_buffer.data());
-  _response._hdr.ordinal = kDevice_GetHypervisorResource_Ordinal;
+  _response._hdr.ordinal = kDevice_GetHypervisorResource_GenOrdinal;
   _response.status = std::move(status);
   _response.resource = std::move(resource);
   _buffer.set_actual(sizeof(GetHypervisorResourceResponse));
@@ -589,16 +584,16 @@ void Device::Interface::GetHypervisorResourceCompleterBase::Reply(::fidl::BytePa
 
 void Device::Interface::GetHypervisorResourceCompleterBase::Reply(::fidl::DecodedMessage<GetHypervisorResourceResponse> params) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kDevice_GetHypervisorResource_Ordinal;
+  params.message()->_hdr.ordinal = kDevice_GetHypervisorResource_GenOrdinal;
   CompleterBase::SendReply(std::move(params));
 }
 
 
 void Device::Interface::GetBoardNameCompleterBase::Reply(int32_t status, ::fidl::StringView name) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetBoardNameResponse>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetBoardNameResponse, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize];
   GetBoardNameResponse _response = {};
-  _response._hdr.ordinal = kDevice_GetBoardName_Ordinal;
+  _response._hdr.ordinal = kDevice_GetBoardName_GenOrdinal;
   _response.status = std::move(status);
   _response.name = std::move(name);
   auto _linearize_result = ::fidl::Linearize(&_response, ::fidl::BytePart(_write_bytes,
@@ -616,7 +611,7 @@ void Device::Interface::GetBoardNameCompleterBase::Reply(::fidl::BytePart _buffe
     return;
   }
   GetBoardNameResponse _response = {};
-  _response._hdr.ordinal = kDevice_GetBoardName_Ordinal;
+  _response._hdr.ordinal = kDevice_GetBoardName_GenOrdinal;
   _response.status = std::move(status);
   _response.name = std::move(name);
   auto _linearize_result = ::fidl::Linearize(&_response, std::move(_buffer));
@@ -629,16 +624,16 @@ void Device::Interface::GetBoardNameCompleterBase::Reply(::fidl::BytePart _buffe
 
 void Device::Interface::GetBoardNameCompleterBase::Reply(::fidl::DecodedMessage<GetBoardNameResponse> params) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kDevice_GetBoardName_Ordinal;
+  params.message()->_hdr.ordinal = kDevice_GetBoardName_GenOrdinal;
   CompleterBase::SendReply(std::move(params));
 }
 
 
 void Device::Interface::GetInterruptControllerInfoCompleterBase::Reply(int32_t status, InterruptControllerInfo* info) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetInterruptControllerInfoResponse>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetInterruptControllerInfoResponse, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize];
   GetInterruptControllerInfoResponse _response = {};
-  _response._hdr.ordinal = kDevice_GetInterruptControllerInfo_Ordinal;
+  _response._hdr.ordinal = kDevice_GetInterruptControllerInfo_GenOrdinal;
   _response.status = std::move(status);
   _response.info = std::move(info);
   auto _linearize_result = ::fidl::Linearize(&_response, ::fidl::BytePart(_write_bytes,
@@ -656,7 +651,7 @@ void Device::Interface::GetInterruptControllerInfoCompleterBase::Reply(::fidl::B
     return;
   }
   GetInterruptControllerInfoResponse _response = {};
-  _response._hdr.ordinal = kDevice_GetInterruptControllerInfo_Ordinal;
+  _response._hdr.ordinal = kDevice_GetInterruptControllerInfo_GenOrdinal;
   _response.status = std::move(status);
   _response.info = std::move(info);
   auto _linearize_result = ::fidl::Linearize(&_response, std::move(_buffer));
@@ -669,7 +664,7 @@ void Device::Interface::GetInterruptControllerInfoCompleterBase::Reply(::fidl::B
 
 void Device::Interface::GetInterruptControllerInfoCompleterBase::Reply(::fidl::DecodedMessage<GetInterruptControllerInfoResponse> params) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kDevice_GetInterruptControllerInfo_Ordinal;
+  params.message()->_hdr.ordinal = kDevice_GetInterruptControllerInfo_GenOrdinal;
   CompleterBase::SendReply(std::move(params));
 }
 

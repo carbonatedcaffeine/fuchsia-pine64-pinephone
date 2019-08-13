@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_JSON_GENERATOR_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_JSON_GENERATOR_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_JSON_GENERATOR_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_JSON_GENERATOR_H_
 
 #include <memory>
 #include <sstream>
@@ -25,8 +25,7 @@ struct NameLocation {
   // TODO(FIDL-596): We are incorrectly assuming that the provided name is not
   // anonymous, and relying on callers to avoid derefencing a nullptr
   // location.
-  explicit NameLocation(const flat::Name& name)
-      : NameLocation(*name.maybe_location()) {}
+  explicit NameLocation(const flat::Name& name) : NameLocation(*name.maybe_location()) {}
 
   const std::string filename;
   SourceFile::Position position;
@@ -112,6 +111,8 @@ class JSONGenerator : public utils::JsonWriter<JSONGenerator> {
   void Generate(const flat::Protocol& value);
   void Generate(const flat::Protocol::MethodWithInfo& value);
   void Generate(const flat::LiteralConstant& value);
+  void Generate(const flat::Service& value);
+  void Generate(const flat::Service::Member& value);
   void Generate(const flat::Struct& value);
   void Generate(const flat::Struct::Member& value);
   void Generate(const flat::Table& value);
@@ -136,4 +137,4 @@ class JSONGenerator : public utils::JsonWriter<JSONGenerator> {
 
 }  // namespace fidl
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_JSON_GENERATOR_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_JSON_GENERATOR_H_

@@ -12,15 +12,14 @@
  * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-#ifndef BRCMFMAC_COMMON_H
-#define BRCMFMAC_COMMON_H
+#ifndef SRC_CONNECTIVITY_WLAN_DRIVERS_THIRD_PARTY_BROADCOM_BRCMFMAC_COMMON_H_
+#define SRC_CONNECTIVITY_WLAN_DRIVERS_THIRD_PARTY_BROADCOM_BRCMFMAC_COMMON_H_
 
+#include "bus.h"
 #include "core.h"
 #include "device.h"
 #include "fwil_types.h"
 #include "linuxisms.h"
-
-extern const uint8_t ALLFFMAC[ETH_ALEN];
 
 #define BRCMF_FW_ALTPATH_LEN 256
 #define BRCMF_FW_NAME_LEN 320
@@ -39,7 +38,7 @@ extern const uint8_t ALLFFMAC[ETH_ALEN];
  * @firmware_path: Alternative firmware path.
  */
 struct brcmf_mp_global_t {
-    char firmware_path[BRCMF_FW_ALTPATH_LEN];
+  char firmware_path[BRCMF_FW_ALTPATH_LEN];
 };
 
 extern struct brcmf_mp_global_t brcmf_mp_global;
@@ -48,10 +47,10 @@ extern struct brcmf_mp_global_t brcmf_mp_global;
  * struct brcmfmac_sdio_pd - SDIO-specific device module parameters
  */
 struct brcmfmac_sdio_pd {
-    int sd_sgentry_align;
-    int sd_head_align;
-    int drive_strength;
-    int oob_irq_supported;
+  int sd_sgentry_align;
+  int sd_head_align;
+  int drive_strength;
+  int oob_irq_supported;
 };
 
 /**
@@ -66,27 +65,28 @@ struct brcmfmac_sdio_pd {
  * @bus: Bus specific platform data. Only SDIO at the mmoment.
  */
 struct brcmf_mp_device {
-    bool p2p_enable;
-    unsigned int feature_disable;
-    int fcmode;
-    bool roamoff;
-    bool ignore_probe_fail;
-    struct brcmfmac_pd_cc* country_codes;
-    struct {
-        struct brcmfmac_sdio_pd sdio;
-    } bus;
+  bool p2p_enable;
+  unsigned int feature_disable;
+  int fcmode;
+  bool roamoff;
+  bool ignore_probe_fail;
+  struct brcmfmac_pd_cc* country_codes;
+  struct {
+    struct brcmfmac_sdio_pd sdio;
+  } bus;
 };
 
 void brcmf_c_set_joinpref_default(struct brcmf_if* ifp);
 
 struct brcmf_mp_device* brcmf_get_module_param(struct brcmf_device* dev,
-                                               enum brcmf_bus_type bus_type,
-                                               uint32_t chip, uint32_t chiprev);
+                                               enum brcmf_bus_type bus_type, uint32_t chip,
+                                               uint32_t chiprev);
 void brcmf_release_module_param(struct brcmf_mp_device* module_param);
 
 /* Sets dongle media info (drv_version, mac address). */
 zx_status_t brcmf_c_preinit_dcmds(struct brcmf_if* ifp);
 
-zx_status_t brcmfmac_module_init(zx_device_t* device);
+zx_status_t brcmfmac_module_init();
+void brcmfmac_module_exit();
 
-#endif /* BRCMFMAC_COMMON_H */
+#endif  // SRC_CONNECTIVITY_WLAN_DRIVERS_THIRD_PARTY_BROADCOM_BRCMFMAC_COMMON_H_

@@ -47,6 +47,18 @@ void MessageLoop::Run() {
   RunImpl();
 }
 
+void MessageLoop::RunUntilNoTasks() {
+  // Check if there are no tasks right now. If so, we exit immediately.
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (task_queue_.empty())
+      return;
+  }
+
+  should_quit_on_no_more_tasks_ = true;
+  Run();
+}
+
 void MessageLoop::PostTask(FileLineFunction file_line, fit::function<void()> fn) {
   PostTaskInternal(std::move(file_line), std::move(fn));
 }
@@ -112,9 +124,9 @@ void MessageLoop::resolve_ticket(fit::suspended_task::ticket ticket, bool resume
   // non-promise-related tasks our message loop currently runs and how most promises are only
   // resolved in response to IPC messages, the alternative is more surprising. If everything was a
   // promise, we could post it to the back of the task_queue_ with no problem (other than a slight
-  // performance pentalty by going through the loop again).
+  // performance penalty by going through the loop again).
 
-  Task task;  // The task (to run or delete outside of the lock).
+  Task task;                // The task (to run or delete outside of the lock).
   bool should_run = false;  // Whether to run the above task (otherwise just delete it).
 
   {
@@ -195,7 +207,7 @@ fit::suspended_task MessageLoop::SuspendCurrentTask() {
   return fit::suspended_task(this, current_task_ticket_);
 }
 
-template<typename TaskType>
+template <typename TaskType>
 void MessageLoop::PostTaskInternal(FileLineFunction file_line, TaskType task) {
   bool needs_awaken;
   {
@@ -281,6 +293,10 @@ void MessageLoop::QuitNow() { should_quit_ = true; }
 bool MessageLoop::ProcessPendingTask() {
   // This function will be called with the mutex held.
   if (task_queue_.empty() && DelayNS() > 0) {
+    if (should_quit_on_no_more_tasks_) {
+      should_quit_on_no_more_tasks_ = false;
+      QuitNow();
+    }
     return false;
   }
 

@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 
 static FONT_DATA: &'static [u8] =
-    include_bytes!("../../fonts/third_party/robotomono/RobotoMono-Regular.ttf");
+    include_bytes!("../../../../prebuilt/third_party/fonts/robotomono/RobotoMono-Regular.ttf");
 
 pub struct App {
     face: FontFacePtr,
@@ -35,7 +35,7 @@ impl App {
 
     pub fn spawn_view_provider_server(app: &AppPtr, stream: ViewProviderRequestStream) {
         let app = app.clone();
-        fasync::spawn(
+        fasync::spawn_local(
             stream
                 .try_for_each(move |req| {
                     let ViewProviderRequest::CreateView { token, .. } = req;

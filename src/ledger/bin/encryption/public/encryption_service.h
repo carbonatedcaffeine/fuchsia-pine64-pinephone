@@ -40,7 +40,8 @@ class EncryptionService {
   // index and a default |deletion_scope_id|.
   // TODO(qsr): The user should have some control on the |deletion_scope_id| to
   // decide on the scope of deletion for objects.
-  virtual storage::ObjectIdentifier MakeObjectIdentifier(storage::ObjectDigest digest) = 0;
+  virtual storage::ObjectIdentifier MakeObjectIdentifier(storage::ObjectIdentifierFactory* factory,
+                                                         storage::ObjectDigest digest) = 0;
 
   // Encrypts the given commit storage bytes for storing in the cloud.
   virtual void EncryptCommit(std::string commit_storage,
@@ -70,6 +71,18 @@ class EncryptionService {
   // chunking algorithm.
   virtual void GetChunkingPermutation(
       fit::function<void(Status, fit::function<uint64_t(uint64_t)>)> callback) = 0;
+
+  // Returns an entry id that identifies an entry in a diff sent to the cloud.
+  //
+  // This version is used for non-merge commits.
+  virtual std::string GetEntryId() = 0;
+
+  // This version is used for merge commits to ensure different devices end up with the same entry
+  // id for the same merge.
+  virtual std::string GetEntryIdForMerge(fxl::StringView entry_name,
+                                         storage::CommitId left_parent_id,
+                                         storage::CommitId right_parent_id,
+                                         fxl::StringView operation_list) = 0;
 
  private:
   FXL_DISALLOW_COPY_AND_ASSIGN(EncryptionService);

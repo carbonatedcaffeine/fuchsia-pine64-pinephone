@@ -7,6 +7,7 @@
 #include <lib/fidl/cpp/string_view.h>
 #include <lib/fidl/llcpp/array.h>
 #include <lib/fidl/llcpp/coding.h>
+#include <lib/fidl/llcpp/sync_call.h>
 #include <lib/fidl/llcpp/traits.h>
 #include <lib/fidl/llcpp/transaction.h>
 #include <lib/fit/function.h>
@@ -52,7 +53,7 @@ struct RealWorldStreamConfig {
   static constexpr uint32_t MaxOutOfLine = 0;
 
   // Numeric identifier for the stream being configured.
-  int16_t stream_id{};
+  int16_t stream_id = {};
 };
 
 
@@ -65,7 +66,7 @@ struct Metadata {
   [[maybe_unused]]
   static constexpr uint32_t MaxOutOfLine = 0;
 
-  int64_t timestamp{};
+  int64_t timestamp = {};
 };
 
 
@@ -80,19 +81,20 @@ struct FrameAvailableEvent {
   static constexpr uint32_t MaxOutOfLine = 0;
 
   // Non zero if an error occurred.
-  FrameStatus frame_status{};
+  FrameStatus frame_status = {};
 
   // The index of the buffer in the buffer collection.
-  uint32_t buffer_id{};
+  uint32_t buffer_id = {};
 
   // Any associated metadata such as timestamp.
-  Metadata metadata{};
+  Metadata metadata = {};
 };
 
 extern "C" const fidl_type_t fuchsia_camera_common_StreamReleaseFrameRequestTable;
 
 // Protocol shared between the driver and the consumer.
 class Stream final {
+  Stream() = delete;
  public:
 
   using StartRequest = ::fidl::AnyZeroArgMessage;
@@ -108,6 +110,9 @@ class Stream final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
   };
 
   struct OnFrameAvailableResponse final {
@@ -119,48 +124,151 @@ class Stream final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 32;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
 
   struct EventHandlers {
     // Sent by the driver to the client when a frame is available for processing,
     // or an error occurred.
-    fit::function<zx_status_t(FrameAvailableEvent frame)> on_frame_available;
+    fit::callback<zx_status_t(FrameAvailableEvent frame)> on_frame_available;
 
     // Fallback handler when an unknown ordinal is received.
     // Caller may put custom error handling logic here.
-    fit::function<zx_status_t()> unknown;
+    fit::callback<zx_status_t()> unknown;
+  };
+
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+    class Start_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      Start_Impl(zx::unowned_channel _client_end);
+      ~Start_Impl() = default;
+      Start_Impl(Start_Impl&& other) = default;
+      Start_Impl& operator=(Start_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+    class Stop_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      Stop_Impl(zx::unowned_channel _client_end);
+      ~Stop_Impl() = default;
+      Stop_Impl(Stop_Impl&& other) = default;
+      Stop_Impl& operator=(Stop_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+    class ReleaseFrame_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      ReleaseFrame_Impl(zx::unowned_channel _client_end, uint32_t buffer_id);
+      ~ReleaseFrame_Impl() = default;
+      ReleaseFrame_Impl(ReleaseFrame_Impl&& other) = default;
+      ReleaseFrame_Impl& operator=(ReleaseFrame_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+
+   public:
+    using Start = Start_Impl;
+    using Stop = Stop_Impl;
+    using ReleaseFrame = ReleaseFrame_Impl;
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+    class Start_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      Start_Impl(zx::unowned_channel _client_end);
+      ~Start_Impl() = default;
+      Start_Impl(Start_Impl&& other) = default;
+      Start_Impl& operator=(Start_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+    class Stop_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      Stop_Impl(zx::unowned_channel _client_end);
+      ~Stop_Impl() = default;
+      Stop_Impl(Stop_Impl&& other) = default;
+      Stop_Impl& operator=(Stop_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+    class ReleaseFrame_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      ReleaseFrame_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t buffer_id);
+      ~ReleaseFrame_Impl() = default;
+      ReleaseFrame_Impl(ReleaseFrame_Impl&& other) = default;
+      ReleaseFrame_Impl& operator=(ReleaseFrame_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+
+   public:
+    using Start = Start_Impl;
+    using Stop = Stop_Impl;
+    using ReleaseFrame = ReleaseFrame_Impl;
   };
 
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
     ::zx::channel* mutable_channel() { return &channel_; }
 
     // Starts the streaming of frames.
-    zx_status_t Start();
+    // Allocates 16 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::Start Start();
+
+
+    // Starts the streaming of frames.
+    zx_status_t Start_Deprecated();
 
     // Stops the streaming of frames.
-    zx_status_t Stop();
+    // Allocates 16 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::Stop Stop();
+
+
+    // Stops the streaming of frames.
+    zx_status_t Stop_Deprecated();
 
     // Unlocks the specified frame, allowing the driver to reuse the memory.
-    zx_status_t ReleaseFrame(uint32_t buffer_id);
+    // Allocates 24 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::ReleaseFrame ReleaseFrame(uint32_t buffer_id);
 
     // Unlocks the specified frame, allowing the driver to reuse the memory.
     // Caller provides the backing storage for FIDL message via request and response buffers.
-    zx_status_t ReleaseFrame(::fidl::BytePart _request_buffer, uint32_t buffer_id);
+    UnownedResultOf::ReleaseFrame ReleaseFrame(::fidl::BytePart _request_buffer, uint32_t buffer_id);
 
     // Unlocks the specified frame, allowing the driver to reuse the memory.
-    // Messages are encoded and decoded in-place.
-    zx_status_t ReleaseFrame(::fidl::DecodedMessage<ReleaseFrameRequest> params);
+    zx_status_t ReleaseFrame_Deprecated(uint32_t buffer_id);
+
+    // Unlocks the specified frame, allowing the driver to reuse the memory.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    zx_status_t ReleaseFrame_Deprecated(::fidl::BytePart _request_buffer, uint32_t buffer_id);
 
     // Handle all possible events defined in this protocol.
     // Blocks to consume exactly one message from the channel, then call the corresponding handler
@@ -173,30 +281,62 @@ class Stream final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
    public:
 
     // Starts the streaming of frames.
-    static zx_status_t Start(zx::unowned_channel _client_end);
+    // Allocates 16 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::Start Start(zx::unowned_channel _client_end);
+
+
+    // Starts the streaming of frames.
+    static zx_status_t Start_Deprecated(zx::unowned_channel _client_end);
 
     // Stops the streaming of frames.
-    static zx_status_t Stop(zx::unowned_channel _client_end);
+    // Allocates 16 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::Stop Stop(zx::unowned_channel _client_end);
+
+
+    // Stops the streaming of frames.
+    static zx_status_t Stop_Deprecated(zx::unowned_channel _client_end);
 
     // Unlocks the specified frame, allowing the driver to reuse the memory.
-    static zx_status_t ReleaseFrame(zx::unowned_channel _client_end, uint32_t buffer_id);
+    // Allocates 24 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::ReleaseFrame ReleaseFrame(zx::unowned_channel _client_end, uint32_t buffer_id);
 
     // Unlocks the specified frame, allowing the driver to reuse the memory.
     // Caller provides the backing storage for FIDL message via request and response buffers.
-    static zx_status_t ReleaseFrame(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t buffer_id);
+    static UnownedResultOf::ReleaseFrame ReleaseFrame(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t buffer_id);
 
     // Unlocks the specified frame, allowing the driver to reuse the memory.
-    // Messages are encoded and decoded in-place.
-    static zx_status_t ReleaseFrame(zx::unowned_channel _client_end, ::fidl::DecodedMessage<ReleaseFrameRequest> params);
+    static zx_status_t ReleaseFrame_Deprecated(zx::unowned_channel _client_end, uint32_t buffer_id);
+
+    // Unlocks the specified frame, allowing the driver to reuse the memory.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static zx_status_t ReleaseFrame_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t buffer_id);
 
     // Handle all possible events defined in this protocol.
     // Blocks to consume exactly one message from the channel, then call the corresponding handler
     // defined in |EventHandlers|. The return status of the handler function is folded with any
     // transport-level errors and returned.
     static zx_status_t HandleEvents(zx::unowned_channel client_end, EventHandlers handlers);
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
+
+    // Starts the streaming of frames.
+    static ::fidl::internal::StatusAndError Start(zx::unowned_channel _client_end);
+
+    // Stops the streaming of frames.
+    static ::fidl::internal::StatusAndError Stop(zx::unowned_channel _client_end);
+
+    // Unlocks the specified frame, allowing the driver to reuse the memory.
+    static ::fidl::internal::StatusAndError ReleaseFrame(zx::unowned_channel _client_end, ::fidl::DecodedMessage<ReleaseFrameRequest> params);
+
   };
 
   // Pure-virtual interface to be implemented by a server.
@@ -266,9 +406,9 @@ struct FrameRate {
   static constexpr uint32_t MaxOutOfLine = 0;
 
   // The frame rate is frames_per_sec_numerator / frames_per_sec_denominator.
-  uint32_t frames_per_sec_numerator{};
+  uint32_t frames_per_sec_numerator = {};
 
-  uint32_t frames_per_sec_denominator{};
+  uint32_t frames_per_sec_denominator = {};
 };
 
 extern "C" const fidl_type_t fuchsia_camera_common_VideoFormatTable;
@@ -281,9 +421,9 @@ struct VideoFormat {
   [[maybe_unused]]
   static constexpr uint32_t MaxOutOfLine = 0;
 
-  ::llcpp::fuchsia::sysmem::ImageFormat format{};
+  ::llcpp::fuchsia::sysmem::ImageFormat format = {};
 
-  FrameRate rate{};
+  FrameRate rate = {};
 };
 
 extern "C" const fidl_type_t fuchsia_camera_common_DeviceInfoTable;
@@ -297,20 +437,20 @@ struct DeviceInfo {
   static constexpr uint32_t MaxOutOfLine = 0;
 
   // Currently populated by the camera manager
-  uint64_t camera_id{};
+  uint64_t camera_id = {};
 
-  uint16_t vendor_id{};
+  uint16_t vendor_id = {};
 
   // string vendor_name;
-  uint16_t product_id{};
+  uint16_t product_id = {};
 
   // string product_name;
   // string serial_number;
   // The maximum number of stream interfaces that the device can support
   // simultaneously.
-  uint16_t max_stream_count{};
+  uint16_t max_stream_count = {};
 
-  uint32_t output_capabilities{};
+  uint32_t output_capabilities = {};
 };
 
 constexpr uint32_t CAMERA_OUTPUT_UNKNOWN = 0u;
@@ -339,7 +479,7 @@ struct ArtificialStreamConfig {
   static constexpr uint32_t MaxOutOfLine = 0;
 
   // Numeric identifier for the stream being configured.
-  int16_t stream_id{};
+  int16_t stream_id = {};
 };
 
 extern "C" const fidl_type_t fuchsia_camera_common_VirtualStreamConfigTable;
@@ -406,19 +546,20 @@ struct VirtualCameraConfig {
   static constexpr uint32_t MaxOutOfLine = 4294967295;
 
   // The formats that the controller will support.
-  ::fidl::VectorView<VideoFormat> formats{};
+  ::fidl::VectorView<VideoFormat> formats = {};
 
   // Device specific information that can be set by the user.
-  DeviceInfo info{};
+  DeviceInfo info = {};
 
   // Either an ArtificialStreamConfig or a RealWorldStreamConfig.
-  VirtualStreamConfig stream_config{};
+  VirtualStreamConfig stream_config = {};
 };
 
 extern "C" const fidl_type_t fuchsia_camera_common_VirtualCameraFactoryCreateDeviceRequestTable;
 
 // Protocol for managing virtual cameras that need to be added for tests.
 class VirtualCameraFactory final {
+  VirtualCameraFactory() = delete;
  public:
 
   struct CreateDeviceRequest final {
@@ -430,18 +571,59 @@ class VirtualCameraFactory final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 80;
     static constexpr uint32_t MaxOutOfLine = 4294967295;
+    static constexpr bool HasFlexibleEnvelope = true;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
   };
 
 
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+    class CreateDevice_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      CreateDevice_Impl(zx::unowned_channel _client_end, VirtualCameraConfig config);
+      ~CreateDevice_Impl() = default;
+      CreateDevice_Impl(CreateDevice_Impl&& other) = default;
+      CreateDevice_Impl& operator=(CreateDevice_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+
+   public:
+    using CreateDevice = CreateDevice_Impl;
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+    class CreateDevice_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      CreateDevice_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, VirtualCameraConfig config);
+      ~CreateDevice_Impl() = default;
+      CreateDevice_Impl(CreateDevice_Impl&& other) = default;
+      CreateDevice_Impl& operator=(CreateDevice_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+
+   public:
+    using CreateDevice = CreateDevice_Impl;
+  };
+
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
@@ -449,17 +631,22 @@ class VirtualCameraFactory final {
 
     // Creates a new VirtualCameraDevice based on the configuration passed in.
     // `config`: a VirtualCameraConfig defining how the new device should behave.
-    zx_status_t CreateDevice(VirtualCameraConfig config);
+    // Request is heap-allocated.
+    ResultOf::CreateDevice CreateDevice(VirtualCameraConfig config);
 
     // Creates a new VirtualCameraDevice based on the configuration passed in.
     // `config`: a VirtualCameraConfig defining how the new device should behave.
     // Caller provides the backing storage for FIDL message via request and response buffers.
-    zx_status_t CreateDevice(::fidl::BytePart _request_buffer, VirtualCameraConfig config);
+    UnownedResultOf::CreateDevice CreateDevice(::fidl::BytePart _request_buffer, VirtualCameraConfig config);
 
     // Creates a new VirtualCameraDevice based on the configuration passed in.
     // `config`: a VirtualCameraConfig defining how the new device should behave.
-    // Messages are encoded and decoded in-place.
-    zx_status_t CreateDevice(::fidl::DecodedMessage<CreateDeviceRequest> params);
+    zx_status_t CreateDevice_Deprecated(VirtualCameraConfig config);
+
+    // Creates a new VirtualCameraDevice based on the configuration passed in.
+    // `config`: a VirtualCameraConfig defining how the new device should behave.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    zx_status_t CreateDevice_Deprecated(::fidl::BytePart _request_buffer, VirtualCameraConfig config);
 
    private:
     ::zx::channel channel_;
@@ -467,21 +654,39 @@ class VirtualCameraFactory final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
    public:
 
     // Creates a new VirtualCameraDevice based on the configuration passed in.
     // `config`: a VirtualCameraConfig defining how the new device should behave.
-    static zx_status_t CreateDevice(zx::unowned_channel _client_end, VirtualCameraConfig config);
+    // Request is heap-allocated.
+    static ResultOf::CreateDevice CreateDevice(zx::unowned_channel _client_end, VirtualCameraConfig config);
 
     // Creates a new VirtualCameraDevice based on the configuration passed in.
     // `config`: a VirtualCameraConfig defining how the new device should behave.
     // Caller provides the backing storage for FIDL message via request and response buffers.
-    static zx_status_t CreateDevice(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, VirtualCameraConfig config);
+    static UnownedResultOf::CreateDevice CreateDevice(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, VirtualCameraConfig config);
 
     // Creates a new VirtualCameraDevice based on the configuration passed in.
     // `config`: a VirtualCameraConfig defining how the new device should behave.
-    // Messages are encoded and decoded in-place.
-    static zx_status_t CreateDevice(zx::unowned_channel _client_end, ::fidl::DecodedMessage<CreateDeviceRequest> params);
+    static zx_status_t CreateDevice_Deprecated(zx::unowned_channel _client_end, VirtualCameraConfig config);
+
+    // Creates a new VirtualCameraDevice based on the configuration passed in.
+    // `config`: a VirtualCameraConfig defining how the new device should behave.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static zx_status_t CreateDevice_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, VirtualCameraConfig config);
+
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
+
+    // Creates a new VirtualCameraDevice based on the configuration passed in.
+    // `config`: a VirtualCameraConfig defining how the new device should behave.
+    static ::fidl::internal::StatusAndError CreateDevice(zx::unowned_channel _client_end, ::fidl::DecodedMessage<CreateDeviceRequest> params);
 
   };
 

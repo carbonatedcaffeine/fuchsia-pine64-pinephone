@@ -34,23 +34,27 @@ Err ErrNoDump() { return Err("Core dump failed to open"); }
 Err ErrNoArch() { return Err("Architecture not supported"); }
 
 template <typename ReplyType>
-void ErrNoLive(std::function<void(const Err&, ReplyType)> cb) {
-  debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE, [cb]() { cb(ErrNoLive(), ReplyType()); });
+void ErrNoLive(fit::callback<void(const Err&, ReplyType)> cb) {
+  debug_ipc::MessageLoop::Current()->PostTask(
+      FROM_HERE, [cb = std::move(cb)]() mutable { cb(ErrNoLive(), ReplyType()); });
 }
 
 template <typename ReplyType>
-void ErrNoDump(std::function<void(const Err&, ReplyType)> cb) {
-  debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE, [cb]() { cb(ErrNoDump(), ReplyType()); });
+void ErrNoDump(fit::callback<void(const Err&, ReplyType)> cb) {
+  debug_ipc::MessageLoop::Current()->PostTask(
+      FROM_HERE, [cb = std::move(cb)]() mutable { cb(ErrNoDump(), ReplyType()); });
 }
 
 template <typename ReplyType>
-void ErrNoArch(std::function<void(const Err&, ReplyType)> cb) {
-  debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE, [cb]() { cb(ErrNoArch(), ReplyType()); });
+void ErrNoArch(fit::callback<void(const Err&, ReplyType)> cb) {
+  debug_ipc::MessageLoop::Current()->PostTask(
+      FROM_HERE, [cb = std::move(cb)]() mutable { cb(ErrNoArch(), ReplyType()); });
 }
 
 template <typename ReplyType>
-void Succeed(std::function<void(const Err&, ReplyType)> cb, ReplyType r) {
-  debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE, [cb, r]() { cb(Err(), r); });
+void Succeed(fit::callback<void(const Err&, ReplyType)> cb, ReplyType r) {
+  debug_ipc::MessageLoop::Current()->PostTask(FROM_HERE,
+                                              [cb = std::move(cb), r]() mutable { cb(Err(), r); });
 }
 
 template <typename ValueType>
@@ -410,9 +414,11 @@ class MinidumpUnwindMemory : public unwindstack::Memory {
 
 }  // namespace
 
-MinidumpRemoteAPI::MinidumpRemoteAPI(Session* session) : session_(session) {}
+MinidumpRemoteAPI::MinidumpRemoteAPI(Session* session) : session_(session) {
+  session_->AddDownloadObserver(this);
+}
 
-MinidumpRemoteAPI::~MinidumpRemoteAPI() = default;
+MinidumpRemoteAPI::~MinidumpRemoteAPI() { session_->RemoveDownloadObserver(this); }
 
 std::string MinidumpRemoteAPI::ProcessName() {
   if (!minidump_) {
@@ -503,6 +509,8 @@ std::unique_ptr<unwindstack::Regs> MinidumpRemoteAPI::GetUnwindRegsX86_64(
 }
 
 void MinidumpRemoteAPI::CollectMemory() {
+  memory_.clear();
+
   for (const auto& thread : minidump_->Threads()) {
     const auto& stack = thread->Stack();
 
@@ -552,6 +560,13 @@ void MinidumpRemoteAPI::CollectMemory() {
             });
 }
 
+void MinidumpRemoteAPI::OnDownloadsStopped(size_t num_succeeded, size_t num_failed) {
+  // If we just downloaded new binary files, more memory information might be available than when we
+  // last collected memory.
+  if (minidump_)
+    CollectMemory();
+}
+
 Err MinidumpRemoteAPI::Open(const std::string& path) {
   crashpad::FileReader reader;
 
@@ -587,9 +602,9 @@ Err MinidumpRemoteAPI::Close() {
 }
 
 void MinidumpRemoteAPI::Hello(const debug_ipc::HelloRequest& request,
-                              std::function<void(const Err&, debug_ipc::HelloReply)> cb) {
+                              fit::callback<void(const Err&, debug_ipc::HelloReply)> cb) {
   if (!minidump_) {
-    ErrNoDump(cb);
+    ErrNoDump(std::move(cb));
     return;
   }
 
@@ -597,7 +612,8 @@ void MinidumpRemoteAPI::Hello(const debug_ipc::HelloRequest& request,
 
   const auto& threads = minidump_->Threads();
   if (threads.empty()) {
-    Succeed(cb, reply);
+    Succeed(std::move(cb), reply);
+    return;
   }
 
   const auto& context = *threads[0]->Context();
@@ -613,26 +629,26 @@ void MinidumpRemoteAPI::Hello(const debug_ipc::HelloRequest& request,
       break;
   }
 
-  Succeed(cb, reply);
+  Succeed(std::move(cb), reply);
 }
 
 void MinidumpRemoteAPI::Launch(const debug_ipc::LaunchRequest& request,
-                               std::function<void(const Err&, debug_ipc::LaunchReply)> cb) {
-  ErrNoLive(cb);
+                               fit::callback<void(const Err&, debug_ipc::LaunchReply)> cb) {
+  ErrNoLive(std::move(cb));
 }
 
 void MinidumpRemoteAPI::Kill(const debug_ipc::KillRequest& request,
-                             std::function<void(const Err&, debug_ipc::KillReply)> cb) {
-  ErrNoLive(cb);
+                             fit::callback<void(const Err&, debug_ipc::KillReply)> cb) {
+  ErrNoLive(std::move(cb));
 }
 
 constexpr uint32_t kAttachOk = 0;
 constexpr uint32_t kAttachNotFound = 1;
 
 void MinidumpRemoteAPI::Attach(const debug_ipc::AttachRequest& request,
-                               std::function<void(const Err&, debug_ipc::AttachReply)> cb) {
+                               fit::callback<void(const Err&, debug_ipc::AttachReply)> cb) {
   if (!minidump_) {
-    ErrNoDump(cb);
+    ErrNoDump(std::move(cb));
     return;
   }
 
@@ -641,7 +657,7 @@ void MinidumpRemoteAPI::Attach(const debug_ipc::AttachRequest& request,
 
   if (static_cast<pid_t>(request.koid) != minidump_->ProcessID()) {
     reply.status = kAttachNotFound;
-    Succeed(cb, reply);
+    Succeed(std::move(cb), reply);
     return;
   }
 
@@ -660,12 +676,22 @@ void MinidumpRemoteAPI::Attach(const debug_ipc::AttachRequest& request,
 
   Session* session = session_;
   debug_ipc::NotifyModules mod_notification;
+  debug_ipc::NotifyException exception_notification;
 
   mod_notification.process_koid = minidump_->ProcessID();
   mod_notification.modules = GetModules();
 
-  std::function<void(const Err&, debug_ipc::AttachReply)> new_cb =
-      [cb, notifications, mod_notification, session](const Err& e, debug_ipc::AttachReply a) {
+  if (auto exception = minidump_->Exception()) {
+    // TODO(sadmac): Break out the code interpretation stuff from the debug agent and use it here.
+    exception_notification.type = debug_ipc::NotifyException::Type::kGeneral;
+    exception_notification.thread.process_koid = minidump_->ProcessID();
+    exception_notification.thread.thread_koid = exception->ThreadID();
+    exception_notification.thread.state = debug_ipc::ThreadRecord::State::kCoreDump;
+  }
+
+  fit::callback<void(const Err&, debug_ipc::AttachReply)> new_cb =
+      [cb = std::move(cb), notifications, mod_notification, exception_notification, session](
+          const Err& e, debug_ipc::AttachReply a) mutable {
         cb(e, a);
 
         for (const auto& notification : notifications) {
@@ -673,15 +699,19 @@ void MinidumpRemoteAPI::Attach(const debug_ipc::AttachRequest& request,
         }
 
         session->DispatchNotifyModules(mod_notification);
+
+        if (exception_notification.type != debug_ipc::NotifyException::Type::kNone) {
+          session->DispatchNotifyException(exception_notification);
+        }
       };
 
-  Succeed(new_cb, reply);
+  Succeed(std::move(new_cb), reply);
 }
 
 void MinidumpRemoteAPI::Detach(const debug_ipc::DetachRequest& request,
-                               std::function<void(const Err&, debug_ipc::DetachReply)> cb) {
+                               fit::callback<void(const Err&, debug_ipc::DetachReply)> cb) {
   if (!minidump_) {
-    ErrNoDump(cb);
+    ErrNoDump(std::move(cb));
     return;
   }
 
@@ -694,43 +724,43 @@ void MinidumpRemoteAPI::Detach(const debug_ipc::DetachRequest& request,
     reply.status = kAttachNotFound;
   }
 
-  Succeed(cb, reply);
+  Succeed(std::move(cb), reply);
 }
 
 void MinidumpRemoteAPI::Modules(const debug_ipc::ModulesRequest& request,
-                                std::function<void(const Err&, debug_ipc::ModulesReply)> cb) {
+                                fit::callback<void(const Err&, debug_ipc::ModulesReply)> cb) {
   if (!minidump_) {
-    ErrNoDump(cb);
+    ErrNoDump(std::move(cb));
     return;
   }
 
   debug_ipc::ModulesReply reply;
 
   if (static_cast<pid_t>(request.process_koid) != minidump_->ProcessID()) {
-    Succeed(cb, reply);
+    Succeed(std::move(cb), reply);
     return;
   }
 
   reply.modules = GetModules();
 
-  Succeed(cb, reply);
+  Succeed(std::move(cb), reply);
 }
 
 void MinidumpRemoteAPI::Pause(const debug_ipc::PauseRequest& request,
-                              std::function<void(const Err&, debug_ipc::PauseReply)> cb) {
-  ErrNoLive(cb);
+                              fit::callback<void(const Err&, debug_ipc::PauseReply)> cb) {
+  ErrNoLive(std::move(cb));
 }
 
 void MinidumpRemoteAPI::Resume(const debug_ipc::ResumeRequest& request,
-                               std::function<void(const Err&, debug_ipc::ResumeReply)> cb) {
-  ErrNoLive(cb);
+                               fit::callback<void(const Err&, debug_ipc::ResumeReply)> cb) {
+  ErrNoLive(std::move(cb));
 }
 
 void MinidumpRemoteAPI::ProcessTree(
     const debug_ipc::ProcessTreeRequest& request,
-    std::function<void(const Err&, debug_ipc::ProcessTreeReply)> cb) {
+    fit::callback<void(const Err&, debug_ipc::ProcessTreeReply)> cb) {
   if (!minidump_) {
-    ErrNoDump(cb);
+    ErrNoDump(std::move(cb));
     return;
   }
 
@@ -744,13 +774,13 @@ void MinidumpRemoteAPI::ProcessTree(
       .root = record,
   };
 
-  Succeed(cb, reply);
+  Succeed(std::move(cb), reply);
 }
 
 void MinidumpRemoteAPI::Threads(const debug_ipc::ThreadsRequest& request,
-                                std::function<void(const Err&, debug_ipc::ThreadsReply)> cb) {
+                                fit::callback<void(const Err&, debug_ipc::ThreadsReply)> cb) {
   if (!minidump_) {
-    ErrNoDump(cb);
+    ErrNoDump(std::move(cb));
     return;
   }
 
@@ -766,13 +796,13 @@ void MinidumpRemoteAPI::Threads(const debug_ipc::ThreadsRequest& request,
     }
   }
 
-  Succeed(cb, reply);
+  Succeed(std::move(cb), reply);
 }
 
 void MinidumpRemoteAPI::ReadMemory(const debug_ipc::ReadMemoryRequest& request,
-                                   std::function<void(const Err&, debug_ipc::ReadMemoryReply)> cb) {
+                                   fit::callback<void(const Err&, debug_ipc::ReadMemoryReply)> cb) {
   if (!minidump_) {
-    ErrNoDump(cb);
+    ErrNoDump(std::move(cb));
     return;
   }
 
@@ -780,68 +810,72 @@ void MinidumpRemoteAPI::ReadMemory(const debug_ipc::ReadMemoryRequest& request,
   uint64_t loc = request.address;
   uint64_t end = request.address + request.size;
 
-  if (static_cast<pid_t>(request.process_koid) != minidump_->ProcessID()) {
-    Succeed(cb, reply);
-    return;
-  }
-
-  for (const auto& reg : memory_) {
-    if (loc == end) {
-      break;
-    }
-
-    if (reg->start + reg->size <= loc) {
-      continue;
-    }
-
-    if (reg->start > loc) {
-      uint64_t stop = std::min(reg->start, end);
-      reply.blocks.emplace_back();
-
-      reply.blocks.back().address = loc;
-      reply.blocks.back().valid = false;
-      reply.blocks.back().size = static_cast<uint32_t>(stop - loc);
-
-      loc = stop;
-
+  if (static_cast<pid_t>(request.process_koid) == minidump_->ProcessID()) {
+    for (const auto& reg : memory_) {
       if (loc == end) {
         break;
       }
+
+      if (reg->start + reg->size <= loc) {
+        continue;
+      }
+
+      if (reg->start > loc) {
+        uint64_t stop = std::min(reg->start, end);
+        reply.blocks.emplace_back();
+
+        reply.blocks.back().address = loc;
+        reply.blocks.back().valid = false;
+        reply.blocks.back().size = static_cast<uint32_t>(stop - loc);
+
+        loc = stop;
+
+        if (loc == end) {
+          break;
+        }
+      }
+
+      uint64_t stop = std::min(reg->start + reg->size, end);
+      auto data = reg->Read(loc - reg->start, stop - loc);
+      reply.blocks.emplace_back();
+      reply.blocks.back().address = loc;
+      reply.blocks.back().valid = !!data;
+      reply.blocks.back().size = static_cast<uint32_t>(stop - loc);
+      reply.blocks.back().data = std::move(*data);
+
+      loc += reply.blocks.back().size;
     }
-
-    uint64_t stop = std::min(reg->start + reg->size, end);
-    auto data = reg->Read(loc - reg->start, stop - loc);
-    reply.blocks.emplace_back();
-    reply.blocks.back().address = loc;
-    reply.blocks.back().valid = !!data;
-    reply.blocks.back().size = static_cast<uint32_t>(stop - loc);
-    reply.blocks.back().data = std::move(*data);
-
-    loc += reply.blocks.back().size;
   }
 
-  Succeed(cb, reply);
+  if (loc != end) {
+    auto block = reply.blocks.emplace_back();
+    reply.blocks.back().address = loc;
+    reply.blocks.back().valid = false;
+    reply.blocks.back().size = static_cast<uint32_t>(end - loc);
+  }
+
+  Succeed(std::move(cb), reply);
 }
 
 void MinidumpRemoteAPI::ReadRegisters(
     const debug_ipc::ReadRegistersRequest& request,
-    std::function<void(const Err&, debug_ipc::ReadRegistersReply)> cb) {
+    fit::callback<void(const Err&, debug_ipc::ReadRegistersReply)> cb) {
   if (!minidump_) {
-    ErrNoDump(cb);
+    ErrNoDump(std::move(cb));
     return;
   }
 
   debug_ipc::ReadRegistersReply reply;
 
   if (static_cast<pid_t>(request.process_koid) != minidump_->ProcessID()) {
-    Succeed(cb, reply);
+    Succeed(std::move(cb), reply);
     return;
   }
 
   const crashpad::ThreadSnapshot* thread = GetThreadById(request.thread_koid);
 
   if (thread == nullptr) {
-    Succeed(cb, reply);
+    Succeed(std::move(cb), reply);
     return;
   }
 
@@ -855,29 +889,29 @@ void MinidumpRemoteAPI::ReadRegisters(
       PopulateRegistersX86_64(*context.x86_64, request, &reply);
       break;
     default:
-      ErrNoArch(cb);
+      ErrNoArch(std::move(cb));
       return;
   }
 
-  Succeed(cb, reply);
+  Succeed(std::move(cb), reply);
 }
 
 void MinidumpRemoteAPI::AddOrChangeBreakpoint(
     const debug_ipc::AddOrChangeBreakpointRequest& request,
-    std::function<void(const Err&, debug_ipc::AddOrChangeBreakpointReply)> cb) {
-  ErrNoLive(cb);
+    fit::callback<void(const Err&, debug_ipc::AddOrChangeBreakpointReply)> cb) {
+  ErrNoLive(std::move(cb));
 }
 
 void MinidumpRemoteAPI::RemoveBreakpoint(
     const debug_ipc::RemoveBreakpointRequest& request,
-    std::function<void(const Err&, debug_ipc::RemoveBreakpointReply)> cb) {
-  ErrNoLive(cb);
+    fit::callback<void(const Err&, debug_ipc::RemoveBreakpointReply)> cb) {
+  ErrNoLive(std::move(cb));
 }
 
 void MinidumpRemoteAPI::SysInfo(const debug_ipc::SysInfoRequest& request,
-                                std::function<void(const Err&, debug_ipc::SysInfoReply)> cb) {
+                                fit::callback<void(const Err&, debug_ipc::SysInfoReply)> cb) {
   if (!minidump_) {
-    ErrNoDump(cb);
+    ErrNoDump(std::move(cb));
     return;
   }
 
@@ -887,28 +921,28 @@ void MinidumpRemoteAPI::SysInfo(const debug_ipc::SysInfoRequest& request,
   reply.memory_mb = 0;
   reply.hw_breakpoint_count = 0;
   reply.hw_watchpoint_count = 0;
-  Succeed(cb, reply);
+  Succeed(std::move(cb), reply);
 }
 
 void MinidumpRemoteAPI::ThreadStatus(
     const debug_ipc::ThreadStatusRequest& request,
-    std::function<void(const Err&, debug_ipc::ThreadStatusReply)> cb) {
+    fit::callback<void(const Err&, debug_ipc::ThreadStatusReply)> cb) {
   if (!minidump_) {
-    ErrNoDump(cb);
+    ErrNoDump(std::move(cb));
     return;
   }
 
   debug_ipc::ThreadStatusReply reply;
 
   if (static_cast<pid_t>(request.process_koid) != minidump_->ProcessID()) {
-    Succeed(cb, reply);
+    Succeed(std::move(cb), reply);
     return;
   }
 
   const crashpad::ThreadSnapshot* thread = GetThreadById(request.thread_koid);
 
   if (thread == nullptr) {
-    Succeed(cb, reply);
+    Succeed(std::move(cb), reply);
     return;
   }
 
@@ -936,7 +970,7 @@ void MinidumpRemoteAPI::ThreadStatus(
       bp = context.x86_64->rbp;
       break;
     default:
-      ErrNoArch(cb);
+      ErrNoArch(std::move(cb));
       return;
   }
 
@@ -975,14 +1009,14 @@ void MinidumpRemoteAPI::ThreadStatus(
     }
   }
 
-  Succeed(cb, reply);
+  Succeed(std::move(cb), reply);
 }
 
 void MinidumpRemoteAPI::AddressSpace(
     const debug_ipc::AddressSpaceRequest& request,
-    std::function<void(const Err&, debug_ipc::AddressSpaceReply)> cb) {
+    fit::callback<void(const Err&, debug_ipc::AddressSpaceReply)> cb) {
   if (!minidump_) {
-    ErrNoDump(cb);
+    ErrNoDump(std::move(cb));
     return;
   }
 
@@ -1004,18 +1038,18 @@ void MinidumpRemoteAPI::AddressSpace(
     }
   }
 
-  Succeed(cb, reply);
+  Succeed(std::move(cb), reply);
 }
 
 void MinidumpRemoteAPI::JobFilter(const debug_ipc::JobFilterRequest& request,
-                                  std::function<void(const Err&, debug_ipc::JobFilterReply)> cb) {
-  ErrNoLive(cb);
+                                  fit::callback<void(const Err&, debug_ipc::JobFilterReply)> cb) {
+  ErrNoLive(std::move(cb));
 }
 
 void MinidumpRemoteAPI::WriteMemory(
     const debug_ipc::WriteMemoryRequest& request,
-    std::function<void(const Err&, debug_ipc::WriteMemoryReply)> cb) {
-  ErrNoLive(cb);
+    fit::callback<void(const Err&, debug_ipc::WriteMemoryReply)> cb) {
+  ErrNoLive(std::move(cb));
 }
 
 }  // namespace zxdb

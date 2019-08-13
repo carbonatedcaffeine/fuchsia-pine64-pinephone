@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 # Copyright 2017 The Fuchsia Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -29,7 +29,7 @@ DIRS_FILE = STORE_DIR + 'fd.txt'
 PICKLE_FILE = STORE_DIR + 'fd.pickle'
 
 EXCLUDE_DIRS = [
-    '"*/.git"', './build', './buildtools', './out', './third_party',
+    '"*/.git"', './build', './out', './prebuilt', './third_party',
     './zircon/build', './zircon/prebuilt', './cmake-build-debug', './zircon/third_party',
 ]
 

@@ -6,7 +6,7 @@
 
 namespace zxdb {
 
-std::string GetRightArrow() {
+std::string GetCurrentRowMarker() {
   // U+25B6 BLACK RIGHT-POINTING TRIANGLE.
   return std::string("\xe2\x96\xb6");
 }
@@ -34,6 +34,13 @@ std::string GetExclamation() {
   // (Without the variation selector this looks like a small black-and-white
   // version. The variation selector selects the colored emoji variant.)
   return std::string("⚠️ ");
+}
+
+std::string GetRightArrow() {
+  // U+2794 HEAVY WIDE-HEADED RIGHTWARDS ARROW
+  // Note that U+1F87A (" 🡺 ")looks better on Linux but isn't supported on Mac or ChromeOS, and
+  // we need to support at least ssh-ing from these platforms.
+  return "➔";
 }
 
 size_t UnicodeCharWidth(const std::string& str) {

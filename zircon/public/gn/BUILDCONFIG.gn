@@ -198,7 +198,6 @@ template("shared_library") {
         binaries = []
         link_barrier = []
         link_output = []
-        elf_link_output = []
 
         if (defined(invoker.metadata)) {
           forward_variables_from(invoker.metadata, "*")
@@ -213,9 +212,6 @@ template("shared_library") {
         # outputs that should be checked for a build ID if collecting an
         # exhaustive list via metadata.
         link_output += [ rebase_path(link_output_file, root_build_dir) ]
-        if (current_os != "mac" && current_os != "win") {
-          elf_link_output += [ rebase_path(link_output_file, root_build_dir) ]
-        }
 
         # For build_api_module("binaries") in $zx/BUILD.gn.
         binaries += [
@@ -228,6 +224,10 @@ template("shared_library") {
             debug = rebase_path(link_output_file, root_build_dir)
             if (toolchain.link_output_suffix != "") {
               dist = rebase_path(output_file, root_build_dir)
+            }
+            if (current_os != "mac" && current_os != "win") {
+              elf_build_id =
+                  rebase_path("$output_file.build-id.stamp", root_build_dir)
             }
           },
         ]
@@ -1304,7 +1304,6 @@ template("_basic_executable") {
       binaries = []
       link_barrier = []
       link_output = []
-      elf_link_output = []
 
       if (defined(invoker.metadata)) {
         forward_variables_from(invoker.metadata, "*")
@@ -1319,9 +1318,6 @@ template("_basic_executable") {
       # outputs that should be checked for a build ID if collecting an
       # exhaustive list via metadata.
       link_output += [ rebase_path(link_output_file, root_build_dir) ]
-      if (current_os != "mac" && current_os != "win") {
-        elf_link_output += [ rebase_path(link_output_file, root_build_dir) ]
-      }
 
       # For build_api_module("binaries") in $zx/BUILD.gn.
       binaries += [
@@ -1334,6 +1330,10 @@ template("_basic_executable") {
           debug = rebase_path(link_output_file, root_build_dir)
           if (toolchain.link_output_suffix != "") {
             dist = rebase_path(output_file, root_build_dir)
+          }
+          if (current_os != "mac" && current_os != "win") {
+            elf_build_id =
+                rebase_path("$output_file.build-id.stamp", root_build_dir)
           }
         },
       ]
@@ -1523,6 +1523,15 @@ template("host_tool") {
         # List of tool binaries that could be presented to users' command line.
         tool_executables = [ install_file ]
 
+        # For the //:tool_paths build_api_module().
+        tool_paths = [
+          {
+            label = get_label_info(":$target_name", "label_with_toolchain")
+            name = output_name
+            path = run_file
+          },
+        ]
+
         # See host_tool_action().
         host_tool_barrier = []
         host_tool_rspfile = [
@@ -1608,7 +1617,6 @@ template("_loadable_module") {
       binaries = []
       link_barrier = []
       link_output = []
-      elf_link_output = []
 
       if (defined(invoker.metadata)) {
         forward_variables_from(invoker.metadata, "*")
@@ -1623,9 +1631,6 @@ template("_loadable_module") {
       # outputs that should be checked for a build ID if collecting an
       # exhaustive list via metadata.
       link_output += [ rebase_path(link_output_file, root_build_dir) ]
-      if (current_os != "mac" && current_os != "win") {
-        elf_link_output += [ rebase_path(link_output_file, root_build_dir) ]
-      }
 
       # For build_api_module("binaries") in $zx/BUILD.gn.
       binaries += [
@@ -1638,6 +1643,10 @@ template("_loadable_module") {
           debug = rebase_path(link_output_file, root_build_dir)
           if (toolchain.link_output_suffix != "") {
             dist = rebase_path(output_file, root_build_dir)
+          }
+          if (current_os != "mac" && current_os != "win") {
+            elf_build_id =
+                rebase_path("$output_file.build-id.stamp", root_build_dir)
           }
         },
       ]

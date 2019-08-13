@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// TODO(turnage): Remove file after migrating clients to sessions2.
+
 use crate::{
     clone_session_id_handle, mpmc,
     proxies::session::{Session, SessionCollectionEvent, SessionRegistration},
@@ -38,17 +40,17 @@ impl Publisher {
 
     pub async fn serve(mut self, mut request_stream: PublisherRequestStream) -> Result<()> {
         while let Some(request) =
-            await!(request_stream.try_next()).context("Publisher server request stream")?
+            request_stream.try_next().await.context("Publisher server request stream")?
         {
             match request {
                 PublisherRequest::Publish { responder, session } => {
                     responder
-                        .send(await!(self.publish(session, true))?)
+                        .send(self.publish(session, true).await?)
                         .context("Giving id to client")?;
                 }
                 PublisherRequest::PublishRemote { responder, session } => {
                     responder
-                        .send(await!(self.publish(session, false))?)
+                        .send(self.publish(session, false).await?)
                         .context("Giving id to client")?;
                 }
             };
@@ -65,20 +67,20 @@ impl Publisher {
         let koid = session_id_handle.as_handle_ref().get_koid()?;
         let handle_for_client = clone_session_id_handle(&session_id_handle)?;
         let registration = SessionRegistration { id: Rc::new(session_id_handle), koid, is_local };
-        await!(self.session_list.lock()).deref_mut().push(
+        self.session_list.lock().await.deref_mut().push(
             registration.clone(),
-            await!(Session::serve(
+            Session::serve(
                 session,
                 registration.clone(),
                 self.active_session_queue.clone(),
                 self.session_list.clone(),
                 self.collection_event_sink.clone(),
                 self.active_session_sink.clone(),
-            ))?,
+            ).await?,
         );
-        await!(self
-            .collection_event_sink
-            .send((registration.clone(), SessionCollectionEvent::Added)));
+        self.collection_event_sink
+            .send((registration.clone(), SessionCollectionEvent::Added))
+            .await;
         Ok(handle_for_client)
     }
 }

@@ -1,21 +1,22 @@
 // Copyright 2019 The Fuchsia Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 #include "src/media/audio/drivers/virtual_audio/virtual_audio.h"
 
-#include <fbl/algorithm.h>
 #include <fuchsia/virtualaudio/cpp/fidl.h>
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/async/cpp/task.h>
 #include <lib/fsl/tasks/fd_waiter.h>
 #include <lib/fzl/vmo-mapper.h>
 #include <lib/sys/cpp/component_context.h>
+#include <lib/zx/clock.h>
 #include <poll.h>
-#include <src/lib/fxl/command_line.h>
-#include <src/lib/fxl/strings/string_number_conversions.h>
 #include <unistd.h>
 #include <zircon/device/audio.h>
+
+#include <fbl/algorithm.h>
+#include <src/lib/fxl/command_line.h>
+#include <src/lib/fxl/strings/string_number_conversions.h>
 
 namespace virtual_audio {
 
@@ -105,7 +106,7 @@ class VirtualAudioUtil {
   static constexpr uint8_t kDefaultFormatRangeOption = 0;
 
   static constexpr uint32_t kDefaultFifoDepth = 0x100;
-  static constexpr uint64_t kDefaultExternalDelayNsec = ZX_MSEC(1);
+  static constexpr uint64_t kDefaultExternalDelayNsec = zx::msec(1).get();
   static constexpr uint8_t kDefaultRingBufferOption = 0;
 
   static constexpr uint8_t kDefaultGainPropsOption = 0;
@@ -196,9 +197,9 @@ class VirtualAudioUtil {
   static void StopNotification(zx_time_t stop_time, uint32_t ring_position);
 
   template <bool is_out>
-  static void PositionNotification(uint32_t ring_position, zx_time_t clock_time);
+  static void PositionNotification(zx_time_t monotonic_time, uint32_t ring_position);
   template <bool is_out>
-  static void PositionCallback(uint32_t ring_position, zx_time_t clock_time);
+  static void PositionCallback(zx_time_t monotonic_time, uint32_t ring_position);
 };
 
 ::async::Loop* VirtualAudioUtil::loop_;
@@ -762,8 +763,8 @@ struct GainSpec {
   float gain_step_db;
 };
 
-// The utility defines two preset groups of gain options. Although arbitrarily
-// chosen, they exercise the available range through SetGainProperties:
+// The utility defines two preset groups of gain options. Although arbitrarily chosen, they exercise
+// the available range through SetGainProperties:
 // 0.Can and is mute.    Cannot AGC.       Gain -2, range [-60, 0] in 2.0dB.
 // 1.Can but isn't mute. Can AGC, enabled. Gain -7.5,range [-30,+2] in 0.5db.
 // 2 and above represent invalid combinations.
@@ -856,8 +857,8 @@ bool VirtualAudioUtil::SetPlugProperties(const std::string& plug_props_str) {
     return false;
   }
 
-  zx_time_t plug_change_time = (kPlugTime[plug_props_option] == -1 ? zx_clock_get_monotonic()
-                                                                   : kPlugTime[plug_props_option]);
+  auto plug_change_time = (kPlugTime[plug_props_option] == -1 ? zx::clock::get_monotonic().get()
+                                                              : kPlugTime[plug_props_option]);
   bool plugged = (kPlugFlags[plug_props_option] & AUDIO_PDNF_PLUGGED);
   bool hardwired = (kPlugFlags[plug_props_option] & AUDIO_PDNF_HARDWIRED);
   bool can_notify = (kPlugFlags[plug_props_option] & AUDIO_PDNF_CAN_NOTIFY);
@@ -918,9 +919,8 @@ bool VirtualAudioUtil::ChangePlugState(const std::string& plug_time_str, bool pl
     return false;
   }
 
-  zx_time_t plug_change_time =
-      (plug_time_str == "" ? zx_clock_get_monotonic()
-                           : fxl::StringToNumber<zx_time_t>(plug_time_str));
+  auto plug_change_time = (plug_time_str == "" ? zx::clock::get_monotonic().get()
+                                               : fxl::StringToNumber<zx_time_t>(plug_time_str));
 
   if (configuring_output_) {
     output_->ChangePlugState(plug_change_time, plugged);
@@ -1077,14 +1077,14 @@ void VirtualAudioUtil::StopNotification(zx_time_t stop_time, uint32_t rb_pos) {
 }
 
 template <bool is_out>
-void VirtualAudioUtil::PositionNotification(uint32_t rb_pos, zx_time_t time_for_pos) {
-  printf("--Received Position (pos: %u, time: %zu) for %s\n", rb_pos, time_for_pos,
+void VirtualAudioUtil::PositionNotification(zx_time_t time_for_pos, uint32_t rb_pos) {
+  printf("--Received Position (time: %zu, pos: %u) for %s\n", time_for_pos, rb_pos,
          (is_out ? "output" : "input"));
 }
 template <bool is_out>
-void VirtualAudioUtil::PositionCallback(uint32_t rb_pos, zx_time_t time_for_pos) {
+void VirtualAudioUtil::PositionCallback(zx_time_t time_for_pos, uint32_t rb_pos) {
   VirtualAudioUtil::CallbackReceived();
-  VirtualAudioUtil::PositionNotification<is_out>(rb_pos, time_for_pos);
+  VirtualAudioUtil::PositionNotification<is_out>(time_for_pos, rb_pos);
 }
 
 }  // namespace virtual_audio

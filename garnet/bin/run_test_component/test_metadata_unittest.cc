@@ -35,12 +35,9 @@ constexpr char kRequiredCmxElements[] = R"(
 
 class TestMetadataTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    ASSERT_NE("", tmp_dir_.path()) << "Cannot acccess /tmp";
-  }
+  void SetUp() override { ASSERT_NE("", tmp_dir_.path()) << "Cannot acccess /tmp"; }
 
-  void ExpectFailedParse(const std::string& json,
-                         const std::string& expected_error) {
+  void ExpectFailedParse(const std::string& json, const std::string& expected_error) {
     std::string error;
     TestMetadata tm;
     EXPECT_FALSE(ParseFrom(&tm, json));
@@ -58,8 +55,7 @@ class TestMetadataTest : public ::testing::Test {
     if (additional_elements == "") {
       return fxl::Substitute("{$0}", kRequiredCmxElements);
     } else {
-      return fxl::Substitute("{$0, $1}", kRequiredCmxElements,
-                             additional_elements);
+      return fxl::Substitute("{$0, $1}", kRequiredCmxElements, additional_elements);
     }
   }
 
@@ -128,8 +124,7 @@ TEST_F(TestMetadataTest, InvalidSystemServicesType) {
       "system-services": "string"
     }
   })");
-  auto expected_error =
-      "'system-services' in 'fuchsia.test' should be a string array.";
+  auto expected_error = "'system-services' in 'fuchsia.test' should be a string array.";
   ExpectFailedParse(json, expected_error);
 
   json = CreateManifestJson(R"(
@@ -154,8 +149,7 @@ TEST_F(TestMetadataTest, InvalidSystemServicesType) {
       "system-services": [ "fuchsia.netstack.Netstack", "invalid_service" ]
     }
   })");
-  ExpectFailedParse(json,
-                    "'system-services' cannot contain 'invalid_service'.");
+  ExpectFailedParse(json, "'system-services' cannot contain 'invalid_service'.");
 }
 
 TEST_F(TestMetadataTest, InvalidServices) {
@@ -177,8 +171,7 @@ TEST_F(TestMetadataTest, InvalidServices) {
       }
     }
   })");
-  ExpectFailedParse(json,
-                    "'1' must be a string or a non-empty array of strings.");
+  ExpectFailedParse(json, "'1' must be a string or a non-empty array of strings.");
   json = CreateManifestJson(R"(
   "facets": {
     "fuchsia.test": {
@@ -188,8 +181,7 @@ TEST_F(TestMetadataTest, InvalidServices) {
     }
   })");
 
-  ExpectFailedParse(json,
-                    "'1' must be a string or a non-empty array of strings.");
+  ExpectFailedParse(json, "'1' must be a string or a non-empty array of strings.");
 }
 
 TEST_F(TestMetadataTest, EmptyServices) {
@@ -225,8 +217,7 @@ TEST_F(TestMetadataTest, ValidServices) {
   EXPECT_EQ(services[0].first, "1");
   EXPECT_TRUE(fidl::Equals(services[0].second, LaunchInfo{.url = "url1"}));
   LaunchInfo launch_info{.url = "url2"};
-  launch_info.arguments.push_back("--a=b");
-  launch_info.arguments.push_back("c");
+  launch_info.arguments.emplace({"--a=b", "c"});
   EXPECT_EQ(services[1].first, "2");
   EXPECT_TRUE(fidl::Equals(services[1].second, launch_info));
   EXPECT_EQ(services[2].first, "3");
@@ -254,12 +245,10 @@ TEST_F(TestMetadataTest, ValidSystemServices) {
     EXPECT_TRUE(ParseFrom(&tm, json));
     EXPECT_EQ(tm.system_services().size(), 6u);
     EXPECT_THAT(tm.system_services(),
-                ::testing::ElementsAre(fuchsia::net::Connectivity::Name_,
-                                       fuchsia::net::SocketProvider::Name_,
-                                       fuchsia::net::stack::Stack::Name_,
-                                       fuchsia::netstack::Netstack::Name_,
-                                       fuchsia::ui::scenic::Scenic::Name_,
-                                       fuchsia::ui::policy::Presenter::Name_));
+                ::testing::ElementsAre(
+                    fuchsia::net::Connectivity::Name_, fuchsia::net::SocketProvider::Name_,
+                    fuchsia::net::stack::Stack::Name_, fuchsia::netstack::Netstack::Name_,
+                    fuchsia::ui::scenic::Scenic::Name_, fuchsia::ui::policy::Presenter::Name_));
   }
 
   json = CreateManifestJson(R"(
@@ -276,10 +265,9 @@ TEST_F(TestMetadataTest, ValidSystemServices) {
     TestMetadata tm;
     EXPECT_TRUE(ParseFrom(&tm, json));
     EXPECT_EQ(tm.system_services().size(), 3u);
-    EXPECT_THAT(tm.system_services(),
-                ::testing::ElementsAre(fuchsia::net::Connectivity::Name_,
-                                       fuchsia::net::SocketProvider::Name_,
-                                       fuchsia::netstack::Netstack::Name_));
+    EXPECT_THAT(tm.system_services(), ::testing::ElementsAre(fuchsia::net::Connectivity::Name_,
+                                                             fuchsia::net::SocketProvider::Name_,
+                                                             fuchsia::netstack::Netstack::Name_));
   }
 }
 

@@ -14,15 +14,16 @@ namespace intrusive_containers {
 
 template <typename ContainerStateType>
 struct OtherListTraits {
-    using PtrTraits = typename ContainerStateType::PtrTraits;
-    static ContainerStateType& node_state(typename PtrTraits::RefType obj) {
-        return obj.other_container_state_;
-    }
+  using PtrTraits = typename ContainerStateType::PtrTraits;
+  static ContainerStateType& node_state(typename PtrTraits::RefType obj) {
+    return obj.other_container_state_;
+  }
 };
 
 template <typename PtrType>
 class DLLTraits {
-public:
+ public:
+  // clang-format off
     using TestObjBaseType         = TestObjBase;
 
     using ContainerType           = DoublyLinkedList<PtrType>;
@@ -45,15 +46,17 @@ public:
     using TaggedType1 = TaggedDoublyLinkedList<PtrType, Tag1>;
     using TaggedType2 = TaggedDoublyLinkedList<PtrType, Tag2>;
     using TaggedType3 = TaggedDoublyLinkedList<PtrType, Tag3>;
+  // clang-format on
 };
 
 // Just a sanity check so we know our metaprogramming nonsense is
 // doing what we expect:
-static_assert(std::is_same_v<typename DLLTraits<int*>::TaggedContainableBaseClasses::TagTypes,
-                             std::tuple<typename DLLTraits<int*>::Tag1,
-                                        typename DLLTraits<int*>::Tag2,
-                                        typename DLLTraits<int*>::Tag3>>);
+static_assert(
+    std::is_same_v<typename DLLTraits<int*>::TaggedContainableBaseClasses::TagTypes,
+                   std::tuple<typename DLLTraits<int*>::Tag1, typename DLLTraits<int*>::Tag2,
+                              typename DLLTraits<int*>::Tag3>>);
 
+// clang-format off
 DEFINE_TEST_OBJECTS(DLL);
 using UMTE    = DEFINE_TEST_THUNK(Sequence, DLL, Unmanaged);
 using UPTE    = DEFINE_TEST_THUNK(Sequence, DLL, UniquePtr);
@@ -274,6 +277,7 @@ RUN_NAMED_TEST("ReplaceMove (std::uptr<Del>)",      SUPCDTE::ReplaceMoveTest)
 RUN_NAMED_TEST("ReplaceMove (RefPtr)",              RPTE::ReplaceMoveTest)
 
 END_TEST_CASE(double_linked_list_tests)
+// clang-format on
 
 }  // namespace intrusive_containers
 }  // namespace tests

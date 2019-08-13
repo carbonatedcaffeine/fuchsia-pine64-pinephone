@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 # Copyright 2018 The Fuchsia Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -77,8 +77,8 @@ def main():
             "aarch64": "arm64",
         }[platform.machine()],
     )
-    buildtools_dir = os.path.join(ROOT_PATH, "buildtools", host_platform)
-    rustfmt = os.path.join(buildtools_dir, "rust", "bin", "rustfmt")
+    buildtools_dir = os.path.join(ROOT_PATH, "prebuilt", "third_party")
+    rustfmt = os.path.join(buildtools_dir, "rust", host_platform, "bin", "rustfmt")
 
     call_args = [
         rustfmt

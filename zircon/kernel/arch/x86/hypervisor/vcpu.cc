@@ -4,21 +4,22 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT
 
+#include <bits.h>
+#include <lib/ktrace.h>
+#include <zircon/syscalls/hypervisor.h>
+
+#include <new>
+
 #include <arch/x86/descriptor.h>
 #include <arch/x86/feature.h>
 #include <arch/x86/pvclock.h>
-#include <bits.h>
 #include <fbl/auto_call.h>
 #include <hypervisor/cpu.h>
 #include <hypervisor/ktrace.h>
 #include <kernel/mp.h>
-#include <lib/ktrace.h>
 #include <vm/fault.h>
 #include <vm/pmm.h>
 #include <vm/vm_object.h>
-#include <zircon/syscalls/hypervisor.h>
-
-#include <new>
 
 #include "pvclock_priv.h"
 #include "vcpu_priv.h"
@@ -231,7 +232,7 @@ zx_status_t AutoVmcs::SetControl(VmcsField32 controls, uint64_t true_msr, uint64
 }
 
 AutoPin::AutoPin(uint16_t vpid)
-    : prev_cpu_mask_(get_current_thread()->cpu_affinity), thread_(hypervisor::pin_thread(vpid)) {}
+    : prev_cpu_mask_(get_current_thread()->hard_affinity), thread_(hypervisor::pin_thread(vpid)) {}
 
 AutoPin::~AutoPin() { thread_set_cpu_affinity(thread_, prev_cpu_mask_); }
 

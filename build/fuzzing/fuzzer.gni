@@ -71,7 +71,10 @@ template("fuzzer") {
         features = []
         forward_variables_from(cmx.sandbox, "*")
         services += [ "fuchsia.process.Launcher" ]
-        features += [ "isolated-persistent-storage" ]
+        features += [
+          "isolated-persistent-storage",
+          "deprecated-ambient-replace-as-executable"
+        ]
       }
       forward_variables_from(cmx,
                              [
@@ -101,7 +104,7 @@ template("fuzzer") {
     # Explicitly forward visibility for nested scopes.
     forward_variables_from(invoker, [ "visibility" ])
     deps += [
-      "//src/fuzzing/cpp:fuzzer_test",
+      "//src/lib/fuzzing/cpp:fuzzer_test",
       "//third_party/googletest:gtest_main",
     ]
   }
@@ -114,7 +117,10 @@ template("fuzzer") {
       }
       sandbox = {
         services = [ "fuchsia.process.Launcher" ]
-        features = [ "isolated-persistent-storage" ]
+        features = [
+          "isolated-persistent-storage",
+          "deprecated-ambient-replace-as-executable"
+        ]
       }
     }
     outputs = [

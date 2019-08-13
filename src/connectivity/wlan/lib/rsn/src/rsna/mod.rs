@@ -195,6 +195,11 @@ impl<B: ByteSlice> Dot11VerifiedKeyFrame<B> {
         // IEEE Std 802.1X-2010, 11.9
         let key_descriptor = match frame.key_frame_fields.descriptor_type {
             eapol::KeyDescriptor::IEEE802DOT11 => eapol::KeyDescriptor::IEEE802DOT11,
+            eapol::KeyDescriptor::LEGACY_WPA1
+                if protection.protection_type == ProtectionType::LegacyWpa1 =>
+            {
+                eapol::KeyDescriptor::LEGACY_WPA1
+            }
             eapol::KeyDescriptor::RC4 => bail!(Error::InvalidKeyDescriptor(
                 frame.key_frame_fields.descriptor_type,
                 eapol::KeyDescriptor::IEEE802DOT11,
@@ -386,10 +391,12 @@ pub fn derive_key_descriptor_version(
 
     match akm.suite_type {
         1 | 2 => match key_descriptor_type {
-            eapol::KeyDescriptor::RC4 => match pairwise.suite_type {
-                TKIP | GROUP_CIPHER_SUITE => 1,
-                _ => 0,
-            },
+            eapol::KeyDescriptor::RC4 | eapol::KeyDescriptor::LEGACY_WPA1 => {
+                match pairwise.suite_type {
+                    TKIP | GROUP_CIPHER_SUITE => 1,
+                    _ => 0,
+                }
+            }
             eapol::KeyDescriptor::IEEE802DOT11
                 if pairwise.is_enhanced() || protection.group_data.is_enhanced() =>
             {
@@ -399,7 +406,7 @@ pub fn derive_key_descriptor_version(
         },
         // Interestingly, IEEE 802.11 does not specify any pairwise- or group cipher
         // requirements for these AKMs.
-        3...6 => 3,
+        3..=6 => 3,
         _ => 0,
     }
 }
@@ -430,7 +437,10 @@ pub type UpdateSink = Vec<SecAssocUpdate>;
 mod tests {
     use super::*;
     use crate::rsna::{test_util, NegotiatedProtection, Role};
-    use wlan_common::ie::rsn::{akm, cipher, rsne::Rsne, suite_selector::OUI};
+    use wlan_common::{
+        assert_variant,
+        ie::rsn::{akm, cipher, rsne::Rsne, suite_selector::OUI},
+    };
 
     #[test]
     fn test_negotiated_protection_from_rsne() {
@@ -505,10 +515,9 @@ mod tests {
         let negotiated_protection = NegotiatedProtection::from_rsne(&rsne)
             .expect("error, could not create negotiated RSNE")
             .to_full_protection();
-        match negotiated_protection {
-            ProtectionInfo::Rsne(negotiated_protection) => assert_eq!(negotiated_protection, rsne),
-            _ => panic!("error, negotiated RSNE turned into a different protection type"),
-        }
+        assert_variant!(negotiated_protection, ProtectionInfo::Rsne(actual_protection) => {
+            assert_eq!(actual_protection, rsne);
+        });
     }
 
     #[test]
@@ -517,12 +526,9 @@ mod tests {
         let negotiated_protection = NegotiatedProtection::from_legacy_wpa(&wpa_ie)
             .expect("error, could not create negotiated WPA")
             .to_full_protection();
-        match negotiated_protection {
-            ProtectionInfo::LegacyWpa(negotiated_protection) => {
-                assert_eq!(negotiated_protection, wpa_ie)
-            }
-            _ => panic!("error, negotiated WPA turned into a different protection type"),
-        }
+        assert_variant!(negotiated_protection, ProtectionInfo::LegacyWpa(actual_protection) => {
+            assert_eq!(actual_protection, wpa_ie);
+        });
     }
 
     fn make_cipher(suite_type: u8) -> cipher::Cipher {

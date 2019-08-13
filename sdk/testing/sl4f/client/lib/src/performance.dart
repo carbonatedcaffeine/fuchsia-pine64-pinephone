@@ -63,7 +63,7 @@ class Performance {
       String categories,
       int bufferSize,
       bool binary = false,
-      bool compress = false}) {
+      bool compress = false}) async {
     // Invoke `/bin/trace record --duration=$duration --categories=$categories
     // --output-file=$outputFile --buffer-size=$bufferSize` on the target
     // device via ssh.
@@ -87,7 +87,8 @@ class Performance {
     if (outputFile != null) {
       command += ' --output-file=$outputFile';
     }
-    return _sl4f.ssh(command);
+    final result = await _sl4f.ssh.run(command);
+    return result.exitCode == 0;
   }
 
   /// Copies the trace file specified by [traceName] off of the target device,
@@ -133,7 +134,7 @@ class Performance {
       {String appName, String converterPath}) async {
     _log.info('Processing trace: ${trace.path} using $processorPath.');
     final outputFileName =
-        '${trace.parent.absolute.path}/$testName-benchmark.json';
+        '${trace.parent.absolute.path}/$testName-benchmark.fuchsiaperf.json';
     final List<String> args = [
       '-test_suite_name=$testName',
       if (appName != null) '-flutter_app_name=$appName',
@@ -202,9 +203,9 @@ class Performance {
     }
 
     final resultsPath = result.absolute.path;
-    assert(resultsPath.endsWith('.json'));
-    final outputFileName =
-        resultsPath.replaceFirst(RegExp(r'\.json$'), '.catapult_json');
+    assert(resultsPath.endsWith('.fuchsiaperf.json'));
+    final outputFileName = resultsPath.replaceFirst(
+        RegExp(r'\.fuchsiaperf\.json$'), '.catapult_json');
 
     final List<String> args = [
       '--input',

@@ -4,11 +4,13 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT
 
-#pragma once
+#ifndef ZIRCON_KERNEL_LIB_UNITTEST_INCLUDE_LIB_UNITTEST_USER_MEMORY_H_
+#define ZIRCON_KERNEL_LIB_UNITTEST_INCLUDE_LIB_UNITTEST_USER_MEMORY_H_
 
-#include <ktl/unique_ptr.h>
-#include <ktl/move.h>
 #include <lib/user_copy/user_ptr.h>
+
+#include <ktl/move.h>
+#include <ktl/unique_ptr.h>
 #include <vm/pmm.h>
 #include <vm/vm.h>
 #include <vm/vm_aspace.h>
@@ -24,17 +26,18 @@ namespace testing {
 //    mem_out.copy_array_to_user(&thing, sizeof(thing));
 //
 class UserMemory {
-public:
-    static ktl::unique_ptr<UserMemory> Create(size_t size);
-    virtual ~UserMemory();
-    void* out() { return reinterpret_cast<void*>(mapping_->base()); }
-    const void* in() { return reinterpret_cast<void*>(mapping_->base()); }
+ public:
+  static ktl::unique_ptr<UserMemory> Create(size_t size);
+  virtual ~UserMemory();
+  void* out() { return reinterpret_cast<void*>(mapping_->base()); }
+  const void* in() { return reinterpret_cast<void*>(mapping_->base()); }
 
-private:
-    UserMemory(fbl::RefPtr<VmMapping> mapping)
-        : mapping_(ktl::move(mapping)) {}
+ private:
+  UserMemory(fbl::RefPtr<VmMapping> mapping) : mapping_(ktl::move(mapping)) {}
 
-    fbl::RefPtr<VmMapping> mapping_;
+  fbl::RefPtr<VmMapping> mapping_;
 };
 
-} // namespace testing
+}  // namespace testing
+
+#endif  // ZIRCON_KERNEL_LIB_UNITTEST_INCLUDE_LIB_UNITTEST_USER_MEMORY_H_

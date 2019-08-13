@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(await_macro, async_await)]
+#![feature(async_await)]
 
 use {
     failure::{err_msg, format_err, Error},
@@ -14,10 +14,8 @@ use {
         MODE_TYPE_FILE, OPEN_FLAG_CREATE, OPEN_FLAG_DIRECTORY,
     },
     fuchsia_async as fasync,
-    fuchsia_zircon::{self as zx, HandleBased},
-    std::ffi::CString,
+    fuchsia_zircon as zx,
     std::path::{Component, Path},
-    std::ptr,
     std::str::from_utf8,
 };
 
@@ -34,7 +32,14 @@ pub fn open_node<'a>(
     flags: u32,
     mode: u32,
 ) -> Result<NodeProxy, Error> {
-    let path = path.to_str().ok_or(err_msg("path is invalid"))?;
+    if path.is_absolute() {
+        return Err(err_msg("path must be relative"));
+    }
+    let path = path.to_str().ok_or(err_msg("path contains invalid UTF-8"))?;
+    if path.is_empty() {
+        return Err(err_msg("path must not be empty"));
+    }
+
     let (new_node, server_end) = create_proxy()?;
     dir.open(flags, mode, path, server_end)?;
     Ok(new_node)
@@ -90,41 +95,18 @@ pub fn connect_in_namespace(
     server_chan: zx::Channel,
     flags: u32,
 ) -> Result<(), zx::Status> {
-    let mut ns_ptr: *mut fdio::fdio_sys::fdio_ns_t = ptr::null_mut();
-    let status = unsafe { fdio::fdio_sys::fdio_ns_get_installed(&mut ns_ptr) };
-    if status != zx::sys::ZX_OK {
-        return Err(zx::Status::from_raw(status));
-    }
-
-    let cstr = CString::new(path)?;
-    let status = unsafe {
-        fdio::fdio_sys::fdio_ns_connect(ns_ptr, cstr.as_ptr(), flags, server_chan.into_raw())
-    };
-    if status != zx::sys::ZX_OK {
-        return Err(zx::Status::from_raw(status));
-    }
+    let namespace = fdio::Namespace::installed()?;
+    namespace.connect(path, flags, server_chan)?;
     Ok(())
 }
 
 /// open_node_in_namespace will return a NodeProxy to the given path by using the default namespace
 /// stored in fdio. The path argument must be an absolute path.
 pub fn open_node_in_namespace(path: &str, flags: u32) -> Result<NodeProxy, Error> {
-    let mut ns_ptr: *mut fdio::fdio_sys::fdio_ns_t = ptr::null_mut();
-    let status = unsafe { fdio::fdio_sys::fdio_ns_get_installed(&mut ns_ptr) };
-    if status != zx::sys::ZX_OK {
-        return Err(format_err!("fdio_ns_get_installed error: {}", status));
-    }
-
     let (proxy_chan, server_end) = zx::Channel::create()
         .map_err(|status| format_err!("zx::Channel::create error: {}", status))?;
 
-    let cstr = CString::new(path)?;
-    let status = unsafe {
-        fdio::fdio_sys::fdio_ns_connect(ns_ptr, cstr.as_ptr(), flags, server_end.into_raw())
-    };
-    if status != zx::sys::ZX_OK {
-        return Err(format_err!("fdio_ns_connect error: {}", status));
-    }
+    connect_in_namespace(path, server_end, flags)?;
 
     return Ok(NodeProxy::new(fasync::Channel::from_channel(proxy_chan)?));
 }
@@ -144,7 +126,7 @@ pub fn open_file_in_namespace(path: &str, flags: u32) -> Result<FileProxy, Error
 pub async fn read_file(file: &FileProxy) -> Result<String, Error> {
     let mut out = String::new();
     loop {
-        let (status, bytes) = await!(file.read(MAX_BUF)).map_err(|e| Error::from(e))?;
+        let (status, bytes) = file.read(MAX_BUF).await.map_err(|e| Error::from(e))?;
         let status = zx::Status::from_raw(status);
         if status != zx::Status::OK {
             return Err(format_err!("failed to read file: {}", status));
@@ -182,6 +164,9 @@ pub fn clone_directory(dir: &DirectoryProxy, flags: u32) -> Result<DirectoryProx
 /// canonicalize_path will remove a leading `/` if it exists, since it's always unnecessary and in
 /// some cases disallowed (US-569).
 pub fn canonicalize_path(path: &str) -> &str {
+    if path == "/" {
+        return ".";
+    }
     if path.starts_with('/') {
         return &path[1..];
     }
@@ -216,8 +201,32 @@ mod tests {
                 .expect("could not open tmp dir");
         let path = Path::new("myfile");
         let file = open_file(&dir, &path, OPEN_RIGHT_READABLE).expect("could not open file");
-        let contents = await!(read_file(&file)).expect("could not read file");
+        let contents = read_file(&file).await.expect("could not read file");
         assert_eq!(&contents, &data, "File contents did not match");
+    }
+
+    #[fasync::run_singlethreaded(test)]
+    async fn open_checks_path_validity() {
+        let dir =
+            open_directory_in_namespace("/pkg", OPEN_RIGHT_READABLE).expect("could not open /pkg");
+
+        assert!(open_file(&dir, Path::new(""), OPEN_RIGHT_READABLE).is_err());
+        assert!(open_file(&dir, Path::new("/"), OPEN_RIGHT_READABLE).is_err());
+        assert!(open_file(&dir, Path::new("/foo"), OPEN_RIGHT_READABLE).is_err());
+        assert!(open_directory(&dir, Path::new(""), OPEN_RIGHT_READABLE).is_err());
+        assert!(open_directory(&dir, Path::new("/"), OPEN_RIGHT_READABLE).is_err());
+        assert!(open_directory(&dir, Path::new("/foo"), OPEN_RIGHT_READABLE).is_err());
+    }
+
+    #[test]
+    fn test_canonicalize_path() {
+        assert_eq!(canonicalize_path("/"), ".");
+        assert_eq!(canonicalize_path("/foo"), "foo");
+        assert_eq!(canonicalize_path("/foo/bar/"), "foo/bar/");
+
+        assert_eq!(canonicalize_path("."), ".");
+        assert_eq!(canonicalize_path("./"), "./");
+        assert_eq!(canonicalize_path("foo/bar/"), "foo/bar/");
     }
 
     #[fasync::run_until_stalled(test)]
@@ -240,7 +249,7 @@ mod tests {
             ServerEnd::new(example_dir_service.into_channel()),
         );
         fasync::spawn(async move {
-            let _ = await!(example_dir);
+            let _ = example_dir.await;
         });
 
         for (file_name, flags, should_succeed) in vec![
@@ -255,7 +264,7 @@ mod tests {
             ("write_only", OPEN_RIGHT_WRITABLE, true),
         ] {
             let file_proxy = open_file(&example_dir_proxy, &Path::new(file_name), flags)?;
-            match (should_succeed, await!(file_proxy.describe())) {
+            match (should_succeed, file_proxy.describe().await) {
                 (true, Ok(_)) => (),
                 (false, Err(_)) => continue,
                 (true, Err(e)) => {
@@ -266,13 +275,13 @@ mod tests {
                 }
             }
             if flags & OPEN_RIGHT_READABLE != 0 {
-                assert_eq!(file_name, await!(read_file(&file_proxy)).expect("failed to read file"));
+                assert_eq!(file_name, read_file(&file_proxy).await.expect("failed to read file"));
             }
             if flags & OPEN_RIGHT_WRITABLE != 0 {
-                let (s, _) = await!(file_proxy.write(&mut b"write_only".to_vec().into_iter()))?;
+                let (s, _) = file_proxy.write(&mut b"write_only".to_vec().into_iter()).await?;
                 assert_eq!(zx::Status::OK, zx::Status::from_raw(s));
             }
-            assert_eq!(zx::Status::OK, zx::Status::from_raw(await!(file_proxy.close())?));
+            assert_eq!(zx::Status::OK, zx::Status::from_raw(file_proxy.close().await?));
         }
         Ok(())
     }
@@ -300,7 +309,7 @@ mod tests {
             OPEN_RIGHT_READABLE | OPEN_RIGHT_WRITABLE | OPEN_FLAG_CREATE,
         )?;
 
-        let (s, _) = await!(file.write(&mut data.as_bytes().to_vec().into_iter()))?;
+        let (s, _) = file.write(&mut data.as_bytes().to_vec().into_iter()).await?;
         assert_eq!(zx::Status::OK, zx::Status::from_raw(s), "writing to the file failed");
 
         let contents = std::fs::read_to_string(tempdir.path().join(path).join(file_name))?;

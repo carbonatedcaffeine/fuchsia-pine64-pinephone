@@ -4,10 +4,12 @@
 
 #include "src/developer/memory/metrics/watcher.h"
 
+#include <lib/async/cpp/task.h>
+#include <lib/zx/time.h>
 #include <stdio.h>
 #include <unistd.h>
 
-#include "lib/async/cpp/task.h"
+#include <trace/event.h>
 
 namespace memory {
 
@@ -20,9 +22,12 @@ Watcher::Watcher(zx::duration poll_frequency, uint64_t high_water_threshold,
       high_water_threshold_(high_water_threshold),
       dispatcher_(dispatcher),
       capture_cb_(std::move(capture_cb)),
-      high_water_cb_(std::move(high_water_cb)) {}
+      high_water_cb_(std::move(high_water_cb)) {
+  task_.PostDelayed(dispatcher_, zx::usec(1));
+}
 
 void Watcher::CaptureMemory() {
+  TRACE_DURATION("memory_metrics", "Watcher::CaptureMemory");
   Capture c;
   capture_cb_(c, KMEM);
   auto free_bytes = c.kmem().free_bytes;
@@ -36,14 +41,7 @@ void Watcher::CaptureMemory() {
       high_water_cb_(c);
     }
   }
+  task_.PostDelayed(dispatcher_, poll_frequency_);
 }
-
-void Watcher::CaptureMemoryRepeatedly() {
-  CaptureMemory();
-  async::PostDelayedTask(
-      dispatcher_, [this] { CaptureMemoryRepeatedly(); }, poll_frequency_);
-}
-
-void Watcher::Run() { CaptureMemoryRepeatedly(); }
 
 }  // namespace memory

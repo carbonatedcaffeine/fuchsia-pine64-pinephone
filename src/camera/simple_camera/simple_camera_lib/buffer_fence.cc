@@ -7,14 +7,15 @@
 #include <fcntl.h>
 #include <lib/async/default.h>
 #include <lib/fdio/io.h>
-#include <src/lib/fxl/command_line.h>
-#include <src/lib/fxl/log_settings_command_line.h>
-#include <src/lib/fxl/logging.h>
 #include <stdio.h>
 #include <unistd.h>
 
 #include <memory>
 #include <utility>
+
+#include <src/lib/fxl/command_line.h>
+#include <src/lib/fxl/log_settings_command_line.h>
+#include <src/lib/fxl/logging.h>
 
 namespace simple_camera {
 
@@ -47,13 +48,11 @@ BufferFence::BufferFence() = default;
 
 BufferFence::~BufferFence() { release_fence_waiter_.Cancel(); }
 
-void BufferFence::OnReleaseFenceSignalled(async_dispatcher_t* dispatcher,
-                                          async::WaitBase* wait,
-                                          zx_status_t status,
-                                          const zx_packet_signal* signal) {
+void BufferFence::OnReleaseFenceSignalled(async_dispatcher_t* dispatcher, async::WaitBase* wait,
+                                          zx_status_t status, const zx_packet_signal* signal) {
   if (status != ZX_OK) {
-    FXL_LOG(ERROR) << "AsyncWaiter received an error ("
-                   << zx_status_get_string(status) << ").  Exiting.";
+    FXL_LOG(ERROR) << "AsyncWaiter received an error (" << zx_status_get_string(status)
+                   << ").  Exiting.";
     // TODO(CAM-7): Store the error state and allow it to be queried somehow.
     return;
   }
@@ -64,8 +63,8 @@ void BufferFence::OnReleaseFenceSignalled(async_dispatcher_t* dispatcher,
 
   status = wait->Begin(dispatcher);
   if (status != ZX_OK) {
-    FXL_LOG(ERROR) << "AsyncWaiter failed to wait ("
-                   << zx_status_get_string(status) << ").  Exiting.";
+    FXL_LOG(ERROR) << "AsyncWaiter failed to wait (" << zx_status_get_string(status)
+                   << ").  Exiting.";
     // TODO(CAM-7): Store the error state and allow it to be queried somehow.
   }
 }

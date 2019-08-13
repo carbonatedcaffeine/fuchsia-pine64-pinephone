@@ -1,0 +1,16 @@
+{
+    "program": {
+        "binary": "test/crashpad_agent_unittest"
+    },
+    "sandbox": {
+        "features": [
+            "build-info",
+            "system-temp",
+            "deprecated-ambient-replace-as-executable"
+        ],
+        "services": [
+            "fuchsia.logger.LogSink",
+            "fuchsia.process.Launcher"
+        ]
+    }
+}

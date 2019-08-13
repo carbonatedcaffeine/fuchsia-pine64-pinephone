@@ -5,12 +5,13 @@
 package ir
 
 import (
-	"fidl/compiler/backend/common"
-	"fidl/compiler/backend/types"
 	"fmt"
 	"log"
 	"sort"
 	"strings"
+
+	"fidl/compiler/backend/common"
+	"fidl/compiler/backend/types"
 )
 
 type EncodedCompoundIdentifier = types.EncodedCompoundIdentifier
@@ -152,9 +153,7 @@ type Interface struct {
 
 type Method struct {
 	types.Attributes
-	Ordinal     uint64
-	GenOrdinal  uint64
-	OrdinalName string
+	Ordinals    types.Ordinals
 	Name        string
 	CamelName   string
 	HasRequest  bool
@@ -368,26 +367,32 @@ var primitiveTypes = map[types.PrimitiveSubtype]string{
 }
 
 var handleSubtypes = map[types.HandleSubtype]string{
-	types.Handle:    "Handle",
-	types.Exception: "Exception",
-	types.Process:   "Process",
-	types.Thread:    "Thread",
-	types.Vmo:       "Vmo",
-	types.Channel:   "Channel",
-	types.Event:     "Event",
-	types.Port:      "Port",
-	types.Interrupt: "Interrupt",
-	types.Log:       "Log",
-	types.Socket:    "Socket",
-	types.Resource:  "Resource",
-	types.Eventpair: "EventPair",
-	types.Job:       "Job",
-	types.Vmar:      "Vmar",
-	types.Fifo:      "Fifo",
-	types.Guest:     "Guest",
-	types.Time:      "Timer",
-	types.Bti:       "Bti",
-	types.Profile:   "Profile",
+	types.Bti:          "Bti",
+	types.Channel:      "Channel",
+	types.Event:        "Event",
+	types.Eventpair:    "EventPair",
+	types.Exception:    "Exception",
+	types.Fifo:         "Fifo",
+	types.Guest:        "Guest",
+	types.Handle:       "Handle",
+	types.Interrupt:    "Interrupt",
+	types.Iommu:        "Iommu",
+	types.Job:          "Job",
+	types.Log:          "Log",
+	types.Pager:        "Pager",
+	types.PciDevice:    "PciDevice",
+	types.Pmt:          "Pmt",
+	types.Port:         "Port",
+	types.Process:      "Process",
+	types.Profile:      "Profile",
+	types.Resource:     "Resource",
+	types.Socket:       "Socket",
+	types.SuspendToken: "SuspendToken",
+	types.Thread:       "Thread",
+	types.Time:         "Timer",
+	types.Vcpu:         "Vcpu",
+	types.Vmar:         "Vmar",
+	types.Vmo:          "Vmo",
 }
 
 type compiler struct {
@@ -437,6 +442,9 @@ func (c *compiler) compileCompoundIdentifier(val types.CompoundIdentifier) strin
 	}
 	str := changeIfReserved(val.Name)
 	strs = append(strs, str)
+	if val.Member != "" {
+		strs = append(strs, string(val.Member))
+	}
 	return strings.Join(strs, "::")
 }
 
@@ -546,7 +554,7 @@ func (c *compiler) compileType(val types.Type, borrowed bool) Type {
 		t := c.compileType(*val.ElementType, borrowed)
 		var inner string
 		if borrowed {
-			inner = fmt.Sprintf("&mut ExactSizeIterator<Item = %s>", t.Decl)
+			inner = fmt.Sprintf("&mut dyn ExactSizeIterator<Item = %s>", t.Decl)
 		} else {
 			inner = fmt.Sprintf("Vec<%s>", t.Decl)
 		}
@@ -570,7 +578,7 @@ func (c *compiler) compileType(val types.Type, borrowed bool) Type {
 			}
 		}
 	case types.HandleType:
-		r = fmt.Sprintf("zx::%s", compileHandleSubtype(val.HandleSubtype))
+		r = fmt.Sprintf("fidl::%s", compileHandleSubtype(val.HandleSubtype))
 		if val.Nullable {
 			r = fmt.Sprintf("Option<%s>", r)
 		}
@@ -725,8 +733,7 @@ func (c *compiler) compileInterface(val types.Interface) Interface {
 
 		m := Method{
 			Attributes:  v.Attributes,
-			Ordinal:     v.Ordinal,
-			GenOrdinal:  v.GenOrdinal,
+			Ordinals:    types.NewOrdinalsStep3(v, "UNUSED", "UNUSED"),
 			Name:        name,
 			CamelName:   camelName,
 			HasRequest:  v.HasRequest,

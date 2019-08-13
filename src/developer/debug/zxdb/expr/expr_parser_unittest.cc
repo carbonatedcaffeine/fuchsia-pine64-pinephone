@@ -63,14 +63,14 @@ class ExprParserTest : public testing::Test {
       return nullptr;
     }
 
-    parser_ = std::make_unique<ExprParser>(tokenizer_->TakeTokens(), name_lookup);
+    parser_ = std::make_unique<ExprParser>(tokenizer_->TakeTokens(), std::move(name_lookup));
     return parser_->Parse();
   }
 
   // Does the parse and returns the string dump of the structure.
   std::string GetParseString(const char* input,
                              NameLookupCallback name_lookup = NameLookupCallback()) {
-    auto root = Parse(input, name_lookup);
+    auto root = Parse(input, std::move(name_lookup));
     if (!root) {
       // Expect calls to this to parse successfully.
       if (parser_.get())
@@ -273,6 +273,11 @@ TEST_F(ExprParserTest, UnaryMath) {
       GetParseString(" - 5 "));
 
   EXPECT_EQ(
+      "UNARY(!)\n"
+      " IDENTIFIER(\"foo\")\n",
+      GetParseString("!foo "));
+
+  EXPECT_EQ(
       "UNARY(-)\n"
       " DEREFERENCE\n"
       "  IDENTIFIER(\"foo\")\n",
@@ -348,28 +353,56 @@ TEST_F(ExprParserTest, Identifiers) {
 
 TEST_F(ExprParserTest, FunctionCall) {
   // Simple call with no args.
-  EXPECT_EQ("FUNCTIONCALL(\"Call\")\n", GetParseString("Call()"));
+  EXPECT_EQ(
+      "FUNCTIONCALL\n"
+      " IDENTIFIER(\"Call\")\n",
+      GetParseString("Call()"));
 
   // Scoped call with namespaces and templates.
-  EXPECT_EQ(R"(FUNCTIONCALL("ns"; ::"Foo",<"int">; ::"GetCurrent"))"
-            "\n",
-            GetParseString("ns::Foo<int>::GetCurrent()"));
+  EXPECT_EQ(
+      "FUNCTIONCALL\n"
+      " IDENTIFIER(\"ns\"; ::\"Foo\",<\"int\">; ::\"GetCurrent\")\n",
+      GetParseString("ns::Foo<int>::GetCurrent()"));
 
   // One arg.
   EXPECT_EQ(
-      "FUNCTIONCALL(\"Call\")\n"
+      "FUNCTIONCALL\n"
+      " IDENTIFIER(\"Call\")\n"
       " LITERAL(42)\n",
       GetParseString("Call(42)"));
 
   // Several complex args and a nested call.
   EXPECT_EQ(
-      "FUNCTIONCALL(\"Call\")\n"
+      "FUNCTIONCALL\n"
+      " IDENTIFIER(\"Call\")\n"
       " IDENTIFIER(\"a\")\n"
       " BINARY_OP(=)\n"
       "  IDENTIFIER(\"b\")\n"
       "  LITERAL(5)\n"
-      " FUNCTIONCALL(\"OtherCall\")\n",
+      " FUNCTIONCALL\n"
+      "  IDENTIFIER(\"OtherCall\")\n",
       GetParseString("Call(a, b = 5, OtherCall())"));
+
+  // Function call on an object with ".".
+  EXPECT_EQ(
+      "FUNCTIONCALL\n"
+      " ACCESSOR(.)\n"
+      "  ACCESSOR(.)\n"
+      "   IDENTIFIER(\"foo\")\n"
+      "   bar\n"
+      "  Baz\n"
+      " IDENTIFIER(\"a\")\n",
+      GetParseString("foo.bar.Baz(a)"));
+
+  // Function call on nested stuff with "->".
+  EXPECT_EQ(
+      "FUNCTIONCALL\n"
+      " ACCESSOR(->)\n"
+      "  BINARY_OP(+)\n"
+      "   IDENTIFIER(\"a\")\n"
+      "   IDENTIFIER(\"b\")\n"
+      "  Call\n",
+      GetParseString("(a + b)-> Call()"));
 
   // Unmatched "(" error.
   auto result = Parse("Call(a, ");
@@ -428,7 +461,7 @@ TEST_F(ExprParserTest, Templates) {
   // Duplicate template spec.
   result = Parse("Foo<Bar><Baz>");
   ASSERT_FALSE(result);
-  EXPECT_EQ("Comparisons not supported yet.", parser().err().msg());
+  EXPECT_EQ("Expected expression after '>'.", parser().err().msg());
 
   // Empty value.
   result = Parse("Foo<1,,2>");
@@ -445,8 +478,48 @@ TEST_F(ExprParserTest, BinaryOp) {
   EXPECT_EQ(
       "BINARY_OP(=)\n"
       " IDENTIFIER(\"a\")\n"
-      " LITERAL(23)\n",
-      GetParseString("a = 23"));
+      " BINARY_OP(+)\n"
+      "  LITERAL(23)\n"
+      "  BINARY_OP(*)\n"
+      "   IDENTIFIER(\"j\")\n"
+      "   BINARY_OP(+)\n"
+      "    IDENTIFIER(\"a\")\n"
+      "    LITERAL(1)\n",
+      GetParseString("a = 23 + j * (a + 1)"));
+}
+
+TEST_F(ExprParserTest, Comparison) {
+  EXPECT_EQ(
+      "BINARY_OP(!=)\n"
+      " IDENTIFIER(\"a\",<\"int\">; ::\"foo\")\n"
+      " LITERAL(0)\n",
+      GetParseString("a<int>::foo != 0"));
+
+  EXPECT_EQ(
+      "BINARY_OP(&&)\n"
+      " BINARY_OP(<)\n"
+      "  LITERAL(1)\n"
+      "  LITERAL(2)\n"
+      " BINARY_OP(>)\n"
+      "  IDENTIFIER(\"a\")\n"
+      "  LITERAL(4)\n",
+      GetParseString("1 < 2 && a > 4"));
+
+  EXPECT_EQ(
+      "BINARY_OP(||)\n"
+      " BINARY_OP(<=)\n"
+      "  LITERAL(1)\n"
+      "  LITERAL(2)\n"
+      " BINARY_OP(>=)\n"
+      "  IDENTIFIER(\"a\")\n"
+      "  LITERAL(4)\n",
+      GetParseString("1 <= 2 || a >= 4"));
+
+  EXPECT_EQ(
+      "BINARY_OP(<=>)\n"
+      " IDENTIFIER(\"a\")\n"
+      " LITERAL(4)\n",
+      GetParseString("a <=> 4"));
 }
 
 // Tests parsing identifier names that require lookups from the symbol system.
@@ -480,8 +553,10 @@ TEST_F(ExprParserTest, NamesWithSymbolLookup) {
   EXPECT_EQ("Template parameters not valid on this object type.", parser().err().msg());
 
   // Good type name.
-  EXPECT_EQ("FUNCTIONCALL(\"Namespace\"; ::\"Template\",<\"int\">; ::\"fn\")\n",
-            GetParseString("Namespace::Template<int>::fn()", &TestLookupName));
+  EXPECT_EQ(
+      "FUNCTIONCALL\n"
+      " IDENTIFIER(\"Namespace\"; ::\"Template\",<\"int\">; ::\"fn\")\n",
+      GetParseString("Namespace::Template<int>::fn()", &TestLookupName));
 }
 
 TEST_F(ExprParserTest, TrueFalse) {

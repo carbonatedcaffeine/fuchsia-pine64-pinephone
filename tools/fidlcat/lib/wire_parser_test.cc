@@ -81,9 +81,20 @@ TEST_F(WireParserTest, ParseSingleString) {
   const InterfaceMethod* method = (*methods)[0];
   ASSERT_NE(method, nullptr);
   ASSERT_EQ("Grob", method->name());
+
+  zx_handle_info_t* handle_infos = nullptr;
+  if (message.handles().size() > 0) {
+    handle_infos = new zx_handle_info_t[message.handles().size()];
+    for (uint32_t i = 0; i < message.handles().size(); ++i) {
+      handle_infos[i].handle = message.handles().data()[i];
+      handle_infos[i].type = ZX_OBJ_TYPE_NONE;
+      handle_infos[i].rights = 0;
+    }
+  }
+
   std::unique_ptr<fidlcat::Object> decoded_request;
-  fidlcat::DecodeRequest(method, message.bytes().data(), message.bytes().size(),
-                         message.handles().data(), message.handles().size(), &decoded_request);
+  fidlcat::DecodeRequest(method, message.bytes().data(), message.bytes().size(), handle_infos,
+                         message.handles().size(), &decoded_request);
   rapidjson::Document actual;
   if (decoded_request != nullptr) {
     decoded_request->ExtractJson(actual.GetAllocator(), actual);
@@ -92,6 +103,8 @@ TEST_F(WireParserTest, ParseSingleString) {
   rapidjson::Document expected;
   expected.Parse(R"JSON({"value":"one"})JSON");
   ASSERT_EQ(expected, actual);
+
+  delete[] handle_infos;
 }
 
 // This is a general-purpose macro for calling InterceptRequest and checking its
@@ -104,74 +117,82 @@ TEST_F(WireParserTest, ParseSingleString) {
 // |_pretty_print| is the expected pretty print of the message.
 // The remaining parameters are the parameters to |_iface| to generate the
 // message.
-#define TEST_DECODE_WIRE_BODY(_iface, _json_value, _pretty_print, ...)                          \
-  do {                                                                                          \
-    fidl::MessageBuffer buffer;                                                                 \
-    fidl::Message message = buffer.CreateEmptyMessage();                                        \
-    using test::fidlcat::examples::FidlcatTestInterface;                                        \
-    InterceptRequest<FidlcatTestInterface>(                                                     \
-        message,                                                                                \
-        [&](fidl::InterfacePtr<FidlcatTestInterface>& ptr) { ptr->_iface(__VA_ARGS__); });      \
-                                                                                                \
-    fidl_message_header_t header = message.header();                                            \
-                                                                                                \
-    const std::vector<const InterfaceMethod*>* methods = loader_->GetByOrdinal(header.ordinal); \
-    ASSERT_NE(methods, nullptr);                                                                \
-    ASSERT_TRUE(!methods->empty());                                                          \
-    const InterfaceMethod* method = (*methods)[0];                                              \
-    ASSERT_NE(method, nullptr);                                                                 \
-    ASSERT_EQ(#_iface, method->name());                                                         \
-                                                                                                \
-    std::unique_ptr<fidlcat::Object> decoded_request;                                           \
-    ASSERT_TRUE(fidlcat::DecodeRequest(method, message.bytes().data(), message.bytes().size(),  \
-                                       message.handles().data(), message.handles().size(),      \
-                                       &decoded_request))                                       \
-        << "Could not decode message";                                                          \
-    rapidjson::Document actual;                                                                 \
-    if (decoded_request != nullptr) {                                                           \
-      decoded_request->ExtractJson(actual.GetAllocator(), actual);                              \
-    }                                                                                           \
-    rapidjson::StringBuffer actual_string;                                                      \
-    rapidjson::Writer<rapidjson::StringBuffer> actual_w(actual_string);                         \
-    actual.Accept(actual_w);                                                                    \
-                                                                                                \
-    rapidjson::Document expected;                                                               \
-    std::string expected_source = _json_value;                                                  \
-    expected.Parse(expected_source.c_str());                                                    \
-    rapidjson::StringBuffer expected_string;                                                    \
-    rapidjson::Writer<rapidjson::StringBuffer> expected_w(expected_string);                     \
-    expected.Accept(expected_w);                                                                \
-                                                                                                \
-    ASSERT_EQ(expected, actual) << "expected = " << expected_string.GetString() << " ("         \
-                                << expected_source << ")"                                       \
-                                << " and actual = " << actual_string.GetString();               \
-                                                                                                \
-    std::stringstream result;                                                                   \
-    if (decoded_request != nullptr) {                                                           \
-      decoded_request->PrettyPrint(result, FakeColors, "", 0, 80, 80);                          \
-    }                                                                                           \
-    ASSERT_EQ(result.str(), _pretty_print)                                                      \
-        << "expected = " << _pretty_print << " actual = " << result.str();                      \
-                                                                                                \
-    for (uint32_t actual = 0; actual < message.bytes().actual(); ++actual) {                    \
-      MessageDecoder decoder(message.bytes().data(), actual, message.handles().data(),          \
-                             message.handles().size(), /*output_errors=*/false);                \
-      std::unique_ptr<Object> object = decoder.DecodeMessage(*method->request());               \
-      ASSERT_TRUE(decoder.HasError()) << "expect decoder error for buffer size " << actual      \
-                                      << " instead of " << message.bytes().actual();            \
-    }                                                                                           \
-                                                                                                \
-    for (uint32_t actual = 0; message.handles().actual() > actual; actual++) {                  \
-      fidl::HandlePart handles(message.handles().data(), message.handles().capacity(), actual); \
-      fidl::BytePart bytes(message.bytes().data(), message.bytes().capacity(),                  \
-                           message.bytes().actual());                                           \
-      fidl::Message message_copy(std::move(bytes), std::move(handles));                         \
-      MessageDecoder decoder(message.bytes().data(), message.bytes().size(),                    \
-                             message.handles().data(), actual, /*output_errors=*/false);        \
-      std::unique_ptr<Object> object = decoder.DecodeMessage(*method->request());               \
-      ASSERT_TRUE(decoder.HasError()) << "expect decoder error for handle size " << actual      \
-                                      << " instead of " << message.handles().actual();          \
-    }                                                                                           \
+#define TEST_DECODE_WIRE_BODY(_iface, _json_value, _pretty_print, ...)                             \
+  do {                                                                                             \
+    fidl::MessageBuffer buffer;                                                                    \
+    fidl::Message message = buffer.CreateEmptyMessage();                                           \
+    using test::fidlcat::examples::FidlcatTestInterface;                                           \
+    InterceptRequest<FidlcatTestInterface>(                                                        \
+        message,                                                                                   \
+        [&](fidl::InterfacePtr<FidlcatTestInterface>& ptr) { ptr->_iface(__VA_ARGS__); });         \
+                                                                                                   \
+    fidl_message_header_t header = message.header();                                               \
+                                                                                                   \
+    const std::vector<const InterfaceMethod*>* methods = loader_->GetByOrdinal(header.ordinal);    \
+    ASSERT_NE(methods, nullptr);                                                                   \
+    ASSERT_TRUE(!methods->empty());                                                                \
+    const InterfaceMethod* method = (*methods)[0];                                                 \
+    ASSERT_NE(method, nullptr);                                                                    \
+    ASSERT_EQ(#_iface, method->name());                                                            \
+                                                                                                   \
+    zx_handle_info_t* handle_infos = nullptr;                                                      \
+    if (message.handles().size() > 0) {                                                            \
+      handle_infos = new zx_handle_info_t[message.handles().size()];                               \
+      for (uint32_t i = 0; i < message.handles().size(); ++i) {                                    \
+        handle_infos[i].handle = message.handles().data()[i];                                      \
+        handle_infos[i].type = ZX_OBJ_TYPE_CHANNEL;                                                \
+        handle_infos[i].rights = ZX_RIGHT_TRANSFER | ZX_RIGHT_READ | ZX_RIGHT_WRITE |              \
+                                 ZX_RIGHT_SIGNAL | ZX_RIGHT_SIGNAL_PEER | ZX_RIGHT_WAIT |          \
+                                 ZX_RIGHT_INSPECT;                                                 \
+      }                                                                                            \
+    }                                                                                              \
+                                                                                                   \
+    MessageDecoder decoder(message.bytes().data(), message.bytes().size(), handle_infos,           \
+                           message.handles().size(), /*output_errors=*/true);                      \
+    std::unique_ptr<Object> object = decoder.DecodeMessage(*method->request());                    \
+    ASSERT_FALSE(decoder.HasError()) << "Could not decode message";                                \
+    rapidjson::Document actual;                                                                    \
+    if (object != nullptr) {                                                                       \
+      object->ExtractJson(actual.GetAllocator(), actual);                                          \
+    }                                                                                              \
+    rapidjson::StringBuffer actual_string;                                                         \
+    rapidjson::Writer<rapidjson::StringBuffer> actual_w(actual_string);                            \
+    actual.Accept(actual_w);                                                                       \
+                                                                                                   \
+    rapidjson::Document expected;                                                                  \
+    std::string expected_source = _json_value;                                                     \
+    expected.Parse(expected_source.c_str());                                                       \
+    rapidjson::StringBuffer expected_string;                                                       \
+    rapidjson::Writer<rapidjson::StringBuffer> expected_w(expected_string);                        \
+    expected.Accept(expected_w);                                                                   \
+                                                                                                   \
+    ASSERT_EQ(expected, actual) << "expected = " << expected_string.GetString() << " ("            \
+                                << expected_source << ")"                                          \
+                                << " and actual = " << actual_string.GetString();                  \
+                                                                                                   \
+    std::stringstream result;                                                                      \
+    if (object != nullptr) {                                                                       \
+      object->PrettyPrint(result, FakeColors, "", 0, 80, 80);                                      \
+    }                                                                                              \
+    ASSERT_EQ(result.str(), _pretty_print)                                                         \
+        << "expected = " << _pretty_print << " actual = " << result.str();                         \
+                                                                                                   \
+    for (uint32_t actual = 0; actual < message.bytes().actual(); ++actual) {                       \
+      MessageDecoder decoder(message.bytes().data(), actual, handle_infos,                         \
+                             message.handles().size(), /*output_errors=*/false);                   \
+      std::unique_ptr<Object> object = decoder.DecodeMessage(*method->request());                  \
+      ASSERT_TRUE(decoder.HasError()) << "expect decoder error for buffer size " << actual         \
+                                      << " instead of " << message.bytes().actual();               \
+    }                                                                                              \
+                                                                                                   \
+    for (uint32_t actual = 0; message.handles().actual() > actual; actual++) {                     \
+      MessageDecoder decoder(message.bytes().data(), message.bytes().size(), handle_infos, actual, \
+                             /*output_errors=*/false);                                             \
+      std::unique_ptr<Object> object = decoder.DecodeMessage(*method->request());                  \
+      ASSERT_TRUE(decoder.HasError()) << "expect decoder error for handle size " << actual         \
+                                      << " instead of " << message.handles().actual();             \
+    }                                                                                              \
+    delete[] handle_infos;                                                                         \
   } while (0)
 
 // This is a convenience wrapper for calling TEST_DECODE_WIRE_BODY that simply
@@ -230,8 +251,20 @@ template <>
 std::string FieldToPretty(std::string key, std::string type, std::string value) {
   return key + ": #gre#" + type + "#rst# = #red#\"" + value + "\"#rst#";
 }
+
+std::string HandleToJson(std::string key, zx_handle_t value) {
+  std::stringstream ss;
+  ss << std::hex << std::setfill('0') << std::setw(8) << value << std::dec << std::setw(0);
+  return "\"" + key + "\":\"ZX_OBJ_TYPE_CHANNEL:" + ss.str() +
+         "(ZX_RIGHT_TRANSFER | ZX_RIGHT_READ | ZX_RIGHT_WRITE | ZX_RIGHT_SIGNAL | " +
+         "ZX_RIGHT_SIGNAL_PEER | ZX_RIGHT_WAIT | ZX_RIGHT_INSPECT)\"";
+}
 std::string HandleToPretty(std::string key, zx_handle_t value) {
-  return key + ": #gre#handle#rst# = #red#" + std::to_string(value) + "#rst#";
+  std::stringstream ss;
+  ss << std::hex << std::setfill('0') << std::setw(8) << value << std::dec << std::setw(0);
+  return key + ": #gre#handle#rst# = #red#ZX_OBJ_TYPE_CHANNEL:" + ss.str() + "#blu#" +
+         "(ZX_RIGHT_TRANSFER | ZX_RIGHT_READ | ZX_RIGHT_WRITE | ZX_RIGHT_SIGNAL | " +
+         "ZX_RIGHT_SIGNAL_PEER | ZX_RIGHT_WAIT | ZX_RIGHT_INSPECT)" + "#rst#";
 }
 
 template <class T>
@@ -244,6 +277,8 @@ std::string SingleToPretty(std::string key, std::string type, T value) {
 #define TEST_SINGLE(_testname, _iface, _key, _type, _value)        \
   TEST_DECODE_WIRE(_testname, _iface, SingleToJson(#_key, _value), \
                    SingleToPretty(#_key, #_type, _value), _value)
+
+TEST_DECODE_WIRE(Empty, Empty, "{}", "{}")
 
 TEST_SINGLE(String, String, s, string, "Hello World!")
 
@@ -345,11 +380,32 @@ TEST_DECODE_WIRE(TwoStringArrayInt, TwoStringArrayInt, R"({"arr":["harpo","chico
 
 namespace {
 
-fidl::VectorPtr<std::string> TwoStringVectorFromVals(std::string v1, std::string v2) {
-  std::vector<std::string> brother_vector;
-  brother_vector.push_back(v1);
-  brother_vector.push_back(v2);
-  return fidl::VectorPtr(brother_vector);
+std::vector<std::string> TwoStringVectorFromVals(std::string v1, std::string v2) {
+  return std::vector<std::string>({v1, v2});
+}
+
+std::vector<uint8_t> VectorUint8() {
+  std::vector<std::uint8_t> result;
+  for (int i = 0; i <= 40; ++i) {
+    result.push_back(i);
+  }
+  return result;
+}
+
+std::vector<uint8_t> VectorUint8(const char* text) {
+  std::vector<std::uint8_t> result;
+  while (*text != 0) {
+    result.push_back(*text++);
+  }
+  return result;
+}
+
+std::vector<uint32_t> VectorUint32() {
+  std::vector<std::uint32_t> result;
+  for (int i = 0; i <= 25; ++i) {
+    result.push_back(i + ((i & 1) << 16));
+  }
+  return result;
 }
 
 }  // namespace
@@ -368,6 +424,56 @@ TEST_DECODE_WIRE(TwoStringVectors, TwoStringVectors,
                  "\n}",
                  TwoStringVectorFromVals("harpo", "chico"),
                  TwoStringVectorFromVals("groucho", "zeppo"))
+
+TEST_DECODE_WIRE(
+    VectorUint8, VectorUint8,
+    R"({"v":["0","1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27","28","29","30","31","32","33","34","35","36","37","38","39","40"]})",
+    "{\n"
+    "  v: #gre#vector<uint8>#rst# = [\n"
+    "    #blu#0#rst#, #blu#1#rst#, #blu#2#rst#, #blu#3#rst#, #blu#4#rst#, #blu#5#rst#, "
+    "#blu#6#rst#, #blu#7#rst#, #blu#8#rst#, #blu#9#rst#, #blu#10#rst#, #blu#11#rst#, #blu#12#rst#, "
+    "#blu#13#rst#, #blu#14#rst#, #blu#15#rst#, #blu#16#rst#, #blu#17#rst#, #blu#18#rst#, "
+    "#blu#19#rst#, #blu#20#rst#,\n"
+    "    #blu#21#rst#, #blu#22#rst#, #blu#23#rst#, #blu#24#rst#, #blu#25#rst#, #blu#26#rst#, "
+    "#blu#27#rst#, #blu#28#rst#, #blu#29#rst#, #blu#30#rst#, #blu#31#rst#, #blu#32#rst#, "
+    "#blu#33#rst#, #blu#34#rst#, #blu#35#rst#, #blu#36#rst#, #blu#37#rst#, #blu#38#rst#, "
+    "#blu#39#rst#,\n"
+    "    #blu#40#rst#\n"
+    "  ]\n"
+    "}",
+    VectorUint8())
+
+TEST_DECODE_WIRE(
+    VectorUint8String, VectorUint8,
+    R"({"v":["72","101","108","108","111","32","116","101","115","116","105","110","103","32","119","111","114","108","100","33"]})",
+    "{ v: #gre#vector<uint8>#rst# = \"Hello testing world!\" }",
+    VectorUint8("Hello testing world!"))
+
+TEST_DECODE_WIRE(
+    VectorUint8MultilineString, VectorUint8,
+    R"({"v":["72","101","108","108","111","32","116","101","115","116","105","110","103","32","119","111","114","108","100","33","10","72","111","119","32","97","114","101","32","121","111","117","32","116","111","100","97","121","63","10","73","39","109","32","116","101","115","116","105","110","103","32","102","105","100","108","99","97","116","46"]})",
+    "{\n"
+    "  v: #gre#vector<uint8>#rst# = [\n"
+    "    Hello testing world!\n"
+    "    How are you today?\n"
+    "    I'm testing fidlcat.\n"
+    "  ]\n"
+    "}",
+    VectorUint8("Hello testing world!\nHow are you today?\nI'm testing fidlcat."))
+
+TEST_DECODE_WIRE(
+    VectorUint32, VectorUint32,
+    R"({"v":["0","65537","2","65539","4","65541","6","65543","8","65545","10","65547","12","65549","14","65551","16","65553","18","65555","20","65557","22","65559","24","65561"]})",
+    "{\n"
+    "  v: #gre#vector<uint32>#rst# = [\n"
+    "    #blu#0#rst#, #blu#65537#rst#, #blu#2#rst#, #blu#65539#rst#, #blu#4#rst#, #blu#65541#rst#, "
+    "#blu#6#rst#, #blu#65543#rst#, #blu#8#rst#, #blu#65545#rst#, #blu#10#rst#, #blu#65547#rst#, "
+    "#blu#12#rst#, #blu#65549#rst#, #blu#14#rst#,\n"
+    "    #blu#65551#rst#, #blu#16#rst#, #blu#65553#rst#, #blu#18#rst#, #blu#65555#rst#, "
+    "#blu#20#rst#, #blu#65557#rst#, #blu#22#rst#, #blu#65559#rst#, #blu#24#rst#, #blu#65561#rst#\n"
+    "  ]\n"
+    "}",
+    VectorUint32())
 
 // Struct Tests
 
@@ -811,9 +917,7 @@ class HandleSupport {
  public:
   HandleSupport() {
     zx::channel::create(0, &out1_, &out2_);
-    json_ = R"({"ch":")";
-    json_.append(std::to_string(out2_.get()));
-    json_.append(R"("})");
+    json_ = "{" + HandleToJson("ch", out2_.get()) + "}";
     pretty_ = "{ " + HandleToPretty("ch", out2_.get()) + " }";
   }
   zx::channel handle() { return std::move(out2_); }
@@ -858,13 +962,8 @@ class HandleStructSupport {
   HandleStructSupport() {
     zx::channel::create(0, &out1_, &out2_);
     zx::channel::create(0, &out3_, &out4_);
-    json_ = R"({"hs":{"h1":")";
-    json_.append(std::to_string(out1_.get()));
-    json_.append(R"(", "h2":")");
-    json_.append(std::to_string(out2_.get()));
-    json_.append(R"(", "h3":")");
-    json_.append(std::to_string(out3_.get()));
-    json_.append(R"("}})");
+    json_ = "{\"hs\":{" + HandleToJson("h1", out1_.get()) + "," + HandleToJson("h2", out2_.get()) +
+            "," + HandleToJson("h3", out3_.get()) + "}}";
     pretty_ = "{\n  hs: #gre#test.fidlcat.examples/handle_struct#rst# = {\n    " +
               HandleToPretty("h1", out1_.get()) + "\n    " + HandleToPretty("h2", out2_.get()) +
               "\n    " + HandleToPretty("h3", out3_.get()) + "\n  }\n}";
@@ -895,6 +994,54 @@ TEST_F(WireParserTest, ParseHandleStruct) {
   HandleStructSupport support;
   TEST_DECODE_WIRE_BODY(HandleStruct, support.GetJSON(), support.GetPretty(),
                         support.handle_struct());
+}
+
+namespace {
+
+class TraversalOrderSupport {
+ public:
+  TraversalOrderSupport() {
+    zx::channel::create(0, &sh1_, &sh2_);
+    zx::channel::create(0, &h1_, &h2_);
+    json_ = "{\"t\":{\"s\":{" + HandleToJson("sh1", sh1_.get()) + "," +
+            HandleToJson("sh2", sh2_.get()) + "}," + HandleToJson("h1", h1_.get()) + "," +
+            HandleToJson("h2", h2_.get()) + "}}";
+    pretty_ =
+        "{\n  t: #gre#test.fidlcat.examples/traversal_order#rst# = {\n    "
+        "s: #gre#test.fidlcat.examples/opt_handle_struct#rst# = {\n      " +
+        HandleToPretty("sh1", sh1_.get()) + "\n      " + HandleToPretty("sh2", sh2_.get()) +
+        "\n    }\n    " + HandleToPretty("h1", h1_.get()) + "\n    " +
+        HandleToPretty("h2", h2_.get()) + "\n  }\n}";
+  }
+  test::fidlcat::examples::traversal_order traversal_order() {
+    test::fidlcat::examples::traversal_order t;
+    auto s = std::make_unique<test::fidlcat::examples::opt_handle_struct>();
+    s->sh1 = std::move(sh1_);
+    s->sh2 = std::move(sh2_);
+    t.s = std::move(s);
+    t.h1 = std::move(h1_);
+    t.h2 = std::move(h2_);
+    return t;
+  }
+  std::string GetJSON() { return json_; }
+  std::string GetPretty() { return pretty_; }
+
+ private:
+  zx::channel sh1_;
+  zx::channel sh2_;
+  zx::channel h1_;
+  zx::channel h2_;
+
+  std::string json_;
+  std::string pretty_;
+};
+
+}  // namespace
+
+TEST_F(WireParserTest, ParseTraversalOrder) {
+  TraversalOrderSupport support;
+  TEST_DECODE_WIRE_BODY(TraversalOrder, support.GetJSON(), support.GetPretty(),
+                        support.traversal_order());
 }
 
 // Corrupt data tests
@@ -975,6 +1122,16 @@ TEST_F(WireParserTest, BadSchemaPrintHex) {
 
   fidl_message_header_t header = message.header();
 
+  zx_handle_info_t* handle_infos = nullptr;
+  if (message.handles().size() > 0) {
+    handle_infos = new zx_handle_info_t[message.handles().size()];
+    for (uint32_t i = 0; i < message.handles().size(); ++i) {
+      handle_infos[i].handle = message.handles().data()[i];
+      handle_infos[i].type = ZX_OBJ_TYPE_NONE;
+      handle_infos[i].rights = 0;
+    }
+  }
+
   const std::vector<const InterfaceMethod*>* methods = loader.GetByOrdinal(header.ordinal);
   ASSERT_NE(methods, nullptr);
   ASSERT_TRUE(!methods->empty());
@@ -984,14 +1141,16 @@ TEST_F(WireParserTest, BadSchemaPrintHex) {
   ASSERT_NE(method, nullptr);
 
   std::unique_ptr<fidlcat::Object> decoded_request;
-  fidlcat::DecodeRequest(method, message.bytes().data(), message.bytes().size(),
-                         message.handles().data(), message.handles().size(), &decoded_request);
+  fidlcat::DecodeRequest(method, message.bytes().data(), message.bytes().size(), handle_infos,
+                         message.handles().size(), &decoded_request);
   rapidjson::Document actual;
   if (decoded_request != nullptr) {
     decoded_request->ExtractJson(actual.GetAllocator(), actual);
   }
 
   ASSERT_STREQ(actual["i32"].GetString(), "ef be ad de");
+
+  delete[] handle_infos;
 }
 
 }  // namespace fidlcat

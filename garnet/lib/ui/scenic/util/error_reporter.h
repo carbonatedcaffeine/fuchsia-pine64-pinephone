@@ -5,6 +5,8 @@
 #ifndef GARNET_LIB_UI_SCENIC_UTIL_ERROR_REPORTER_H_
 #define GARNET_LIB_UI_SCENIC_UTIL_ERROR_REPORTER_H_
 
+#include <lib/zx/time.h>
+
 #include <sstream>
 
 #include "src/lib/fxl/logging.h"
@@ -15,6 +17,8 @@ namespace scenic_impl {
 // implement ReportError().
 class ErrorReporter {
  public:
+  virtual ~ErrorReporter() = default;
+
   // Helper class with RAII semantics.  Invokes ErrorReporter::ReportError()
   // upon destruction.
   class Report {
@@ -26,6 +30,16 @@ class ErrorReporter {
     template <typename T>
     Report& operator<<(const T& val) {
       stream_ << val;
+      return *this;
+    }
+
+    Report& operator<<(const zx::time& val) {
+      stream_ << val.get();
+      return *this;
+    }
+
+    Report& operator<<(const zx::duration& val) {
+      stream_ << val.get();
       return *this;
     }
 
@@ -50,12 +64,11 @@ class ErrorReporter {
 
   // Return a default ErrorReporter that is always available, which simply logs
   // the error using FXL_LOG(severity).
-  static ErrorReporter* Default();
+  static const std::shared_ptr<ErrorReporter>& Default();
 
  private:
   virtual void ReportError(fxl::LogSeverity severity, std::string error_string) = 0;
 };
-
 }  // namespace scenic_impl
 
 #endif  // GARNET_LIB_UI_SCENIC_UTIL_ERROR_REPORTER_H_

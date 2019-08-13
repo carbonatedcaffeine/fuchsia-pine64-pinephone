@@ -1,7 +1,6 @@
 // Copyright 2019 The Fuchsia Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-#![deny(warnings)]
 
 mod args;
 mod common_operations;
@@ -72,10 +71,11 @@ fn output_config(generator_args_vec: &Vec<GeneratorArgs>, output_config_file: &S
 }
 
 fn main() -> Result<(), Error> {
+    log_init()?;
+
     let args = args::parse()?;
 
     let start_instant: Instant = Instant::now();
-    log_init()?;
 
     let mut thread_handles = vec![];
     let mut generator_args_vec = vec![];

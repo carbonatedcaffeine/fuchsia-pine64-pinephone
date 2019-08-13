@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#![cfg(target_os = "fuchsia")]
+
 //! An implementation of a client for a fidl interface.
 
 #[allow(unused_imports)]
@@ -83,7 +85,8 @@ impl Txid {
         Txid((int_id.0 + 1) as u32)
     }
 
-    fn as_raw_id(&self) -> u32 {
+    /// Get the raw u32 transaction ID.
+    pub fn as_raw_id(&self) -> u32 {
         self.0
     }
 }
@@ -132,11 +135,8 @@ impl Client {
     }
 
     /// Send an encodable message without expecting a response.
-    pub fn send<T: Encodable>(&self, body: &mut T, ordinal: u32) -> Result<(), Error> {
-        let msg = &mut TransactionMessage {
-            header: TransactionHeader { tx_id: 0, flags: 0, ordinal },
-            body,
-        };
+    pub fn send<T: Encodable>(&self, body: &mut T, ordinal: u64) -> Result<(), Error> {
+        let msg = &mut TransactionMessage { header: TransactionHeader { tx_id: 0, ordinal }, body };
         crate::encoding::with_tls_encoded(msg, |bytes, handles| {
             self.send_raw_msg(&**bytes, handles)
         })
@@ -146,11 +146,11 @@ impl Client {
     pub fn send_query<E: Encodable, D: Decodable>(
         &self,
         msg: &mut E,
-        ordinal: u32,
+        ordinal: u64,
     ) -> QueryResponseFut<D> {
         let res_fut = self.send_raw_query(|tx_id, bytes, handles| {
             let msg = &mut TransactionMessage {
-                header: TransactionHeader { tx_id: tx_id.as_raw_id(), flags: 0, ordinal },
+                header: TransactionHeader { tx_id: tx_id.as_raw_id(), ordinal },
                 body: msg,
             };
             Encoder::encode(bytes, handles, msg)?;
@@ -545,11 +545,11 @@ pub mod sync {
         }
 
         /// Send a new message.
-        pub fn send<E: Encodable>(&mut self, msg: &mut E, ordinal: u32) -> Result<(), Error> {
+        pub fn send<E: Encodable>(&mut self, msg: &mut E, ordinal: u64) -> Result<(), Error> {
             self.buf.clear();
             let (buf, handles) = self.buf.split_mut();
             let msg = &mut TransactionMessage {
-                header: TransactionHeader { tx_id: 0, flags: 0, ordinal },
+                header: TransactionHeader { tx_id: 0, ordinal },
                 body: msg,
             };
             Encoder::encode(buf, handles, msg)?;
@@ -561,14 +561,14 @@ pub mod sync {
         pub fn send_query<E: Encodable, D: Decodable>(
             &mut self,
             msg: &mut E,
-            ordinal: u32,
+            ordinal: u64,
             deadline: zx::Time,
         ) -> Result<D, Error> {
             // Write the message into the channel
             self.buf.clear();
             let (buf, handles) = self.buf.split_mut();
             let msg = &mut TransactionMessage {
-                header: TransactionHeader { tx_id: QUERY_TX_ID, flags: 0, ordinal },
+                header: TransactionHeader { tx_id: QUERY_TX_ID, ordinal },
                 body: msg,
             };
             Encoder::encode(buf, handles, msg)?;
@@ -615,19 +615,20 @@ mod tests {
         fuchsia_zircon::DurationNum,
         futures::{future::join, FutureExt, StreamExt},
         futures_test::task::new_count_waker,
-        std::{io, thread},
+        std::thread,
     };
 
     #[rustfmt::skip]
     const SEND_EXPECTED: &[u8] = &[
-        0, 0, 0, 0, 0, 0, 0, 0, // 32 bit tx_id followed by 32 bits of padding
-        0, 0, 0, 0, // 32 bits for flags
-        SEND_ORDINAL_HIGH_BYTE, 0, 0, 0, // 32 bit ordinal
+        0, 0, 0, 0, // 32 bit tx_id
+        0, 0, 0, 0, // 32 bits paddings
+        0, 0, 0, 0, // low bytes of 64 bit ordinal
+        SEND_ORDINAL_HIGH_BYTE, 0, 0, 0, // high bytes of 64 bit ordinal
         SEND_DATA, // 8 bit data
         0, 0, 0, 0, 0, 0, 0, // 7 bytes of padding after our 1 byte of data
     ];
     const SEND_ORDINAL_HIGH_BYTE: u8 = 42;
-    const SEND_ORDINAL: u32 = 42;
+    const SEND_ORDINAL: u64 = 42 << 32;
     const SEND_DATA: u8 = 55;
 
     fn send_transaction(header: TransactionHeader, channel: &zx::Channel) {
@@ -672,7 +673,7 @@ mod tests {
             assert_eq!(header.tx_id, sync::QUERY_TX_ID);
             assert_eq!(header.ordinal, SEND_ORDINAL);
             send_transaction(
-                TransactionHeader { tx_id: header.tx_id, flags: 0, ordinal: header.ordinal },
+                TransactionHeader { tx_id: header.tx_id, ordinal: header.ordinal },
                 &server_end,
             );
         });
@@ -693,7 +694,7 @@ mod tests {
         let server = fasync::Channel::from_channel(server_end).unwrap();
         let receiver = async move {
             let mut buffer = zx::MessageBuf::new();
-            await!(server.recv_msg(&mut buffer)).expect("failed to recv msg");
+            server.recv_msg(&mut buffer).await.expect("failed to recv msg");
             assert_eq!(SEND_EXPECTED, buffer.bytes());
         };
 
@@ -712,8 +713,8 @@ mod tests {
     fn client_with_response() {
         const EXPECTED: &[u8] = &[
             1, 0, 0, 0, 0, 0, 0, 0, // 32 bit tx_id followed by 32 bits of padding
-            0, 0, 0, 0, // 32 bits for flags
-            42, 0, 0, 0,  // 32 bit ordinal
+            0, 0, 0, 0, // low bytes of 64 bit ordinal
+            42, 0, 0, 0,  // high bytes of 64 bit ordinal
             55, // 8 bit data
             0, 0, 0, 0, 0, 0, 0, // 7 bytes of padding after our 1 byte of data
         ];
@@ -727,13 +728,13 @@ mod tests {
         let server = fasync::Channel::from_channel(server_end).unwrap();
         let mut buffer = zx::MessageBuf::new();
         let receiver = async move {
-            await!(server.recv_msg(&mut buffer)).expect("failed to recv msg");
+            server.recv_msg(&mut buffer).await.expect("failed to recv msg");
             assert_eq!(EXPECTED, buffer.bytes());
             let id = 1; // internally, the first slot in a slab returns a `0`. We then add one
                         // since FIDL txids start with `1`.
 
             let (bytes, handles) = (&mut vec![], &mut vec![]);
-            let header = TransactionHeader { tx_id: id, flags: 0, ordinal: 42 };
+            let header = TransactionHeader { tx_id: id, ordinal: 42 };
             encode_transaction(header, bytes, handles);
             server.write(bytes, handles).expect("Server channel write failed");
         };
@@ -743,15 +744,15 @@ mod tests {
             .on_timeout(300.millis().after_now(), || panic!("did not receiver message in time!"));
 
         let sender = client
-            .send_query::<u8, u8>(&mut 55, 42)
+            .send_query::<u8, u8>(&mut 55, 42 << 32)
             .map_ok(|x| assert_eq!(x, 55))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, &*format!("fidl error: {:?}", e)));
+            .unwrap_or_else(|e| panic!("fidl error: {:?}", e));
 
         // add a timeout to receiver so if test is broken it doesn't take forever
         let sender = sender
             .on_timeout(300.millis().after_now(), || panic!("did not receive response in time!"));
 
-        executor.run_singlethreaded(join(receiver, sender));
+        let ((), ()) = executor.run_singlethreaded(join(receiver, sender));
     }
 
     #[test]
@@ -785,7 +786,7 @@ mod tests {
         // Send the event from the server
         let server = fasync::Channel::from_channel(server_end).unwrap();
         let (bytes, handles) = (&mut vec![], &mut vec![]);
-        let header = TransactionHeader { tx_id: 0, flags: 0, ordinal: 5 };
+        let header = TransactionHeader { tx_id: 0, ordinal: 5 };
         encode_transaction(header, bytes, handles);
         server.write(bytes, handles).expect("Server channel write failed");
         drop(server);
@@ -825,8 +826,7 @@ mod tests {
         let mut response_txid = Txid(0);
         let mut response_future = client.send_raw_query(|tx_id, bytes, handles| {
             response_txid = tx_id;
-            let header =
-                TransactionHeader { tx_id: response_txid.as_raw_id(), flags: 0, ordinal: 42 };
+            let header = TransactionHeader { tx_id: response_txid.as_raw_id(), ordinal: 42 };
             encode_transaction(header, bytes, handles);
             Ok(())
         });
@@ -842,10 +842,10 @@ mod tests {
         assert_eq!(event_waker_count.get(), 0);
 
         // next, simulate an event coming in
-        send_transaction(TransactionHeader { tx_id: 0, flags: 0, ordinal: 5 }, &server_end);
+        send_transaction(TransactionHeader { tx_id: 0, ordinal: 5 }, &server_end);
 
         // get event loop to deliver readiness notifications to channels
-        let _ = executor.run_until_stalled(&mut future::empty::<()>());
+        let _ = executor.run_until_stalled(&mut future::pending::<()>());
 
         // either response_waker or event_waker should be woken
         assert_eq!(response_waker_count.get() + event_waker_count.get(), 1);
@@ -856,12 +856,12 @@ mod tests {
 
         // next, simulate a response coming in
         send_transaction(
-            TransactionHeader { tx_id: response_txid.as_raw_id(), flags: 0, ordinal: 42 },
+            TransactionHeader { tx_id: response_txid.as_raw_id(), ordinal: 42 },
             &server_end,
         );
 
         // get event loop to deliver readiness notifications to channels
-        let _ = executor.run_until_stalled(&mut future::empty::<()>());
+        let _ = executor.run_until_stalled(&mut future::pending::<()>());
 
         // response waker should have been woken again
         assert_eq!(response_waker_count.get(), last_response_waker_count + 1);
@@ -876,7 +876,7 @@ mod tests {
         let client = Client::new(client_end);
 
         // first simulate an event coming in, even though nothing has polled
-        send_transaction(TransactionHeader { tx_id: 0, flags: 0, ordinal: 5 }, &server_end);
+        send_transaction(TransactionHeader { tx_id: 0, ordinal: 5 }, &server_end);
 
         // next, poll on a response
         let (response_waker, _response_waker_count) = new_count_waker();

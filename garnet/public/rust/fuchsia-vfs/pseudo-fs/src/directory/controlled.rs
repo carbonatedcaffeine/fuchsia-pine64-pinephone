@@ -55,7 +55,7 @@ pub enum AddEntryResError<'entries> {
     /// Controlled directory has been destroyed.
     Terminated,
     /// [`Controlled::add_boxed_entry`] has returned an error.
-    AddFailed((Status, Box<DirectoryEntry + 'entries>)),
+    AddFailed((Status, Box<dyn DirectoryEntry + 'entries>)),
 }
 
 impl<'entries> fmt::Debug for AddEntryResError<'entries> {
@@ -88,8 +88,8 @@ pub enum RemoveEntryResError {
     RemoveFailed(Status),
 }
 
-type AddEntryResponse<'entries> = Result<(), (Status, Box<DirectoryEntry + 'entries>)>;
-type RemoveEntryResponse<'entries> = Result<Option<Box<DirectoryEntry + 'entries>>, Status>;
+type AddEntryResponse<'entries> = Result<(), (Status, Box<dyn DirectoryEntry + 'entries>)>;
+type RemoveEntryResponse<'entries> = Result<Option<Box<dyn DirectoryEntry + 'entries>>, Status>;
 
 enum Command<'entries> {
     Open {
@@ -100,11 +100,11 @@ enum Command<'entries> {
     },
     AddEntry {
         name: String,
-        entry: Box<DirectoryEntry + 'entries>,
+        entry: Box<dyn DirectoryEntry + 'entries>,
     },
     AddEntryAndRespond {
         name: String,
-        entry: Box<DirectoryEntry + 'entries>,
+        entry: Box<dyn DirectoryEntry + 'entries>,
         res_sender: oneshot::Sender<AddEntryResponse<'entries>>,
     },
     RemoveEntry {
@@ -174,7 +174,7 @@ impl<'entries> Controller<'entries> {
         // dependencies on self.
         let mut controlled = self.controlled.clone();
         async move {
-            await!(controlled.send(Command::Open { flags, mode, path, server_end })).map_err(
+            controlled.send(Command::Open { flags, mode, path, server_end }).await.map_err(
                 |send_err| {
                     check_send_err_is_disconnection("Controller::open", send_err);
                     OpenError::Terminated
@@ -212,7 +212,7 @@ impl<'entries> Controller<'entries> {
     pub fn add_boxed_entry<Name>(
         &self,
         name: Name,
-        entry: Box<DirectoryEntry + 'entries>,
+        entry: Box<dyn DirectoryEntry + 'entries>,
     ) -> impl Future<Output = Result<(), AddEntryError>> + 'entries
     where
         Name: Into<String>,
@@ -222,7 +222,7 @@ impl<'entries> Controller<'entries> {
         let mut controlled = self.controlled.clone();
         let name = name.into();
         async move {
-            await!(controlled.send(Command::AddEntry { name, entry })).map_err(|send_err| {
+            controlled.send(Command::AddEntry { name, entry }).await.map_err(|send_err| {
                 check_send_err_is_disconnection("Controller::add_boxed_entry", send_err);
                 AddEntryError::Terminated
             })
@@ -262,7 +262,7 @@ impl<'entries> Controller<'entries> {
     pub fn add_boxed_entry_res<Name>(
         &self,
         name: Name,
-        entry: Box<DirectoryEntry + 'entries>,
+        entry: Box<dyn DirectoryEntry + 'entries>,
     ) -> impl Future<Output = Result<(), AddEntryResError<'entries>>> + 'entries
     where
         Name: Into<String>,
@@ -273,13 +273,15 @@ impl<'entries> Controller<'entries> {
         let name = name.into();
         let (res_sender, res_receiver) = oneshot::channel();
         async move {
-            await!(controlled.send(Command::AddEntryAndRespond { name, entry, res_sender }))
+            controlled
+                .send(Command::AddEntryAndRespond { name, entry, res_sender })
+                .await
                 .map_err(|send_err| {
                     check_send_err_is_disconnection("Controller::add_boxed_entry_res", send_err);
                     AddEntryResError::Terminated
                 })?;
 
-            match await!(res_receiver) {
+            match res_receiver.await {
                 Ok(res) => res.map_err(AddEntryResError::AddFailed),
                 Err(oneshot::Canceled) => Err(AddEntryResError::Terminated),
             }
@@ -301,7 +303,7 @@ impl<'entries> Controller<'entries> {
         let mut controlled = self.controlled.clone();
         let name = name.into();
         async move {
-            await!(controlled.send(Command::RemoveEntry { name })).map_err(|send_err| {
+            controlled.send(Command::RemoveEntry { name }).await.map_err(|send_err| {
                 check_send_err_is_disconnection("Controller::remove_entry", send_err);
                 RemoveEntryError::Terminated
             })
@@ -316,7 +318,7 @@ impl<'entries> Controller<'entries> {
     pub fn remove_entry_res<Name>(
         &self,
         name: Name,
-    ) -> impl Future<Output = Result<Option<Box<DirectoryEntry + 'entries>>, RemoveEntryResError>>
+    ) -> impl Future<Output = Result<Option<Box<dyn DirectoryEntry + 'entries>>, RemoveEntryResError>>
                  + 'entries
     where
         Name: Into<String>,
@@ -327,14 +329,14 @@ impl<'entries> Controller<'entries> {
         let name = name.into();
         let (res_sender, res_receiver) = oneshot::channel();
         async move {
-            await!(controlled.send(Command::RemoveEntryAndRespond { name, res_sender })).map_err(
+            controlled.send(Command::RemoveEntryAndRespond { name, res_sender }).await.map_err(
                 |send_err| {
                     check_send_err_is_disconnection("Controller::remove_entry_res", send_err);
                     RemoveEntryResError::Terminated
                 },
             )?;
 
-            match await!(res_receiver) {
+            match res_receiver.await {
                 Ok(res) => res.map_err(RemoveEntryResError::RemoveFailed),
                 Err(oneshot::Canceled) => Err(RemoveEntryResError::Terminated),
             }
@@ -351,7 +353,7 @@ pub struct Controlled<'entries> {
     controller: mpsc::Receiver<Command<'entries>>,
 
     /// Wrapped entry.
-    controllable: Box<Controllable<'entries> + 'entries>,
+    controllable: Box<dyn Controllable<'entries> + 'entries>,
 }
 
 /// Given a directory that can be controlled, create a "controller" for it.  Controller allows
@@ -362,7 +364,7 @@ pub fn controlled<'entries, Entry: 'entries>(
 where
     Entry: Controllable<'entries>,
 {
-    let (sender, receiver) = mpsc::channel(0);
+    let (sender, receiver) = mpsc::channel(1);
     (
         Controller { controlled: sender },
         Controlled { controller: receiver, controllable: Box::new(controllable) },
@@ -382,7 +384,7 @@ impl<'entries> Controlled<'entries> {
         &mut self,
         name: &str,
         entry: DE,
-    ) -> Result<(), (Status, Box<DirectoryEntry + 'entries>)>
+    ) -> Result<(), (Status, Box<dyn DirectoryEntry + 'entries>)>
     where
         DE: DirectoryEntry + 'entries,
     {
@@ -398,7 +400,7 @@ impl<'entries> Controlled<'entries> {
     pub fn remove_entry(
         &mut self,
         name: &str,
-    ) -> Result<Option<Box<DirectoryEntry + 'entries>>, Status> {
+    ) -> Result<Option<Box<dyn DirectoryEntry + 'entries>>, Status> {
         self.controllable.remove_entry(name)
     }
 
@@ -445,7 +447,7 @@ impl<'entries> DirectoryEntry for Controlled<'entries> {
         &mut self,
         flags: u32,
         mode: u32,
-        path: &mut Iterator<Item = &str>,
+        path: &mut dyn Iterator<Item = &str>,
         server_end: ServerEnd<NodeMarker>,
     ) {
         self.controllable.open(flags, mode, path, server_end);
@@ -498,7 +500,7 @@ mod tests {
 
     use {
         crate::directory::{simple, test_utils::run_server_client},
-        crate::file::simple::read_only,
+        crate::file::simple::read_only_static,
         fidl::endpoints::{create_proxy, ServerEnd},
         fidl_fuchsia_io::{
             DirectoryMarker, DirectoryObject, FileMarker, NodeInfo, NodeMarker, DIRENT_TYPE_FILE,
@@ -540,42 +542,45 @@ mod tests {
     #[test]
     fn empty_directory() {
         let (_, root) = controlled(simple::empty());
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            assert_close!(root);
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                assert_close!(root);
+            }
         });
     }
 
     #[test]
     fn simple_open() {
         let (controller, root) = controlled(simple::empty());
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |_root| {
-            let (proxy, server_end) =
-                create_proxy::<DirectoryMarker>().expect("Failed to create connection endpoints");
+        run_server_client(OPEN_RIGHT_READABLE, root, |_root| {
+            async move {
+                let (proxy, server_end) = create_proxy::<DirectoryMarker>()
+                    .expect("Failed to create connection endpoints");
 
-            await!(controller.open(
-                OPEN_RIGHT_READABLE,
-                0,
-                vec![],
-                ServerEnd::new(server_end.into_channel())
-            ))
-            .unwrap();
-            assert_describe!(proxy, NodeInfo::Directory(DirectoryObject));
-            assert_close!(proxy);
+                controller
+                    .open(OPEN_RIGHT_READABLE, 0, vec![], ServerEnd::new(server_end.into_channel()))
+                    .await
+                    .unwrap();
+                assert_describe!(proxy, NodeInfo::Directory(DirectoryObject));
+                assert_close!(proxy);
+            }
         });
     }
 
     #[test]
     fn simple_add_file() {
         let (controller, root) = controlled(simple::empty());
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            {
-                let file = read_only(|| Ok(b"Content".to_vec()));
-                await!(controller.add_entry("file", file)).unwrap();
-            }
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                {
+                    let file = read_only_static("Content");
+                    controller.add_entry("file", file).await.unwrap();
+                }
 
-            let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
-            open_as_file_assert_content!(&root, flags, "file", "Content");
-            assert_close!(root);
+                let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
+                open_as_file_assert_content!(&root, flags, "file", "Content");
+                assert_close!(root);
+            }
         });
     }
 
@@ -586,18 +591,20 @@ mod tests {
             "etc" => controlled_pseudo_directory!(controller -> {}),
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
 
-            open_as_file_assert_err!(&root, flags, "etc/fstab", Status::NOT_FOUND);
+                open_as_file_assert_err!(&root, flags, "etc/fstab", Status::NOT_FOUND);
 
-            {
-                let fstab = read_only(|| Ok(b"/dev/fs /".to_vec()));
-                await!(controller.add_entry("fstab", fstab)).unwrap();
+                {
+                    let fstab = read_only_static("/dev/fs /");
+                    controller.add_entry("fstab", fstab).await.unwrap();
+                }
+
+                open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
+                assert_close!(root);
             }
-
-            open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
-            assert_close!(root);
         });
     }
 
@@ -608,28 +615,32 @@ mod tests {
             "etc" => controlled_pseudo_directory! {
                 controller ->
                 "ssh" => pseudo_directory! {
-                    "sshd_config" => read_only(|| Ok(b"# Empty".to_vec())),
+                    "sshd_config" => read_only_static("# Empty"),
                 },
             },
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let (proxy, server_end) =
-                create_proxy::<DirectoryMarker>().expect("Failed to create connection endpoints");
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let (proxy, server_end) = create_proxy::<DirectoryMarker>()
+                    .expect("Failed to create connection endpoints");
 
-            await!(controller.open(
-                OPEN_RIGHT_READABLE,
-                0,
-                vec![],
-                ServerEnd::<NodeMarker>::new(server_end.into_channel())
-            ))
-            .unwrap();
+                controller
+                    .open(
+                        OPEN_RIGHT_READABLE,
+                        0,
+                        vec![],
+                        ServerEnd::<NodeMarker>::new(server_end.into_channel()),
+                    )
+                    .await
+                    .unwrap();
 
-            let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
-            open_as_file_assert_content!(&proxy, flags, "ssh/sshd_config", "# Empty");
-            assert_close!(proxy);
+                let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
+                open_as_file_assert_content!(&proxy, flags, "ssh/sshd_config", "# Empty");
+                assert_close!(proxy);
 
-            assert_close!(root);
+                assert_close!(root);
+            }
         });
     }
 
@@ -640,28 +651,32 @@ mod tests {
             "etc" => controlled_pseudo_directory! {
                 controller ->
                 "ssh" => pseudo_directory! {
-                    "sshd_config" => read_only(|| Ok(b"# Empty".to_vec())),
+                    "sshd_config" => read_only_static("# Empty"),
                 },
             },
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let (proxy, server_end) =
-                create_proxy::<DirectoryMarker>().expect("Failed to create connection endpoints");
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let (proxy, server_end) = create_proxy::<DirectoryMarker>()
+                    .expect("Failed to create connection endpoints");
 
-            await!(controller.open(
-                OPEN_RIGHT_READABLE,
-                0,
-                vec_string!["ssh"],
-                ServerEnd::<NodeMarker>::new(server_end.into_channel())
-            ))
-            .unwrap();
+                controller
+                    .open(
+                        OPEN_RIGHT_READABLE,
+                        0,
+                        vec_string!["ssh"],
+                        ServerEnd::<NodeMarker>::new(server_end.into_channel()),
+                    )
+                    .await
+                    .unwrap();
 
-            let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
-            open_as_file_assert_content!(&proxy, flags, "sshd_config", "# Empty");
-            assert_close!(proxy);
+                let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
+                open_as_file_assert_content!(&proxy, flags, "sshd_config", "# Empty");
+                assert_close!(proxy);
 
-            assert_close!(root);
+                assert_close!(root);
+            }
         });
     }
 
@@ -672,27 +687,31 @@ mod tests {
             "etc" => controlled_pseudo_directory! {
                 controller ->
                 "ssh" => pseudo_directory! {
-                    "sshd_config" => read_only(|| Ok(b"# Empty".to_vec())),
+                    "sshd_config" => read_only_static("# Empty"),
                 },
             },
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let (proxy, server_end) =
-                create_proxy::<FileMarker>().expect("Failed to create connection endpoints");
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let (proxy, server_end) =
+                    create_proxy::<FileMarker>().expect("Failed to create connection endpoints");
 
-            await!(controller.open(
-                OPEN_RIGHT_READABLE,
-                0,
-                vec_string!["ssh", "sshd_config"],
-                ServerEnd::<NodeMarker>::new(server_end.into_channel())
-            ))
-            .unwrap();
+                controller
+                    .open(
+                        OPEN_RIGHT_READABLE,
+                        0,
+                        vec_string!["ssh", "sshd_config"],
+                        ServerEnd::<NodeMarker>::new(server_end.into_channel()),
+                    )
+                    .await
+                    .unwrap();
 
-            assert_read!(&proxy, "# Empty");
-            assert_close!(proxy);
+                assert_read!(&proxy, "# Empty");
+                assert_close!(proxy);
 
-            assert_close!(root);
+                assert_close!(root);
+            }
         });
     }
 
@@ -703,27 +722,29 @@ mod tests {
             "etc" => controlled_pseudo_directory! {
                 controller ->
                 "ssh" => pseudo_directory! {
-                    "sshd_config" => read_only(|| Ok(b"# Empty".to_vec())),
+                    "sshd_config" => read_only_static("# Empty"),
                 },
-                "passwd" => read_only(|| Ok(b"[redacted]".to_vec())),
+                "passwd" => read_only_static("[redacted]"),
             },
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
 
-            open_as_file_assert_err!(&root, flags, "etc/fstab", Status::NOT_FOUND);
-            open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
+                open_as_file_assert_err!(&root, flags, "etc/fstab", Status::NOT_FOUND);
+                open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
 
-            {
-                let fstab = read_only(|| Ok(b"/dev/fs /".to_vec()));
-                await!(controller.add_entry("fstab", fstab)).unwrap();
+                {
+                    let fstab = read_only_static("/dev/fs /");
+                    controller.add_entry("fstab", fstab).await.unwrap();
+                }
+
+                open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
+                open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
+
+                assert_close!(root);
             }
-
-            open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
-            open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
-
-            assert_close!(root);
         });
     }
 
@@ -733,30 +754,32 @@ mod tests {
         let root = pseudo_directory! {
             "etc" => controlled_pseudo_directory! {
                 controller ->
-                "fstab" => read_only(|| Ok(b"/dev/fs /".to_vec())),
-                "passwd" => read_only(|| Ok(b"[redacted]".to_vec())),
+                "fstab" => read_only_static("/dev/fs /"),
+                "passwd" => read_only_static("[redacted]"),
             },
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
 
-            open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
-            open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
+                open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
+                open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
 
-            let o_passwd = await!(controller.remove_entry_res("passwd")).unwrap();
-            match o_passwd {
-                None => panic!("remove_entry_res() did not find 'passwd'"),
-                Some(passwd) => {
-                    let entry_info = passwd.entry_info();
-                    assert_eq!(entry_info, EntryInfo::new(INO_UNKNOWN, DIRENT_TYPE_FILE));
+                let o_passwd = controller.remove_entry_res("passwd").await.unwrap();
+                match o_passwd {
+                    None => panic!("remove_entry_res() did not find 'passwd'"),
+                    Some(passwd) => {
+                        let entry_info = passwd.entry_info();
+                        assert_eq!(entry_info, EntryInfo::new(INO_UNKNOWN, DIRENT_TYPE_FILE));
+                    }
                 }
+
+                open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
+                open_as_file_assert_err!(&root, flags, "etc/passwd", Status::NOT_FOUND);
+
+                assert_close!(root);
             }
-
-            open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
-            open_as_file_assert_err!(&root, flags, "etc/passwd", Status::NOT_FOUND);
-
-            assert_close!(root);
         });
     }
 
@@ -766,26 +789,30 @@ mod tests {
         let root = pseudo_directory! {
             "etc" => controlled_pseudo_directory! {
                 controller ->
-                "fstab" => read_only(|| Ok(b"/dev/fs /".to_vec())),
+                "fstab" => read_only_static("/dev/fs /"),
             },
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
 
-            open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
-            open_as_file_assert_err!(&root, flags, "etc/passwd", Status::NOT_FOUND);
+                open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
+                open_as_file_assert_err!(&root, flags, "etc/passwd", Status::NOT_FOUND);
 
-            let fstab = await!(controller.remove_entry_res("fstab"))
-                .unwrap()
-                .expect("remove_entry_res() did not find 'fstab'");
+                let fstab = controller
+                    .remove_entry_res("fstab")
+                    .await
+                    .unwrap()
+                    .expect("remove_entry_res() did not find 'fstab'");
 
-            await!(controller.add_boxed_entry("passwd", fstab)).unwrap();
+                controller.add_boxed_entry("passwd", fstab).await.unwrap();
 
-            open_as_file_assert_err!(&root, flags, "etc/fstab", Status::NOT_FOUND);
-            open_as_file_assert_content!(&root, flags, "etc/passwd", "/dev/fs /");
+                open_as_file_assert_err!(&root, flags, "etc/fstab", Status::NOT_FOUND);
+                open_as_file_assert_content!(&root, flags, "etc/passwd", "/dev/fs /");
 
-            assert_close!(root);
+                assert_close!(root);
+            }
         });
     }
 
@@ -796,43 +823,45 @@ mod tests {
             "etc" => controlled_pseudo_directory! {
                 controller ->
                 "ssh" => pseudo_directory! {
-                    "sshd_config" => read_only(|| Ok(b"# Empty".to_vec())),
+                    "sshd_config" => read_only_static("# Empty"),
                 },
-                "passwd" => read_only(|| Ok(b"[redacted]".to_vec())),
+                "passwd" => read_only_static("[redacted]"),
             },
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
 
-            open_as_file_assert_err!(&root, flags, "etc/fstab", Status::NOT_FOUND);
-            open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
+                open_as_file_assert_err!(&root, flags, "etc/fstab", Status::NOT_FOUND);
+                open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
 
-            let etc = open_get_directory_proxy_assert_ok!(&root, flags, "etc");
+                let etc = open_get_directory_proxy_assert_ok!(&root, flags, "etc");
 
-            let watch_mask =
-                WATCH_MASK_EXISTING | WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
-            let watcher = assert_watch!(etc, watch_mask);
+                let watch_mask =
+                    WATCH_MASK_EXISTING | WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
+                let watcher = assert_watch!(etc, watch_mask);
 
-            assert_watcher_one_message_watched_events!(
-                watcher,
-                { EXISTING, "." },
-                { EXISTING, "passwd" },
-                { EXISTING, "ssh" },
-            );
-            assert_watcher_one_message_watched_events!(watcher, { IDLE, vec![] });
+                assert_watcher_one_message_watched_events!(
+                    watcher,
+                    { EXISTING, "." },
+                    { EXISTING, "passwd" },
+                    { EXISTING, "ssh" },
+                );
+                assert_watcher_one_message_watched_events!(watcher, { IDLE, vec![] });
 
-            {
-                let fstab = read_only(|| Ok(b"/dev/fs /".to_vec()));
-                await!(controller.add_entry("fstab", fstab)).unwrap();
+                {
+                    let fstab = read_only_static("/dev/fs /");
+                    controller.add_entry("fstab", fstab).await.unwrap();
+                }
+
+                assert_watcher_one_message_watched_events!(watcher, { ADDED, "fstab" });
+
+                open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
+                open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
+
+                assert_close!(root);
             }
-
-            assert_watcher_one_message_watched_events!(watcher, { ADDED, "fstab" });
-
-            open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
-            open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
-
-            assert_close!(root);
         });
     }
 
@@ -842,46 +871,48 @@ mod tests {
         let root = pseudo_directory! {
             "etc" => controlled_pseudo_directory! {
                 controller ->
-                "fstab" => read_only(|| Ok(b"/dev/fs /".to_vec())),
-                "passwd" => read_only(|| Ok(b"[redacted]".to_vec())),
+                "fstab" => read_only_static("/dev/fs /"),
+                "passwd" => read_only_static("[redacted]"),
             },
         };
 
-        run_server_client(OPEN_RIGHT_READABLE, root, async move |root| {
-            let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
+        run_server_client(OPEN_RIGHT_READABLE, root, |root| {
+            async move {
+                let flags = OPEN_RIGHT_READABLE | OPEN_FLAG_DESCRIBE;
 
-            open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
-            open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
+                open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
+                open_as_file_assert_content!(&root, flags, "etc/passwd", "[redacted]");
 
-            let etc = open_get_directory_proxy_assert_ok!(&root, flags, "etc");
+                let etc = open_get_directory_proxy_assert_ok!(&root, flags, "etc");
 
-            let watch_mask =
-                WATCH_MASK_EXISTING | WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
-            let watcher = assert_watch!(etc, watch_mask);
+                let watch_mask =
+                    WATCH_MASK_EXISTING | WATCH_MASK_IDLE | WATCH_MASK_ADDED | WATCH_MASK_REMOVED;
+                let watcher = assert_watch!(etc, watch_mask);
 
-            assert_watcher_one_message_watched_events!(
-                watcher,
-                { EXISTING, "." },
-                { EXISTING, "fstab" },
-                { EXISTING, "passwd" },
-            );
-            assert_watcher_one_message_watched_events!(watcher, { IDLE, vec![] });
+                assert_watcher_one_message_watched_events!(
+                    watcher,
+                    { EXISTING, "." },
+                    { EXISTING, "fstab" },
+                    { EXISTING, "passwd" },
+                );
+                assert_watcher_one_message_watched_events!(watcher, { IDLE, vec![] });
 
-            let o_passwd = await!(controller.remove_entry_res("passwd")).unwrap();
-            match o_passwd {
-                None => panic!("remove_entry_res() did not find 'passwd'"),
-                Some(passwd) => {
-                    let entry_info = passwd.entry_info();
-                    assert_eq!(entry_info, EntryInfo::new(INO_UNKNOWN, DIRENT_TYPE_FILE));
+                let o_passwd = controller.remove_entry_res("passwd").await.unwrap();
+                match o_passwd {
+                    None => panic!("remove_entry_res() did not find 'passwd'"),
+                    Some(passwd) => {
+                        let entry_info = passwd.entry_info();
+                        assert_eq!(entry_info, EntryInfo::new(INO_UNKNOWN, DIRENT_TYPE_FILE));
+                    }
                 }
+
+                assert_watcher_one_message_watched_events!(watcher, { REMOVED, "passwd" });
+
+                open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
+                open_as_file_assert_err!(&root, flags, "etc/passwd", Status::NOT_FOUND);
+
+                assert_close!(root);
             }
-
-            assert_watcher_one_message_watched_events!(watcher, { REMOVED, "passwd" });
-
-            open_as_file_assert_content!(&root, flags, "etc/fstab", "/dev/fs /");
-            open_as_file_assert_err!(&root, flags, "etc/passwd", Status::NOT_FOUND);
-
-            assert_close!(root);
         });
     }
 }

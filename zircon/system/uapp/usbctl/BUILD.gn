@@ -4,11 +4,11 @@
 
 executable("usbctl") {
   sources = [
-    "usbctl.c",
+    "usbctl.cc",
   ]
   deps = [
     "$zx/system/banjo/ddk.protocol.usb.modeswitch",
-    "$zx/system/fidl/fuchsia-hardware-usb-peripheral:c",
+    "$zx/system/fidl/fuchsia-hardware-usb-peripheral:llcpp",
     "$zx/system/fidl/fuchsia-hardware-usb-virtual-bus:c",
     "$zx/system/ulib/fdio",
     "$zx/system/ulib/fidl",

@@ -1,4 +1,3 @@
-
 Contributing to FIDL
 ====================
 
@@ -62,6 +61,25 @@ SomeClass::SomeClass()
 Comments must respect 80 columns line size limit, unlike code which can extend
 to 100 lines size limit.
 
+##### Lambda captures
+
+* If a lambda escapes the current scope, capture all variables explicitly.
+* If the lambda is local (does not escape the current scope), prefer using a default capture by
+  reference ("`[&]`").
+
+Seeing `[&]` is a strong signal that the lambda exists within the current scope only, and can be
+used to distinguish local from non-local lambdas.
+
+```cpp
+// Correct.
+std::set<const flat::Library*, LibraryComparator> dependencies;
+auto add_dependency = [&](const flat::Library* dep_library) {
+  if (!dep_library->HasAttribute("Internal")) {
+    dependencies.insert(dep_library);
+  }
+};
+```
+
 ## General Setup
 
 ### Fuchsia Setup
@@ -85,7 +103,7 @@ fx set terminal.x64 --with //bundles:kitchen_sink --with //vendor/google/bundles
 To symbolize backtraces, you'll need a symbolizer in scope:
 
 ```sh
-export ASAN_SYMBOLIZER_PATH="$FUCHSIA_DIR/buildtools/linux-x64/clang/bin/llvm-symbolizer"
+export ASAN_SYMBOLIZER_PATH="$FUCHSIA_DIR/prebuilt/third_party/clang/$HOST_PLATFORM/bin/llvm-symbolizer"
 ```
 
 ## Compiling, and Running Tests
@@ -213,12 +231,20 @@ As with normal Go tests, you can pass [various flags][go-test-flags] to control
 execution, filter test cases, run benchmarks, etc. For instance:
 
 ```sh
-Tab 3> fx run-test go_fidl_tests-- -test.v -test.run 'TestAllSuccessCases/.*xunion.*'
+Tab 3> fx run-test go_fidl_tests -- -test.v -test.run 'TestAllSuccessCases/.*xunion.*'
 ```
 
 ### Rust runtime
 
-**TBD**
+You first need to have Fuchsia running in an emulator. Here are the steps:
+
+```sh
+Tab 1> fx build && fx serve-updates
+
+Tab 2> fx run -kN
+
+Tab 3> fx run-test rust_fidl_tests
+```
 
 ### Dart runtime
 
@@ -258,6 +284,47 @@ Then, copy the script to the device, and run it:
 fx cp `find topaz -name run_fidl_compatibility_test_topaz.sh` /tmp/
 fx shell /tmp/run_fidl_compatibility_test_topaz.sh
 ```
+
+### All Tests
+
+| Name                     | Test Command                                        | Directories Covered                                                     |
+|--------------------------|-----------------------------------------------------|-------------------------------------------------------------------------|
+| gidl parser              | fx run-host-tests gidl_parser_test                  | tools/fidl/gidl/parser                                                  |
+| fidlgen hlcpp            | fx run-host-tests fidlgen_cpp_test                  | garnet/go/src/fidl/compiler/backend/cpp                                 |
+| fidlgen hlcpp ir         | fx run-host-tests fidlgen_cpp_ir_test               | garnet/go/src/fidl/compiler/backend/cpp/ir                              |
+| fidlgen llcpp            | fx run-host-tests fidlgen_llcpp_test                | garnet/go/src/fidl/compiler/llcpp_backend                               |
+| fidlgen overnet          | fx run-host-tests fidlgen_cpp_overnet_internal_test | garnet/go/src/fidl/compiler/backend/cpp_overnet_internal                |
+| fidlgen golang           | fx run-host-tests fidlgen_golang_test               | garnet/go/src/fidl/compiler/backend/golang                              |
+| fidlgen golang ir        | fx run-host-tests fidlgen_golang_ir_test            | garnet/go/src/fidl/compiler/backend/golang/ir                           |
+| fidlgen rust             | fx run-host-tests fidlgen_rust_test                 | garnet/go/src/fidl/compiler/backend/rust                                |
+| fidlgen rust ir          | fx run-host-tests fidlgen_rust_ir_test              | garnet/go/src/fidl/compiler/backend/rust/ir                             |
+| fidlgen syzkaller        | fx run-host-tests fidlgen_syzkaller_test            | garnet/go/src/fidl/compiler/backend/syzkaller                           |
+| fidlgen syzkaller ir     | fx run-host-tests fidlgen_syzkaller_ir_test         | garnet/go/src/fidl/compiler/backend/syzkaller/ir                        |
+| fidlgen type definitions | fx run-host-tests fidlgen_types_test                | garnet/go/src/fidl/compiler/backend/types                               |
+| c++ bindings tests       | fx run-test fidl_tests                              | sdk/lib/fidl                                                            |
+| go bindings tests        | fx run-test go_fidl_tests                           | third_party/go/syscall/zx/fidl third_party/go/syscall/zx/fidl/fidl_test |
+| dart bindings tests      | fx run-test fidl_bindings_test                      | topaz/public/dart/fidl                                                  |
+| rust bindings            | fx run-test rust_fidl_tests                         |                                                                         |
+
+
+The following requires: fx set bringup.x64 --with-base //garnet/packages/tests:zircon
+
+| Name                      | Test Command                                                                                                 | Directories Covered     |
+|---------------------------|--------------------------------------------------------------------------------------------------------------|-------------------------|
+| fidlc host test           | $FUCHSIA_DIR/out/default.zircon/host-x64-linux-clang/obj/system/utest/fidl-compiler/fidl-compiler-test.debug | zircon/system/host/fidl |
+| fidl coding tables test   | fx run -k -c zircon.autorun.boot=/boot/bin/runtests+-t+fidl-coding-tables-test                               | zircon/system/host/fidl |
+| fidl c runtime test       | fx run -k -c zircon.autorun.boot=/boot/bin/runtests+-t+fidl-test                                             | zircon/system/ulib/fidl |
+| fidl c-llcpp interop test | fx run -k -c zircon.autorun.boot=/boot/bin/runtests+-t+fidl-llcpp-interop-test                               | zircon/system/ulib/fidl |
+
+### All Regen Commands
+
+| Name                             | Regen Commands                                                              | Input                                                             | Output                                                                                                                                                                                                                                                                                       |
+|----------------------------------|-----------------------------------------------------------------------------|-------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| fidlgen goldens                  | fx exec $FUCHSIA_DIR/garnet/go/src/fidl/compiler/backend/typestest/regen.sh | garnet/go/src/fidl/compiler/backend/goldens                       | garnet/go/src/fidl/compiler/backend/goldens                                                                                                                                                                                                                                                  |
+| dart fidlgen goldens             | fx exec $FUCHSIA_DIR/topaz/bin/fidlgen_dart/regen.sh                        | garnet/go/src/fidl/compiler/backend/goldens                       | topaz/bin/fidlgen_dart/goldens                                                                                                                                                                                                                                                               |
+| gidl conformance test generation | fx exec $FUCHSIA_DIR/tools/fidl/gidl-conformance-suite/regen.sh             | tools/fidl/gidl-conformance-suite                                 | third_party/go/src/syscall/zx/fidl/conformance/impl.go third_party/go/src/syscall/zx/fidl/fidl_test/conformance_test.go sdk/lib/fidl/cpp/conformance_test.cc topaz/bin/fidl_bindings_test/test/test/conformance_test_types.dart topaz/bin/fidl_bindings_test/test/test/conformance_test.dart |
+| dangerous identifiers            | garnet/tests/fidl-dangerous-identifiers/generate.py                         | garnet/tests/fidl-dangerous-identifiers/dangerous_identifiers.txt | garnet/tests/fidl-dangerous-identifiers/cpp/ garnet/tests/fidl-dangerous-identifiers/fidl/                                                                                                                                                                                                   |
+| regen third party go             | fx exec $FUCHSIA_DIR/third_party/go/regen-fidl                              |                                                                   |                                                                                                                                                                                                                                                                                              |
 
 ## Workflows
 
@@ -330,7 +397,7 @@ fidl fmt --library my_library.fidl -i
 [fidlc-tests]: /zircon/system/utest/fidl/
 [jsonir]: /docs/development/languages/fidl/reference/json-ir.md
 [rtl-c]: /zircon/system/ulib/fidl/
-[rtl-cpp]: /garnet/lib/fidl/cpp/
+[rtl-cpp]: /garnet/public/lib/fidl/llcpp/
 [rtl-dart]: https://fuchsia.googlesource.com/topaz/+/master/public/dart/fidl/
 [rtl-go]: /third_party/go/src/syscall/zx/fidl/
 [rtl-rust]: /garnet/public/lib/fidl/rust/fidl/

@@ -4,7 +4,7 @@
 
 //! Fuchsia Ethernet client
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 #![deny(missing_docs)]
 
 use bitflags::bitflags;
@@ -12,7 +12,7 @@ use fidl_fuchsia_hardware_ethernet as sys;
 use fidl_fuchsia_hardware_ethernet_ext::{EthernetInfo, EthernetStatus};
 use fuchsia_async as fasync;
 use fuchsia_zircon::{self as zx, AsHandleRef};
-use futures::{ready, task::{Context, Waker}, try_ready, FutureExt, Poll, Stream};
+use futures::{ready, task::{Context, Waker}, FutureExt, Poll, Stream};
 
 use std::fs::File;
 use std::marker::Unpin;
@@ -66,14 +66,14 @@ impl Client {
         buf_size: usize,
         name: &str,
     ) -> Result<Self, failure::Error> {
-        zx::Status::ok(await!(dev.set_client_name(name))?)?;
-        let (status, fifos) = await!(dev.get_fifos())?;
+        zx::Status::ok(dev.set_client_name(name).await?)?;
+        let (status, fifos) = dev.get_fifos().await?;
         zx::Status::ok(status)?;
         // Safe because we checked the return status above.
         let fifos = *fifos.unwrap();
         {
             let buf = zx::Vmo::from(buf.as_handle_ref().duplicate(zx::Rights::SAME_RIGHTS)?);
-            await!(dev.set_io_buffer(buf))?;
+            dev.set_io_buffer(buf).await?;
         }
         let pool = Mutex::new(buffer::BufferPool::new(buf, buf_size)?);
         Ok(Client { inner: Arc::new(ClientInner::new(dev, pool, fifos)?) })
@@ -102,7 +102,7 @@ impl Client {
             fuchsia_zircon::Channel::from(unsafe { fuchsia_zircon::Handle::from_raw(client) }),
         )
         .into_proxy()?;
-        await!(Client::new(dev, buf, buf_size, name))
+        Client::new(dev, buf, buf_size, name).await
     }
 
     /// Get a stream of events from the Ethernet device.
@@ -115,7 +115,7 @@ impl Client {
 
     /// Retrieve information about the Ethernet device.
     pub async fn info(&self) -> Result<EthernetInfo, fidl::Error> {
-        let info = await!(self.inner.dev.get_info())?;
+        let info = self.inner.dev.get_info().await?;
         Ok(info.into())
     }
 
@@ -123,7 +123,7 @@ impl Client {
     ///
     /// Before this is called, no packets will be transferred.
     pub async fn start(&self) -> Result<(), failure::Error> {
-        let raw = await!(self.inner.dev.start())?;
+        let raw = self.inner.dev.start().await?;
         Ok(zx::Status::ok(raw)?)
     }
 
@@ -131,25 +131,25 @@ impl Client {
     ///
     /// After this is called, no packets will be transferred.
     pub async fn stop(&self) -> Result<(), fidl::Error> {
-        await!(self.inner.dev.stop())
+        self.inner.dev.stop().await
     }
 
     /// Start receiving all packets transmitted by this host.
     ///
     /// Such packets will have the `EthernetQueueFlags::TX_ECHO` bit set.
     pub async fn tx_listen_start(&self) -> Result<(), failure::Error> {
-        let raw = await!(self.inner.dev.listen_start())?;
+        let raw = self.inner.dev.listen_start().await?;
         Ok(zx::Status::ok(raw)?)
     }
 
     /// Stop receiving all packets transmitted by this host.
     pub async fn tx_listen_stop(&self) -> Result<(), fidl::Error> {
-        await!(self.inner.dev.listen_stop())
+        self.inner.dev.listen_stop().await
     }
 
     /// Get the status of the Ethernet device.
     pub async fn get_status(&self) -> Result<EthernetStatus, fidl::Error> {
-        Ok(EthernetStatus::from_bits_truncate(await!(self.inner.dev.get_status())?))
+        Ok(EthernetStatus::from_bits_truncate(self.inner.dev.get_status().await?))
     }
 
     /// Send a buffer with the Ethernet device.
@@ -312,7 +312,7 @@ impl ClientInner {
     ///
     /// These changes are signaled on the rx fifo.
     fn poll_status(&self, cx: &mut Context<'_>) -> Poll<Result<zx::Signals, zx::Status>> {
-        let signals = try_ready!(self.signals.lock().unwrap().poll_unpin(cx));
+        let signals = ready!(self.signals.lock().unwrap().poll_unpin(cx))?;
         self.register_signals();
         Poll::Ready(Ok(signals))
     }
@@ -339,7 +339,7 @@ impl ClientInner {
     ///
     /// Returns the flags indicating success or failure.
     fn poll_complete_tx(&self, cx: &mut Context<'_>) -> Poll<Result<EthernetQueueFlags, zx::Status>> {
-        match try_ready!(self.tx_fifo.try_read(cx)) {
+        match ready!(self.tx_fifo.try_read(cx))? {
             Some(buffer::FifoEntry { offset, flags, .. }) => {
                 self.pool.lock().unwrap().release_tx_buffer(offset as usize);
                 Poll::Ready(Ok(EthernetQueueFlags::from_bits_truncate(flags)))
@@ -350,7 +350,7 @@ impl ClientInner {
 
     /// Queue an available receive buffer to the rx fifo.
     fn poll_queue_rx(&self, cx: &mut Context<'_>) -> Poll<Result<(), zx::Status>> {
-        try_ready!(self.rx_fifo.poll_write(cx));
+        ready!(self.rx_fifo.poll_write(cx))?;
         let mut pool_guard = self.pool.lock().unwrap();
         match pool_guard.alloc_rx_buffer() {
             None => Poll::Pending,
@@ -372,7 +372,7 @@ impl ClientInner {
         &self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(buffer::RxBuffer, EthernetQueueFlags), zx::Status>> {
-        Poll::Ready(match try_ready!(self.rx_fifo.try_read(cx)) {
+        Poll::Ready(match ready!(self.rx_fifo.try_read(cx))? {
             Some(entry) => {
                 let mut pool_guard = self.pool.lock().unwrap();
                 let buf = pool_guard.map_rx_buffer(entry.offset as usize, entry.length as usize);

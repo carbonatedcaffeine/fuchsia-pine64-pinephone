@@ -5,15 +5,16 @@
 #ifndef SRC_CAMERA_DRIVERS_ISP_MALI_009_ARM_ISP_TEST_H_
 #define SRC_CAMERA_DRIVERS_ISP_MALI_009_ARM_ISP_TEST_H_
 
-#include <ddktl/device.h>
-#include <ddktl/protocol/empty-protocol.h>
-#include <fbl/mutex.h>
 #include <fuchsia/camera/test/c/fidl.h>
 #include <lib/fidl-utils/bind.h>
 #include <lib/fit/function.h>
 #include <zircon/fidl.h>
 
 #include <memory>
+
+#include <ddktl/device.h>
+#include <ddktl/protocol/empty-protocol.h>
+#include <fbl/mutex.h>
 
 #include "global_regs.h"
 #include "pingpong_regs.h"
@@ -33,8 +34,7 @@ struct ArmIspRegisterDump {
 class ArmIspDevice;
 
 class ArmIspDeviceTester;
-using IspDeviceTesterType =
-    ddk::Device<ArmIspDeviceTester, ddk::Unbindable, ddk::Messageable>;
+using IspDeviceTesterType = ddk::Device<ArmIspDeviceTester, ddk::Unbindable, ddk::Messageable>;
 
 class ArmIspDeviceTester : public IspDeviceTesterType,
                            public ddk::EmptyProtocol<ZX_PROTOCOL_ISP_TEST> {
@@ -47,8 +47,7 @@ class ArmIspDeviceTester : public IspDeviceTesterType,
   // On successful creation, |on_isp_unbind| is filled with a pointer to the
   // Disconnect function, so that the ArmIspDevice can notify the
   // ArmIspDeviceTester that it is going away.
-  static zx_status_t Create(ArmIspDevice* isp,
-                            fit::callback<void()>* on_isp_unbind);
+  static zx_status_t Create(ArmIspDevice* isp, fit::callback<void()>* on_isp_unbind);
 
   // Methods required by the ddk.
   void DdkRelease();
@@ -65,14 +64,21 @@ class ArmIspDeviceTester : public IspDeviceTesterType,
   void Disconnect();
 
   static constexpr fuchsia_camera_test_IspTester_ops isp_tester_ops = {
-      .RunTests = fidl::Binder<ArmIspDeviceTester>::BindMember<
-          &ArmIspDeviceTester::RunTests>,
+      .RunTests = fidl::Binder<ArmIspDeviceTester>::BindMember<&ArmIspDeviceTester::RunTests>,
   };
 
   // ISP Tests:
   // Test the GetRegisters interface by writing to a register.
   // |report| is updated with the results of the tests this function performs.
-  void TestWriteRegister(fuchsia_camera_test_TestReport& report);
+  void TestWriteRegister(fuchsia_camera_test_TestReport* report);
+
+  // Test the IspCreateOutputStream by calling it.
+  // |report| is updated with the results of the tests this function performs.
+  void TestConnectStream(fuchsia_camera_test_TestReport* report);
+
+  // Test the callbacks passed to IspCreateOutputStream by calling them.
+  // |report| is updated with the results of the tests this function performs.
+  void TestCallbacks(fuchsia_camera_test_TestReport* report);
 
   // The ArmIspDevice is a parent of the ArmIspDeviceTester.  It will call
   // Disconnect() during its DdkUnbind() call, so that isp_ never references an

@@ -7,7 +7,7 @@
 
 #include <lib/async/cpp/task.h>
 #include <lib/async/dispatcher.h>
-#include <lib/inspect/inspect.h>
+#include <lib/inspect_deprecated/inspect.h>
 #include <lib/zx/time.h>
 
 #include <queue>
@@ -28,8 +28,9 @@ class Display;
 // scheduler should be added to it as well.
 class DefaultFrameScheduler : public FrameScheduler {
  public:
-  explicit DefaultFrameScheduler(const Display* display, std::unique_ptr<FramePredictor> predictor,
-                                 inspect::Node inspect_node = inspect::Node());
+  explicit DefaultFrameScheduler(
+      const Display* display, std::unique_ptr<FramePredictor> predictor,
+      inspect_deprecated::Node inspect_node = inspect_deprecated::Node());
   ~DefaultFrameScheduler();
 
   // |FrameScheduler|
@@ -48,7 +49,7 @@ class DefaultFrameScheduler : public FrameScheduler {
   //
   // Tell the FrameScheduler to schedule a frame. This is also used for updates triggered by
   // something other than a Session update i.e. an ImagePipe with a new Image to present.
-  void ScheduleUpdateForSession(zx_time_t presentation_time,
+  void ScheduleUpdateForSession(zx::time presentation_time,
                                 scenic_impl::SessionId session) override;
 
   constexpr static zx::duration kInitialRenderDuration = zx::msec(5);
@@ -71,7 +72,7 @@ class DefaultFrameScheduler : public FrameScheduler {
     // Schedules an update for the specified session.  All updaters registered by
     // |AddSessionUpdater()| are notified when |ApplyUpdates()| is called with an equal or later
     // presentation time.
-    void ScheduleUpdate(zx_time_t presentation_time, SessionId session);
+    void ScheduleUpdate(zx::time presentation_time, SessionId session);
 
     // Returned by |ApplyUpdates()|; used by a |FrameScheduler| to decide whether to render a frame
     // and/or schedule another frame to be rendered.
@@ -81,20 +82,20 @@ class DefaultFrameScheduler : public FrameScheduler {
     };
     // Calls |SessionUpdater::UpdateSessions()| on all updaters, and uses the returned
     // |SessionUpdater::UpdateResults| to generate the returned |ApplyUpdatesResult|.
-    ApplyUpdatesResult ApplyUpdates(zx_time_t presentation_time, zx_time_t vsync_interval,
+    ApplyUpdatesResult ApplyUpdates(zx::time presentation_time, zx::duration vsync_interval,
                                     uint64_t frame_number);
 
     // Return true if there are any scheduled session updates that have not yet been applied.
     bool HasUpdatableSessions() const { return !updatable_sessions_.empty(); }
 
-    zx_time_t EarliestRequestedPresentationTime() {
+    zx::time EarliestRequestedPresentationTime() {
       FXL_DCHECK(HasUpdatableSessions());
       return updatable_sessions_.top().requested_presentation_time;
     }
 
     // Creates a ratchet point for the updater. All present calls that were updated before this
     // point will be signaled with the next call to |SignalPresentCallbacks()|.
-    void RatchetPresentCallbacks(zx_time_t presentation_time, uint64_t frame_number);
+    void RatchetPresentCallbacks(zx::time presentation_time, uint64_t frame_number);
 
     // Signal that all updates before the last ratchet point have been presented.  The signaled
     // callbacks are every successful present between the last time |SignalPresentCallbacks()| was
@@ -108,7 +109,7 @@ class DefaultFrameScheduler : public FrameScheduler {
     // latest.
     struct SessionUpdate {
       SessionId session_id;
-      zx_time_t requested_presentation_time;
+      zx::time requested_presentation_time;
 
       bool operator>(const SessionUpdate& rhs) const {
         return requested_presentation_time > rhs.requested_presentation_time;
@@ -142,11 +143,11 @@ class DefaultFrameScheduler : public FrameScheduler {
   // Computes the target presentation time for the requested presentation time, and a wake-up time
   // that is early enough to start rendering in order to hit the target presentation time. These
   // times are guaranteed to be in the future.
-  std::pair<zx_time_t, zx_time_t> ComputePresentationAndWakeupTimesForTargetTime(
-      zx_time_t requested_presentation_time) const;
+  std::pair<zx::time, zx::time> ComputePresentationAndWakeupTimesForTargetTime(
+      zx::time requested_presentation_time) const;
 
   // Executes updates that are scheduled up to and including a given presentation time.
-  UpdateManager::ApplyUpdatesResult ApplyUpdates(zx_time_t presentation_time);
+  UpdateManager::ApplyUpdatesResult ApplyUpdates(zx::time presentation_time);
 
   // References.
   async_dispatcher_t* const dispatcher_;
@@ -160,8 +161,8 @@ class DefaultFrameScheduler : public FrameScheduler {
   bool render_continuously_ = false;
   bool currently_rendering_ = false;
   bool render_pending_ = false;
-  zx_time_t wakeup_time_;
-  zx_time_t next_presentation_time_;
+  zx::time wakeup_time_;
+  zx::time next_presentation_time_;
   UpdateManager update_manager_;
   std::unique_ptr<FramePredictor> frame_predictor_;
 
@@ -169,10 +170,10 @@ class DefaultFrameScheduler : public FrameScheduler {
   async::TaskMethod<DefaultFrameScheduler, &DefaultFrameScheduler::MaybeRenderFrame>
       frame_render_task_{this};
 
-  inspect::Node inspect_node_;
-  inspect::UIntMetric inspect_frame_number_;
-  inspect::UIntMetric inspect_last_successful_update_start_time_;
-  inspect::UIntMetric inspect_last_successful_render_start_time_;
+  inspect_deprecated::Node inspect_node_;
+  inspect_deprecated::UIntMetric inspect_frame_number_;
+  inspect_deprecated::UIntMetric inspect_last_successful_update_start_time_;
+  inspect_deprecated::UIntMetric inspect_last_successful_render_start_time_;
 
   FrameStats stats_;
 

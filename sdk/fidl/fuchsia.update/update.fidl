@@ -5,18 +5,44 @@
 library fuchsia.update;
 
 /// Information about the state of the update system.
-[Discoverable]
+[Discoverable, FragileBase]
 protocol Info {
     /// Retrieve the currently active update channel.
     ///
-    /// - response `channel` The currently active update channel.
+    /// - response `channel` the currently active update channel.
     GetChannel() -> (string:128 channel);
+};
+
+/// Control the target update channel, this is the channel we will use on the next update check.
+[Discoverable]
+protocol ChannelControl {
+    compose Info;
+
+    /// Set a new desired target channel.  This tells the updater to attempt to
+    /// check for updates using a new channel.  This is tentative, and won't be
+    /// persisted unless an update check on that channel is successful.
+    ///
+    /// A response is generated when the new target channel has been verified as
+    /// valid.
+    ///
+    /// + request `channel` the new target channel name (name used by the updater)
+    SetTarget(string:128 channel) -> ();
+
+    /// Get the current tentative target channel for updates.
+    /// This returns the channel that the update client is using to perform update
+    /// checks.  It's always one of:
+    ///    - the current channel
+    ///    - the default channel
+    ///    - a new target that's different, but hasn't been OTA'd from yet.
+    ///
+    /// - response `channel` the current target channel.
+    GetTarget() -> (string:128 channel);
 };
 
 [Discoverable]
 protocol Manager {
     /// Immediately check for an update.
-    ///  `options`:  Did a user initiate this request? (USER_INITIATED) This changes
+    ///  `options`:  Did a user initiate this request? (`USER_INITIATED`) This changes
     ///              some parameters about aggressiveness of retries and throttling.
     ///  `monitor`:  An interface on which to receive the status events for this update check.
     ///               It's only valid for a single update check, after that it won't receive any
@@ -61,6 +87,7 @@ enum Initiator {
     SERVICE = 1;
 };
 
+/// ```
 /// The various states that the manager can be in.
 ///
 ///     +----------------------+
@@ -86,6 +113,7 @@ enum Initiator {
 /// +---|  FINALIZING_UPDATE   |---->|  ENCOUNTERED_ERROR   |----+
 ///     +----------------------+     +----------------------+
 ///
+/// ```
 enum ManagerState {
     /// The Manager is currently idle (in between updates).
     ///

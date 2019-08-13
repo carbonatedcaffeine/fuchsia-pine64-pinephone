@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "garnet/public/lib/callback/scoped_callback.h"
 #include "src/lib/fxl/macros.h"
 #include "src/lib/fxl/memory/ref_counted.h"
 
@@ -91,9 +92,7 @@ class AnyAccumulator {
     return result_status_ != success_status_;
   }
 
-  std::pair<S, V> Result() {
-    return std::make_pair(result_status_, std::move(value_));
-  }
+  std::pair<S, V> Result() { return std::make_pair(result_status_, std::move(value_)); }
 
  private:
   const S success_status_;
@@ -115,9 +114,7 @@ class PromiseAccumulator {
     return false;
   }
 
-  std::pair<S, V> Result() {
-    return std::make_pair(status_, std::move(value_));
-  }
+  std::pair<S, V> Result() { return std::make_pair(status_, std::move(value_)); }
 
  private:
   S status_;
@@ -131,6 +128,19 @@ class CompletionAccumulator {
   bool Update(bool /*token*/) { return true; }
 
   bool Result() { return true; }
+};
+
+// Implements operator bool() for a waiter, for use in |callback::MakeScoped|.
+template <typename W>
+class WaiterWitness {
+ public:
+  explicit WaiterWitness(fxl::RefPtr<W> waiter) : waiter_(waiter) {}
+
+  // Returns |true| if the waiter is in state |STARTED|.
+  explicit operator bool() { return waiter_->state_ == W::State::STARTED; }
+
+ private:
+  fxl::RefPtr<W> waiter_;
 };
 
 }  // namespace internal
@@ -198,8 +208,7 @@ class BaseWaiter : public fxl::RefCountedThreadSafe<BaseWaiter<A, R, Args...>> {
       return;
     }
     // This is a programmer error.
-    FXL_DCHECK(!result_callback_)
-        << "Waiter already finalized, can't finalize more!";
+    FXL_DCHECK(!result_callback_) << "Waiter already finalized, can't finalize more!";
     // This should never happen: FINISHED can only be reached after having
     // called Finalize, and Finalize can only be called once.
     FXL_DCHECK(state_ != State::FINISHED) << "Waiter already finished.";
@@ -214,6 +223,14 @@ class BaseWaiter : public fxl::RefCountedThreadSafe<BaseWaiter<A, R, Args...>> {
     result_callback_ = nullptr;
   }
 
+  // Scopes a callback to this waiter: the callback is only called if the waiter is active.  This
+  // implies that the finalizer is still alive, so callbacks can use objects owned by the finalizer.
+  template <typename Callback>
+  auto MakeScoped(Callback callback) {
+    return callback::MakeScoped(
+        internal::WaiterWitness(fxl::RefPtr<BaseWaiter<A, R, Args...>>(this)), std::move(callback));
+  }
+
  protected:
   explicit BaseWaiter(A&& accumulator) : accumulator_(std::move(accumulator)) {}
   virtual ~BaseWaiter() {}
@@ -224,6 +241,7 @@ class BaseWaiter : public fxl::RefCountedThreadSafe<BaseWaiter<A, R, Args...>> {
 
   FRIEND_REF_COUNTED_THREAD_SAFE(BaseWaiter);
   FRIEND_MAKE_REF_COUNTED(BaseWaiter);
+  friend class internal::WaiterWitness<BaseWaiter<A, R, Args...>>;
 
   // Receives the result of a |NewCallback| callback and accumulates it if not
   // already done, cancelled or finished. Then executes the finalization
@@ -235,8 +253,7 @@ class BaseWaiter : public fxl::RefCountedThreadSafe<BaseWaiter<A, R, Args...>> {
     if (state_ != State::STARTED) {
       return;
     }
-    const bool success =
-        accumulator_.Update(std::move(token), std::forward<Args>(args)...);
+    const bool success = accumulator_.Update(std::move(token), std::forward<Args>(args)...);
     if (!success) {
       state_ = State::DONE;
     }
@@ -250,8 +267,7 @@ class BaseWaiter : public fxl::RefCountedThreadSafe<BaseWaiter<A, R, Args...>> {
     FXL_DCHECK(state_ != State::FINISHED) << "Waiter already finished.";
     FXL_DCHECK(state_ != State::CANCELLED)
         << "Cancelled waiter tried to execute the finalization callback.";
-    if (!result_callback_ ||
-        (state_ == State::STARTED && pending_callbacks_ > 0)) {
+    if (!result_callback_ || (state_ == State::STARTED && pending_callbacks_ > 0)) {
       return;
     }
     state_ = State::FINISHED;
@@ -285,16 +301,14 @@ class BaseWaiter : public fxl::RefCountedThreadSafe<BaseWaiter<A, R, Args...>> {
 //   do something with the returned objects
 // });
 template <class S, class T>
-class Waiter : public BaseWaiter<internal::ResultAccumulator<S, T>,
-                                 std::pair<S, std::vector<T>>, S, T> {
+class Waiter
+    : public BaseWaiter<internal::ResultAccumulator<S, T>, std::pair<S, std::vector<T>>, S, T> {
  public:
   void Finalize(fit::function<void(S, std::vector<T>)> callback) {
-    BaseWaiter<internal::ResultAccumulator<S, T>, std::pair<S, std::vector<T>>,
-               S, T>::Finalize([callback =
-                                    std::move(callback)](
-                                   std::pair<S, std::vector<T>> result) {
-      callback(result.first, std::move(result.second));
-    });
+    BaseWaiter<internal::ResultAccumulator<S, T>, std::pair<S, std::vector<T>>, S, T>::Finalize(
+        [callback = std::move(callback)](std::pair<S, std::vector<T>> result) {
+          callback(result.first, std::move(result.second));
+        });
   }
 
  private:
@@ -303,8 +317,7 @@ class Waiter : public BaseWaiter<internal::ResultAccumulator<S, T>,
   ~Waiter() override{};
 
   explicit Waiter(S success_status)
-      : BaseWaiter<internal::ResultAccumulator<S, T>,
-                   std::pair<S, std::vector<T>>, S, T>(
+      : BaseWaiter<internal::ResultAccumulator<S, T>, std::pair<S, std::vector<T>>, S, T>(
             internal::ResultAccumulator<S, T>(success_status)) {}
 };
 
@@ -327,8 +340,7 @@ class StatusWaiter : public BaseWaiter<internal::StatusAccumulator<S>, S, S> {
 // successful result. It will return |default_status| and |default_value| only
 // if no callback was called with a |success_status| status.
 template <class S, class V>
-class AnyWaiter
-    : public BaseWaiter<internal::AnyAccumulator<S, V>, std::pair<S, V>, S, V> {
+class AnyWaiter : public BaseWaiter<internal::AnyAccumulator<S, V>, std::pair<S, V>, S, V> {
  public:
   void Finalize(fit::function<void(S, V)> callback) {
     BaseWaiter<internal::AnyAccumulator<S, V>, std::pair<S, V>, S, V>::Finalize(
@@ -362,15 +374,13 @@ class AnyWaiter
 //   do something with the returned object
 // });
 template <class S, class V>
-class Promise : public BaseWaiter<internal::PromiseAccumulator<S, V>,
-                                  std::pair<S, V>, S, V> {
+class Promise : public BaseWaiter<internal::PromiseAccumulator<S, V>, std::pair<S, V>, S, V> {
  public:
   void Finalize(fit::function<void(S, V)> callback) {
-    BaseWaiter<internal::PromiseAccumulator<S, V>, std::pair<S, V>, S,
-               V>::Finalize([callback =
-                                 std::move(callback)](std::pair<S, V> result) {
-      callback(result.first, std::move(result.second));
-    });
+    BaseWaiter<internal::PromiseAccumulator<S, V>, std::pair<S, V>, S, V>::Finalize(
+        [callback = std::move(callback)](std::pair<S, V> result) {
+          callback(result.first, std::move(result.second));
+        });
   }
 
  private:
@@ -381,14 +391,12 @@ class Promise : public BaseWaiter<internal::PromiseAccumulator<S, V>,
   // returned to the callback in |Finalize| if |NewCallback| is not called.
   Promise(S default_status, V default_value = V())
       : BaseWaiter<internal::PromiseAccumulator<S, V>, std::pair<S, V>, S, V>(
-            internal::PromiseAccumulator<S, V>(default_status,
-                                               std::move(default_value))) {}
+            internal::PromiseAccumulator<S, V>(default_status, std::move(default_value))) {}
   ~Promise() override{};
 };
 
 // CompletionWaiter can be used to be notified on completion of a computation.
-class CompletionWaiter
-    : public BaseWaiter<internal::CompletionAccumulator, bool> {
+class CompletionWaiter : public BaseWaiter<internal::CompletionAccumulator, bool> {
  public:
   void Finalize(fit::function<void()> callback) {
     BaseWaiter<internal::CompletionAccumulator, bool>::Finalize(
@@ -400,8 +408,7 @@ class CompletionWaiter
   FRIEND_MAKE_REF_COUNTED(CompletionWaiter);
 
   CompletionWaiter()
-      : BaseWaiter<internal::CompletionAccumulator, bool>(
-            internal::CompletionAccumulator()) {}
+      : BaseWaiter<internal::CompletionAccumulator, bool>(internal::CompletionAccumulator()) {}
   ~CompletionWaiter() override{};
 };
 

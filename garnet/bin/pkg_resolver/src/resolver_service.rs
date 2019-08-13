@@ -4,26 +4,23 @@
 
 use {
     crate::amber_connector::AmberConnect,
+    crate::font_package_manager::FontPackageManager,
     crate::repository_manager::RepositoryManager,
     crate::rewrite_manager::RewriteManager,
     failure::Error,
     fidl::endpoints::ServerEnd,
     fidl_fuchsia_io::{self, DirectoryMarker},
     fidl_fuchsia_pkg::{
-        PackageCacheProxy, PackageResolverRequest, PackageResolverRequestStream, UpdatePolicy,
+        FontResolverRequest, FontResolverRequestStream, PackageCacheProxy, PackageResolverRequest,
+        PackageResolverRequestStream, UpdatePolicy,
     },
-    fidl_fuchsia_pkg_ext::BlobId,
-    fuchsia_async as fasync,
     fuchsia_syslog::{fx_log_err, fx_log_info, fx_log_warn},
-    fuchsia_url::pkg_url::PkgUrl,
-    fuchsia_zircon::{Channel, MessageBuf, Signals, Status},
+    fuchsia_url::pkg_url::{ParseError, PkgUrl},
+    fuchsia_zircon::Status,
     futures::prelude::*,
     parking_lot::RwLock,
     std::sync::Arc,
 };
-
-// The error amber returns if it could not find the merkle for this package.
-const PACKAGE_NOT_FOUND: &str = "merkle not found for package";
 
 pub async fn run_resolver_service<A>(
     rewrites: Arc<RwLock<RewriteManager>>,
@@ -34,7 +31,7 @@ pub async fn run_resolver_service<A>(
 where
     A: AmberConnect,
 {
-    while let Some(event) = await!(stream.try_next())? {
+    while let Some(event) = stream.try_next().await? {
         let PackageResolverRequest::Resolve {
             package_url,
             selectors,
@@ -43,15 +40,9 @@ where
             responder,
         } = event;
 
-        let status = await!(resolve(
-            &rewrites,
-            &repo_manager,
-            &cache,
-            package_url,
-            selectors,
-            update_policy,
-            dir
-        ));
+        let status =
+            resolve(&rewrites, &repo_manager, &cache, package_url, selectors, update_policy, dir)
+                .await;
 
         responder.send(Status::from(status).into_raw())?;
     }
@@ -75,11 +66,7 @@ async fn resolve<'a, A>(
 where
     A: AmberConnect,
 {
-    let url = PkgUrl::parse(&pkg_url).map_err(|err| {
-        fx_log_err!("failed to parse package url {:?}: {}", pkg_url, err);
-        Err(Status::INVALID_ARGS)
-    })?;
-    let was_fuchsia_host = url.host() == "fuchsia.com";
+    let url = PkgUrl::parse(&pkg_url).map_err(|err| handle_bad_package_url(err, &pkg_url))?;
     let url = rewrites.read().rewrite(url);
 
     // While the fuchsia-pkg:// spec allows resource paths, the package resolver should not be
@@ -94,30 +81,7 @@ where
         fx_log_warn!("resolve does not support selectors yet");
     }
 
-    // FIXME(PKG-798): only use the OpenRepository for non-fuchsia.com hosts.
-    let merkle = if !was_fuchsia_host && url.host() != "fuchsia.com" {
-        await!(repo_manager.read().get_package(&url))?
-    } else {
-        let amber = repo_manager.read().connect_to_amber()?;
-
-        // While the fuchsia-pkg:// spec doesn't require a package name, we do.
-        let name = url.name().ok_or_else(|| {
-            fx_log_err!("package url is missing a package name: {}", url);
-            Err(Status::INVALID_ARGS)
-        })?;
-
-        // Ask amber to cache the package.
-        let chan = await!(amber.get_update_complete(&name, url.variant(), url.package_hash()))
-            .map_err(|err| {
-                fx_log_err!("error communicating with amber: {:?}", err);
-                Status::INTERNAL
-            })?;
-
-        await!(wait_for_update_to_complete(chan, &url)).map_err(|err| {
-            fx_log_err!("error when waiting for amber to complete: {:?}", err);
-            err
-        })?
-    };
+    let merkle = repo_manager.read().get_package(&url).await?;
 
     fx_log_info!(
         "resolved {} as {} with the selectors {:?} to {}",
@@ -127,7 +91,9 @@ where
         merkle
     );
 
-    await!(cache.open(&mut merkle.into(), &mut selectors.iter().map(|s| s.as_str()), dir_request))
+    cache
+        .open(&mut merkle.into(), &mut selectors.iter().map(|s| s.as_str()), dir_request)
+        .await
         .map_err(|err| {
             fx_log_err!("error opening {}: {:?}", merkle, err);
             Status::INTERNAL
@@ -136,108 +102,89 @@ where
     Ok(())
 }
 
-// Checks for the error amber returns if it could resolve a merkle for this
-// package, but it couldn't download the package.
-//
-// Format: "not found in \\d+ active sources"
-fn is_unavailable_msg(msg: &str) -> bool {
-    const UNAVAILABLE_PRE: &str = "not found in ";
-    const UNAVAILABLE_POST: &str = "active sources";
+/// Run a service that only resolves registered font packages.
+pub async fn run_font_resolver_service<A>(
+    font_package_manager: Arc<FontPackageManager>,
+    rewrites: Arc<RwLock<RewriteManager>>,
+    repo_manager: Arc<RwLock<RepositoryManager<A>>>,
+    cache: PackageCacheProxy,
+    mut stream: FontResolverRequestStream,
+) -> Result<(), Error>
+where
+    A: AmberConnect,
+{
+    while let Some(event) = stream.try_next().await? {
+        let FontResolverRequest::Resolve { package_url, directory_request, responder } = event;
 
-    if !msg.starts_with(UNAVAILABLE_PRE) {
-        return false;
+        let result = resolve_font(
+            &font_package_manager,
+            &rewrites,
+            &repo_manager,
+            &cache,
+            package_url,
+            directory_request,
+        )
+        .await;
+
+        responder.send(Status::from(result).into_raw())?;
     }
-    let (_unavailable_pre, tail) = msg.split_at(UNAVAILABLE_PRE.len());
-    let tail_chars = &mut tail.chars();
-    let mut c = tail_chars.next();
-    // require at least one digit
-    if !c.map_or(false, |c| c.is_numeric()) {
-        return false;
-    }
-    loop {
-        c = tail_chars.next();
-        if !c.map_or(false, |c| c.is_numeric()) {
-            // check for space after digit
-            if let Some(' ') = c {
-                break;
-            } else {
-                return false;
-            }
-        }
-    }
-    // take remaining digits
-    let tail = tail_chars.as_str();
-    return tail.starts_with(UNAVAILABLE_POST);
+    Ok(())
 }
 
-async fn wait_for_update_to_complete(chan: Channel, url: &PkgUrl) -> Result<BlobId, Status> {
-    let mut buf = MessageBuf::new();
-
-    let sigs = await!(fasync::OnSignals::new(
-        &chan,
-        Signals::CHANNEL_PEER_CLOSED | Signals::CHANNEL_READABLE
-    ))?;
-
-    if sigs.contains(Signals::CHANNEL_READABLE) {
-        chan.read(&mut buf)?;
-        let buf = buf.split().0;
-
-        if sigs.contains(Signals::USER_0) {
-            let msg = String::from_utf8_lossy(&buf);
-
-            if msg.starts_with(PACKAGE_NOT_FOUND) {
-                fx_log_info!("package {} was not found: {}", url, msg);
-                return Err(Status::NOT_FOUND);
+/// Resolve a single font package.
+async fn resolve_font<'a, A>(
+    font_package_manager: &'a Arc<FontPackageManager>,
+    rewrites: &'a Arc<RwLock<RewriteManager>>,
+    repo_manager: &'a Arc<RwLock<RepositoryManager<A>>>,
+    cache: &'a PackageCacheProxy,
+    package_url: String,
+    directory_request: ServerEnd<DirectoryMarker>,
+) -> Result<(), Status>
+where
+    A: AmberConnect,
+{
+    match PkgUrl::parse(&package_url) {
+        Err(err) => handle_bad_package_url(err, &package_url),
+        Ok(parsed_package_url) => {
+            if !font_package_manager.is_font_package(&parsed_package_url) {
+                fx_log_err!("tried to resolve unknown font package: {}", package_url);
+                Err(Status::NOT_FOUND)
+            } else {
+                resolve(
+                    &rewrites,
+                    &repo_manager,
+                    &cache,
+                    package_url,
+                    vec![],
+                    UpdatePolicy { fetch_if_absent: true, allow_old_versions: true },
+                    directory_request,
+                )
+                .await
             }
-
-            if is_unavailable_msg(&msg) {
-                fx_log_info!("package {} is currently unavailable: {}", url, msg);
-                return Err(Status::UNAVAILABLE);
-            }
-
-            fx_log_err!("error installing package {}: {}", url, msg);
-
-            return Err(Status::INTERNAL);
         }
-
-        let merkle = match String::from_utf8(buf) {
-            Ok(merkle) => merkle,
-            Err(err) => {
-                let merkle = String::from_utf8_lossy(err.as_bytes());
-                fx_log_err!("{:?} is not a valid UTF-8 encoded merkleroot: {:?}", merkle, err);
-
-                return Err(Status::INTERNAL);
-            }
-        };
-
-        let merkle = match merkle.parse() {
-            Ok(merkle) => merkle,
-            Err(err) => {
-                fx_log_err!("{:?} is not a valid merkleroot: {:?}", merkle, err);
-
-                return Err(Status::INTERNAL);
-            }
-        };
-
-        Ok(merkle)
-    } else {
-        fx_log_err!("response channel closed unexpectedly");
-        Err(Status::INTERNAL)
     }
+}
+
+fn handle_bad_package_url(parse_error: ParseError, pkg_url: &str) -> Result<(), Status> {
+    fx_log_err!("failed to parse package url {:?}: {}", pkg_url, parse_error);
+    Err(Status::INVALID_ARGS)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::experiment::{Experiment, Experiments};
+    use crate::font_package_manager::FontPackageManagerBuilder;
     use crate::repository_manager::RepositoryManagerBuilder;
     use crate::rewrite_manager::{tests::make_rule_config, RewriteManagerBuilder};
     use crate::test_util::{
         create_dir, MockAmberBuilder, MockAmberConnector, MockPackageCache, Package, PackageKind,
     };
     use fidl::endpoints;
+    use fidl_fuchsia_amber::FetchResultProxy;
     use fidl_fuchsia_io::DirectoryProxy;
     use fidl_fuchsia_pkg::{self, PackageCacheProxy, UpdatePolicy};
-    use fidl_fuchsia_pkg_ext::{RepositoryConfigBuilder, RepositoryConfigs, RepositoryKey};
+    use fidl_fuchsia_pkg_ext::{BlobId, RepositoryConfigBuilder, RepositoryConfigs, RepositoryKey};
     use files_async;
     use fuchsia_url::pkg_url::RepoUrl;
     use fuchsia_url_rewrite::Rule;
@@ -248,12 +195,42 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
+    async fn wait_for_update_to_complete(
+        result_proxy: FetchResultProxy,
+        _url: &PkgUrl,
+    ) -> Result<BlobId, Status> {
+        use fidl_fuchsia_amber::FetchResultEvent;
+        match result_proxy.take_event_stream().into_future().await {
+            (Some(Ok(FetchResultEvent::OnSuccess { merkle })), _) => match merkle.parse() {
+                Ok(merkle) => Ok(merkle),
+                Err(err) => {
+                    fx_log_err!("{:?} is not a valid merkleroot: {:?}", merkle, err);
+                    return Err(Status::INTERNAL);
+                }
+            },
+            (Some(Ok(FetchResultEvent::OnError { result, message })), _) => {
+                let status = Status::from_raw(result);
+                fx_log_err!("error fetching package: {}: {}", status, message);
+                return Err(status);
+            }
+            (Some(Err(err)), _) => {
+                fx_log_err!("error communicating with amber: {}", err);
+                return Err(Status::INTERNAL);
+            }
+            (None, _) => {
+                fx_log_err!("amber unexpectedly closed fetch result channel");
+                return Err(Status::INTERNAL);
+            }
+        }
+    }
+
     struct ResolveTest {
         _static_repo_dir: tempfile::TempDir,
         _dynamic_repo_dir: tempfile::TempDir,
         amber_connector: MockAmberConnector,
         rewrite_manager: Arc<RwLock<RewriteManager>>,
         repo_manager: Arc<RwLock<RepositoryManager<MockAmberConnector>>>,
+        font_package_manager: Arc<FontPackageManager>,
         cache_proxy: PackageCacheProxy,
         pkgfs: Arc<TempDir>,
     }
@@ -281,7 +258,7 @@ mod tests {
             dir: &'a DirectoryProxy,
             want_files: &'a Vec<String>,
         ) {
-            let entries = await!(files_async::readdir(dir)).expect("could not read dir");
+            let entries = files_async::readdir(dir).await.expect("could not read dir");
             let mut files: Vec<_> = entries.into_iter().map(|f| f.name).collect();
             files.sort_unstable();
             assert_eq!(&files, want_files);
@@ -295,7 +272,20 @@ mod tests {
             expected_res: Result<String, Status>,
         ) {
             let amber = self.repo_manager.read().connect_to_amber().unwrap();
-            let chan = await!(amber.get_update_complete(name, variant, merkle))
+            let (repo, repo_server_end) = fidl::endpoints::create_proxy().unwrap();
+            let status = amber
+                .open_repository(
+                    RepositoryConfigBuilder::new("fuchsia-pkg://fuchsia.com".parse().unwrap())
+                        .add_root_key(RepositoryKey::Ed25519(vec![1; 32]))
+                        .build()
+                        .into(),
+                    repo_server_end,
+                )
+                .await
+                .unwrap();
+            Status::ok(status).unwrap();
+            let (result_proxy, result_server_end) = fidl::endpoints::create_proxy().unwrap();
+            repo.get_update_complete(name, variant, merkle, result_server_end)
                 .expect("error communicating with amber");
             let expected_res = expected_res.map(|r| r.parse().expect("could not parse blob"));
 
@@ -308,7 +298,7 @@ mod tests {
                 PkgUrl::new_package("fuchsia.com".to_string(), path, merkle.map(|s| s.to_string()))
                     .unwrap();
 
-            let res = await!(wait_for_update_to_complete(chan, &url));
+            let res = wait_for_update_to_complete(result_proxy, &url).await;
             assert_eq!(res, expected_res);
         }
 
@@ -320,7 +310,7 @@ mod tests {
             let selectors = vec![];
             let update_policy = UpdatePolicy { fetch_if_absent: true, allow_old_versions: false };
             let (dir, dir_server_end) = fidl::endpoints::create_proxy::<DirectoryMarker>().unwrap();
-            let res = await!(resolve(
+            let res = resolve(
                 &self.rewrite_manager,
                 &self.repo_manager,
                 &self.cache_proxy,
@@ -328,10 +318,33 @@ mod tests {
                 selectors,
                 update_policy,
                 dir_server_end,
-            ));
+            )
+            .await;
             if res.is_ok() {
                 let expected_files = expected_res.as_ref().unwrap();
-                await!(self.check_dir_async(&dir, expected_files));
+                self.check_dir_async(&dir, expected_files).await;
+            }
+            assert_eq!(res, expected_res.map(|_s| ()), "unexpected result for {}", url);
+        }
+
+        async fn run_resolve_font<'a>(
+            &'a self,
+            url: &'a str,
+            expected_res: Result<Vec<String>, Status>,
+        ) {
+            let (dir, dir_server_end) = fidl::endpoints::create_proxy::<DirectoryMarker>().unwrap();
+            let res = resolve_font(
+                &self.font_package_manager,
+                &self.rewrite_manager,
+                &self.repo_manager,
+                &self.cache_proxy,
+                url.to_string(),
+                dir_server_end,
+            )
+            .await;
+            if res.is_ok() {
+                let expected_files = expected_res.as_ref().unwrap();
+                self.check_dir_async(&dir, expected_files).await;
             }
             assert_eq!(res, expected_res.map(|_s| ()), "unexpected result for {}", url);
         }
@@ -343,6 +356,8 @@ mod tests {
         static_repos: Vec<(String, RepositoryConfigs)>,
         static_rewrite_rules: Vec<Rule>,
         dynamic_rewrite_rules: Vec<Rule>,
+        font_package_urls: Vec<String>,
+        experiments: Option<Experiments>,
     }
 
     impl ResolveTestBuilder {
@@ -355,12 +370,18 @@ mod tests {
                 static_repos: vec![],
                 static_rewrite_rules: vec![],
                 dynamic_rewrite_rules: vec![],
+                font_package_urls: vec![],
+                experiments: None,
             }
         }
 
-        fn source_packages<I: IntoIterator<Item = Package>>(mut self, packages: I) -> Self {
-            self.amber = self.amber.packages(packages);
+        fn experiments(mut self, experiments: Experiments) -> Self {
+            self.experiments = Some(experiments);
             self
+        }
+
+        fn source_packages<I: IntoIterator<Item = Package>>(self, packages: I) -> Self {
+            self.static_repo("fuchsia-pkg://fuchsia.com", packages.into_iter().collect())
         }
 
         fn static_repo(mut self, url: &str, packages: Vec<Package>) -> Self {
@@ -380,6 +401,14 @@ mod tests {
 
         fn static_rewrite_rules<I: IntoIterator<Item = Rule>>(mut self, rules: I) -> Self {
             self.static_rewrite_rules.extend(rules);
+            self
+        }
+
+        fn font_package_urls<S: Into<String>, I: IntoIterator<Item = S>>(
+            mut self,
+            urls: I,
+        ) -> Self {
+            self.font_package_urls.extend(urls.into_iter().map(Into::into));
             self
         }
 
@@ -410,12 +439,21 @@ mod tests {
             let dynamic_repo_dir = TempDir::new().unwrap();
 
             let dynamic_configs_path = dynamic_repo_dir.path().join("config");
-            let repo_manager =
-                RepositoryManagerBuilder::new(dynamic_configs_path, amber_connector.clone())
-                    .unwrap()
-                    .load_static_configs_dir(static_repo_dir.path())
-                    .unwrap()
-                    .build();
+            let repo_manager = RepositoryManagerBuilder::new(
+                dynamic_configs_path,
+                amber_connector.clone(),
+                self.experiments.unwrap_or_else(Experiments::none),
+            )
+            .unwrap()
+            .load_static_configs_dir(static_repo_dir.path())
+            .unwrap()
+            .build();
+
+            let font_config_dir = create_dir(vec![("font_packages.json", self.font_package_urls)]);
+            let font_package_manager = FontPackageManagerBuilder::new()
+                .add_registry_file(font_config_dir.path().join("font_packages.json"))
+                .unwrap()
+                .build();
 
             ResolveTest {
                 _static_repo_dir: static_repo_dir,
@@ -423,6 +461,7 @@ mod tests {
                 amber_connector: amber_connector,
                 rewrite_manager: Arc::new(RwLock::new(rewrite_manager)),
                 repo_manager: Arc::new(RwLock::new(repo_manager)),
+                font_package_manager: Arc::new(font_package_manager),
                 pkgfs: self.pkgfs,
                 cache_proxy,
             }
@@ -449,17 +488,17 @@ mod tests {
             .build();
 
         // Name
-        await!(test.check_amber_update("foo", None, None, Ok(gen_merkle('a'))));
+        test.check_amber_update("foo", None, None, Ok(gen_merkle('a'))).await;
 
         // Name and variant
-        await!(test.check_amber_update("bar", Some("stable"), None, Ok(gen_merkle('b'))));
+        test.check_amber_update("bar", Some("stable"), None, Ok(gen_merkle('b'))).await;
 
         // Name, variant, and merkle
         let merkle = gen_merkle('c');
-        await!(test.check_amber_update("baz", Some("stable"), Some(&merkle), Ok(gen_merkle('c'))));
+        test.check_amber_update("baz", Some("stable"), Some(&merkle), Ok(gen_merkle('c'))).await;
 
         // Nonexistent package
-        await!(test.check_amber_update("nonexistent", None, None, Err(Status::NOT_FOUND)));
+        test.check_amber_update("nonexistent", None, None, Err(Status::NOT_FOUND)).await;
 
         // no merkle('d') since we didn't ask to update "buz".
         test.check_dir(test.pkgfs.path(), &vec![gen_merkle('a'), gen_merkle('b'), gen_merkle('c')]);
@@ -475,15 +514,36 @@ mod tests {
             .build();
 
         // Package name
-        await!(test.run_resolve("fuchsia-pkg://fuchsia.com/foo", Ok(vec![gen_merkle_file('a')]),));
+        test.run_resolve("fuchsia-pkg://fuchsia.com/foo", Ok(vec![gen_merkle_file('a')])).await;
 
         // Package name and variant
-        await!(test
-            .run_resolve("fuchsia-pkg://fuchsia.com/bar/stable", Ok(vec![gen_merkle_file('b')]),));
+        test.run_resolve("fuchsia-pkg://fuchsia.com/bar/stable", Ok(vec![gen_merkle_file('b')]))
+            .await;
 
         // Package name, variant, and merkle
         let url = format!("fuchsia-pkg://fuchsia.com/bar/stable?hash={}", gen_merkle('b'));
-        await!(test.run_resolve(&url, Ok(vec![gen_merkle_file('b')],)));
+        test.run_resolve(&url, Ok(vec![gen_merkle_file('b')])).await;
+    }
+
+    #[fuchsia_async::run_singlethreaded(test)]
+    async fn test_download_blob_experiment_fails() {
+        let experiments = Arc::new(RwLock::new(crate::experiment::State::new_test()));
+
+        let test = ResolveTestBuilder::new()
+            .source_packages(vec![Package::new("foo", "0", &gen_merkle('a'), PackageKind::Ok)])
+            .experiments(Arc::clone(&experiments).into())
+            .build();
+
+        // Succeeds without experiment enabled.
+        test.run_resolve("fuchsia-pkg://fuchsia.com/foo", Ok(vec![gen_merkle_file('a')])).await;
+
+        // Picks up new experiment state and fails as expected.
+        experiments.write().set_state(Experiment::DownloadBlob, true);
+        test.run_resolve("fuchsia-pkg://fuchsia.com/foo", Err(Status::INTERNAL)).await;
+
+        // Succeeds after disabling experiment.
+        experiments.write().set_state(Experiment::DownloadBlob, false);
+        test.run_resolve("fuchsia-pkg://fuchsia.com/foo", Ok(vec![gen_merkle_file('a')])).await;
     }
 
     #[fuchsia_async::run_singlethreaded(test)]
@@ -504,18 +564,16 @@ mod tests {
             .build();
 
         // Missing package
-        await!(test.run_resolve("fuchsia-pkg://fuchsia.com/foo/beta", Err(Status::NOT_FOUND)));
+        test.run_resolve("fuchsia-pkg://fuchsia.com/foo/beta", Err(Status::NOT_FOUND)).await;
 
         // Unavailable package
-        await!(
-            test.run_resolve("fuchsia-pkg://fuchsia.com/unavailable/0", Err(Status::UNAVAILABLE))
-        );
+        test.run_resolve("fuchsia-pkg://fuchsia.com/unavailable/0", Err(Status::UNAVAILABLE)).await;
 
         // Bad package URL
-        await!(test.run_resolve("fuchsia-pkg://fuchsia.com/foo!", Err(Status::INVALID_ARGS)));
+        test.run_resolve("fuchsia-pkg://fuchsia.com/foo!", Err(Status::INVALID_ARGS)).await;
 
         // No package name
-        await!(test.run_resolve("fuchsia-pkg://fuchsia.com", Err(Status::INVALID_ARGS)));
+        test.run_resolve("fuchsia-pkg://fuchsia.com", Err(Status::INVALID_ARGS)).await;
     }
 
     #[fuchsia_async::run_singlethreaded(test)]
@@ -534,27 +592,11 @@ mod tests {
             .unwrap()])
             .build();
 
-        await!(test.run_resolve("fuchsia-pkg://example.com/foo/0", Ok(vec![gen_merkle_file('a')]),));
-        await!(test.run_resolve("fuchsia-pkg://fuchsia.com/foo/0", Ok(vec![gen_merkle_file('a')]),));
-        await!(test.run_resolve("fuchsia-pkg://example.com/bar/stable", Err(Status::NOT_FOUND)));
-        await!(test
-            .run_resolve("fuchsia-pkg://fuchsia.com/bar/stable", Ok(vec![gen_merkle_file('b')]),));
-    }
-
-    #[test]
-    fn test_is_unavailable_msg() {
-        // Success:
-        assert!(is_unavailable_msg("not found in 1 active sources"), "single digit");
-        assert!(
-            is_unavailable_msg("not found in 12345678901928 active sources"),
-            "multiple digits"
-        );
-
-        // Failure:
-        assert!(!is_unavailable_msg("not found in  active sources"), "no digits");
-        assert!(!is_unavailable_msg("not found in 1"), "no suffix");
-        assert!(!is_unavailable_msg("1 active sources"), "no prefix");
-        assert!(!is_unavailable_msg(""), "empty");
+        test.run_resolve("fuchsia-pkg://example.com/foo/0", Ok(vec![gen_merkle_file('a')])).await;
+        test.run_resolve("fuchsia-pkg://fuchsia.com/foo/0", Ok(vec![gen_merkle_file('a')])).await;
+        test.run_resolve("fuchsia-pkg://example.com/bar/stable", Err(Status::NOT_FOUND)).await;
+        test.run_resolve("fuchsia-pkg://fuchsia.com/bar/stable", Ok(vec![gen_merkle_file('b')]))
+            .await;
     }
 
     #[fuchsia_async::run_singlethreaded(test)]
@@ -570,15 +612,15 @@ mod tests {
             .build();
 
         // Package name
-        await!(test.run_resolve("fuchsia-pkg://example.com/foo", Ok(vec![gen_merkle_file('a')]),));
+        test.run_resolve("fuchsia-pkg://example.com/foo", Ok(vec![gen_merkle_file('a')])).await;
 
         // Package name and variant
-        await!(test
-            .run_resolve("fuchsia-pkg://example.com/bar/stable", Ok(vec![gen_merkle_file('b')]),));
+        test.run_resolve("fuchsia-pkg://example.com/bar/stable", Ok(vec![gen_merkle_file('b')]))
+            .await;
 
         // Package name, variant, and merkle
         let url = format!("fuchsia-pkg://example.com/bar/stable?hash={}", gen_merkle('b'));
-        await!(test.run_resolve(&url, Ok(vec![gen_merkle_file('b')],)));
+        test.run_resolve(&url, Ok(vec![gen_merkle_file('b')])).await;
     }
 
     #[fuchsia_async::run_singlethreaded(test)]
@@ -602,18 +644,16 @@ mod tests {
             .build();
 
         // Missing package
-        await!(test.run_resolve("fuchsia-pkg://example.com/foo/beta", Err(Status::NOT_FOUND)));
+        test.run_resolve("fuchsia-pkg://example.com/foo/beta", Err(Status::NOT_FOUND)).await;
 
         // Unavailable package
-        await!(
-            test.run_resolve("fuchsia-pkg://example.com/unavailable/0", Err(Status::UNAVAILABLE))
-        );
+        test.run_resolve("fuchsia-pkg://example.com/unavailable/0", Err(Status::UNAVAILABLE)).await;
 
         // Bad package URL
-        await!(test.run_resolve("fuchsia-pkg://example.com/foo!", Err(Status::INVALID_ARGS)));
+        test.run_resolve("fuchsia-pkg://example.com/foo!", Err(Status::INVALID_ARGS)).await;
 
         // No package name
-        await!(test.run_resolve("fuchsia-pkg://example.com", Err(Status::INVALID_ARGS)));
+        test.run_resolve("fuchsia-pkg://example.com", Err(Status::INVALID_ARGS)).await;
     }
 
     #[fuchsia_async::run_singlethreaded(test)]
@@ -635,12 +675,11 @@ mod tests {
             .unwrap()])
             .build();
 
-        await!(test.run_resolve("fuchsia-pkg://example.com/foo/0", Ok(vec![gen_merkle_file('a')]),));
-        await!(test.run_resolve("fuchsia-pkg://oem.com/foo/0", Ok(vec![gen_merkle_file('a')]),));
-        await!(test.run_resolve("fuchsia-pkg://example.com/bar/stable", Err(Status::NOT_FOUND)));
-        await!(
-            test.run_resolve("fuchsia-pkg://oem.com/bar/stable", Ok(vec![gen_merkle_file('b')]),)
-        );
+        test.run_resolve("fuchsia-pkg://example.com/foo/0", Ok(vec![gen_merkle_file('a')])).await;
+        test.run_resolve("fuchsia-pkg://oem.com/foo/0", Ok(vec![gen_merkle_file('a')])).await;
+        test.run_resolve("fuchsia-pkg://example.com/bar/stable", Err(Status::NOT_FOUND)).await;
+
+        test.run_resolve("fuchsia-pkg://oem.com/bar/stable", Ok(vec![gen_merkle_file('b')])).await;
     }
 
     #[fuchsia_async::run_singlethreaded(test)]
@@ -653,7 +692,7 @@ mod tests {
             )
             .build();
 
-        await!(test.run_resolve("fuchsia-pkg://example.com/foo/0", Ok(vec![gen_merkle_file('a')])));
+        test.run_resolve("fuchsia-pkg://example.com/foo/0", Ok(vec![gen_merkle_file('a')])).await;
 
         dbg!();
 
@@ -672,7 +711,7 @@ mod tests {
                 .build(),
         );
 
-        await!(test.run_resolve("fuchsia-pkg://example.com/foo/0", Ok(vec![gen_merkle_file('a')]),));
+        test.run_resolve("fuchsia-pkg://example.com/foo/0", Ok(vec![gen_merkle_file('a')])).await;
 
         dbg!();
 
@@ -680,6 +719,27 @@ mod tests {
         // The next request should connect to our new amber, which contains the new package.
         test.repo_manager.write().insert(config);
 
-        await!(test.run_resolve("fuchsia-pkg://example.com/foo/0", Ok(vec![gen_merkle_file('b')])));
+        test.run_resolve("fuchsia-pkg://example.com/foo/0", Ok(vec![gen_merkle_file('b')])).await;
+    }
+
+    #[fuchsia_async::run_singlethreaded(test)]
+    async fn test_resolve_font_package() {
+        let test = ResolveTestBuilder::new()
+            .source_packages(vec![
+                Package::new("font1", "0", &gen_merkle('a'), PackageKind::Ok),
+                Package::new("font2", "0", &gen_merkle('b'), PackageKind::Ok),
+                Package::new("squares", "0", &gen_merkle('b'), PackageKind::Ok),
+            ])
+            .font_package_urls(vec![
+                "fuchsia-pkg://fuchsia.com/font1",
+                "fuchsia-pkg://fuchsia.com/font2",
+            ])
+            .build();
+
+        test.run_resolve_font("fuchsia-pkg://fuchsia.com/font1", Ok(vec![gen_merkle_file('a')]))
+            .await;
+        test.run_resolve_font("fuchsia-pkg://fuchsia.com/font2", Ok(vec![gen_merkle_file('b')]))
+            .await;
+        test.run_resolve_font("fuchsia-pkg://fuchsia.com/squares", Err(Status::NOT_FOUND)).await;
     }
 }

@@ -6,8 +6,8 @@ use {
     crate::net::{set_nonblock, EventedFd},
     futures::{
         future::Future,
+        ready,
         task::{Context, Poll},
-        try_ready,
     },
     std::{
         io,
@@ -51,7 +51,7 @@ impl UdpSocket {
         buf: &mut [u8],
         cx: &mut Context<'_>,
     ) -> Poll<io::Result<(usize, SocketAddr)>> {
-        try_ready!(EventedFd::poll_readable(&self.0, cx));
+        ready!(EventedFd::poll_readable(&self.0, cx))?;
         match self.0.as_ref().recv_from(buf) {
             Err(e) => {
                 if e.kind() == io::ErrorKind::WouldBlock {
@@ -70,7 +70,7 @@ impl UdpSocket {
     }
 
     pub fn async_send_to(&self, buf: &[u8], addr: SocketAddr, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        try_ready!(EventedFd::poll_writable(&self.0, cx));
+        ready!(EventedFd::poll_writable(&self.0, cx))?;
         match self.0.as_ref().send_to(buf, addr) {
             Err(e) => {
                 if e.kind() == io::ErrorKind::WouldBlock {
@@ -105,7 +105,7 @@ impl<'a> Future for RecvFrom<'a> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
-        let (received, addr) = try_ready!(this.socket.async_recv_from(this.buf, cx));
+        let (received, addr) = ready!(this.socket.async_recv_from(this.buf, cx))?;
         Poll::Ready(Ok((received, addr)))
     }
 }
@@ -140,9 +140,9 @@ mod tests {
         let buf = b"hello world";
         let socket = UdpSocket::bind(&addr).expect("could not create socket");
         let fut = async move {
-            await!(socket.send_to(buf, addr))?;
+            socket.send_to(buf, addr).await?;
             let mut recvbuf = vec![0; 11];
-            let (received, sender) = await!(socket.recv_from(&mut *recvbuf))?;
+            let (received, sender) = socket.recv_from(&mut *recvbuf).await?;
             assert_eq!(addr, sender);
             assert_eq!(received, buf.len());
             assert_eq!(&*buf, &*recvbuf);

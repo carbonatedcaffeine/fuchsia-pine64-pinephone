@@ -8,13 +8,20 @@ import (
 	"fmt"
 )
 
+const OneSecInMicroSeconds float64 = 1000000
+
 // Extract the list of average cpu percentage usages from the trace model
 // under system_metrics category, and write it into testResultsFile.
 func ReportCpuMetrics(model Model, testSuite string, testResultsFile *TestResultsFile) {
 	fmt.Printf("=== CPU ===\n")
+	duration := model.getTotalTraceDurationInMicroseconds()
+	if duration < 1.1*OneSecInMicroSeconds {
+		fmt.Printf("Trace duration %.4f microseconds is too short to provide CPU information.\n", duration)
+		return
+	}
 	cpuPercentages := extractCounterValues(
 		model, "system_metrics", "cpu_usage", []string{"average_cpu_percentage"})["average_cpu_percentage"]
-	fmt.Printf("Average CPU Load: %f\n", computeAverage(cpuPercentages))
+	fmt.Printf("Average CPU Load: %.4f\n", computeAverage(cpuPercentages))
 	testResultsFile.Add(&TestCaseResults{
 		Label:     "CPU Load",
 		TestSuite: testSuite,
@@ -27,6 +34,11 @@ func ReportCpuMetrics(model Model, testSuite string, testResultsFile *TestResult
 // from the trace model under memory_monitor category, and write it into testResultsFile.
 func ReportMemoryMetrics(model Model, testSuite string, testResultsFile *TestResultsFile) {
 	fmt.Printf("=== Memory ===\n")
+	duration := model.getTotalTraceDurationInMicroseconds()
+	if duration < 1.1*OneSecInMicroSeconds {
+		fmt.Printf("Trace duration %.4f microseconds is too short to provide memory information.\n", duration)
+		return
+	}
 	allocatedMemoryValues := extractCounterValues(
 		model, "memory_monitor", "allocated", []string{"vmo", "mmu_overhead", "ipc"})
 	totalMemory := extractCounterValues(
@@ -48,7 +60,7 @@ func ReportMemoryMetrics(model Model, testSuite string, testResultsFile *TestRes
 		{"IPC Memory", allocatedMemoryValues["ipc"]},
 	}
 	for _, metric := range systemMetrics {
-		fmt.Printf("Average %s in bytes: %f\n", metric.Name, computeAverage(metric.Values))
+		fmt.Printf("Average %s in bytes: %.2f\n", metric.Name, computeAverage(metric.Values))
 		testResultsFile.Add(&TestCaseResults{
 			Label:     metric.Name,
 			TestSuite: testSuite,
@@ -56,6 +68,26 @@ func ReportMemoryMetrics(model Model, testSuite string, testResultsFile *TestRes
 			Values:    metric.Values,
 		})
 	}
+}
+
+// Extract the list of device temperature readings in Celsius from the trace model
+// under system_metrics category, and write it into testResultsFile.
+func ReportTemperatureMetrics(model Model, testSuite string, testResultsFile *TestResultsFile) {
+	fmt.Printf("=== Temperature ===\n")
+	duration := model.getTotalTraceDurationInMicroseconds()
+	if duration < 10.1*OneSecInMicroSeconds {
+		fmt.Printf("Trace duration %.4f microseconds is too short to provide temperature information.\n", duration)
+		return
+	}
+	temperatureReadings := extractCounterValues(
+		model, "system_metrics", "temperature", []string{"temperature"})["temperature"]
+	fmt.Printf("Average temperature reading: %.2f degrees Celsius\n", computeAverage(temperatureReadings))
+	testResultsFile.Add(&TestCaseResults{
+		Label:     "Device temperature",
+		TestSuite: testSuite,
+		Unit:      Unit(Count),
+		Values:    temperatureReadings,
+	})
 }
 
 // Helper function to extract int or float64 values for a particular category,

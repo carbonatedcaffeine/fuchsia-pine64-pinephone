@@ -22,11 +22,16 @@
 #[cfg(all(test, feature = "benchmark"))]
 extern crate test;
 
+// TODO(joshlf): Remove this once the old packet crate has been deleted and the
+// new one's name has been changed back to `packet`.
+extern crate packet_new as packet;
+
 #[macro_use]
 mod macros;
 
-#[cfg(all(test, feature = "benchmark"))]
+#[cfg(test)]
 mod benchmarks;
+mod context;
 mod data_structures;
 mod device;
 mod error;
@@ -34,36 +39,46 @@ mod ip;
 #[cfg(test)]
 mod testutil;
 mod transport;
-mod types;
 mod wire;
+
+use log::trace;
 
 pub use crate::data_structures::{IdMapCollection, IdMapCollectionKey};
 pub use crate::device::{
-    ethernet::Mac, get_ip_addr_subnet, receive_frame, DeviceId, DeviceLayerEventDispatcher,
+    get_ip_addr_subnet, initialize_device, receive_frame, remove_device, DeviceId,
+    DeviceLayerEventDispatcher,
 };
 pub use crate::error::NetstackError;
 pub use crate::ip::{
-    icmp, AddrSubnet, AddrSubnetEither, EntryDest, EntryDestEither, EntryEither, IpAddr,
-    IpLayerEventDispatcher, IpStateBuilder, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr, Subnet, SubnetEither,
+    icmp, EntryDest, EntryDestEither, EntryEither, IpLayerEventDispatcher, IpStateBuilder,
 };
 pub use crate::transport::udp::UdpEventDispatcher;
 pub use crate::transport::TransportLayerEventDispatcher;
 
+use net_types::ethernet::Mac;
+use net_types::ip::{AddrSubnetEither, IpAddr, Ipv4Addr, Ipv6Addr, SubnetEither};
+use packet::{Buf, BufferMut, EmptyBuf};
+use rand::{CryptoRng, RngCore};
 use std::time;
 
-use crate::device::{DeviceLayerState, DeviceLayerTimerId};
+use crate::device::{DeviceLayerState, DeviceLayerTimerId, DeviceStateBuilder};
 use crate::ip::{IpLayerState, IpLayerTimerId};
 use crate::transport::{TransportLayerState, TransportLayerTimerId};
 
-/// Map an expression over either version of an address.
+/// Map an expression over either version of one or more addresses.
 ///
-/// `map_addr_version!` takes a type which is an enum with two variants - `V4`
-/// and `V6` - and a value of that type. It matches on the variants, and for
-/// both variants, invokes an expression on the inner contents. `$addr` is both
-/// the name of the variable to match on, and the name that the address will be
-/// bound to for the scope of the expression.
+/// `map_addr_version!` when given a value of a type which is an enum with two
+/// variants - `V4` and `V6` - matches on the variants, and for both variants,
+/// invokes an expression on the inner contents. `$addr` is both the name of the
+/// variable to match on, and the name that the address will be bound to for the
+/// scope of the expression.
 ///
-/// To make it concrete, the expression `map_addr_version!(Foo, bar, blah(bar))`
+/// `map_addr_version!` when given a list of values and their types (all enums
+/// with variants `V4` and `V6`), matches on the tuple of values and invokes the
+/// `$match` expression when all values are of the same variant. Otherwise the
+/// `$mismatch` expression is invoked.
+///
+/// To make it concrete, the expression `map_addr_version!(bar: Foo; blah(bar))`
 /// desugars to:
 ///
 /// ```rust,ignore
@@ -72,23 +87,43 @@ use crate::transport::{TransportLayerState, TransportLayerTimerId};
 ///     Foo::V6(bar) => blah(bar),
 /// }
 /// ```
+///
+/// Also,
+/// `map_addr_version!((foo: Foo, bar: Bar); blah(foo, bar), unreachable!())`
+/// desugars to:
+///
+/// ```rust,ignore
+/// match (foo, bar) {
+///     (Foo::V4(foo), Bar::V4(bar)) => blah(foo, bar),
+///     (Foo::V6(foo), Bar::V6(bar)) => blah(foo, bar),
+///     _ => unreachable!(),
+/// }
+/// ```
 #[macro_export]
 macro_rules! map_addr_version {
-    ($ty:tt, $addr:ident, $expr:expr) => {
+    ($addr:ident: $ty:tt; $expr:expr) => {
         match $addr {
             $ty::V4($addr) => $expr,
             $ty::V6($addr) => $expr,
         }
     };
-    ($ty:tt, $addr:ident, $expr:expr,) => {
-        map_addr_version!($addr, $expr)
+    (( $( $addr:ident : $ty:tt ),+ ); $match:expr, $mismatch:expr) => {
+        match ( $( $addr ),+ ) {
+            ( $( $ty::V4( $addr ) ),+ ) => $match,
+            ( $( $ty::V6( $addr ) ),+ ) => $match,
+            _ => $mismatch,
+        }
+    };
+    (( $( $addr:ident : $ty:tt ),+ ); $match:expr, $mismatch:expr,) => {
+        map_addr_version!(($( $addr: $ty ),+); $match, $mismatch)
     };
 }
 
 /// A builder for [`StackState`].
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct StackStateBuilder {
     ip: IpStateBuilder,
+    device: DeviceStateBuilder,
 }
 
 impl StackStateBuilder {
@@ -97,12 +132,17 @@ impl StackStateBuilder {
         &mut self.ip
     }
 
+    /// Get the builder for the device state.
+    pub fn device_builder(&mut self) -> &mut DeviceStateBuilder {
+        &mut self.device
+    }
+
     /// Consume this builder and produce a `StackState`.
     pub fn build<D: EventDispatcher>(self) -> StackState<D> {
         StackState {
             transport: TransportLayerState::default(),
             ip: self.ip.build(),
-            device: DeviceLayerState::default(),
+            device: self.device.build(),
             #[cfg(test)]
             test_counters: testutil::TestCounters::default(),
         }
@@ -111,23 +151,32 @@ impl StackStateBuilder {
 
 /// The state associated with the network stack.
 pub struct StackState<D: EventDispatcher> {
-    transport: TransportLayerState<D>,
+    transport: TransportLayerState,
     ip: IpLayerState<D>,
     device: DeviceLayerState,
     #[cfg(test)]
     test_counters: testutil::TestCounters,
 }
 
-impl<D: EventDispatcher> Default for StackState<D> {
-    fn default() -> StackState<D> {
-        StackStateBuilder::default().build()
+impl<D: EventDispatcher> StackState<D> {
+    /// Add a new ethernet device to the device layer.
+    ///
+    /// `add_ethernet_device` only makes the netstack aware of the device. The device still needs to
+    /// be initialized. A device MUST NOT be used until it has been initialized. The netstack
+    /// promises not to generate any outbound traffic on the device until [`initialize_device`] has
+    /// been called.
+    ///
+    /// See [`initialize_device`] for more information.
+    ///
+    /// [`initialize_device`]: crate::device::initialize_device
+    pub fn add_ethernet_device(&mut self, mac: Mac, mtu: u32) -> DeviceId {
+        self.device.add_ethernet_device(mac, mtu)
     }
 }
 
-impl<D: EventDispatcher> StackState<D> {
-    /// Add a new ethernet device to the device layer.
-    pub fn add_ethernet_device(&mut self, mac: Mac, mtu: u32) -> DeviceId {
-        self.device.add_ethernet_device(mac, mtu)
+impl<D: EventDispatcher> Default for StackState<D> {
+    fn default() -> StackState<D> {
+        StackStateBuilder::default().build()
     }
 }
 
@@ -191,10 +240,10 @@ impl<D: EventDispatcher + Default> Context<D> {
 }
 
 /// The identifier for any timer event.
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 pub struct TimerId(TimerIdInner);
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 enum TimerIdInner {
     /// A timer event in the device layer.
     DeviceLayer(DeviceLayerTimerId),
@@ -207,8 +256,16 @@ enum TimerIdInner {
     Nop(usize),
 }
 
+impl From<DeviceLayerTimerId> for TimerId {
+    fn from(id: DeviceLayerTimerId) -> TimerId {
+        TimerId(TimerIdInner::DeviceLayer(id))
+    }
+}
+
 /// Handle a generic timer event.
 pub fn handle_timeout<D: EventDispatcher>(ctx: &mut Context<D>, id: TimerId) {
+    trace!("handle_timeout: dispatching timerid: {:?}", id);
+
     match id {
         TimerId(TimerIdInner::DeviceLayer(x)) => {
             device::handle_timeout(ctx, x);
@@ -264,6 +321,25 @@ impl Instant for time::Instant {
     }
 }
 
+/// An `EventDispatcher` which supports sending buffers of a given type.
+///
+/// `D: BufferDispatcher<B>` is shorthand for `D: EventDispatcher +
+/// DeviceLayerEventDispatcher<B>`.
+pub trait BufferDispatcher<B: BufferMut>:
+    EventDispatcher + DeviceLayerEventDispatcher<B> + IpLayerEventDispatcher<B>
+{
+}
+impl<
+        B: BufferMut,
+        D: EventDispatcher + DeviceLayerEventDispatcher<B> + IpLayerEventDispatcher<B>,
+    > BufferDispatcher<B> for D
+{
+}
+
+// TODO(joshlf): Should we add a `for<'a> DeviceLayerEventDispatcher<&'a mut
+// [u8]>` bound? Would anything get more efficient if we were able to stack
+// allocate internally-generated buffers?
+
 /// An object which can dispatch events to a real system.
 ///
 /// An `EventDispatcher` provides access to a real system. It provides the
@@ -272,7 +348,11 @@ impl Instant for time::Instant {
 /// that must be supported in order to support that layer of the stack. The
 /// `EventDispatcher` trait is a sub-trait of all of these traits.
 pub trait EventDispatcher:
-    DeviceLayerEventDispatcher + IpLayerEventDispatcher + TransportLayerEventDispatcher
+    DeviceLayerEventDispatcher<Buf<Vec<u8>>>
+    + DeviceLayerEventDispatcher<EmptyBuf>
+    + IpLayerEventDispatcher<Buf<Vec<u8>>>
+    + IpLayerEventDispatcher<EmptyBuf>
+    + TransportLayerEventDispatcher
 {
     /// The type of an instant in time.
     ///
@@ -321,6 +401,49 @@ pub trait EventDispatcher:
     /// Returns true if the timeout was cancelled, false if there was no timeout
     /// for the given ID.
     fn cancel_timeout(&mut self, id: TimerId) -> Option<Self::Instant>;
+
+    /// Cancel all timeouts which satisfy a predicate.
+    ///
+    /// `cancel_timeouts_with` calls `f` on each scheduled timer, and cancels
+    /// any timeout for which `f` returns true.
+    fn cancel_timeouts_with<F: FnMut(&TimerId) -> bool>(&mut self, f: F);
+
+    // TODO(joshlf): If the CSPRNG requirement becomes a performance problem,
+    // introduce a second, non-cryptographically secure, RNG.
+
+    /// The random number generator (RNG) provided by this `EventDispatcher`.
+    ///
+    /// Code in the core is required to only obtain random values through this
+    /// RNG. This allows a deterministic RNG to be provided when useful (for
+    /// example, in tests).
+    ///
+    /// The provided RNG must be cryptographically secure in order to ensure
+    /// that random values produced within the network stack are not predictable
+    /// by outside observers. This helps to prevent certain kinds of
+    /// fingerprinting and denial of service attacks.
+    type Rng: RngCore + CryptoRng;
+
+    /// Get the random number generator (RNG).
+    ///
+    /// Code in the core is required to only obtain random values through this
+    /// RNG. This allows a deterministic RNG to be provided when useful (for
+    /// example, in tests).
+    fn rng(&mut self) -> &mut Self::Rng;
+}
+
+/// Get all IPv4 and IPv6 address/subnet configured on a device
+pub fn get_all_ip_addr_subnet<D: EventDispatcher>(
+    ctx: &Context<D>,
+    device: DeviceId,
+) -> Vec<AddrSubnetEither> {
+    let mut addresses = vec![];
+    if let Some(addr_v4) = get_ip_addr_subnet::<_, Ipv4Addr>(ctx, device) {
+        addresses.push(AddrSubnetEither::V4(addr_v4));
+    }
+    if let Some(addr_v6) = get_ip_addr_subnet::<_, Ipv6Addr>(ctx, device) {
+        addresses.push(AddrSubnetEither::V6(addr_v6));
+    }
+    addresses
 }
 
 /// Set the IP address and subnet for a device.
@@ -330,20 +453,30 @@ pub fn set_ip_addr_subnet<D: EventDispatcher>(
     addr_sub: AddrSubnetEither,
 ) {
     map_addr_version!(
-        AddrSubnetEither,
-        addr_sub,
+        addr_sub: AddrSubnetEither;
         crate::device::set_ip_addr_subnet(ctx, device, addr_sub)
     );
 }
 
-/// Add a route to send all packets addressed to a specific subnet to a specific device.
-pub fn add_device_route<D: EventDispatcher>(
+/// Adds a route to the forwarding table.
+pub fn add_route<D: EventDispatcher>(
     ctx: &mut Context<D>,
-    subnet: SubnetEither,
-    device: DeviceId,
+    entry: EntryEither,
 ) -> Result<(), error::NetstackError> {
-    map_addr_version!(SubnetEither, subnet, crate::ip::add_device_route(ctx, subnet, device))
-        .map_err(From::from)
+    let (subnet, dest) = entry.into_subnet_dest();
+    match dest {
+        EntryDest::Local { device } => map_addr_version!(
+            subnet: SubnetEither;
+            crate::ip::add_device_route(ctx, subnet, device)
+        )
+        .map_err(From::from),
+        EntryDest::Remote { next_hop } => map_addr_version!(
+            (subnet: SubnetEither, next_hop: IpAddr);
+            crate::ip::add_route(ctx, subnet, next_hop),
+            unreachable!(),
+        )
+        .map_err(From::from),
+    }
 }
 
 /// Delete a route from the forwarding table, returning `Err` if no
@@ -352,7 +485,7 @@ pub fn del_device_route<D: EventDispatcher>(
     ctx: &mut Context<D>,
     subnet: SubnetEither,
 ) -> Result<(), error::NetstackError> {
-    map_addr_version!(SubnetEither, subnet, crate::ip::del_device_route(ctx, subnet))
+    map_addr_version!(subnet: SubnetEither; crate::ip::del_device_route(ctx, subnet))
         .map_err(From::from)
 }
 
@@ -360,7 +493,7 @@ pub fn del_device_route<D: EventDispatcher>(
 pub fn get_all_routes<'a, D: EventDispatcher>(
     ctx: &'a Context<D>,
 ) -> impl 'a + Iterator<Item = EntryEither> {
-    let v4_routes = ip::iter_routes::<_, ip::Ipv4Addr>(ctx);
-    let v6_routes = ip::iter_routes::<_, ip::Ipv6Addr>(ctx);
+    let v4_routes = ip::iter_all_routes::<_, Ipv4Addr>(ctx);
+    let v6_routes = ip::iter_all_routes::<_, Ipv6Addr>(ctx);
     v4_routes.cloned().map(From::from).chain(v6_routes.cloned().map(From::from))
 }

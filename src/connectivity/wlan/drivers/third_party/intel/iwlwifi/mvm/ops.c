@@ -101,20 +101,20 @@ zx_status_t iwl_mvm_init(void) {
 #if 0   // NEEDS_PORTING
     ret = iwl_mvm_rate_control_register();
     if (ret) {
-        pr_err("Unable to register rate control algorithm: %d\n", ret);
+        zxlogf(ERROR, "Unable to register rate control algorithm: %d\n", ret);
         return ret;
     }
 #endif  // NEEDS_PORTING
 
   ret = iwl_opmode_register("iwlmvm", &iwl_mvm_ops);
   if (ret) {
-    pr_err("Unable to register MVM op_mode: %d\n", ret);
+    zxlogf(ERROR, "Unable to register MVM op_mode: %d\n", ret);
   }
 
   return ret;
 }
 
-void __exit iwl_mvm_exit(void) {
+void iwl_mvm_exit(void) {
   iwl_opmode_deregister("iwlmvm");
 #if 0   // NEEDS_PORTING
     iwl_mvm_rate_control_unregister();
@@ -839,7 +839,7 @@ static struct iwl_op_mode* iwl_op_mode_mvm_start(struct iwl_trans* trans, const 
       trans_cfg.rx_buf_size = IWL_AMSDU_12K;
       break;
     default:
-      pr_err("%s: Unsupported amsdu_size: %d\n", KBUILD_MODNAME, iwlwifi_mod_params.amsdu_size);
+      zxlogf(ERROR, "%s: Unsupported amsdu_size: %d\n", KBUILD_MODNAME, iwlwifi_mod_params.amsdu_size);
       trans_cfg.rx_buf_size = rb_size_default;
   }
 
@@ -880,10 +880,8 @@ static struct iwl_op_mode* iwl_op_mode_mvm_start(struct iwl_trans* trans, const 
   trans->iml = mvm->fw->iml;
   trans->iml_len = mvm->fw->iml_len;
 
-#if 0   // NEEDS_PORTING
-    /* set up notification wait support */
-    iwl_notification_wait_init(&mvm->notif_wait);
-#endif  // NEEDS_PORTING
+  /* set up notification wait support */
+  iwl_notification_wait_init(&mvm->notif_wait);
 
 #ifdef CPTCFG_IWLWIFI_DEVICE_TESTMODE
   iwl_dnt_init(mvm->trans, dbgfs_dir);
@@ -916,22 +914,25 @@ static struct iwl_op_mode* iwl_op_mode_mvm_start(struct iwl_trans* trans, const 
     goto out_free;
   }
 
-  mtx_lock(&mvm->mutex);
-  iwl_mvm_ref(mvm, IWL_MVM_REF_INIT_UCODE);
-  err = iwl_run_init_mvm_ucode(mvm, true);
+  if (trans->to_load_firmware) {
+    mtx_lock(&mvm->mutex);
+    iwl_mvm_ref(mvm, IWL_MVM_REF_INIT_UCODE);
+    err = iwl_run_init_mvm_ucode(mvm, true);
+
 #if 0   // NEEDS_PORTING
     if (test_bit(IWL_FWRT_STATUS_WAIT_ALIVE, &mvm->fwrt.status)) {
         iwl_fw_alive_error_dump(&mvm->fwrt);
     }
 #endif  // NEEDS_PORTING
-  if (!iwlmvm_mod_params.init_dbg || !err) {
-    iwl_mvm_stop_device(mvm);
-  }
-  iwl_mvm_unref(mvm, IWL_MVM_REF_INIT_UCODE);
-  mtx_unlock(&mvm->mutex);
-  if (err < 0) {
-    IWL_ERR(mvm, "Failed to run INIT ucode: %d\n", err);
-    goto out_free;
+    if (!iwlmvm_mod_params.init_dbg || !err) {
+      iwl_mvm_stop_device(mvm);
+    }
+    iwl_mvm_unref(mvm, IWL_MVM_REF_INIT_UCODE);
+    mtx_unlock(&mvm->mutex);
+    if (err < 0) {
+      IWL_ERR(mvm, "Failed to run INIT ucode: %d\n", err);
+      goto out_free;
+    }
   }
 
   scan_size = iwl_mvm_scan_size(mvm);
@@ -967,7 +968,7 @@ static struct iwl_op_mode* iwl_op_mode_mvm_start(struct iwl_trans* trans, const 
 #ifdef CPTCFG_IWLWIFI_FRQ_MGR
   err = iwl_mvm_fm_register(mvm);
   if (err) {
-    pr_err("Unable to register with Frequency Manager: %d\n", err);
+    zxlogf(ERROR, "Unable to register with Frequency Manager: %d\n", err);
   }
 #endif
 
@@ -988,7 +989,6 @@ static struct iwl_op_mode* iwl_op_mode_mvm_start(struct iwl_trans* trans, const 
 #endif
 
   iwl_mvm_toggle_tx_ant(mvm, &mvm->mgmt_last_antenna_idx);
-
   return op_mode;
 
 out_unregister:
@@ -1203,7 +1203,6 @@ static void iwl_mvm_rx_common(struct iwl_mvm* mvm, struct iwl_rx_cmd_buffer* rxb
 
     entry->rxb._page = rxb_steal_page(rxb);
     entry->rxb._offset = rxb->_offset;
-    entry->rxb._rx_page_order = rxb->_rx_page_order;
     entry->fn = rx_h->fn;
     entry->context = rx_h->context;
     mtx_lock(&mvm->async_handlers_lock);

@@ -25,6 +25,13 @@ class ModuleSymbols;
 // "Impl" split.
 class SystemSymbols {
  public:
+  // What kind of downloading should be attempted for missing symbols.
+  enum DownloadType {
+    kNone,
+    kSymbols,
+    kBinary,
+  };
+
   // A reference-counted holder for the ModuleSymbols object. This object
   // will notify the owning SystemSymbols object when all references have
   // been destroyed.
@@ -58,9 +65,6 @@ class SystemSymbols {
   explicit SystemSymbols(DownloadHandler* download_handler);
   ~SystemSymbols();
 
-  // Returns the directory to which paths are relative.
-  const std::string& build_dir() const { return build_dir_; }
-
   BuildIDIndex& build_id_index() { return build_id_index_; }
 
   // Injects a ModuleSymbols object for the given build ID. Used for testing.
@@ -80,7 +84,8 @@ class SystemSymbols {
   //
   // If download is set to true, downloads will be kicked off for any missing
   // debug files.
-  Err GetModule(const std::string& build_id, fxl::RefPtr<ModuleRef>* module, bool download = true);
+  Err GetModule(const std::string& build_id, fxl::RefPtr<ModuleRef>* module,
+                DownloadType download_type = kSymbols);
 
  private:
   friend ModuleRef;
@@ -88,9 +93,6 @@ class SystemSymbols {
   // Notification from the ModuleRef that all references have been deleted and
   // the tracking information should be removed from the map.
   void WillDeleteModule(ModuleRef* module);
-
-  // The directory to which paths are relative.
-  std::string build_dir_;
 
   DownloadHandler* download_handler_;
 

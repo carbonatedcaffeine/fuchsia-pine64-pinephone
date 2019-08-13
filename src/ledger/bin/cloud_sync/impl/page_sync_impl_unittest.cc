@@ -4,8 +4,6 @@
 
 #include "src/ledger/bin/cloud_sync/impl/page_sync_impl.h"
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
 #include <lib/async/cpp/task.h>
 #include <lib/backoff/testing/test_backoff.h>
 #include <lib/callback/capture.h>
@@ -17,6 +15,9 @@
 #include <memory>
 #include <utility>
 #include <vector>
+
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 
 #include "src/ledger/bin/cloud_sync/impl/constants.h"
 #include "src/ledger/bin/cloud_sync/impl/testing/test_page_cloud.h"
@@ -31,7 +32,9 @@
 namespace cloud_sync {
 namespace {
 
+using ::testing::Each;
 using testing::ElementsAre;
+using ::testing::Truly;
 
 // Creates a dummy continuation token.
 cloud_provider::PositionToken MakeToken(convert::ExtendedStringView token_id) {
@@ -117,16 +120,17 @@ TEST_F(PageSyncImplTest, UploadBacklog) {
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
 
-  ASSERT_EQ(2u, page_cloud_.received_commits.size());
-  EXPECT_EQ("id1", page_cloud_.received_commits[0].id);
-  EXPECT_EQ("content1",
-            encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[0].data));
-  EXPECT_EQ("id2", page_cloud_.received_commits[1].id);
-  EXPECT_EQ("content2",
-            encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[1].data));
-  EXPECT_EQ(2u, storage_.commits_marked_as_synced.size());
-  EXPECT_EQ(1u, storage_.commits_marked_as_synced.count("id1"));
-  EXPECT_EQ(1u, storage_.commits_marked_as_synced.count("id2"));
+  ASSERT_EQ(page_cloud_.received_commits.size(), 2u);
+  ASSERT_THAT(page_cloud_.received_commits, Each(Truly(CommitHasIdAndData)));
+  EXPECT_EQ(page_cloud_.received_commits[0].id(), convert::ToArray("id1"));
+  EXPECT_EQ(encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[0].data()),
+            "content1");
+  EXPECT_EQ(page_cloud_.received_commits[1].id(), convert::ToArray("id2"));
+  EXPECT_EQ(encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[1].data()),
+            "content2");
+  EXPECT_EQ(storage_.commits_marked_as_synced.size(), 2u);
+  EXPECT_EQ(storage_.commits_marked_as_synced.count("id1"), 1u);
+  EXPECT_EQ(storage_.commits_marked_as_synced.count("id2"), 1u);
 
   EXPECT_THAT(state_watcher_->states,
               ElementsAre(MakeStates(DOWNLOAD_BACKLOG, UPLOAD_NOT_STARTED),
@@ -205,8 +209,8 @@ TEST_F(PageSyncImplTest, UploadExistingCommitsOnlyAfterBacklogDownload) {
   page_cloud_.position_token_to_return = fidl::MakeOptional(MakeToken("43"));
   bool backlog_downloaded_called = false;
   page_sync_->SetOnBacklogDownloaded([this, &backlog_downloaded_called] {
-    EXPECT_EQ(0u, page_cloud_.received_commits.size());
-    EXPECT_EQ(0u, storage_.commits_marked_as_synced.size());
+    EXPECT_EQ(page_cloud_.received_commits.size(), 0u);
+    EXPECT_EQ(storage_.commits_marked_as_synced.size(), 0u);
     backlog_downloaded_called = true;
   });
   bool called;
@@ -216,16 +220,17 @@ TEST_F(PageSyncImplTest, UploadExistingCommitsOnlyAfterBacklogDownload) {
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
   EXPECT_TRUE(backlog_downloaded_called);
-  ASSERT_EQ(2u, page_cloud_.received_commits.size());
-  EXPECT_EQ("local1", page_cloud_.received_commits[0].id);
-  EXPECT_EQ("content1",
-            encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[0].data));
-  EXPECT_EQ("local2", page_cloud_.received_commits[1].id);
-  EXPECT_EQ("content2",
-            encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[1].data));
-  ASSERT_EQ(2u, storage_.commits_marked_as_synced.size());
-  EXPECT_EQ(1u, storage_.commits_marked_as_synced.count("local1"));
-  EXPECT_EQ(1u, storage_.commits_marked_as_synced.count("local2"));
+  ASSERT_EQ(page_cloud_.received_commits.size(), 2u);
+  ASSERT_THAT(page_cloud_.received_commits, Each(Truly(CommitHasIdAndData)));
+  EXPECT_EQ(page_cloud_.received_commits[0].id(), convert::ToArray("local1"));
+  EXPECT_EQ(encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[0].data()),
+            "content1");
+  EXPECT_EQ(page_cloud_.received_commits[1].id(), convert::ToArray("local2"));
+  EXPECT_EQ(encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[1].data()),
+            "content2");
+  ASSERT_EQ(storage_.commits_marked_as_synced.size(), 2u);
+  EXPECT_EQ(storage_.commits_marked_as_synced.count("local1"), 1u);
+  EXPECT_EQ(storage_.commits_marked_as_synced.count("local2"), 1u);
 }
 
 // Verifies that existing commits are uploaded before the new ones.
@@ -235,7 +240,6 @@ TEST_F(PageSyncImplTest, UploadExistingAndNewCommits) {
   page_sync_->SetOnBacklogDownloaded([this] {
     async::PostTask(dispatcher(), [this] {
       auto commit = storage_.NewCommit("id2", "content2");
-      storage_.new_commits_to_return["id2"] = commit->Clone();
       storage_.watcher_->OnNewCommits(commit->AsList(), storage::ChangeSource::LOCAL);
     });
   });
@@ -246,16 +250,17 @@ TEST_F(PageSyncImplTest, UploadExistingAndNewCommits) {
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
 
-  ASSERT_EQ(2u, page_cloud_.received_commits.size());
-  EXPECT_EQ("id1", page_cloud_.received_commits[0].id);
-  EXPECT_EQ("content1",
-            encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[0].data));
-  EXPECT_EQ("id2", page_cloud_.received_commits[1].id);
-  EXPECT_EQ("content2",
-            encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[1].data));
-  EXPECT_EQ(2u, storage_.commits_marked_as_synced.size());
-  EXPECT_EQ(1u, storage_.commits_marked_as_synced.count("id1"));
-  EXPECT_EQ(1u, storage_.commits_marked_as_synced.count("id2"));
+  ASSERT_EQ(page_cloud_.received_commits.size(), 2u);
+  ASSERT_THAT(page_cloud_.received_commits, Each(Truly(CommitHasIdAndData)));
+  EXPECT_EQ(page_cloud_.received_commits[0].id(), convert::ToArray("id1"));
+  EXPECT_EQ(encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[0].data()),
+            "content1");
+  EXPECT_EQ(page_cloud_.received_commits[1].id(), convert::ToArray("id2"));
+  EXPECT_EQ(encryption_service_.DecryptCommitSynchronous(page_cloud_.received_commits[1].data()),
+            "content2");
+  EXPECT_EQ(storage_.commits_marked_as_synced.size(), 2u);
+  EXPECT_EQ(storage_.commits_marked_as_synced.count("id1"), 1u);
+  EXPECT_EQ(storage_.commits_marked_as_synced.count("id2"), 1u);
 }
 
 // Verifies that the on idle callback is called when there is no pending upload
@@ -271,19 +276,18 @@ TEST_F(PageSyncImplTest, UploadIdleCallback) {
 
   // Verify that the idle callback is called once both commits are uploaded.
   RunLoopUntilIdle();
-  EXPECT_EQ(2u, page_cloud_.received_commits.size());
-  EXPECT_EQ(1, on_idle_calls);
+  EXPECT_EQ(page_cloud_.received_commits.size(), 2u);
+  EXPECT_EQ(on_idle_calls, 1);
   EXPECT_TRUE(page_sync_->IsIdle());
 
   // Notify about a new commit to upload and verify that the idle callback was
   // called again on completion.
   auto commit3 = storage_.NewCommit("id3", "content3");
-  storage_.new_commits_to_return["id3"] = commit3->Clone();
   storage_.watcher_->OnNewCommits(commit3->AsList(), storage::ChangeSource::LOCAL);
   EXPECT_FALSE(page_sync_->IsIdle());
   RunLoopUntilIdle();
-  EXPECT_EQ(3u, page_cloud_.received_commits.size());
-  EXPECT_EQ(2, on_idle_calls);
+  EXPECT_EQ(page_cloud_.received_commits.size(), 3u);
+  EXPECT_EQ(on_idle_calls, 2);
   EXPECT_TRUE(page_sync_->IsIdle());
 }
 
@@ -302,12 +306,12 @@ TEST_F(PageSyncImplTest, FailToStoreRemoteCommit) {
   auto commit_pack = MakeTestCommitPack(&encryption_service_, {{"id1", "content1"}});
   ASSERT_TRUE(commit_pack);
   storage_.should_fail_add_commit_from_sync = true;
-  EXPECT_EQ(0, error_callback_calls);
+  EXPECT_EQ(error_callback_calls, 0);
   page_cloud_.set_watcher->OnNewCommits(std::move(*commit_pack), MakeToken("42"), [] {});
 
   RunLoopUntilIdle();
   EXPECT_FALSE(page_cloud_.set_watcher.is_bound());
-  EXPECT_EQ(1, error_callback_calls);
+  EXPECT_EQ(error_callback_calls, 1);
 }
 
 // Verifies that the on idle callback is called when there is no download in
@@ -320,15 +324,15 @@ TEST_F(PageSyncImplTest, DownloadIdleCallback) {
   int on_idle_calls = 0;
   page_sync_->SetOnIdle([&on_idle_calls] { on_idle_calls++; });
   StartPageSync();
-  EXPECT_EQ(0, on_idle_calls);
+  EXPECT_EQ(on_idle_calls, 0);
   EXPECT_FALSE(page_sync_->IsIdle());
 
   // Run the message loop and verify that the sync is idle after all remote
   // commits are added to storage.
   RunLoopUntilIdle();
-  EXPECT_EQ(1, on_idle_calls);
+  EXPECT_EQ(on_idle_calls, 1);
   EXPECT_TRUE(page_sync_->IsIdle());
-  EXPECT_EQ(2u, storage_.received_commits.size());
+  EXPECT_EQ(storage_.received_commits.size(), 2u);
 
   // Notify about a new commit to download and verify that the idle callback was
   // called again on completion.
@@ -336,8 +340,8 @@ TEST_F(PageSyncImplTest, DownloadIdleCallback) {
   ASSERT_TRUE(commit_pack);
   page_cloud_.set_watcher->OnNewCommits(std::move(*commit_pack), MakeToken("44"), [] {});
   RunLoopUntilIdle();
-  EXPECT_EQ(3u, storage_.received_commits.size());
-  EXPECT_EQ(2, on_idle_calls);
+  EXPECT_EQ(storage_.received_commits.size(), 3u);
+  EXPECT_EQ(on_idle_calls, 2);
   EXPECT_TRUE(page_sync_->IsIdle());
 }
 
@@ -352,12 +356,12 @@ TEST_F(PageSyncImplTest, UploadIsPaused) {
   RunLoopUntilIdle();
   ASSERT_TRUE(called);
 
-  ASSERT_EQ(0u, page_cloud_.received_commits.size());
+  ASSERT_EQ(page_cloud_.received_commits.size(), 0u);
 
   page_sync_->EnableUpload();
   RunLoopUntilIdle();
 
-  ASSERT_EQ(2u, page_cloud_.received_commits.size());
+  ASSERT_EQ(page_cloud_.received_commits.size(), 2u);
 }
 
 // Merge commits are deterministic, so can already be in the cloud when we try
@@ -368,18 +372,17 @@ TEST_F(PageSyncImplTest, UploadCommitAlreadyInCloud) {
   // Complete the initial sync.
   StartPageSync();
   RunLoopUntilIdle();
-  EXPECT_EQ(1u, page_cloud_.get_commits_calls);
+  EXPECT_EQ(page_cloud_.get_commits_calls, 1u);
 
   // Create a local commit, but make the upload fail.
   page_cloud_.commit_status_to_return = cloud_provider::Status::SERVER_ERROR;
   auto commit1 = storage_.NewCommit("id1", "content1");
-  storage_.new_commits_to_return["id1"] = commit1->Clone();
   storage_.watcher_->OnNewCommits(commit1->AsList(), storage::ChangeSource::LOCAL);
 
   // We need to wait for the callback to be executed on the PageSync side.
   RunLoopUntilIdle();
-  EXPECT_EQ(1u, page_cloud_.add_commits_calls);
-  EXPECT_EQ(1, upload_backoff_ptr_->get_next_count);
+  EXPECT_EQ(page_cloud_.add_commits_calls, 1u);
+  EXPECT_EQ(upload_backoff_ptr_->get_next_count, 1);
 
   // Verify that the commit is still not marked as synced in storage.
   EXPECT_TRUE(storage_.commits_marked_as_synced.empty());
@@ -392,7 +395,7 @@ TEST_F(PageSyncImplTest, UploadCommitAlreadyInCloud) {
   EXPECT_TRUE(page_sync_->IsIdle());
 
   // No additional calls.
-  EXPECT_EQ(1u, page_cloud_.add_commits_calls);
+  EXPECT_EQ(page_cloud_.add_commits_calls, 1u);
   EXPECT_TRUE(page_sync_->IsIdle());
 }
 
@@ -402,11 +405,11 @@ TEST_F(PageSyncImplTest, UnrecoverableError) {
   // Complete the initial sync.
   StartPageSync();
   RunLoopUntilIdle();
-  EXPECT_EQ(0, on_error_calls);
+  EXPECT_EQ(on_error_calls, 0);
 
   page_cloud_.Unbind();
   RunLoopUntilIdle();
-  EXPECT_EQ(1, on_error_calls);
+  EXPECT_EQ(on_error_calls, 1);
 }
 
 }  // namespace

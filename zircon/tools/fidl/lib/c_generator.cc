@@ -14,8 +14,7 @@ namespace {
 // RAII helper class to reset the iostream to its original flags.
 class IOFlagsGuard {
  public:
-  explicit IOFlagsGuard(std::ostream* stream)
-      : stream_(stream), flags_(stream_->flags()) {}
+  explicit IOFlagsGuard(std::ostream* stream) : stream_(stream), flags_(stream_->flags()) {}
 
   ~IOFlagsGuard() { stream_->setf(flags_); }
 
@@ -56,9 +55,6 @@ CGenerator::Member EmptyStructMember() {
 }
 
 CGenerator::Transport ParseTransport(std::string_view view) {
-  if (view == "SocketControl") {
-    return CGenerator::Transport::SocketControl;
-  }
   return CGenerator::Transport::Channel;
 }
 
@@ -117,6 +113,7 @@ void EmitMethodInParamDecl(std::ostream* file, const CGenerator::Member& member)
     case flat::Type::Kind::kIdentifier:
       switch (member.decl_kind) {
         case flat::Decl::Kind::kConst:
+        case flat::Decl::Kind::kService:
         case flat::Decl::Kind::kTypeAlias:
           assert(false && "bad decl kind for member");
           break;
@@ -169,6 +166,7 @@ void EmitMethodOutParamDecl(std::ostream* file, const CGenerator::Member& member
     case flat::Type::Kind::kIdentifier:
       switch (member.decl_kind) {
         case flat::Decl::Kind::kConst:
+        case flat::Decl::Kind::kService:
         case flat::Decl::Kind::kTypeAlias:
           assert(false && "bad decl kind for member");
           break;
@@ -367,6 +365,7 @@ void EmitLinearizeMessage(std::ostream* file, std::string_view receiver, std::st
       case flat::Type::Kind::kIdentifier:
         switch (member.decl_kind) {
           case flat::Decl::Kind::kConst:
+          case flat::Decl::Kind::kService:
           case flat::Decl::Kind::kTypeAlias:
             assert(false && "bad decl kind for member");
             break;
@@ -616,7 +615,7 @@ void GetMethodParameters(const flat::Library* library, const CGenerator::NamedMe
   }
 
   if (response && method_info.response) {
-    response->reserve(method_info.request->parameters.size());
+    response->reserve(method_info.response->parameters.size());
     for (const auto& parameter : method_info.response->parameters) {
       response->push_back(CreateMember(library, parameter));
     }
@@ -629,8 +628,6 @@ uint32_t CGenerator::GetMaxHandlesFor(Transport transport, const TypeShape& type
   switch (transport) {
     case Transport::Channel:
       return std::min(ZX_CHANNEL_MAX_MSG_HANDLES, typeshape.MaxHandles());
-    case Transport::SocketControl:
-      return 0u;
   }
   assert(false && "what transport?");
   return 0u;
@@ -794,7 +791,6 @@ std::map<const flat::Decl*, CGenerator::NamedProtocol> CGenerator::NameProtocols
     if (protocol_info->HasAttribute("Discoverable")) {
       named_protocol.discoverable_name = NameDiscoverable(*protocol_info);
     }
-    // TODO: Transport::SocketControl should imply NoHandles.
     named_protocol.transport = ParseTransport(protocol_info->GetAttribute("Transport"));
     for (const auto& method_with_info : protocol_info->all_methods) {
       assert(method_with_info.method != nullptr);
@@ -1130,10 +1126,6 @@ void CGenerator::ProduceProtocolClientImplementation(const NamedProtocol& named_
                   << "return zx_channel_write(_channel, 0u, _wr_bytes, _wr_num_bytes, NULL, 0);\n";
           }
           break;
-        case Transport::SocketControl:
-          file_ << kIndent
-                << "return fidl_socket_write_control(_channel, _wr_bytes, _wr_num_bytes);\n";
-          break;
       }
     } else {
       file_ << kIndent << "uint32_t _rd_num_bytes = sizeof(" << method_info.response->c_name << ")";
@@ -1169,16 +1161,6 @@ void CGenerator::ProduceProtocolClientImplementation(const NamedProtocol& named_
           }
           file_ << "_status = zx_channel_call(_channel, 0u, ZX_TIME_INFINITE, &_args, "
                    "&_actual_num_bytes, &_actual_num_handles);\n";
-          break;
-        case Transport::SocketControl:
-          file_ << kIndent << "size_t _actual_num_bytes = 0u;\n";
-          if (encode_request) {
-            file_ << kIndent;
-          } else {
-            file_ << kIndent << "zx_status_t ";
-          }
-          file_ << "_status = fidl_socket_call_control(_channel, _wr_bytes, _wr_num_bytes, "
-                   "_rd_bytes, _rd_num_bytes, &_actual_num_bytes);\n";
           break;
       }
       file_ << kIndent << "if (_status != ZX_OK)\n";
@@ -1230,10 +1212,6 @@ void CGenerator::ProduceProtocolClientImplementation(const NamedProtocol& named_
                   << ", _rd_bytes, _actual_num_bytes, " << handles_value
                   << ", _actual_num_handles, NULL);\n";
             break;
-          case Transport::SocketControl:
-            file_ << kIndent << "_status = fidl_decode(&" << method_info.response->coded_name
-                  << ", _rd_bytes, _actual_num_bytes, NULL, 0, NULL);\n";
-            break;
         }
         file_ << kIndent << "if (_status != ZX_OK)\n";
         file_ << kIndent << kIndent << "return _status;\n";
@@ -1267,6 +1245,7 @@ void CGenerator::ProduceProtocolClientImplementation(const NamedProtocol& named_
           case flat::Type::Kind::kIdentifier:
             switch (member.decl_kind) {
               case flat::Decl::Kind::kConst:
+              case flat::Decl::Kind::kService:
               case flat::Decl::Kind::kTypeAlias:
                 assert(false && "bad decl kind for member");
                 break;
@@ -1314,7 +1293,7 @@ void CGenerator::ProduceProtocolClientImplementation(const NamedProtocol& named_
     }
     file_ << "}\n\n";
   }
-}  // namespace fidl
+}
 
 void CGenerator::ProduceProtocolServerDeclaration(const NamedProtocol& named_protocol) {
   file_ << "typedef struct " << named_protocol.c_name << "_ops {\n";
@@ -1394,6 +1373,7 @@ void CGenerator::ProduceProtocolServerImplementation(const NamedProtocol& named_
         case flat::Type::Kind::kIdentifier:
           switch (member.decl_kind) {
             case flat::Decl::Kind::kConst:
+            case flat::Decl::Kind::kService:
             case flat::Decl::Kind::kTypeAlias:
               assert(false && "bad decl kind for member");
               break;
@@ -1544,6 +1524,9 @@ std::ostringstream CGenerator::ProduceHeader() {
         }
         break;
       }
+      case flat::Decl::Kind::kService:
+        // Do nothing.
+        break;
       case flat::Decl::Kind::kStruct: {
         auto iter = named_structs.find(decl);
         if (iter != named_structs.end()) {
@@ -1585,6 +1568,7 @@ std::ostringstream CGenerator::ProduceHeader() {
       case flat::Decl::Kind::kBits:
       case flat::Decl::Kind::kConst:
       case flat::Decl::Kind::kEnum:
+      case flat::Decl::Kind::kService:
       case flat::Decl::Kind::kStruct:
       case flat::Decl::Kind::kTable:
       case flat::Decl::Kind::kTypeAlias:
@@ -1628,6 +1612,9 @@ std::ostringstream CGenerator::ProduceHeader() {
         }
         break;
       }
+      case flat::Decl::Kind::kService:
+        // Do nothing.
+        break;
       case flat::Decl::Kind::kStruct: {
         auto iter = named_structs.find(decl);
         if (iter != named_structs.end()) {
@@ -1666,6 +1653,7 @@ std::ostringstream CGenerator::ProduceHeader() {
       case flat::Decl::Kind::kBits:
       case flat::Decl::Kind::kConst:
       case flat::Decl::Kind::kEnum:
+      case flat::Decl::Kind::kService:
       case flat::Decl::Kind::kStruct:
       case flat::Decl::Kind::kTable:
       case flat::Decl::Kind::kTypeAlias:
@@ -1694,7 +1682,6 @@ std::ostringstream CGenerator::ProduceHeader() {
 std::ostringstream CGenerator::ProduceClient() {
   EmitFileComment(&file_);
   EmitIncludeHeader(&file_, "<lib/fidl/coding.h>");
-  EmitIncludeHeader(&file_, "<lib/fidl/transport.h>");
   EmitIncludeHeader(&file_, "<string.h>");
   EmitIncludeHeader(&file_, "<zircon/syscalls.h>");
   EmitIncludeHeader(&file_, "<" + NameLibraryCHeader(library_->name()) + ">");
@@ -1708,6 +1695,7 @@ std::ostringstream CGenerator::ProduceClient() {
       case flat::Decl::Kind::kBits:
       case flat::Decl::Kind::kConst:
       case flat::Decl::Kind::kEnum:
+      case flat::Decl::Kind::kService:
       case flat::Decl::Kind::kStruct:
       case flat::Decl::Kind::kTable:
       case flat::Decl::Kind::kTypeAlias:
@@ -1746,6 +1734,7 @@ std::ostringstream CGenerator::ProduceServer() {
       case flat::Decl::Kind::kBits:
       case flat::Decl::Kind::kConst:
       case flat::Decl::Kind::kEnum:
+      case flat::Decl::Kind::kService:
       case flat::Decl::Kind::kStruct:
       case flat::Decl::Kind::kTable:
       case flat::Decl::Kind::kTypeAlias:

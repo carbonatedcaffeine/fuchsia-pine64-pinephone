@@ -15,7 +15,6 @@ use fuchsia_syslog::fx_log_err;
 use fuchsia_url::pkg_url::RepoUrl;
 use fuchsia_zircon::Status;
 use futures::prelude::*;
-use futures::TryFutureExt;
 use parking_lot::RwLock;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -35,7 +34,7 @@ impl<A: AmberConnect> RepositoryService<A> {
         &mut self,
         mut stream: RepositoryManagerRequestStream,
     ) -> Result<(), failure::Error> {
-        while let Some(event) = await!(stream.try_next())? {
+        while let Some(event) = stream.try_next().await? {
             match event {
                 RepositoryManagerRequest::Add { repo, responder } => {
                     let status = self.serve_insert(repo);
@@ -122,7 +121,7 @@ impl<A: AmberConnect> RepositoryService<A> {
                 let mut iter = results.into_iter();
 
                 while let Some(RepositoryIteratorRequest::Next { responder }) =
-                    await!(stream.try_next())?
+                    stream.try_next().await?
                 {
                     responder.send(&mut iter.by_ref().take(LIST_CHUNK_SIZE))?;
                 }
@@ -156,7 +155,7 @@ mod tests {
 
         let mut results: Vec<RepositoryConfig> = Vec::new();
         loop {
-            let chunk = await!(list_iterator.next()).unwrap();
+            let chunk = list_iterator.next().await.unwrap();
             if chunk.len() == 0 {
                 break;
             }
@@ -172,12 +171,12 @@ mod tests {
     async fn test_list_empty() {
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
-        let mgr = RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+        let mgr = RepositoryManagerBuilder::new_test(&dynamic_configs_path, ClosedAmberConnector)
             .unwrap()
             .build();
         let service = RepositoryService::new(Arc::new(RwLock::new(mgr)));
 
-        let results = await!(list(&service));
+        let results = list(&service).await;
         assert_eq!(results, vec![]);
     }
 
@@ -193,7 +192,7 @@ mod tests {
 
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
-        let mgr = RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+        let mgr = RepositoryManagerBuilder::new_test(&dynamic_configs_path, ClosedAmberConnector)
             .unwrap()
             .static_configs(configs.clone())
             .build();
@@ -201,7 +200,7 @@ mod tests {
         let service = RepositoryService::new(Arc::new(RwLock::new(mgr)));
 
         // Fetch the list of results and make sure the results are what we expected.
-        let results = await!(list(&service));
+        let results = list(&service).await;
         assert_eq!(results, configs);
     }
 
@@ -209,7 +208,7 @@ mod tests {
     async fn test_insert_list_remove() {
         let dynamic_dir = tempfile::tempdir().unwrap();
         let dynamic_configs_path = dynamic_dir.path().join("config");
-        let mgr = RepositoryManagerBuilder::new(&dynamic_configs_path, ClosedAmberConnector)
+        let mgr = RepositoryManagerBuilder::new_test(&dynamic_configs_path, ClosedAmberConnector)
             .unwrap()
             .build();
         let mut service = RepositoryService::new(Arc::new(RwLock::new(mgr)));
@@ -231,7 +230,7 @@ mod tests {
         }
 
         // Fetch the list of results and make sure the results are what we expected.
-        let results = await!(list(&service));
+        let results = list(&service).await;
         assert_eq!(results, configs);
 
         // Remove all the configs and make sure nothing is left.
@@ -240,7 +239,7 @@ mod tests {
         }
 
         // We should now not receive anything.
-        let results = await!(list(&service));
+        let results = list(&service).await;
         assert_eq!(results, vec![]);
     }
 }

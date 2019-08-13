@@ -33,7 +33,7 @@ fit::function<void(storage::Journal*)> TestWithPageStorage::AddKeyValueToJournal
         callback::Capture(callback::SetWhenCalled(&called), &status, &object_identifier));
     RunLoopUntilIdle();
     EXPECT_TRUE(called);
-    EXPECT_EQ(Status::OK, status);
+    EXPECT_EQ(status, Status::OK);
 
     journal->Put(key, object_identifier, storage::KeyPriority::EAGER);
   };
@@ -49,7 +49,7 @@ fit::function<void(storage::Journal*)> TestWithPageStorage::DeleteKeyFromJournal
   Status status;
   std::unique_ptr<const storage::Object> object;
   bool called;
-  page_storage()->GetObject(std::move(object_identifier), storage::PageStorage::Location::LOCAL,
+  page_storage()->GetObject(std::move(object_identifier), storage::PageStorage::Location::Local(),
                             callback::Capture(callback::SetWhenCalled(&called), &status, &object));
   RunLoopUntilIdle();
   if (!called) {

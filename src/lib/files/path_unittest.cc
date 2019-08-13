@@ -15,9 +15,7 @@
 namespace files {
 namespace {
 
-void ExpectPlatformPath(std::string expected, std::string actual) {
-  EXPECT_EQ(expected, actual);
-}
+void ExpectPlatformPath(std::string expected, std::string actual) { EXPECT_EQ(expected, actual); }
 
 TEST(Path, SimplifyPath) {
   ExpectPlatformPath(".", SimplifyPath(""));
@@ -120,8 +118,7 @@ TEST(Path, SimplifyPath) {
   ExpectPlatformPath("/", SimplifyPath("/abc/def/../.."));
   ExpectPlatformPath("..", SimplifyPath("abc/def/../../.."));
   ExpectPlatformPath("/", SimplifyPath("/abc/def/../../.."));
-  ExpectPlatformPath("../../mno",
-                     SimplifyPath("abc/def/../../../ghi/jkl/../../../mno"));
+  ExpectPlatformPath("../../mno", SimplifyPath("abc/def/../../../ghi/jkl/../../../mno"));
   ExpectPlatformPath("/mno", SimplifyPath("/../mno"));
 
   // Combinations
@@ -183,7 +180,7 @@ TEST(Path, DeletePath) {
 
 TEST(Path, DeletePathAt) {
   ScopedTempDir dir;
-  fxl::UniqueFD root(open(dir.path().c_str(), O_RDONLY));
+  fbl::unique_fd root(open(dir.path().c_str(), O_RDONLY));
   ASSERT_TRUE(root.is_valid());
 
   std::string sub_dir = "dir";
@@ -218,7 +215,7 @@ TEST(Path, DeletePathRecursively) {
 
 TEST(Path, DeletePathRecursivelyAt) {
   ScopedTempDir dir;
-  fxl::UniqueFD root(open(dir.path().c_str(), O_RDONLY));
+  fbl::unique_fd root(open(dir.path().c_str(), O_RDONLY));
   ASSERT_TRUE(root.is_valid());
 
   std::string sub_dir = "dir";
@@ -273,8 +270,7 @@ TEST(Path, JoinPath) {
   EXPECT_EQ(JoinPath("", "/bar"), "/bar");
   EXPECT_EQ(JoinPath("", "/bar/"), "/bar/");
 
-  EXPECT_EQ(JoinPath("/foo/bar/baz/", "/blah/blink/biz"),
-            "/foo/bar/baz/blah/blink/biz");
+  EXPECT_EQ(JoinPath("/foo/bar/baz/", "/blah/blink/biz"), "/foo/bar/baz/blah/blink/biz");
 }
 
 }  // namespace

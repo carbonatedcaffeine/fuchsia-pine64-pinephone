@@ -47,11 +47,11 @@ impl<E> Timer<E> {
         id
     }
 
-    pub fn schedule(&mut self, event: E) -> EventId
+    pub fn schedule<EV>(&mut self, event: EV) -> EventId
     where
-        E: TimeoutDuration,
+        EV: TimeoutDuration + Into<E>,
     {
-        self.schedule_at(zx::Time::after(event.timeout_duration()), event)
+        self.schedule_at(zx::Time::after(event.timeout_duration()), event.into())
     }
 }
 
@@ -69,7 +69,7 @@ pub trait TimeoutDuration {
 mod tests {
     use super::*;
     use fuchsia_zircon::prelude::DurationNum;
-    use std::error::Error;
+    use wlan_common::assert_variant;
 
     type Event = u32;
     impl TimeoutDuration for Event {
@@ -96,10 +96,9 @@ mod tests {
         assert_eq!(event2.id, 1);
         assert_eq!(event2.event, 9);
 
-        match time_stream.try_next() {
-            Err(e) => assert_eq!(e.description(), "receiver channel is empty"),
-            _ => panic!("unexpected event in time stream"),
-        }
+        assert_variant!(time_stream.try_next(), Err(e) => {
+            assert_eq!(e.to_string(), "receiver channel is empty")
+        });
     }
 
     #[test]

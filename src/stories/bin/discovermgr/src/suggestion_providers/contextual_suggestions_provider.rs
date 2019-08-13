@@ -4,7 +4,7 @@
 
 use {
     crate::{
-        models::{Action, AddMod, EntityMatching, Intent, Suggestion},
+        models::{Action, AddModInfo, EntityMatching, Intent, Suggestion},
         story_context_store::{ContextEntity, Contributor},
         suggestions_manager::SearchSuggestionsProvider,
     },
@@ -38,7 +38,7 @@ impl SearchSuggestionsProvider for ContextualSuggestionsProvider {
                 .iter()
                 .filter_map(|action| ActionMatching::try_to_match(action.clone(), context))
                 .map(|matching| matching.suggestions());
-            let result = await!(join_all(futs))
+            let result = join_all(futs).await
                 .into_iter()
                 .flat_map(|suggestions| suggestions.into_iter())
                 .collect::<Vec<Suggestion>>();
@@ -77,31 +77,37 @@ impl<'a> ActionMatching<'a> {
 
     pub async fn suggestions(self) -> impl Iterator<Item = Suggestion> + 'a {
         let action = &self.action;
-        let futs = all_matches(self.parameters).map(async move |parameters| {
-            let mut intent = Intent::new().with_action(&action.name);
-            if let Some(ref fulfillment) = action.fuchsia_fulfillment {
-                intent = intent.with_handler(&fulfillment.component_url);
-            }
-            let references = parameters.iter().map(|(p, e)| (p, &e.context_entity.reference));
-            let intent = references.into_iter().fold(intent, |intent, (param_name, reference)| {
-                intent.add_parameter(&param_name, reference)
-            });
-            // TODO: make this cleaner.The matching could contain the
-            // story id for example if we gurantee all entities are from the same
-            // story.
-            // TODO: the filling of the story should happen in the suggestions
-            // manager, not here. Eventually we expect SuggestionProviders to not
-            // live here, but in shells, agents, etc.
-            let story_name = parameters.values().next().and_then(|first_param| {
-                match first_param.context_entity.contributors.iter().next().unwrap() {
-                    Contributor::ModuleContributor { story_id, .. } => Some(story_id.to_string()),
+        let futs = all_matches(self.parameters).map(|parameters| {
+            async move {
+                let mut intent = Intent::new().with_action(&action.name);
+                if let Some(ref fulfillment) = action.fuchsia_fulfillment {
+                    intent = intent.with_handler(&fulfillment.component_url);
                 }
-            });
-            let add_mod = AddMod::new(intent, story_name, None);
-            await!(action.load_display_info(parameters))
-                .map(|display_info| Suggestion::new(add_mod, display_info))
+                let references = parameters.iter().map(|(p, e)| (p, &e.context_entity.reference));
+                let intent =
+                    references.into_iter().fold(intent, |intent, (param_name, reference)| {
+                        intent.add_parameter(&param_name, reference)
+                    });
+                // TODO: make this cleaner.The matching could contain the
+                // story id for example if we gurantee all entities are from the same
+                // story.
+                // TODO: the filling of the story should happen in the suggestions
+                // manager, not here. Eventually we expect SuggestionProviders to not
+                // live here, but in shells, agents, etc.
+                let story_name =
+                    parameters.values().next().and_then(|first_param| {
+                        match first_param.context_entity.contributors.iter().next().unwrap() {
+                            Contributor::ModuleContributor { story_id, .. } => {
+                                Some(story_id.to_string())
+                            }
+                        }
+                    });
+                let add_mod = AddModInfo::new(intent, story_name, None);
+                action.load_display_info(parameters).await
+                    .map(|display_info| Suggestion::new(add_mod, display_info))
+            }
         });
-        await!(join_all(futs)).into_iter().filter_map(|result| result)
+        join_all(futs).await.into_iter().filter_map(|result| result)
     }
 }
 
@@ -138,7 +144,7 @@ mod tests {
     use {
         super::*,
         crate::{
-            models::DisplayInfo,
+            models::{DisplayInfo, SuggestedAction},
             testing::{FakeEntityData, FakeEntityResolver},
         },
         fidl_fuchsia_modular::{EntityMarker, EntityResolverMarker},
@@ -150,9 +156,9 @@ mod tests {
     async fn get_suggestions() -> Result<(), Error> {
         let contextual_suggestions_provider =
             ContextualSuggestionsProvider::new(test_action_index());
-        let context = await!(test_context())?;
+        let context = test_context().await?;
         let context_refs = context.iter().collect::<Vec<_>>();
-        let results = await!(contextual_suggestions_provider.request("", &context_refs))?;
+        let results = contextual_suggestions_provider.request("", &context_refs).await?;
 
         let expected_results = vec![
             suggestion!(
@@ -200,9 +206,17 @@ mod tests {
 
         // Ensure all results are what we expected
         assert!(results.into_iter().all(|actual| expected_results.iter().any(|expected| {
-            actual.action().intent == expected.action().intent
-                && actual.action().story_name() == expected.action().story_name()
-                && actual.display_info() == expected.display_info()
+            match actual.action() {
+                SuggestedAction::AddMod(actual_action) => match expected.action() {
+                    SuggestedAction::AddMod(expected_action) => {
+                        actual_action.intent == expected_action.intent
+                            && actual_action.story_name() == expected_action.story_name()
+                            && actual.display_info() == expected.display_info()
+                    }
+                    SuggestedAction::RestoreStory(_) => false,
+                },
+                SuggestedAction::RestoreStory(_) => false,
+            }
         })));
         Ok(())
     }
@@ -256,7 +270,7 @@ mod tests {
                 hashset!(Contributor::module_new("story1", "mod-b", "param-bar")),
             ),
         ];
-        Ok(await!(join_all(futs)).into_iter().map(|e| e.unwrap()).collect::<Vec<ContextEntity>>())
+        Ok(join_all(futs).await.into_iter().map(|e| e.unwrap()).collect::<Vec<ContextEntity>>())
     }
 
     fn test_action_index() -> Vec<Action> {

@@ -14,18 +14,39 @@ pub type SettingRequestResponder = Sender<SettingResponseResult>;
 #[derive(PartialEq, Debug, Eq, Hash, Clone, Copy)]
 pub enum SettingType {
     Unknown,
+    Display,
+    Intl,
 }
 
 /// The possible requests that can be made on a setting. The sink will expect a
 /// subset of the values defined below based on the associated type.
-#[derive(PartialEq, Debug, Clone, Copy, Eq, Hash)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum SettingRequest {
     Get,
+    SetBrightness(f32),
+    SetAutoBrightness(bool),
+    SetTimeZone(String),
+}
+
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum BrightnessInfo {
+    ManualBrightness(f32),
+    AutoBrightness,
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct IntlInfo {
+    pub time_zone_id: String,
 }
 
 /// The possible responses to a SettingRequest.
-#[derive(PartialEq, Eq, Hash, Debug)]
-pub enum SettingResponse {}
+#[derive(PartialEq, Debug, Clone)]
+pub enum SettingResponse {
+    Unknown,
+    /// Response to a request to get current brightness state.AccessibilityEncoder
+    Brightness(BrightnessInfo),
+    Intl(IntlInfo),
+}
 
 /// Description of an action request on a setting. This wraps a
 /// SettingActionData, providing destination details (setting type) along with

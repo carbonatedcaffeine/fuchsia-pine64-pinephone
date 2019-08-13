@@ -5,7 +5,7 @@
 use {
     crate::directory_broker::RoutingFn,
     crate::model::*,
-    cm_rust::{Capability, ComponentDecl, UseDecl},
+    cm_rust::{ComponentDecl, ExposeDecl, UseDecl},
     failure::{format_err, Error},
     fidl::endpoints::ServerEnd,
     fidl_fidl_examples_echo::{EchoMarker, EchoRequest, EchoRequestStream},
@@ -15,7 +15,7 @@ use {
         directory::{self, entry::DirectoryEntry},
         file::simple::read_only,
     },
-    futures::future::FutureObj,
+    futures::future::BoxFuture,
     futures::lock::Mutex,
     futures::prelude::*,
     std::{
@@ -29,37 +29,64 @@ use {
 /// - Redirects all directory capabilities to a directory with the file "hello".
 /// - Redirects all service capabilities to the echo service.
 pub fn proxy_use_routing_factory() -> impl Fn(AbsoluteMoniker, UseDecl) -> RoutingFn {
-    move |_abs_moniker: AbsoluteMoniker, use_decl: UseDecl| {
-        new_proxy_routing_fn(use_decl.clone().into())
-    }
+    move |_abs_moniker: AbsoluteMoniker, use_decl: UseDecl| new_proxy_routing_fn(use_decl.into())
 }
 
 /// Creates a routing function factory for `ExposeDecl` that does the following:
 /// - Redirects all directory capabilities to a directory with the file "hello".
 /// - Redirects all service capabilities to the echo service.
-pub fn proxy_expose_routing_factory() -> impl Fn(AbsoluteMoniker, Capability) -> RoutingFn {
-    move |_abs_moniker: AbsoluteMoniker, capability: Capability| {
-        new_proxy_routing_fn(capability.clone())
+pub fn proxy_expose_routing_factory() -> impl Fn(AbsoluteMoniker, ExposeDecl) -> RoutingFn {
+    move |_abs_moniker: AbsoluteMoniker, expose_decl: ExposeDecl| {
+        new_proxy_routing_fn(expose_decl.into())
     }
 }
 
-fn new_proxy_routing_fn(capability: Capability) -> RoutingFn {
+enum CapabilityType {
+    Service,
+    LegacyService,
+    Directory,
+    Storage,
+}
+
+impl From<UseDecl> for CapabilityType {
+    fn from(use_: UseDecl) -> Self {
+        match use_ {
+            UseDecl::Service(_) => CapabilityType::Service,
+            UseDecl::LegacyService(_) => CapabilityType::LegacyService,
+            UseDecl::Directory(_) => CapabilityType::Directory,
+            UseDecl::Storage(_) => CapabilityType::Storage,
+        }
+    }
+}
+
+impl From<ExposeDecl> for CapabilityType {
+    fn from(expose: ExposeDecl) -> Self {
+        match expose {
+            ExposeDecl::Service(_) => CapabilityType::Service,
+            ExposeDecl::LegacyService(_) => CapabilityType::LegacyService,
+            ExposeDecl::Directory(_) => CapabilityType::Directory,
+        }
+    }
+}
+
+fn new_proxy_routing_fn(ty: CapabilityType) -> RoutingFn {
     Box::new(
         move |flags: u32, mode: u32, relative_path: String, server_end: ServerEnd<NodeMarker>| {
-            match capability {
-                Capability::Service(_) => {
+            match ty {
+                CapabilityType::Service => panic!("service capability unsupported"),
+                CapabilityType::LegacyService => {
                     fasync::spawn(async move {
                         let server_end: ServerEnd<EchoMarker> =
                             ServerEnd::new(server_end.into_channel());
                         let mut stream: EchoRequestStream = server_end.into_stream().unwrap();
                         while let Some(EchoRequest::EchoString { value, responder }) =
-                            await!(stream.try_next()).unwrap()
+                            stream.try_next().await.unwrap()
                         {
                             responder.send(value.as_ref().map(|s| &**s)).unwrap();
                         }
                     });
                 }
-                Capability::Directory(_) | Capability::Storage(_) => {
+                CapabilityType::Directory | CapabilityType::Storage => {
                     let mut sub_dir = directory::simple::empty();
                     sub_dir
                         .add_entry("hello", { read_only(move || Ok(b"friend".to_vec())) })
@@ -67,7 +94,7 @@ fn new_proxy_routing_fn(capability: Capability) -> RoutingFn {
                         .expect("Failed to add 'hello' entry");
                     sub_dir.open(flags, mode, &mut relative_path.split("/"), server_end);
                     fasync::spawn(async move {
-                        let _ = await!(sub_dir);
+                        let _ = sub_dir.await;
                     });
                 }
             }
@@ -107,16 +134,16 @@ impl MockResolver {
 }
 
 impl Resolver for MockResolver {
-    fn resolve(&self, component_url: &str) -> FutureObj<Result<fsys::Component, ResolverError>> {
-        FutureObj::new(Box::new(self.resolve_async(component_url.to_string())))
+    fn resolve<'a>(&'a self, component_url: &'a str) -> ResolverFut<'a> {
+        Box::pin(self.resolve_async(component_url.to_string()))
     }
 }
 
 pub struct MockRunner {
     pub urls_run: Arc<Mutex<Vec<String>>>,
     pub namespaces: Namespaces,
-    pub host_fns: HashMap<String, Box<Fn(ServerEnd<DirectoryMarker>) + Send + Sync>>,
-    pub runtime_host_fns: HashMap<String, Box<Fn(ServerEnd<DirectoryMarker>) + Send + Sync>>,
+    pub host_fns: HashMap<String, Box<dyn Fn(ServerEnd<DirectoryMarker>) + Send + Sync>>,
+    pub runtime_host_fns: HashMap<String, Box<dyn Fn(ServerEnd<DirectoryMarker>) + Send + Sync>>,
     failing_urls: HashSet<String>,
 }
 
@@ -142,8 +169,8 @@ impl MockRunner {
         if self.failing_urls.contains(&resolved_url) {
             return Err(RunnerError::component_launch_error(resolved_url, format_err!("ouch")));
         }
-        await!(self.urls_run.lock()).push(resolved_url.clone());
-        await!(self.namespaces.lock()).insert(resolved_url.clone(), start_info.ns.unwrap());
+        self.urls_run.lock().await.push(resolved_url.clone());
+        self.namespaces.lock().await.insert(resolved_url.clone(), start_info.ns.unwrap());
         // If no host_fn was provided, then start_info.outgoing_dir will be
         // automatically closed once it goes out of scope at the end of this
         // function.
@@ -161,8 +188,8 @@ impl MockRunner {
 }
 
 impl Runner for MockRunner {
-    fn start(&self, start_info: fsys::ComponentStartInfo) -> FutureObj<Result<(), RunnerError>> {
-        FutureObj::new(Box::new(self.start_async(start_info)))
+    fn start(&self, start_info: fsys::ComponentStartInfo) -> BoxFuture<Result<(), RunnerError>> {
+        Box::pin(self.start_async(start_info))
     }
 }
 
@@ -177,12 +204,12 @@ impl FrameworkServiceHost for MockFrameworkServiceHost {
         _model: Model,
         realm: Arc<Realm>,
         stream: fsys::RealmRequestStream,
-    ) -> FutureObj<Result<(), FrameworkServiceError>> {
-        FutureObj::new(Box::new(async move {
-            await!(self.do_serve_realm_service(realm, stream))
+    ) -> BoxFuture<Result<(), FrameworkServiceError>> {
+        Box::pin(async move {
+            self.do_serve_realm_service(realm, stream).await
                 .expect(&format!("serving {} failed", REALM_SERVICE.to_string()));
             Ok(())
-        }))
+        })
     }
 }
 
@@ -196,10 +223,10 @@ impl MockFrameworkServiceHost {
         realm: Arc<Realm>,
         mut stream: fsys::RealmRequestStream,
     ) -> Result<(), Error> {
-        while let Some(request) = await!(stream.try_next())? {
+        while let Some(request) = stream.try_next().await? {
             match request {
                 fsys::RealmRequest::BindChild { responder, .. } => {
-                    await!(self.bind_calls.lock()).push(
+                    self.bind_calls.lock().await.push(
                         realm
                             .abs_moniker
                             .path()

@@ -5,8 +5,9 @@
 extern "C" {
 #endif
 
-#include <bits/null.h>
 #include <features.h>
+
+#include <bits/null.h>
 
 #define __NEED_size_t
 #define __NEED_wchar_t
@@ -55,13 +56,13 @@ long labs(long);
 long long llabs(long long);
 
 typedef struct {
-    int quot, rem;
+  int quot, rem;
 } div_t;
 typedef struct {
-    long quot, rem;
+  long quot, rem;
 } ldiv_t;
 typedef struct {
-    long long quot, rem;
+  long long quot, rem;
 } lldiv_t;
 
 div_t div(int, int);
@@ -117,7 +118,6 @@ int posix_openpt(int);
 int grantpt(int);
 int unlockpt(int);
 char* ptsname(int);
-char* l64a(long);
 long a64l(const char*);
 void setkey(const char*);
 double drand48(void);
@@ -154,4 +154,4 @@ char* gcvt(double, int, char*);
 }
 #endif
 
-#endif // SYSROOT_STDLIB_H_
+#endif  // SYSROOT_STDLIB_H_

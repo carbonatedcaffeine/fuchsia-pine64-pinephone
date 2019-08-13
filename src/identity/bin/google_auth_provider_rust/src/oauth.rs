@@ -5,7 +5,9 @@
 //! This module contains methods for creating OAuth requests and interpreting
 //! responses.
 
-use crate::constants::{FUCHSIA_CLIENT_ID, OAUTH_URI, REDIRECT_URI};
+use crate::constants::{
+    FUCHSIA_CLIENT_ID, OAUTH_REVOCATION_URI, OAUTH_TOKEN_EXCHANGE_URI, REDIRECT_URI,
+};
 use crate::error::{AuthProviderError, ResultExt};
 use crate::http::{HttpRequest, HttpRequestBuilder};
 
@@ -27,11 +29,18 @@ pub struct RefreshToken(pub String);
 #[derive(Debug, PartialEq)]
 pub struct AccessToken(pub String);
 
-/// Response type for Oauth access token requests.
+/// Response type for Oauth access token requests with a refresh token.
 #[derive(Debug, Deserialize)]
-struct AccessTokenResponse {
+struct AccessTokenResponseWithRefreshToken {
     pub access_token: String,
     pub refresh_token: String,
+}
+
+/// Response type for Oauth access token requests where a refresh token is not expected.
+#[derive(Debug, Deserialize)]
+struct AccessTokenResponseWithoutRefreshToken {
+    pub access_token: String,
+    pub expires_in: u64,
 }
 
 /// Error response type for Oauth requests.
@@ -50,7 +59,39 @@ pub fn build_request_with_auth_code(auth_code: AuthCode) -> AuthProviderResult<H
         .append_pair("grant_type", "authorization_code")
         .finish();
 
-    HttpRequestBuilder::new(OAUTH_URI.as_str(), "POST")
+    HttpRequestBuilder::new(OAUTH_TOKEN_EXCHANGE_URI.as_str(), "POST")
+        .with_header("content-type", "application/x-www-form-urlencoded")
+        .set_body(&request_body)
+        .finish()
+}
+
+/// Construct an Oauth access token request using a refresh token grant.  If
+/// `client_id` is not given the Fuchsia client id is used.
+pub fn build_request_with_refresh_token(
+    refresh_token: RefreshToken,
+    scopes: Vec<String>,
+    client_id: Option<String>,
+) -> AuthProviderResult<HttpRequest> {
+    let request_body = form_urlencoded::Serializer::new(String::new())
+        .append_pair("refresh_token", refresh_token.0.as_str())
+        .append_pair("client_id", client_id.as_ref().map_or(FUCHSIA_CLIENT_ID, String::as_str))
+        .append_pair("grant_type", "refresh_token")
+        .append_pair("scope", &scopes.join(" "))
+        .finish();
+
+    HttpRequestBuilder::new(OAUTH_TOKEN_EXCHANGE_URI.as_str(), "POST")
+        .with_header("content-type", "application/x-www-form-urlencoded")
+        .set_body(&request_body)
+        .finish()
+}
+
+/// Construct an Oauth token revocation request.  `credential` may be either
+/// an access token or refresh token.
+pub fn build_revocation_request(credential: String) -> AuthProviderResult<HttpRequest> {
+    let request_body =
+        form_urlencoded::Serializer::new(String::new()).append_pair("token", &credential).finish();
+
+    HttpRequestBuilder::new(OAUTH_REVOCATION_URI.as_str(), "POST")
         .with_header("content-type", "application/x-www-form-urlencoded")
         .set_body(&request_body)
         .finish()
@@ -64,7 +105,7 @@ pub fn parse_response_with_refresh_token(
 ) -> AuthProviderResult<(RefreshToken, AccessToken)> {
     match (response_body.as_ref(), status) {
         (Some(response), StatusCode::OK) => {
-            let response = from_str::<AccessTokenResponse>(&response)
+            let response = from_str::<AccessTokenResponseWithRefreshToken>(&response)
                 .auth_provider_status(AuthProviderStatus::OauthServerError)?;
             Ok((RefreshToken(response.refresh_token), AccessToken(response.access_token)))
         }
@@ -79,6 +120,51 @@ pub fn parse_response_with_refresh_token(
                 }
             };
             Err(AuthProviderError::new(status))
+        }
+        _ => Err(AuthProviderError::new(AuthProviderStatus::OauthServerError)),
+    }
+}
+
+/// Parses a response for an OAuth access token request when a refresh token is
+/// not expected.  Returns an access token and the lifetime of the token.
+pub fn parse_response_without_refresh_token(
+    response_body: Option<String>,
+    status: StatusCode,
+) -> AuthProviderResult<(AccessToken, u64)> {
+    match (response_body.as_ref(), status) {
+        (Some(response), StatusCode::OK) => {
+            let response = from_str::<AccessTokenResponseWithoutRefreshToken>(&response)
+                .auth_provider_status(AuthProviderStatus::OauthServerError)?;
+            Ok((AccessToken(response.access_token), response.expires_in))
+        }
+        (Some(response), status) if status.is_client_error() => {
+            let response = from_str::<OAuthErrorResponse>(&response)
+                .auth_provider_status(AuthProviderStatus::OauthServerError)?;
+            let status = match response.error.as_str() {
+                "invalid_grant" => AuthProviderStatus::ReauthRequired,
+                error_code => {
+                    warn!("Got unexpected error code from access token request: {}", error_code);
+                    AuthProviderStatus::OauthServerError
+                }
+            };
+            Err(AuthProviderError::new(status))
+        }
+        _ => Err(AuthProviderError::new(AuthProviderStatus::OauthServerError)),
+    }
+}
+
+/// Parses a response for an Oauth revocation request.
+pub fn parse_revocation_response(
+    response_body: Option<String>,
+    status: StatusCode,
+) -> AuthProviderResult<()> {
+    match (response_body.as_ref(), status) {
+        (_, StatusCode::OK) => Ok(()),
+        (Some(response), status) if status.is_client_error() => {
+            let response = from_str::<OAuthErrorResponse>(&response)
+                .auth_provider_status(AuthProviderStatus::OauthServerError)?;
+            warn!("Got unexpected error code during token revocation: {}", response.error);
+            Err(AuthProviderError::new(AuthProviderStatus::OauthServerError))
         }
         _ => Err(AuthProviderError::new(AuthProviderStatus::OauthServerError)),
     }
@@ -123,7 +209,7 @@ mod test {
     }
 
     #[test]
-    fn test_parse_response_success() {
+    fn test_parse_response_with_refresh_token_success() {
         let response_body = Some(
             "{\"refresh_token\": \"test-refresh-token\", \"access_token\": \"test-access-token\"}"
                 .to_string(),
@@ -138,7 +224,7 @@ mod test {
     }
 
     #[test]
-    fn test_parse_response_failures() {
+    fn test_parse_response_with_refresh_token_failures() {
         // Expired auth token
         let response =
             "{\"error\": \"invalid_grant\", \"error_description\": \"ouch\"}".to_string();
@@ -157,6 +243,56 @@ mod test {
         // Malformed response
         let response = "{\"a malformed response\"}".to_string();
         let result = parse_response_with_refresh_token(Some(response), StatusCode::OK);
+        assert_eq!(result.unwrap_err().status, AuthProviderStatus::OauthServerError);
+    }
+
+    #[test]
+    fn test_parse_response_without_refresh_token_success() {
+        let response_body =
+            Some("{\"access_token\": \"test-access-token\", \"expires_in\": 3600}".to_string());
+        assert_eq!(
+            (AccessToken("test-access-token".to_string()), 3600),
+            parse_response_without_refresh_token(response_body, StatusCode::OK).unwrap()
+        )
+    }
+
+    #[test]
+    fn test_parse_response_without_refresh_token_failures() {
+        // Expired auth token
+        let response =
+            "{\"error\": \"invalid_grant\", \"error_description\": \"expired\"}".to_string();
+        let result = parse_response_without_refresh_token(Some(response), StatusCode::BAD_REQUEST);
+        assert_eq!(result.unwrap_err().status, AuthProviderStatus::ReauthRequired);
+
+        // Server side error
+        let result = parse_response_without_refresh_token(None, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(result.unwrap_err().status, AuthProviderStatus::OauthServerError);
+
+        // Invalid client error
+        let response = "{\"error\": \"invalid_client\"}".to_string();
+        let result = parse_response_without_refresh_token(Some(response), StatusCode::UNAUTHORIZED);
+        assert_eq!(result.unwrap_err().status, AuthProviderStatus::OauthServerError);
+
+        // Malformed response
+        let response = "{\"a malformed response\"}".to_string();
+        let result = parse_response_without_refresh_token(Some(response), StatusCode::OK);
+        assert_eq!(result.unwrap_err().status, AuthProviderStatus::OauthServerError);
+    }
+
+    #[test]
+    fn test_parse_revocation_response_success() {
+        assert!(parse_revocation_response(None, StatusCode::OK).is_ok());
+    }
+
+    #[test]
+    fn test_parse_revocation_response_failures() {
+        // Server side error
+        let result = parse_revocation_response(None, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(result.unwrap_err().status, AuthProviderStatus::OauthServerError);
+
+        // Malformed response
+        let response = "bad response".to_string();
+        let result = parse_revocation_response(Some(response), StatusCode::BAD_REQUEST);
         assert_eq!(result.unwrap_err().status, AuthProviderStatus::OauthServerError);
     }
 

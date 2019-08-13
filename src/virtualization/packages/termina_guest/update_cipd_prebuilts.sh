@@ -165,7 +165,7 @@ main() {
   done
   shift $((OPTIND - 1))
 
-  declare -r cipd="${FUCHSIA_DIR}/buildtools/cipd"
+  declare -r cipd="${FUCHSIA_DIR}/.jiri_root/bin/cipd"
   declare -r cros_dir=${cros_dir}
   declare -r termina_revision_requested=${termina_revision_requested}
   declare -r kernel_overlay_dir=${kernel_overlay_dir}
@@ -212,6 +212,7 @@ main() {
       cp "${kernel_override}" "${cros_dir}/chroot/home/${USER}/${board}/output/vm_kernel"
     fi
 
+    # TODO(PD-206): remove termina kernel image
     ${cipd} create \
         -in "${cros_dir}/chroot/home/${USER}/${board}/output" \
         -name "fuchsia_internal/linux/termina-${arch}" \

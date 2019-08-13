@@ -48,7 +48,7 @@ class LedgerManager : public LedgerImpl::Delegate, inspect_deprecated::ChildrenM
                 std::unique_ptr<encryption::EncryptionService> encryption_service,
                 std::unique_ptr<storage::LedgerStorage> storage,
                 std::unique_ptr<sync_coordinator::LedgerSync> ledger_sync,
-                PageUsageListener* page_usage_listener);
+                std::vector<PageUsageListener*> page_usage_listeners);
   ~LedgerManager() override;
 
   // Creates a new proxy for the LedgerImpl managed by this LedgerManager.
@@ -71,6 +71,9 @@ class LedgerManager : public LedgerImpl::Delegate, inspect_deprecated::ChildrenM
   // Deletes the local copy of the page. If the page is currently open, the
   // callback will be called with |ILLEGAL_STATE|.
   void DeletePageStorage(convert::ExtendedStringView page_id, fit::function<void(Status)> callback);
+
+  // Tries to open the closed page and start a sync with the cloud.
+  void TrySyncClosedPage(convert::ExtendedStringView page_id);
 
   // LedgerImpl::Delegate:
   void GetPage(convert::ExtendedStringView page_id, PageState page_state,
@@ -129,7 +132,7 @@ class LedgerManager : public LedgerImpl::Delegate, inspect_deprecated::ChildrenM
   // Mapping from each page id to the manager of that page.
   callback::AutoCleanableMap<storage::PageId, PageManager, convert::StringViewComparator>
       page_managers_;
-  PageUsageListener* page_usage_listener_;
+  std::vector<PageUsageListener*> page_usage_listeners_;
   fit::closure on_empty_callback_;
 
   // The static Inspect object maintaining in Inspect a representation of this

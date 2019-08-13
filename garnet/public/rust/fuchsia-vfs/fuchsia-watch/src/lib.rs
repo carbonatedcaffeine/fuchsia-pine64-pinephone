@@ -7,7 +7,7 @@
 //! This module provides a higher-level asyncronous directory watcher that supports recursive
 //! watching.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 #![deny(missing_docs)]
 
 use {
@@ -47,7 +47,7 @@ impl NodeType {
     ///
     /// TODO(TC-563): Update this to use asynchronous I/O.
     pub async fn from_path(path: impl AsRef<Path>) -> Result<Self, Error> {
-        await!(NodeType::inner_from_path(path.as_ref()))
+        NodeType::inner_from_path(path.as_ref()).await
     }
 
     async fn inner_from_path(path: &Path) -> Result<Self, Error> {
@@ -99,16 +99,17 @@ impl AsRef<Path> for PathEvent {
 /// Returns a stream of PathEvents if a watcher could be installed on the path successfully.
 ///
 /// TODO(TC-555): This should generate a stream rather than spawning tasks.
-pub fn watch(path: impl Into<PathBuf>) -> Result<BoxStream<'static, PathEvent>, Error> {
-    inner_watch(path.into())
+pub async fn watch(path: impl Into<PathBuf>) -> Result<BoxStream<'static, PathEvent>, Error> {
+    inner_watch(path.into()).await
 }
 
-fn inner_watch(path: PathBuf) -> Result<BoxStream<'static, PathEvent>, Error> {
-    let mut watcher = Watcher::new(&File::open(&path)?)?;
+async fn inner_watch(path: PathBuf) -> Result<BoxStream<'static, PathEvent>, Error> {
+    let file = File::open(&path)?;
+    let (mut tx, rx) = channel(1);
+    let mut watcher = Watcher::new(&file).await?;
 
-    let (mut tx, rx) = channel(0);
     let path_future = async move {
-        while let Ok(message) = await!(watcher.try_next()) {
+        while let Ok(message) = watcher.try_next().await {
             let message = match message {
                 Some(value) => value,
                 None => {
@@ -124,7 +125,7 @@ fn inner_watch(path: PathBuf) -> Result<BoxStream<'static, PathEvent>, Error> {
 
             let value = match message.event {
                 fuchsia_vfs_watcher::WatchEvent::EXISTING => {
-                    let node_type = match await!(NodeType::from_path(&file_path)) {
+                    let node_type = match NodeType::from_path(&file_path).await {
                         Ok(t) => t,
                         Err(_) => {
                             continue;
@@ -133,7 +134,7 @@ fn inner_watch(path: PathBuf) -> Result<BoxStream<'static, PathEvent>, Error> {
                     PathEvent::Existing(file_path, node_type)
                 }
                 fuchsia_vfs_watcher::WatchEvent::ADD_FILE => {
-                    let node_type = match await!(NodeType::from_path(&file_path)) {
+                    let node_type = match NodeType::from_path(&file_path).await {
                         Ok(t) => t,
                         Err(_) => {
                             continue;
@@ -147,7 +148,7 @@ fn inner_watch(path: PathBuf) -> Result<BoxStream<'static, PathEvent>, Error> {
                 }
             };
 
-            if await!(tx.send(value)).is_err() {
+            if tx.send(value).await.is_err() {
                 return;
             };
         }
@@ -155,7 +156,7 @@ fn inner_watch(path: PathBuf) -> Result<BoxStream<'static, PathEvent>, Error> {
 
     fasync::spawn(path_future);
 
-    Ok(rx.boxed())
+    Ok(rx.boxed() as BoxStream<_>)
 }
 
 /// Watches a path and all directories under that path for changes.
@@ -166,7 +167,7 @@ fn inner_watch(path: PathBuf) -> Result<BoxStream<'static, PathEvent>, Error> {
 ///
 /// The stream ends when the given path is deleted.
 pub fn watch_recursive(path: impl Into<PathBuf>) -> BoxStream<'static, Result<PathEvent, Error>> {
-    let (tx, rx) = channel(0);
+    let (tx, rx) = channel(1);
 
     fasync::spawn(inner_watch_recursive(tx, path.into(), true));
 
@@ -187,15 +188,15 @@ fn inner_watch_recursive(
     existing: bool,
 ) -> BoxFuture<'static, ()> {
     async move {
-        let mut watch_stream = match watch(&path) {
+        let mut watch_stream = match watch(&path).await {
             Ok(stream) => stream,
             Err(e) => {
-                await!(tx.send(Err(e))).unwrap_or_else(|_| {});
+                tx.send(Err(e)).await.unwrap_or_else(|_| {});
                 return;
             }
         };
 
-        while let Some(event) = await!(watch_stream.next()) {
+        while let Some(event) = watch_stream.next().await {
             let (next_path, next_existing, send_event) = match event {
                 PathEvent::Added(path, node_type) => {
                     // A path was observed being added, we need to watch the new path if it is a
@@ -219,7 +220,7 @@ fn inner_watch_recursive(
                 }
                 PathEvent::Removed(path) => (None, existing, PathEvent::Removed(path)),
             };
-            if await!(tx.send(Ok(send_event))).is_err() {
+            if tx.send(Ok(send_event)).await.is_err() {
                 break;
             }
             if let Some(next_path) = next_path {
@@ -259,16 +260,16 @@ mod tests {
         let subdir = path.join("subdir");
 
         fs::write(&existing_path, "a").expect("write existing");
-        let mut watch_stream = watch(path.clone()).expect("watch stream");
+        let mut watch_stream = watch(path.clone()).await.expect("watch stream");
         fs::write(&file1, "a").expect("write file1");
 
         assert_eq!(
             PathEvent::Existing(existing_path.clone(), NodeType::File),
-            await!(watch_stream.next()).expect("existing path read")
+            watch_stream.next().await.expect("existing path read")
         );
         assert_eq!(
             PathEvent::Added(file1.clone(), NodeType::File),
-            await!(watch_stream.next()).expect("added file read")
+            watch_stream.next().await.expect("added file read")
         );
 
         // Create subdir and a file under it.
@@ -286,23 +287,23 @@ mod tests {
 
         assert_eq!(
             PathEvent::Added(subdir.clone(), NodeType::Directory),
-            await!(watch_stream.next()).expect("added subdir read")
+            watch_stream.next().await.expect("added subdir read")
         );
         assert_eq!(
             PathEvent::Removed(existing_path.clone()),
-            await!(watch_stream.next()).expect("removed existing path read")
+            watch_stream.next().await.expect("removed existing path read")
         );
         assert_eq!(
             PathEvent::Removed(file1.clone()),
-            await!(watch_stream.next()).expect("removed file1 read")
+            watch_stream.next().await.expect("removed file1 read")
         );
         assert_eq!(
             PathEvent::Added(file1.clone(), NodeType::Unknown),
-            await!(watch_stream.next()).expect("added file1 read")
+            watch_stream.next().await.expect("added file1 read")
         );
         assert_eq!(
             PathEvent::Removed(file1.clone()),
-            await!(watch_stream.next()).expect("removed file1 again read")
+            watch_stream.next().await.expect("removed file1 again read")
         );
 
         // Remove everything, ensuring we reach the end of the stream.
@@ -310,9 +311,9 @@ mod tests {
 
         assert_eq!(
             PathEvent::Removed(subdir.clone()),
-            await!(watch_stream.next()).expect("removed subdir read")
+            watch_stream.next().await.expect("removed subdir read")
         );
-        assert_eq!(None, await!(watch_stream.next()));
+        assert_eq!(None, watch_stream.next().await);
     }
 
     #[fasync::run_singlethreaded(test)]
@@ -320,7 +321,7 @@ mod tests {
         let dir = tempdir().expect("make tempdir");
         let path = dir.path();
 
-        assert!(watch(path.join("does_not_exist")).is_err());
+        assert!(watch(path.join("does_not_exist")).await.is_err());
     }
 
     #[fasync::run_singlethreaded(test)]
@@ -339,11 +340,11 @@ mod tests {
 
         assert_eq!(
             Some(PathEvent::Existing(existing_dir.clone(), NodeType::Directory)),
-            await!(watch_stream.try_next()).expect("existing dir read")
+            watch_stream.try_next().await.expect("existing dir read")
         );
         assert_eq!(
             Some(PathEvent::Existing(existing_file.clone(), NodeType::File)),
-            await!(watch_stream.try_next()).expect("existing file read")
+            watch_stream.try_next().await.expect("existing file read")
         );
 
         // Create subdir and a directory under it.
@@ -354,11 +355,11 @@ mod tests {
 
         assert_eq!(
             Some(PathEvent::Added(subdir.clone(), NodeType::Directory)),
-            await!(watch_stream.try_next()).expect("added subdir read")
+            watch_stream.try_next().await.expect("added subdir read")
         );
         assert_eq!(
             Some(PathEvent::Added(subsubdir.clone(), NodeType::Directory)),
-            await!(watch_stream.try_next()).expect("added subsubdir read")
+            watch_stream.try_next().await.expect("added subsubdir read")
         );
 
         // Remove the existing dir and everything under it.
@@ -366,11 +367,11 @@ mod tests {
 
         assert_eq!(
             Some(PathEvent::Removed(existing_file.clone())),
-            await!(watch_stream.try_next()).expect("removed existing file read")
+            watch_stream.try_next().await.expect("removed existing file read")
         );
         assert_eq!(
             Some(PathEvent::Removed(existing_dir.clone())),
-            await!(watch_stream.try_next()).expect("removed existing dir read")
+            watch_stream.try_next().await.expect("removed existing dir read")
         );
 
         // Recreate and remove existing dir, we will fail to describe this directory, and attaching
@@ -381,11 +382,11 @@ mod tests {
 
         assert_eq!(
             Some(PathEvent::Added(existing_dir.clone(), NodeType::Unknown)),
-            await!(watch_stream.try_next()).expect("added existing dir read")
+            watch_stream.try_next().await.expect("added existing dir read")
         );
         assert_eq!(
             Some(PathEvent::Removed(existing_dir.clone())),
-            await!(watch_stream.try_next()).expect("removed existing dir again read")
+            watch_stream.try_next().await.expect("removed existing dir again read")
         );
 
         // Remove everything, ensuring we reach the end of the stream.
@@ -393,13 +394,13 @@ mod tests {
 
         assert_eq!(
             Some(PathEvent::Removed(subsubdir.clone())),
-            await!(watch_stream.try_next()).expect("removed subsubdir read")
+            watch_stream.try_next().await.expect("removed subsubdir read")
         );
         assert_eq!(
             Some(PathEvent::Removed(subdir.clone())),
-            await!(watch_stream.try_next()).expect("removed subdir read")
+            watch_stream.try_next().await.expect("removed subdir read")
         );
-        assert_eq!(None, await!(watch_stream.try_next()).unwrap());
+        assert_eq!(None, watch_stream.try_next().await.unwrap());
     }
 
     #[fasync::run_singlethreaded(test)]
@@ -413,8 +414,8 @@ mod tests {
 
         let mut stream = watch_recursive(&file);
 
-        assert!(await!(stream.try_next()).is_err());
-        assert_eq!(None, await!(stream.try_next()).expect("read sentinel"));
+        assert!(stream.try_next().await.is_err());
+        assert_eq!(None, stream.try_next().await.expect("read sentinel"));
     }
 
 }

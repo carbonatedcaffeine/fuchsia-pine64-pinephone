@@ -6,9 +6,8 @@
 //! that communicates with the Google identity system to perform authentication
 //! for and issue tokens for Google accounts.
 
-#![deny(warnings)]
 #![deny(missing_docs)]
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 mod auth_provider;
 mod auth_provider_factory;
@@ -16,6 +15,7 @@ mod constants;
 mod error;
 mod http;
 mod oauth;
+mod openid;
 mod web;
 
 use crate::auth_provider_factory::GoogleAuthProviderFactory;
@@ -36,7 +36,9 @@ fn main() -> Result<(), Error> {
         let auth_provider_factory =
             GoogleAuthProviderFactory::new().expect("Error creating GoogleAuthProviderFactory");
         fasync::spawn(async move {
-            await!(auth_provider_factory.handle_requests_from_stream(stream))
+            auth_provider_factory
+                .handle_requests_from_stream(stream)
+                .await
                 .unwrap_or_else(|e| error!("Error handling AuthProviderFactory channel {:?}", e));
         });
     });

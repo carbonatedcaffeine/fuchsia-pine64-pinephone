@@ -69,17 +69,14 @@ std::unique_ptr<uint8_t[]> make_AudioSpecificConfig_from_ADTS_header(
   profile_ObjectType = (adts_header[2] >> 6) & 0x3;
   sampling_frequency_index = (adts_header[2] >> 2) & 0xf;
   if (sampling_frequency_index >= 11) {
-    Exit("sampling frequency index too large: %d - exiting\n",
-         sampling_frequency_index);
+    Exit("sampling frequency index too large: %d - exiting\n", sampling_frequency_index);
   }
   channel_configuration = (adts_header[2] & 0x1) << 2 | (adts_header[3] >> 6);
 
   // Now let's convert these to the forms needed by AudioSpecificConfig.
-  uint8_t audioObjectType =
-      profile_ObjectType + 1;  // see near Table 1.A.11, for AAC not MPEG-2
-  uint8_t samplingFrequencyIndex =
-      sampling_frequency_index;                          // no conversion needed
-  uint8_t channelConfiguration = channel_configuration;  // no conversion needed
+  uint8_t audioObjectType = profile_ObjectType + 1;  // see near Table 1.A.11, for AAC not MPEG-2
+  uint8_t samplingFrequencyIndex = sampling_frequency_index;  // no conversion needed
+  uint8_t channelConfiguration = channel_configuration;       // no conversion needed
   uint8_t frameLengthFlag = 0;
   uint8_t dependsOnCoreCoder = 0;
   uint8_t extensionFlag = 0;
@@ -90,8 +87,7 @@ std::unique_ptr<uint8_t[]> make_AudioSpecificConfig_from_ADTS_header(
   uint8_t* asc_header = static_cast<uint8_t*>(asc.get());
   asc_header[0] = (audioObjectType << 3) | (samplingFrequencyIndex >> 1);
   asc_header[1] = (samplingFrequencyIndex << 7) | (channelConfiguration << 3) |
-                  (frameLengthFlag << 2) | (dependsOnCoreCoder << 1) |
-                  (extensionFlag << 0);
+                  (frameLengthFlag << 2) | (dependsOnCoreCoder << 1) | (extensionFlag << 0);
 
   return asc;
 }
@@ -117,11 +113,10 @@ std::unique_ptr<uint8_t[]> make_AudioSpecificConfig_from_ADTS_header(
 //     an example, this will tend to be set.  When used as a test, this will not
 //     be set.
 // out_md - SHA256_DIGEST_LENGTH bytes long
-void use_aac_decoder(async::Loop* main_loop,
-                     fuchsia::mediacodec::CodecFactoryPtr codec_factory,
+void use_aac_decoder(async::Loop* main_loop, fuchsia::mediacodec::CodecFactoryPtr codec_factory,
                      fidl::InterfaceHandle<fuchsia::sysmem::Allocator> sysmem,
-                     const std::string& input_adts_file,
-                     const std::string& output_wav_file, uint8_t* out_md) {
+                     const std::string& input_adts_file, const std::string& output_wav_file,
+                     uint8_t* out_md) {
   memset(out_md, 0, SHA256_DIGEST_LENGTH);
 
   // In this example code, we're using this async::Loop for everything
@@ -135,14 +130,15 @@ void use_aac_decoder(async::Loop* main_loop,
   // those sends which are already on the loop thread, vs. what we're doing
   // which only needs anything extra for sends we queue from threads that aren't
   // the loop thread.
-  async::Loop loop(&kAsyncLoopConfigNoAttachToThread);
+  async::Loop fidl_loop(&kAsyncLoopConfigNoAttachToThread);
 
   // This example will give the loop it's own thread, so that the main thread
   // can be used to sequence overall control of the Codec instance using a
   // thread instead of chaining together a bunch of async activity (which would
   // be more complicated to understand and serve little purpose in an example
   // program like this).
-  loop.StartThread("use_aac_decoder_loop");
+  thrd_t fidl_thread;
+  ZX_ASSERT(ZX_OK == fidl_loop.StartThread("use_aac_decoder_loop", &fidl_thread));
   // From this point forward, because the loop is already running, this example
   // needs to be careful to be ready for all potential FIDL channel messages and
   // errors before attaching the channel to the loop.  The loop will continue
@@ -181,8 +177,7 @@ void use_aac_decoder(async::Loop* main_loop,
 
   VLOGF("reading adts file...\n");
   size_t input_size;
-  std::unique_ptr<uint8_t[]> input_bytes =
-      read_whole_file(input_adts_file.c_str(), &input_size);
+  std::unique_ptr<uint8_t[]> input_bytes = read_whole_file(input_adts_file.c_str(), &input_size);
   VLOGF("done reading adts file.\n");
 
   codec_factory.set_error_handler([](zx_status_t status) {
@@ -193,8 +188,7 @@ void use_aac_decoder(async::Loop* main_loop,
 
   VLOGF("before make_AudioSpecificConfig_from_ADTS_header()...\n");
   VLOGF("input_bytes->get(): %p\n", input_bytes.get());
-  std::unique_ptr<uint8_t[]> asc =
-      make_AudioSpecificConfig_from_ADTS_header(&input_bytes);
+  std::unique_ptr<uint8_t[]> asc = make_AudioSpecificConfig_from_ADTS_header(&input_bytes);
   VLOGF("after make_AudioSpecificConfig_from_ADTS_header()\n");
   std::vector<uint8_t> asc_vector(2);
   for (int i = 0; i < 2; i++) {
@@ -213,8 +207,7 @@ void use_aac_decoder(async::Loop* main_loop,
   // QueueInputFormatDetails() does.
   // create_params.input_details.oob_bytes.reset(std::move(asc_vector));
 
-  fuchsia::media::FormatDetails full_input_details =
-      fidl::Clone(create_params.input_details());
+  fuchsia::media::FormatDetails full_input_details = fidl::Clone(create_params.input_details());
   *full_input_details.mutable_oob_bytes() = std::move(asc_vector);
 
   // We're using CodecPtr here rather than CodecSyncPtr partly to have this
@@ -227,14 +220,12 @@ void use_aac_decoder(async::Loop* main_loop,
   // loop is already running, and we want the error handler to be set up by
   // CodecClient in advance of the channel potentially being closed.
   VLOGF("before CodecClient::CodecClient()...\n");
-  CodecClient codec_client(&loop, std::move(sysmem));
+  CodecClient codec_client(&fidl_loop, fidl_thread, std::move(sysmem));
   async::PostTask(
-      main_loop->dispatcher(),
-      [&codec_factory, create_params = std::move(create_params),
-       codec_client_request = codec_client.GetTheRequestOnce()]() mutable {
+      main_loop->dispatcher(), [&codec_factory, create_params = std::move(create_params),
+                                codec_client_request = codec_client.GetTheRequestOnce()]() mutable {
         VLOGF("before codec_factory->CreateDecoder() (async)\n");
-        codec_factory->CreateDecoder(std::move(create_params),
-                                     std::move(codec_client_request));
+        codec_factory->CreateDecoder(std::move(create_params), std::move(codec_client_request));
       });
   VLOGF("before codec_client.Start()...\n");
   // This does a Sync(), so after this we can drop the CodecFactory without it
@@ -251,18 +242,17 @@ void use_aac_decoder(async::Loop* main_loop,
   std::mutex unbind_mutex;
   std::condition_variable unbind_done_condition;
   bool unbind_done = false;
-  async::PostTask(
-      main_loop->dispatcher(),
-      [&codec_factory, &unbind_mutex, &unbind_done, &unbind_done_condition] {
-        codec_factory.Unbind();
-        {  // scope lock
-          std::lock_guard<std::mutex> lock(unbind_mutex);
-          unbind_done = true;
-        }  // ~lock
-        unbind_done_condition.notify_all();
-        // All of codec_factory, unbind_mutex, unbind_done,
-        // unbind_done_condition are potentially gone by this point.
-      });
+  async::PostTask(main_loop->dispatcher(),
+                  [&codec_factory, &unbind_mutex, &unbind_done, &unbind_done_condition] {
+                    codec_factory.Unbind();
+                    {  // scope lock
+                      std::lock_guard<std::mutex> lock(unbind_mutex);
+                      unbind_done = true;
+                    }  // ~lock
+                    unbind_done_condition.notify_all();
+                    // All of codec_factory, unbind_mutex, unbind_done,
+                    // unbind_done_condition are potentially gone by this point.
+                  });
   {  // scope lock
     std::unique_lock<std::mutex> lock(unbind_mutex);
     while (!unbind_done) {
@@ -281,11 +271,10 @@ void use_aac_decoder(async::Loop* main_loop,
   // the captures go out of scope.
   VLOGF("before starting in_thread...\n");
   std::unique_ptr<std::thread> in_thread = std::make_unique<std::thread>(
-      [&codec_client, full_input_details = std::move(full_input_details),
-       &input_bytes, input_size]() mutable {
+      [&codec_client, full_input_details = std::move(full_input_details), &input_bytes,
+       input_size]() mutable {
         // First queue the full_input_details.
-        codec_client.QueueInputFormatDetails(kStreamLifetimeOrdinal,
-                                             std::move(full_input_details));
+        codec_client.QueueInputFormatDetails(kStreamLifetimeOrdinal, std::move(full_input_details));
 
         // "syncword" bits for ADTS are, starting at byte alignment: 0xFF 0xF.
         // That's 12 1 bits, with the first 1 bit starting at a byte aligned
@@ -296,8 +285,7 @@ void use_aac_decoder(async::Loop* main_loop,
         // sync.  In this case the test file is clean, so by parsing the aac
         // frame length we can skip forward and avoid getting fooled by the fake
         // syncword(s).
-        auto queue_access_unit = [&codec_client](uint8_t* bytes,
-                                                 size_t byte_count) {
+        auto queue_access_unit = [&codec_client](uint8_t* bytes, size_t byte_count) {
           size_t bytes_so_far = 0;
           // printf("queuing offset: %ld byte_count: %zu\n", bytes -
           // input_bytes.get(), byte_count);
@@ -313,10 +301,9 @@ void use_aac_decoder(async::Loop* main_loop,
               Exit("broken server sent packet without packet index");
             }
 
-            const CodecBuffer& buffer = codec_client.GetInputBufferByIndex(
-                packet->header().packet_index());
-            size_t bytes_to_copy =
-                std::min(byte_count - bytes_so_far, buffer.size_bytes());
+            const CodecBuffer& buffer =
+                codec_client.GetInputBufferByIndex(packet->header().packet_index());
+            size_t bytes_to_copy = std::min(byte_count - bytes_so_far, buffer.size_bytes());
             packet->set_stream_lifetime_ordinal(kStreamLifetimeOrdinal);
             packet->set_start_offset(0);
             packet->set_valid_length_bytes(bytes_to_copy);
@@ -329,8 +316,7 @@ void use_aac_decoder(async::Loop* main_loop,
         };
         int input_byte_count = input_size;
         for (int i = 0; i < input_byte_count - 1;) {
-          if (!(input_bytes[i] == 0xFF &&
-                ((input_bytes[i + 1] & 0xF0) == 0xF0))) {
+          if (!(input_bytes[i] == 0xFF && ((input_bytes[i + 1] & 0xF0) == 0xF0))) {
             printf("s");
             i++;
             continue;
@@ -345,9 +331,8 @@ void use_aac_decoder(async::Loop* main_loop,
                 "bytes_left: %d adts_header_size: %d",
                 bytes_left, adts_header_size);
           }
-          uint32_t aac_frame_length = ((adts_header[3] & 3) << 11) |
-                                      (adts_header[4] << 3) |
-                                      (adts_header[5] >> 5);
+          uint32_t aac_frame_length =
+              ((adts_header[3] & 3) << 11) | (adts_header[4] << 3) | (adts_header[5] >> 5);
           if (bytes_left < aac_frame_length) {
             Exit(
                 "input data corrupt (maybe truncated) - vs frame length - "
@@ -366,8 +351,9 @@ void use_aac_decoder(async::Loop* main_loop,
   // Separate thread to process the output.
   //
   // codec_client outlives the thread.
-  std::unique_ptr<std::thread> out_thread = std::make_unique<
-      std::thread>([&codec_client, output_wav_file, out_md]() {
+  std::unique_ptr<std::thread> out_thread = std::make_unique<std::thread>([&codec_client,
+                                                                           output_wav_file,
+                                                                           out_md]() {
     // The codec_client lock_ is not held for long durations in here, which is
     // good since we're using this thread to do things like write to a WAV
     // file.
@@ -385,8 +371,7 @@ void use_aac_decoder(async::Loop* main_loop,
     // stream data show up, since WAV only supports a single format per file.
     std::shared_ptr<const fuchsia::media::StreamOutputFormat> stream_format;
     while (true) {
-      std::unique_ptr<CodecOutput> output =
-          codec_client.BlockingGetEmittedOutput();
+      std::unique_ptr<CodecOutput> output = codec_client.BlockingGetEmittedOutput();
       if (output->stream_lifetime_ordinal() != kStreamLifetimeOrdinal) {
         Exit(
             "server emitted a stream_lifetime_ordinal that client didn't set "
@@ -419,27 +404,23 @@ void use_aac_decoder(async::Loop* main_loop,
 
       // We don't really care about output->constraints() here, for now.
 
-      std::shared_ptr<const fuchsia::media::StreamOutputFormat> format =
-          output->format();
+      std::shared_ptr<const fuchsia::media::StreamOutputFormat> format = output->format();
       // This will remain live long enough because this thread is the only
       // thread that re-allocates output buffers.
       const CodecBuffer& buffer =
           codec_client.GetOutputBufferByIndex(packet.header().packet_index());
 
       ZX_ASSERT(!stream_format || stream_format->has_format_details());
-      if (stream_format &&
-          (!format->has_format_details() ||
-           !format->format_details().has_format_details_version_ordinal() ||
-           format->format_details().format_details_version_ordinal() !=
-               stream_format->format_details()
-                   .format_details_version_ordinal())) {
+      if (stream_format && (!format->has_format_details() ||
+                            !format->format_details().has_format_details_version_ordinal() ||
+                            format->format_details().format_details_version_ordinal() !=
+                                stream_format->format_details().format_details_version_ordinal())) {
         Exit(
             "codec server unexpectedly changed output format mid-stream - "
             "unexpected for this stream");
       }
 
-      if (!packet.has_valid_length_bytes() ||
-          packet.valid_length_bytes() == 0) {
+      if (!packet.has_valid_length_bytes() || packet.valid_length_bytes() == 0) {
         // The server should not generate any empty packets.
         Exit("broken server sent empty packet");
       }
@@ -459,8 +440,7 @@ void use_aac_decoder(async::Loop* main_loop,
           Exit("!format_details");
         }
 
-        const fuchsia::media::FormatDetails& format_details =
-            stream_format->format_details();
+        const fuchsia::media::FormatDetails& format_details = stream_format->format_details();
         if (!format_details.has_domain()) {
           Exit("!format.domain");
         }
@@ -468,13 +448,11 @@ void use_aac_decoder(async::Loop* main_loop,
         if (!format_details.domain().is_audio()) {
           Exit("!format.domain.is_audio() - unexpected");
         }
-        const fuchsia::media::AudioFormat& audio =
-            format_details.domain().audio();
+        const fuchsia::media::AudioFormat& audio = format_details.domain().audio();
         if (!audio.is_uncompressed()) {
           Exit("!audio.is_uncompressed() - unexpected");
         }
-        const fuchsia::media::AudioUncompressedFormat& uncompressed =
-            audio.uncompressed();
+        const fuchsia::media::AudioUncompressedFormat& uncompressed = audio.uncompressed();
         if (!uncompressed.is_pcm()) {
           Exit("!uncompressed.is_pcm() - unexpected");
         }
@@ -511,19 +489,15 @@ void use_aac_decoder(async::Loop* main_loop,
               "this example");
         }
         if (pcm.bits_per_sample != 16) {
-          Exit("pcm.bits_per_sample != 16 - unexpected - actual: %d",
-               pcm.bits_per_sample);
+          Exit("pcm.bits_per_sample != 16 - unexpected - actual: %d", pcm.bits_per_sample);
         }
         if (pcm.frames_per_second != 44100) {
-          Exit("pcm.frames_per_second != 44100 - unexpected - actual: %d",
-               pcm.frames_per_second);
+          Exit("pcm.frames_per_second != 44100 - unexpected - actual: %d", pcm.frames_per_second);
         }
         if (!output_wav_file.empty()) {
           if (!wav_writer.Initialize(
-                  output_wav_file.c_str(),
-                  fuchsia::media::AudioSampleFormat::SIGNED_16,
-                  pcm.channel_map.size(), pcm.frames_per_second,
-                  pcm.bits_per_sample)) {
+                  output_wav_file.c_str(), fuchsia::media::AudioSampleFormat::SIGNED_16,
+                  pcm.channel_map.size(), pcm.frames_per_second, pcm.bits_per_sample)) {
             Exit("wav_writer.Initialize() failed");
           }
           is_wav_initialized = true;
@@ -534,15 +508,12 @@ void use_aac_decoder(async::Loop* main_loop,
       // We have a non-empty buffer (EOS or not), so write the audio data to the
       // WAV file.
       if (is_wav_initialized) {
-        if (!wav_writer.Write(buffer.base() + packet.start_offset(),
-                              packet.valid_length_bytes())) {
+        if (!wav_writer.Write(buffer.base() + packet.start_offset(), packet.valid_length_bytes())) {
           Exit("wav_writer.Write() failed");
         }
       }
-      int16_t* int16_base =
-          reinterpret_cast<int16_t*>(buffer.base() + packet.start_offset());
-      for (size_t iter = 0;
-           iter < packet.valid_length_bytes() / sizeof(int16_t); iter++) {
+      int16_t* int16_base = reinterpret_cast<int16_t*>(buffer.base() + packet.start_offset());
+      for (size_t iter = 0; iter < packet.valid_length_bytes() / sizeof(int16_t); iter++) {
         int16_t data_le = htole16(int16_base[iter]);
         SHA256_Update(&sha256_ctx, &data_le, sizeof(data_le));
       }
@@ -597,9 +568,9 @@ void use_aac_decoder(async::Loop* main_loop,
   // runs on the loop.  This way, unexpected channel failure is the only case to
   // worry about.
   VLOGF("before loop.Quit()\n");
-  loop.Quit();
+  fidl_loop.Quit();
   VLOGF("before loop.JoinThreads()...\n");
-  loop.JoinThreads();
+  fidl_loop.JoinThreads();
   VLOGF("after loop.JoinThreads()\n");
 
   // Close the channel explicitly (just so we can more easily print messages
@@ -613,7 +584,7 @@ void use_aac_decoder(async::Loop* main_loop,
   // codec_client.Stop() it would cause the channel bindings to fail because
   // async waits are failed as cancelled during Shutdown().
   VLOGF("before loop.Shutdown()...\n");
-  loop.Shutdown();
+  fidl_loop.Shutdown();
   VLOGF("after loop.Shutdown()\n");
 
   // The FIDL loop isn't running any more and the channels are closed.  There

@@ -4,7 +4,7 @@
 
 use crate::auth_provider::{self, GoogleAuthProvider};
 use crate::http::UrlLoaderHttpClient;
-use crate::web::StandaloneWebFrame;
+use crate::web::DefaultStandaloneWebFrame;
 use failure::Error;
 use fidl::endpoints::{create_proxy, ClientEnd};
 use fidl_fuchsia_auth::{
@@ -45,8 +45,8 @@ impl GoogleAuthProviderFactory {
         &self,
         mut stream: AuthProviderFactoryRequestStream,
     ) -> Result<(), Error> {
-        while let Some(request) = await!(stream.try_next())? {
-            await!(self.handle_request(request))?;
+        while let Some(request) = stream.try_next().await? {
+            self.handle_request(request).await?;
         }
         Ok(())
     }
@@ -60,7 +60,9 @@ impl GoogleAuthProviderFactory {
         let request_stream = server_end.into_stream()?;
         let auth_provider = Arc::clone(&self.google_auth_provider);
         fasync::spawn(async move {
-            await!(auth_provider.handle_requests_from_stream(request_stream))
+            auth_provider
+                .handle_requests_from_stream(request_stream)
+                .await
                 .unwrap_or_else(|e| error!("Error handling AuthProvider channel {:?}", e));
         });
         responder.send(AuthProviderStatus::Ok)?;
@@ -79,7 +81,8 @@ impl WebFrameSupplier {
 }
 
 impl auth_provider::WebFrameSupplier for WebFrameSupplier {
-    fn new_standalone_frame(&self) -> Result<StandaloneWebFrame, failure::Error> {
+    type Frame = DefaultStandaloneWebFrame;
+    fn new_standalone_frame(&self) -> Result<DefaultStandaloneWebFrame, failure::Error> {
         let context_provider = connect_to_service::<ContextProviderMarker>()?;
         let (context_proxy, context_server_end) = create_proxy::<ContextMarker>()?;
 
@@ -102,6 +105,6 @@ impl auth_provider::WebFrameSupplier for WebFrameSupplier {
 
         let (frame_proxy, frame_server_end) = create_proxy::<FrameMarker>()?;
         context_proxy.create_frame(frame_server_end)?;
-        Ok(StandaloneWebFrame::new(context_proxy, frame_proxy))
+        Ok(DefaultStandaloneWebFrame::new(context_proxy, frame_proxy))
     }
 }

@@ -16,8 +16,9 @@
 #include "peridot/lib/convert/convert.h"
 #include "src/ledger/bin/encryption/public/encryption_service.h"
 #include "src/ledger/bin/environment/environment.h"
+#include "src/ledger/bin/storage/impl/commit_factory.h"
 #include "src/ledger/bin/storage/impl/commit_pruner.h"
-#include "src/ledger/bin/storage/impl/live_commit_tracker.h"
+#include "src/ledger/bin/storage/impl/object_identifier_factory_impl.h"
 #include "src/ledger/bin/storage/impl/page_db_impl.h"
 #include "src/ledger/bin/storage/public/db.h"
 #include "src/ledger/bin/storage/public/page_storage.h"
@@ -26,6 +27,7 @@
 #include "src/ledger/lib/coroutine/coroutine.h"
 #include "src/ledger/lib/coroutine/coroutine_manager.h"
 #include "src/lib/fxl/memory/ref_ptr.h"
+#include "src/lib/fxl/memory/weak_ptr.h"
 #include "src/lib/fxl/observer_list.h"
 #include "src/lib/fxl/strings/string_view.h"
 
@@ -53,9 +55,11 @@ class PageStorageImpl : public PageStorage {
   void ObjectIsUntracked(ObjectIdentifier object_identifier,
                          fit::function<void(Status, bool)> callback);
 
+  void SetSyncDelegate(PageSyncDelegate* page_sync) override;
+
   // PageStorage:
   PageId GetId() override;
-  void SetSyncDelegate(PageSyncDelegate* page_sync) override;
+  ObjectIdentifierFactory* GetObjectIdentifierFactory() override;
   Status GetHeadCommits(std::vector<std::unique_ptr<const Commit>>* head_commits) override;
   void GetMergeCommitIds(CommitIdView parent1_id, CommitIdView parent2_id,
                          fit::function<void(Status, std::vector<CommitId>)> callback) override;
@@ -106,6 +110,9 @@ class PageStorageImpl : public PageStorage {
                          fit::function<void(Status)> on_done) override;
   void GetEntryFromCommit(const Commit& commit, std::string key,
                           fit::function<void(Status, Entry)> callback) override;
+  void GetDiffForCloud(
+      const Commit& target_commit,
+      fit::function<void(Status, CommitIdView, std::vector<EntryChange>)> callback) override;
   void GetCommitContentsDiff(const Commit& base_commit, const Commit& other_commit,
                              std::string min_key, fit::function<bool(EntryChange)> on_next_diff,
                              fit::function<void(Status)> on_done) override;
@@ -114,9 +121,7 @@ class PageStorageImpl : public PageStorage {
                                fit::function<bool(ThreeWayChange)> on_next_diff,
                                fit::function<void(Status)> on_done) override;
 
-  // Returns the LiveCommitTracker associated with this page. |PageStorageImpl|
-  // must outlive the returned pointer.
-  LiveCommitTracker* GetCommitTracker();
+  CommitFactory* GetCommitFactory();
 
  private:
   friend class PageStorageImplAccessorForTest;
@@ -148,14 +153,14 @@ class PageStorageImpl : public PageStorage {
 
   // Returns the piece identified by |object_identifier|. |location| is either LOCAL and NETWORK,
   // and defines whether the piece should be looked up remotely if not available locally.
-  // When the piece has been retrieved remotely, attempts to add it to storage before returning it.
-  // If this is not possible, ie. when the piece is an index tree-node that requires the full object
-  // to compute its references, also returns a WritePieceCallback. It is the callers responsability
-  // to invoke this callback to add the piece to storage once they have gathered the full object.
-  // The WritePieceCallback is safe to call as long as this class is valid. It should not outlive
-  // the returned piece (since a reference to the piece must be passed to it when invoked), and in
-  // practice should be called as soon as the full object containing the piece has been constructed
-  // to ensure data is persisted to disk as early as possible.
+  // When the piece has been retrieved remotely, attempts to add it to storage before returning
+  // it. If this is not possible, ie. when the piece is an index tree-node that requires the full
+  // object to compute its references, also returns a WritePieceCallback. It is the callers
+  // responsability to invoke this callback to add the piece to storage once they have gathered
+  // the full object. The WritePieceCallback is safe to call as long as this class is valid. It
+  // should not outlive the returned piece (since a reference to the piece must be passed to it
+  // when invoked), and in practice should be called as soon as the full object containing the
+  // piece has been constructed to ensure data is persisted to disk as early as possible.
   void GetOrDownloadPiece(
       ObjectIdentifier object_identifier, Location location,
       fit::function<void(Status, std::unique_ptr<const Piece>, WritePieceCallback)> callback);
@@ -234,10 +239,15 @@ class PageStorageImpl : public PageStorage {
   FXL_WARN_UNUSED_RESULT Status SynchronousGetEmptyNodeIdentifier(
       coroutine::CoroutineHandler* handler, ObjectIdentifier** empty_node_id);
 
+  // Checks if a tracked object identifier is tracked by this PageStorage.
+  // Returns true for all untracked object identifiers.
+  bool IsTokenValid(const ObjectIdentifier& object_identifier);
+
   ledger::Environment* environment_;
   encryption::EncryptionService* const encryption_service_;
   const PageId page_id_;
-  LiveCommitTracker commit_tracker_;
+  ObjectIdentifierFactoryImpl object_identifier_factory_;
+  CommitFactory commit_factory_;
   CommitPruner commit_pruner_;
   std::unique_ptr<PageDb> db_;
   fxl::ObserverList<CommitWatcher> watchers_;
@@ -248,6 +258,9 @@ class PageStorageImpl : public PageStorage {
 
   callback::OperationSerializer commit_serializer_;
   coroutine::CoroutineManager coroutine_manager_;
+
+  // This must be the last member of the class.
+  fxl::WeakPtrFactory<PageStorageImpl> weak_factory_;
 
   FXL_DISALLOW_COPY_AND_ASSIGN(PageStorageImpl);
 };

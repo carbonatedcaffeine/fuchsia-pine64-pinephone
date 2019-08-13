@@ -52,6 +52,12 @@ protocol ExampleProtocol {
     Method(exampleusing.Empty arg);
 };
 
+[OnService]
+service ExampleService {
+    [OnServiceMember]
+    ExampleProtocol member;
+};
+
 [OnStruct]
 struct ExampleStruct {
     [OnStructMember]
@@ -104,6 +110,11 @@ xunion ExampleXUnion {
   ASSERT_NONNULL(example_protocol);
   EXPECT_TRUE(example_protocol->attributes->HasAttribute("OnProtocol"));
   EXPECT_TRUE(example_protocol->methods.front().attributes->HasAttribute("OnMethod"));
+
+  auto example_service = library.LookupService("ExampleService");
+  ASSERT_NONNULL(example_service);
+  EXPECT_TRUE(example_service->attributes->HasAttribute("OnService"));
+  EXPECT_TRUE(example_service->members.front().attributes->HasAttribute("OnServiceMember"));
 
   auto example_struct = library.LookupStruct("ExampleStruct");
   ASSERT_NONNULL(example_struct);
@@ -324,13 +335,13 @@ protocol A {
   END_TEST;
 }
 
-bool socket_control_transport() {
+bool syscall_transport() {
   BEGIN_TEST;
 
-  TestLibrary library("transport_attribuets.fidl", R"FIDL(
+  TestLibrary library("transport_attributes.fidl", R"FIDL(
 library fidl.test.transportattributes;
 
-[Transport = "SocketControl"]
+[Transport = "Syscall"]
 protocol A {
     MethodA();
 };
@@ -349,7 +360,7 @@ bool multiple_transports() {
   TestLibrary library("transport_attribuets.fidl", R"FIDL(
 library fidl.test.transportattributes;
 
-[Transport = "SocketControl, OvernetInternal"]
+[Transport = "Channel, OvernetInternal"]
 protocol A {
     MethodA();
 };
@@ -368,7 +379,7 @@ bool multiple_transports_with_bogus() {
   TestLibrary library("transport_attribuets.fidl", R"FIDL(
 library fidl.test.transportattributes;
 
-[Transport = "SocketControl,Bogus, OvernetInternal"]
+[Transport = "Channel, Bogus, OvernetInternal"]
 protocol A {
     MethodA();
 };
@@ -615,7 +626,7 @@ RUN_TEST(warnings_as_errors_test)
 RUN_TEST(empty_transport)
 RUN_TEST(bogus_transport)
 RUN_TEST(channel_transport)
-RUN_TEST(socket_control_transport)
+RUN_TEST(syscall_transport)
 RUN_TEST(multiple_transports)
 RUN_TEST(multiple_transports_with_bogus)
 RUN_TEST(incorrect_placement_layout)

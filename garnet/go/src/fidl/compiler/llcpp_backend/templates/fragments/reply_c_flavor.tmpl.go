@@ -11,9 +11,9 @@ Reply({{ template "Params" .Response }})
 
 {{- define "ReplyCFlavorMethodDefinition" }}
 void {{ .LLProps.InterfaceName }}::Interface::{{ .Name }}CompleterBase::{{ template "ReplyCFlavorMethodSignature" . }} {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<{{ .Name }}Response>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<{{ .Name }}Response, ::fidl::MessageDirection::kSending>();
 
-  {{- if .LLProps.StackAllocResponse }}
+  {{- if .LLProps.ClientContext.StackAllocResponse }}
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] {{- if not .LLProps.LinearizeResponse }} = {} {{- end }};
   {{- else }}
   std::unique_ptr<uint8_t[]> _write_bytes_unique_ptr(new uint8_t[_kWriteAllocSize]);
@@ -25,7 +25,7 @@ void {{ .LLProps.InterfaceName }}::Interface::{{ .Name }}CompleterBase::{{ templ
   {{- else }}
   auto& _response = *reinterpret_cast<{{ .Name }}Response*>(_write_bytes);
   {{- end }}
-  _response._hdr.ordinal = {{ .OrdinalName }};
+  _response._hdr.ordinal = {{ .Ordinals.Write.Name }};
   {{- template "FillResponseStructMembers" .Response -}}
 
   {{- if .LLProps.LinearizeResponse }}

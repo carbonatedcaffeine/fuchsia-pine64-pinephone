@@ -5,12 +5,13 @@
 #ifndef GARNET_DRIVERS_VIDEO_AMLOGIC_DECODER_CODEC_ADAPTER_VP9_H_
 #define GARNET_DRIVERS_VIDEO_AMLOGIC_DECODER_CODEC_ADAPTER_VP9_H_
 
-#include <fbl/macros.h>
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/media/codec_impl/codec_adapter.h>
 #include <lib/zx/bti.h>
 
 #include <random>
+
+#include <fbl/macros.h>
 
 #include "vp9_decoder.h"
 
@@ -19,11 +20,9 @@ struct CodecFrame;
 class DeviceCtx;
 struct VideoFrame;
 
-class CodecAdapterVp9 : public CodecAdapter,
-                        public Vp9Decoder::FrameDataProvider {
+class CodecAdapterVp9 : public CodecAdapter, public Vp9Decoder::FrameDataProvider {
  public:
-  explicit CodecAdapterVp9(std::mutex& lock,
-                           CodecAdapterEvents* codec_adapter_events,
+  explicit CodecAdapterVp9(std::mutex& lock, CodecAdapterEvents* codec_adapter_events,
                            DeviceCtx* device);
   ~CodecAdapterVp9();
 
@@ -31,35 +30,26 @@ class CodecAdapterVp9 : public CodecAdapter,
   bool IsCoreCodecMappedBufferNeeded(CodecPort port) override;
   bool IsCoreCodecHwBased() override;
 
-  void CoreCodecInit(const fuchsia::media::FormatDetails&
-                         initial_input_format_details) override;
-  fuchsia::sysmem::BufferCollectionConstraints
-  CoreCodecGetBufferCollectionConstraints(
-      CodecPort port,
-      const fuchsia::media::StreamBufferConstraints& stream_buffer_constraints,
-      const fuchsia::media::StreamBufferPartialSettings& partial_settings)
-      override;
+  void CoreCodecInit(const fuchsia::media::FormatDetails& initial_input_format_details) override;
+  fuchsia::sysmem::BufferCollectionConstraints CoreCodecGetBufferCollectionConstraints(
+      CodecPort port, const fuchsia::media::StreamBufferConstraints& stream_buffer_constraints,
+      const fuchsia::media::StreamBufferPartialSettings& partial_settings) override;
   void CoreCodecSetBufferCollectionInfo(
       CodecPort port,
-      const fuchsia::sysmem::BufferCollectionInfo_2& buffer_collection_info)
-      override;
+      const fuchsia::sysmem::BufferCollectionInfo_2& buffer_collection_info) override;
   void CoreCodecStartStream() override;
   void CoreCodecQueueInputFormatDetails(
-      const fuchsia::media::FormatDetails& per_stream_override_format_details)
-      override;
+      const fuchsia::media::FormatDetails& per_stream_override_format_details) override;
   void CoreCodecQueueInputPacket(CodecPacket* packet) override;
   void CoreCodecQueueInputEndOfStream() override;
   void CoreCodecStopStream() override;
   void CoreCodecAddBuffer(CodecPort port, const CodecBuffer* buffer) override;
-  void CoreCodecConfigureBuffers(
-      CodecPort port,
-      const std::vector<std::unique_ptr<CodecPacket>>& packets) override;
+  void CoreCodecConfigureBuffers(CodecPort port,
+                                 const std::vector<std::unique_ptr<CodecPacket>>& packets) override;
   void CoreCodecRecycleOutputPacket(CodecPacket* packet) override;
   void CoreCodecEnsureBuffersNotConfigured(CodecPort port) override;
-  std::unique_ptr<const fuchsia::media::StreamOutputConstraints>
-  CoreCodecBuildNewOutputConstraints(
-      uint64_t stream_lifetime_ordinal,
-      uint64_t new_output_buffer_constraints_version_ordinal,
+  std::unique_ptr<const fuchsia::media::StreamOutputConstraints> CoreCodecBuildNewOutputConstraints(
+      uint64_t stream_lifetime_ordinal, uint64_t new_output_buffer_constraints_version_ordinal,
       bool buffer_constraints_action_required) override;
   fuchsia::media::StreamOutputFormat CoreCodecGetOutputFormat(
       uint64_t stream_lifetime_ordinal,
@@ -78,13 +68,17 @@ class CodecAdapterVp9 : public CodecAdapter,
   void QueueInputItem(CodecInputItem input_item);
   CodecInputItem DequeueInputItem();
   void ProcessInput();
+  bool IsCurrentOutputBufferCollectionUsable(
+      uint32_t frame_count, uint32_t coded_width, uint32_t coded_height, uint32_t stride,
+      uint32_t display_width, uint32_t display_height);
   zx_status_t InitializeFramesHandler(::zx::bti bti, uint32_t frame_count,
                                       uint32_t width, uint32_t height,
                                       uint32_t stride, uint32_t display_width,
                                       uint32_t display_height, bool has_sar,
                                       uint32_t sar_width, uint32_t sar_height);
 
-  void OnCoreCodecFailStream();
+  void OnCoreCodecEos();
+  void OnCoreCodecFailStream(fuchsia::media::StreamError error);
   CodecPacket* GetFreePacket();
 
   DeviceCtx* device_ = nullptr;
@@ -108,19 +102,25 @@ class CodecAdapterVp9 : public CodecAdapter,
   // Skip any further processing in ProcessInput().
   bool is_cancelling_input_processing_ = false;
 
+  std::optional<fuchsia::sysmem::BufferCollectionInfo_2> output_buffer_collection_info_;
+
   std::vector<const CodecBuffer*> all_output_buffers_;
   std::vector<CodecPacket*> all_output_packets_;
   std::vector<uint32_t> free_output_packets_;
 
+  // >= output_buffer_collection_info_.buffer_count
   uint32_t packet_count_total_ = 0;
-  uint32_t width_ = 0;
-  uint32_t height_ = 0;
-  uint32_t stride_ = 0;
-  uint32_t display_width_ = 0;
-  uint32_t display_height_ = 0;
+  // These don't actually change, for VP9, since the SAR is at webm layer and
+  // the VP9 decoder never actually sees SAR.
   bool has_sar_ = false;
   uint32_t sar_width_ = 0;
   uint32_t sar_height_ = 0;
+  // These change on the fly as frames are decoded:
+  uint32_t coded_width_ = 0;
+  uint32_t coded_height_ = 0;
+  uint32_t stride_ = 0;
+  uint32_t display_width_ = 0;
+  uint32_t display_height_ = 0;
 
   // Output frames get a PTS based on looking up the output frame's input stream
   // offset via the PtsManager.  For that to work we have to feed the input PTSs

@@ -3,9 +3,8 @@
 // found in the LICENSE file.
 
 //! Types that are shared across more than one Account Management crate.
-#![deny(warnings)]
 #![deny(missing_docs)]
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 extern crate serde;
 

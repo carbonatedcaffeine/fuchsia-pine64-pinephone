@@ -25,7 +25,7 @@
       "methods": [
         {
           "ordinal": 915586153,
-          "generated_ordinal": 915586153,
+          "generated_ordinal": 3932412583805452288,
           "name": "GetChild",
           "location": {
             "filename": "garnet/go/src/fidl/compiler/backend/typestest/protocol_request.test.fidl",
@@ -37,6 +37,7 @@
           "maybe_request_size": 16,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": false,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": true,
           "maybe_response": [
             {
@@ -60,11 +61,13 @@
           ],
           "maybe_response_size": 24,
           "maybe_response_alignment": 8,
-          "maybe_response_has_padding": true
+          "maybe_response_has_padding": true,
+          "experimental_maybe_response_has_flexible_envelope": false,
+          "is_composed": false
         },
         {
           "ordinal": 1068158078,
-          "generated_ordinal": 1068158078,
+          "generated_ordinal": 4587704011968217088,
           "name": "GetChildRequest",
           "location": {
             "filename": "garnet/go/src/fidl/compiler/backend/typestest/protocol_request.test.fidl",
@@ -76,6 +79,7 @@
           "maybe_request_size": 16,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": false,
+          "experimental_maybe_request_has_flexible_envelope": false,
           "has_response": true,
           "maybe_response": [
             {
@@ -99,11 +103,13 @@
           ],
           "maybe_response_size": 24,
           "maybe_response_alignment": 8,
-          "maybe_response_has_padding": true
+          "maybe_response_has_padding": true,
+          "experimental_maybe_response_has_flexible_envelope": false,
+          "is_composed": false
         },
         {
           "ordinal": 1275478777,
-          "generated_ordinal": 1275478777,
+          "generated_ordinal": 5478139633957076992,
           "name": "TakeChild",
           "location": {
             "filename": "garnet/go/src/fidl/compiler/backend/typestest/protocol_request.test.fidl",
@@ -134,11 +140,13 @@
           "maybe_request_size": 24,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": true,
-          "has_response": false
+          "experimental_maybe_request_has_flexible_envelope": false,
+          "has_response": false,
+          "is_composed": false
         },
         {
           "ordinal": 1589872250,
-          "generated_ordinal": 1589872250,
+          "generated_ordinal": 6828449318567936000,
           "name": "TakeChildRequest",
           "location": {
             "filename": "garnet/go/src/fidl/compiler/backend/typestest/protocol_request.test.fidl",
@@ -169,11 +177,14 @@
           "maybe_request_size": 24,
           "maybe_request_alignment": 8,
           "maybe_request_has_padding": true,
-          "has_response": false
+          "experimental_maybe_request_has_flexible_envelope": false,
+          "has_response": false,
+          "is_composed": false
         }
       ]
     }
   ],
+  "service_declarations": [],
   "struct_declarations": [],
   "table_declarations": [],
   "union_declarations": [],

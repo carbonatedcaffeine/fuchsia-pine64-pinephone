@@ -5,7 +5,7 @@
 use {
     crate::fidl,
     crate::Rule,
-    failure::Fail,
+    failure::{format_err, Error, Fail},
     pest::iterators::{Pair, Pairs},
     serde_derive::Serialize,
     std::collections::{BTreeMap, HashSet, VecDeque},
@@ -438,7 +438,7 @@ impl StructField {
     }
 }
 
-#[derive(PartialEq, Eq, Serialize, Debug, Hash, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, Serialize, Debug, Hash, PartialOrd, Ord, Clone)]
 pub struct UnionField {
     pub attributes: Attrs,
     pub ty: Ty,
@@ -456,7 +456,7 @@ impl UnionField {
     }
 }
 
-#[derive(PartialEq, Eq, Serialize, Debug, Hash, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, Serialize, Debug, Hash, PartialOrd, Ord, Clone)]
 pub struct EnumVariant {
     pub attributes: Attrs,
     pub name: String,
@@ -482,6 +482,15 @@ pub struct Method {
 }
 
 impl Method {
+    pub fn name_to_ty(&self, arg_name: &str) -> Result<&Ty, Error> {
+        for (name, ty) in self.in_params.iter() {
+            if arg_name == name {
+                return Ok(ty);
+            }
+        }
+        Err(format_err!("`{:?}` arg not found in method `{:?}`", arg_name, self.name))
+    }
+
     pub fn from_pair(ns: &str, pair: Pair<'_, Rule>) -> Result<Self, ParseError> {
         let mut attributes = Attrs::default();
         let mut name = String::default();
@@ -538,6 +547,7 @@ pub enum Decl {
     Enum { attributes: Attrs, name: Ident, ty: Ty, variants: Vec<EnumVariant> },
     Constant { attributes: Attrs, name: Ident, ty: Ty, value: Constant },
     Protocol { attributes: Attrs, name: Ident, methods: Vec<Method> },
+    Resource { attributes: Attrs, ty: Ty, values: Vec<Constant> },
     Alias(Ident, Ident),
 }
 
@@ -582,6 +592,7 @@ impl BanjoAst {
                         return Ok(decl);
                     }
                 }
+                Decl::Resource { .. } => {}
             }
         }
         return Err(ParseError::UnknownDecl);
@@ -648,6 +659,7 @@ impl BanjoAst {
                         return (*ty).clone();
                     }
                 }
+                Decl::Resource { .. } => {}
             }
         }
         panic!("Unidentified {:?}", fq_ident);
@@ -693,6 +705,7 @@ impl BanjoAst {
                         return Some(attributes);
                     }
                 }
+                Decl::Resource { .. } => {}
             }
         }
         None
@@ -735,7 +748,7 @@ impl BanjoAst {
                         Rule::ident => {
                             name = String::from(inner_pair.as_str().trim());
                         }
-                        Rule::integer_type => {
+                        Rule::integer_type | Rule::identifier_type => {
                             ty = Ty::from_pair(ns, &inner_pair)?;
                         }
                         Rule::enum_field => variants.push(EnumVariant::from_pair(inner_pair)?),
@@ -805,6 +818,26 @@ impl BanjoAst {
                 }
                 Ok(Decl::Constant { attributes, name: Ident::new(ns, name.as_str()), ty, value })
             }
+            Rule::resource_declaration => {
+                let mut attributes = Attrs::default();
+                let mut ty = Ty::UInt32;
+                let mut values = Vec::default();
+                for inner_pair in pair.into_inner() {
+                    match inner_pair.as_rule() {
+                        Rule::attributes => {
+                            attributes = Attrs::from_pair(inner_pair)?;
+                        }
+                        Rule::handle_type | Rule::identifier_type => {
+                            ty = Ty::from_pair(ns, &inner_pair)?;
+                        }
+                        Rule::constant => {
+                            values.push(Constant::from_str(inner_pair.clone().as_span().as_str()));
+                        }
+                        e => return Err(ParseError::UnexpectedToken(e)),
+                    }
+                }
+                Ok(Decl::Resource { attributes, ty, values })
+            }
             e => Err(ParseError::UnexpectedToken(e)),
         }
     }
@@ -812,7 +845,7 @@ impl BanjoAst {
     /// Finds the `Decl` in the AST for a `Ty` found inside of another `Decl`.
     /// If |ignore_ref| is true and |ty| is a reference to an identifier, `None`
     /// will be returned instead of the appropriate `Decl`.
-    fn type_to_decl(&self, ty: &Ty, ignore_ref: bool) -> Option<&Decl> {
+    pub fn type_to_decl(&self, ty: &Ty, ignore_ref: bool) -> Option<&Decl> {
         match ty {
             Ty::Array { ref ty, .. } => self.type_to_decl(ty, ignore_ref),
             Ty::Vector { ref ty, .. } => self.type_to_decl(ty, ignore_ref),
@@ -839,11 +872,52 @@ impl BanjoAst {
                                 return self.type_to_decl(&self.id_to_type(from), ignore_ref);
                             }
                         }
+                        Decl::Resource { .. } => {}
                     }
                 }
                 None
             }
             _ => None,
+        }
+    }
+
+    pub fn is_resource(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Identifier { id, .. } => {
+                let target_id = id;
+                for decl in self.namespaces[&self.primary_namespace].iter() {
+                    match decl {
+                        Decl::Resource { ty, .. } => match ty {
+                            Ty::Identifier { id, .. } => {
+                                if id == target_id {
+                                    return true;
+                                }
+                            }
+                            _ => {}
+                        },
+                        _ => {}
+                    }
+                }
+                false
+            }
+            Ty::Handle { ty, .. } => {
+                let handle_type = ty;
+                for decl in self.namespaces[&self.primary_namespace].iter() {
+                    match decl {
+                        Decl::Resource { ty, .. } => match ty {
+                            Ty::Handle { ty, .. } => {
+                                if ty == handle_type {
+                                    return true;
+                                }
+                            }
+                            _ => {}
+                        },
+                        _ => {}
+                    }
+                }
+                false
+            }
+            _ => false,
         }
     }
 
@@ -890,6 +964,7 @@ impl BanjoAst {
             Decl::Constant { .. } => (),
             // Enum cannot have dependencies.
             Decl::Enum { .. } => (),
+            Decl::Resource { .. } => (),
         };
 
         Ok(edges)
@@ -954,18 +1029,24 @@ impl BanjoAst {
         Ok(decl_order
             .into_iter()
             .filter(|decl| {
-                let ident = match decl {
-                    Decl::Protocol { name, .. } => name,
-                    Decl::Struct { name, .. } => name,
-                    Decl::Union { name, .. } => name,
-                    Decl::Enum { name, .. } => name,
-                    Decl::Alias(to, _from) => to,
-                    Decl::Constant { name, .. } => name,
+                let ident: Option<&Ident> = match decl {
+                    Decl::Protocol { name, .. } => Some(name),
+                    Decl::Struct { name, .. } => Some(name),
+                    Decl::Union { name, .. } => Some(name),
+                    Decl::Enum { name, .. } => Some(name),
+                    Decl::Alias(to, _from) => Some(to),
+                    Decl::Constant { name, .. } => Some(name),
+                    Decl::Resource { .. } => None,
                 };
-                if let Some(ref ns) = ident.fq().0 {
-                    ns == &self.primary_namespace
-                } else {
-                    true
+                match ident {
+                    Some(ident) => {
+                        if let Some(ref ns) = ident.fq().0 {
+                            ns == &self.primary_namespace
+                        } else {
+                            true
+                        }
+                    }
+                    None => true,
                 }
             })
             .collect())
@@ -1096,7 +1177,8 @@ impl BanjoAst {
                         | Rule::union_declaration
                         | Rule::enum_declaration
                         | Rule::protocol_declaration
-                        | Rule::const_declaration => {
+                        | Rule::const_declaration
+                        | Rule::resource_declaration => {
                             let decl =
                                 Self::parse_decl(inner_pair, &current_namespace, &namespaces)?;
                             namespace.push(decl)

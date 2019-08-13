@@ -38,7 +38,7 @@ static const char* kPauseOnAttachDescription =
 const char* ClientSettings::System::kShowStdout = "show-stdout";
 static const char* kShowStdoutDescription =
     R"(  Whether newly debugged process (either launched or attached) should
-  output it's stdout/stderr to zxdb. This setting is global but can be overriden
+  output it's stdout/stderr to zxdb. This setting is global but can be overridden
   by each individual process.)";
 
 const char* ClientSettings::System::kQuitAgentOnExit = "quit-agent-on-exit";
@@ -63,10 +63,12 @@ fxl::RefPtr<SettingSchema> CreateSchema() {
   schema->AddList(ClientSettings::System::kSymbolPaths, kSymbolPathsDescription, {});
   schema->AddBool(ClientSettings::System::kPauseOnLaunch, kPauseOnLaunchDescription, false);
   schema->AddBool(ClientSettings::System::kPauseOnAttach, kPauseOnAttachDescription, false);
-  schema->AddBool(ClientSettings::System::kQuitAgentOnExit, kQuitAgentOnExitDescription, false);
+  schema->AddBool(ClientSettings::System::kQuitAgentOnExit, kQuitAgentOnExitDescription, true);
   schema->AddBool(ClientSettings::System::kShowStdout, kShowStdoutDescription, true);
   schema->AddList(ClientSettings::System::kSymbolServers, kSymbolServersDescription, {});
   schema->AddString(ClientSettings::System::kSymbolCache, kSymbolCacheDescription, "");
+  schema->AddList(ClientSettings::Target::kBuildDirs, ClientSettings::Target::kBuildDirsDescription,
+                  {});
 
   return schema;
 }

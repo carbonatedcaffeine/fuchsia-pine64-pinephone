@@ -111,9 +111,8 @@ class RawVideoWriter {
   //     written.
   // uv_offset - the bytes offset from y_base to first byte of first pixel of
   //     U data.
-  size_t WriteNv12(uint32_t width_pixels, uint32_t height_pixels,
-                   uint32_t stride, const uint8_t* y_base = nullptr,
-                   uint32_t uv_offset = 0);
+  size_t WriteNv12(uint32_t width_pixels, uint32_t height_pixels, uint32_t stride,
+                   const uint8_t* y_base = nullptr, uint32_t uv_offset = 0);
 
   // Close() finishes/closes the file.  IsOk() will return true after this call
   // if closing worked.
@@ -134,7 +133,7 @@ class RawVideoWriter {
   bool is_initialized_ = false;
   bool is_done_ = false;
   std::string file_name_;
-  fxl::UniqueFD file_;
+  fbl::unique_fd file_;
 
   static std::atomic<uint32_t> instance_count_;
 
@@ -152,9 +151,8 @@ class RawVideoWriter<false> {
   size_t WriteUint32BigEndian(uint32_t number) { return sizeof(uint32_t); }
   size_t WriteUint32LittleEndian(uint32_t number) { return sizeof(uint32_t); }
 
-  size_t WriteNv12(uint32_t width_pixels, uint32_t height_pixels,
-                   uint32_t stride, const uint8_t* y_base = nullptr,
-                   uint32_t uv_offset = 0) {
+  size_t WriteNv12(uint32_t width_pixels, uint32_t height_pixels, uint32_t stride,
+                   const uint8_t* y_base = nullptr, uint32_t uv_offset = 0) {
     return height_pixels * width_pixels + height_pixels / 2 * width_pixels;
   }
 

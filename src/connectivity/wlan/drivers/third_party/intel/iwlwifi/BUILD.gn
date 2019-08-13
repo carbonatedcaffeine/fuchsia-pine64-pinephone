@@ -21,6 +21,8 @@ source_set("core") {
     "fuchsia_porting.h",
     "fw/init.c",
     "fw/notif-wait.c",
+    "fw/paging.c",
+    "fw/smem.c",
     "ieee80211.h",
     "iwl-config.h",
     "iwl-csr.h",
@@ -35,6 +37,8 @@ source_set("core") {
     "mvm/fw.c",
     "mvm/mac80211.c",
     "mvm/ops.c",
+    "mvm/phy-ctxt.c",
+    "mvm/power.c",
     "mvm/rxmq.c",
     "mvm/scan.c",
     "mvm/tof.c",
@@ -44,6 +48,7 @@ source_set("core") {
   ]
 
   deps = [
+    "//garnet/lib/wlan/protocol:protocol",
     "//zircon/public/lib/ddk",
     "//zircon/public/lib/driver",
   ]
@@ -62,6 +67,7 @@ source_set("pcie") {
   sources = [
     "pcie/drv.c",
     "pcie/internal.h",
+    "pcie/rx.c",
     "pcie/trans-gen2.c",
     "pcie/trans.c",
     "pcie/tx-gen2.c",
@@ -72,12 +78,12 @@ source_set("pcie") {
     ":core",
     "//garnet/lib/wlan/protocol",
     "//zircon/public/banjo/ddk.protocol.wlanphyimpl",
-    "//zircon/public/lib/ddk",
     "//zircon/public/lib/driver",
   ]
 
   public_deps = [
     "//zircon/public/banjo/ddk.protocol.pci",
+    "//zircon/public/lib/ddk",
     "//zircon/public/lib/device-protocol-pci",
     "//zircon/public/lib/sync",
   ]

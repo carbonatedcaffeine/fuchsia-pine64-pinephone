@@ -7,24 +7,27 @@
 #[cfg(test)]
 use std::fmt::{self, Debug, Formatter};
 use std::num::NonZeroU16;
+use std::ops::Range;
 
-use byteorder::{ByteOrder, NetworkEndian};
+use net_types::ip::IpAddress;
 use packet::{
-    BufferView, BufferViewMut, PacketBuilder, ParsablePacket, ParseMetadata, SerializeBuffer,
+    BufferView, BufferViewMut, PacketBuilder, PacketConstraints, ParsablePacket, ParseMetadata,
+    SerializeBuffer,
 };
 use zerocopy::{AsBytes, ByteSlice, FromBytes, LayoutVerified, Unaligned};
 
 use crate::error::{ParseError, ParseResult};
-use crate::ip::{IpAddress, IpProto};
+use crate::ip::IpProto;
 use crate::transport::tcp::TcpOption;
-use crate::wire::compute_transport_checksum;
-use crate::wire::records::options::Options;
-use crate::wire::{U16, U32};
+use crate::wire::records::options::{Options, OptionsRaw};
+use crate::wire::{compute_transport_checksum, compute_transport_checksum_parts};
+use crate::wire::{FromRaw, MaybeParsed, U16, U32};
 
 use self::options::TcpOptionsImpl;
 
 const HDR_PREFIX_LEN: usize = 20;
 const CHECKSUM_OFFSET: usize = 16;
+const CHECKSUM_RANGE: Range<usize> = CHECKSUM_OFFSET..CHECKSUM_OFFSET + 2;
 pub(crate) const TCP_MIN_HDR_LEN: usize = HDR_PREFIX_LEN;
 #[cfg(test)]
 pub(crate) const TCP_MAX_HDR_LEN: usize = 60;
@@ -38,13 +41,19 @@ struct HeaderPrefix {
     ack: U32,
     data_offset_reserved_flags: U16,
     window_size: U16,
-    checksum: U16,
+    checksum: [u8; 2],
     urg_ptr: U16,
 }
 
 impl HeaderPrefix {
     fn data_offset(&self) -> u8 {
         (self.data_offset_reserved_flags.get() >> 12) as u8
+    }
+
+    fn set_data_offset(&mut self, offset: u8) {
+        debug_assert!(offset <= 15);
+        let v = self.data_offset_reserved_flags.get();
+        self.data_offset_reserved_flags.set((v & 0x0FFF) | (((offset & 0x0F) as u16) << 12));
     }
 }
 
@@ -85,37 +94,56 @@ impl<B: ByteSlice, A: IpAddress> ParsablePacket<B, TcpParseArgs<A>> for TcpSegme
     }
 
     fn parse<BV: BufferView<B>>(mut buffer: BV, args: TcpParseArgs<A>) -> ParseResult<Self> {
+        TcpSegmentRaw::<B>::parse(buffer, ()).and_then(|u| TcpSegment::try_from_raw_with(u, args))
+    }
+}
+
+impl<B: ByteSlice, A: IpAddress> FromRaw<TcpSegmentRaw<B>, TcpParseArgs<A>> for TcpSegment<B> {
+    type Error = ParseError;
+
+    fn try_from_raw_with(
+        raw: TcpSegmentRaw<B>,
+        args: TcpParseArgs<A>,
+    ) -> Result<Self, Self::Error> {
         // See for details: https://en.wikipedia.org/wiki/Transmission_Control_Protocol#TCP_segment_structure
 
+        let hdr_prefix = raw
+            .hdr_prefix
+            .ok_or_else(|_| debug_err!(ParseError::Format, "too few bytes for header"))?;
+        let options = raw
+            .options
+            .ok_or_else(|_| debug_err!(ParseError::Format, "Incomplete options"))
+            .and_then(|o| {
+                Options::try_from_raw(o)
+                    .map_err(|_| debug_err!(ParseError::Format, "Options validation failed"))
+            })?;
+        let body = raw.body;
+
+        let hdr_bytes = (hdr_prefix.data_offset() * 4) as usize;
+        if hdr_bytes != hdr_prefix.bytes().len() + options.bytes().len() {
+            return debug_err!(
+                Err(ParseError::Format),
+                "invalid data offset: {} for header={} + options={}",
+                hdr_prefix.data_offset(),
+                hdr_prefix.bytes().len(),
+                options.bytes().len()
+            );
+        }
+
+        let parts = [hdr_prefix.bytes(), options.bytes(), body.deref().as_ref()];
         let checksum =
-            compute_transport_checksum(args.src_ip, args.dst_ip, IpProto::Tcp, buffer.as_ref())
+            compute_transport_checksum_parts(args.src_ip, args.dst_ip, IpProto::Tcp, parts.iter())
                 .ok_or_else(debug_err_fn!(ParseError::Format, "segment too large"))?;
-        if checksum != 0 {
+
+        if checksum != [0, 0] {
             return debug_err!(Err(ParseError::Checksum), "invalid checksum");
         }
 
-        let hdr_prefix = buffer
-            .take_obj_front::<HeaderPrefix>()
-            .ok_or_else(debug_err_fn!(ParseError::Format, "too few bytes for header"))?;
-        let hdr_bytes = (hdr_prefix.data_offset() * 4) as usize;
-        if hdr_bytes < hdr_prefix.bytes().len() {
-            return debug_err!(
-                Err(ParseError::Format),
-                "invalid data offset: {}",
-                hdr_prefix.data_offset()
-            );
-        }
-        let options = buffer
-            .take_front(hdr_bytes - hdr_prefix.bytes().len())
-            .ok_or_else(debug_err_fn!(ParseError::Format, "data offset larger than buffer"))?;
-        let options = Options::parse(options).map_err(|_| ParseError::Format)?;
-        let segment = TcpSegment { hdr_prefix, options, body: buffer.into_rest() };
-
-        if segment.hdr_prefix.src_port == U16::ZERO || segment.hdr_prefix.dst_port == U16::ZERO {
+        if hdr_prefix.src_port == U16::ZERO || hdr_prefix.dst_port == U16::ZERO {
             return debug_err!(Err(ParseError::Format), "zero source or destination port");
         }
 
-        Ok(segment)
+        Ok(TcpSegment { hdr_prefix, options, body })
     }
 }
 
@@ -212,6 +240,89 @@ impl<B: ByteSlice> TcpSegment<B> {
     }
 }
 
+/// The minimal information required from a TCP segment header.
+///
+/// A `TcpFlowHeader` may be the result of a partially parsed TCP segment in
+/// [`TcpSegmentRaw`].
+#[derive(Default, FromBytes, AsBytes, Unaligned)]
+#[repr(C)]
+struct TcpFlowHeader {
+    src_port: U16,
+    dst_port: U16,
+}
+
+struct PartialHeaderPrefix<B> {
+    flow: LayoutVerified<B, TcpFlowHeader>,
+    rest: B,
+}
+
+/// A partially-parsed and not yet validated TCP segment.
+///
+/// A `TcpSegmentRaw` shares its underlying memory with the byte slice it was
+/// parsed from or serialized to, meaning that no copying or extra allocation is
+/// necessary.
+///
+/// Parsing a `TcpSegmentRaw` from raw data will succeed as long as at least 4
+/// bytes are available, which will be extracted as a [`TcpFlowHeader`] that
+/// contains the TCP source and destination ports. A `TcpSegmentRaw` is, then,
+/// guaranteed to always have at least that minimal information available.
+///
+/// [`TcpSegment`] provides a [`FromRaw`] implementation that can be used to
+/// validate a `TcpSegmentRaw`.
+pub(crate) struct TcpSegmentRaw<B> {
+    hdr_prefix: MaybeParsed<LayoutVerified<B, HeaderPrefix>, PartialHeaderPrefix<B>>,
+    options: MaybeParsed<OptionsRaw<B, TcpOptionsImpl>, B>,
+    body: B,
+}
+
+impl<B> ParsablePacket<B, ()> for TcpSegmentRaw<B>
+where
+    B: ByteSlice,
+{
+    type Error = ParseError;
+
+    fn parse_metadata(&self) -> ParseMetadata {
+        let header_len = self.options.len()
+            + match &self.hdr_prefix {
+                MaybeParsed::Complete(h) => h.bytes().len(),
+                MaybeParsed::Incomplete(h) => h.flow.bytes().len() + h.rest.len(),
+            };
+        ParseMetadata::from_packet(header_len, self.body.len(), 0)
+    }
+
+    fn parse<BV: BufferView<B>>(mut buffer: BV, args: ()) -> ParseResult<Self> {
+        // See for details: https://en.wikipedia.org/wiki/Transmission_Control_Protocol#TCP_segment_structure
+
+        let (hdr_prefix, options) = if let Some(pfx) = buffer.take_obj_front::<HeaderPrefix>() {
+            // If the subtraction data_offset*4 - HDR_PREFIX_LEN would have been
+            // negative, that would imply that data_offset has an invalid value.
+            // Even though this will end up being MaybeParsed::Complete, the
+            // data_offset value is validated when transforming TcpSegmentRaw to
+            // TcpSegment.
+            let option_bytes = ((pfx.data_offset() * 4) as usize).saturating_sub(HDR_PREFIX_LEN);
+            let options =
+                MaybeParsed::take_from_buffer_with(&mut buffer, option_bytes, OptionsRaw::new);
+            let hdr_prefix = MaybeParsed::Complete(pfx);
+            (hdr_prefix, options)
+        } else {
+            let flow = buffer
+                .take_obj_front::<TcpFlowHeader>()
+                .ok_or_else(debug_err_fn!(ParseError::Format, "too few bytes for flow header"))?;
+            let rest = buffer.take_rest_front();
+            // if we can't take the entire header, the rest of options will be
+            // incomplete:
+            let hdr_prefix = MaybeParsed::Incomplete(PartialHeaderPrefix { flow, rest });
+            let options = MaybeParsed::Incomplete(buffer.take_rest_front());
+            (hdr_prefix, options)
+        };
+
+        // A TCP segment's body is always just the rest of the buffer:
+        let body = buffer.into_rest();
+
+        Ok(Self { hdr_prefix, options, body })
+    }
+}
+
 // NOTE(joshlf): In order to ensure that the checksum is always valid, we don't
 // expose any setters for the fields of the TCP segment; the only way to set
 // them is via TcpSegmentBuilder. This, combined with checksum validation
@@ -282,23 +393,11 @@ impl<A: IpAddress> TcpSegmentBuilder<A> {
 }
 
 impl<A: IpAddress> PacketBuilder for TcpSegmentBuilder<A> {
-    fn header_len(&self) -> usize {
-        TCP_MIN_HDR_LEN
+    fn constraints(&self) -> PacketConstraints {
+        PacketConstraints::new(TCP_MIN_HDR_LEN, 0, 0, core::usize::MAX)
     }
 
-    fn min_body_len(&self) -> usize {
-        0
-    }
-
-    fn max_body_len(&self) -> usize {
-        std::usize::MAX
-    }
-
-    fn footer_len(&self) -> usize {
-        0
-    }
-
-    fn serialize(self, mut buffer: SerializeBuffer) {
+    fn serialize(&self, buffer: &mut SerializeBuffer) {
         let (mut header, body, _) = buffer.parts();
         // implements BufferViewMut, giving us take_obj_xxx_zero methods
         let mut header = &mut header;
@@ -326,20 +425,25 @@ impl<A: IpAddress> PacketBuilder for TcpSegmentBuilder<A> {
         segment.hdr_prefix.urg_ptr = U16::ZERO;
         // Initialize the checksum to 0 so that we will get the correct
         // value when we compute it below.
-        segment.hdr_prefix.checksum = U16::ZERO;
+        segment.hdr_prefix.checksum = [0, 0];
 
         // NOTE: We stop using segment at this point so that it no longer
         // borrows the buffer, and we can use the buffer directly.
         let segment_len = buffer.as_ref().len();
-        let checksum =
-            compute_transport_checksum(self.src_ip, self.dst_ip, IpProto::Tcp, buffer.as_ref())
-                .unwrap_or_else(|| {
-                    panic!(
-                    "total TCP segment length of {} bytes overflows length field of pseudo-header",
-                    segment_len
-                )
-                });
-        NetworkEndian::write_u16(&mut buffer.as_mut()[CHECKSUM_OFFSET..], checksum);
+        #[rustfmt::skip]
+        let checksum = compute_transport_checksum(
+            self.src_ip,
+            self.dst_ip,
+            IpProto::Tcp,
+            buffer.as_ref(),
+        )
+        .unwrap_or_else(|| {
+            panic!(
+                "total TCP segment length of {} bytes overflows length field of pseudo-header",
+                segment_len
+            )
+        });
+        buffer.as_mut()[CHECKSUM_RANGE].copy_from_slice(&checksum[..]);
     }
 }
 
@@ -426,13 +530,18 @@ impl<B> Debug for TcpSegment<B> {
 
 #[cfg(test)]
 mod tests {
-    use packet::{Buf, BufferSerializer, ParseBuffer, Serializer};
+    use byteorder::{ByteOrder, NetworkEndian};
+    use net_types::ip::{Ipv4, Ipv4Addr, Ipv6Addr};
+    use packet::{Buf, InnerPacketBuilder, ParseBuffer, Serializer};
+    use std::num::NonZeroU16;
 
     use super::*;
-    use crate::device::ethernet::EtherType;
-    use crate::ip::{IpProto, Ipv4Addr, Ipv6Addr};
+    use crate::ip::IpProto;
+    use crate::testutil::benchmarks::{black_box, Bencher};
+    use crate::testutil::*;
     use crate::wire::ethernet::EthernetFrame;
-    use crate::wire::ipv4::Ipv4Packet;
+    use crate::wire::ipv4::{Ipv4Header, Ipv4Packet};
+    use crate::wire::ipv6::Ipv6Packet;
 
     const TEST_SRC_IPV4: Ipv4Addr = Ipv4Addr::new([1, 2, 3, 4]);
     const TEST_DST_IPV4: Ipv4Addr = Ipv4Addr::new([5, 6, 7, 8]);
@@ -442,39 +551,49 @@ mod tests {
         Ipv6Addr::new([17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]);
 
     #[test]
-    fn test_parse_serialize_full() {
-        use crate::wire::testdata::tls_client_hello::*;
+    fn test_parse_serialize_full_ipv4() {
+        use crate::wire::testdata::tls_client_hello_v4::*;
 
-        let mut buf = &ETHERNET_FRAME_BYTES[..];
+        let mut buf = &ETHERNET_FRAME.bytes[..];
         let frame = buf.parse::<EthernetFrame<_>>().unwrap();
-        assert_eq!(frame.src_mac(), ETHERNET_SRC_MAC);
-        assert_eq!(frame.dst_mac(), ETHERNET_DST_MAC);
-        assert_eq!(frame.ethertype(), Some(EtherType::Ipv4));
+        verify_ethernet_frame(&frame, ETHERNET_FRAME);
 
         let mut body = frame.body();
         let packet = body.parse::<Ipv4Packet<_>>().unwrap();
-        assert_eq!(packet.proto(), IpProto::Tcp);
-        assert_eq!(packet.dscp(), IP_DSCP);
-        assert_eq!(packet.ecn(), IP_ECN);
-        assert_eq!(packet.df_flag(), IP_DONT_FRAGMENT);
-        assert_eq!(packet.mf_flag(), IP_MORE_FRAGMENTS);
-        assert_eq!(packet.fragment_offset(), IP_FRAGMENT_OFFSET);
-        assert_eq!(packet.id(), IP_ID);
-        assert_eq!(packet.ttl(), IP_TTL);
-        assert_eq!(packet.src_ip(), IP_SRC_IP);
-        assert_eq!(packet.dst_ip(), IP_DST_IP);
+        verify_ipv4_packet(&packet, IPV4_PACKET);
 
         let mut body = packet.body();
         let segment = body
             .parse_with::<_, TcpSegment<_>>(TcpParseArgs::new(packet.src_ip(), packet.dst_ip()))
             .unwrap();
-        assert_eq!(segment.src_port().get(), TCP_SRC_PORT);
-        assert_eq!(segment.dst_port().get(), TCP_DST_PORT);
-        assert_eq!(segment.ack_num().is_some(), TCP_ACK_FLAG);
-        assert_eq!(segment.fin(), TCP_FIN_FLAG);
-        assert_eq!(segment.syn(), TCP_SYN_FLAG);
-        assert_eq!(segment.iter_options().collect::<Vec<_>>().as_slice(), TCP_OPTIONS);
-        assert_eq!(segment.body(), TCP_BODY);
+        verify_tcp_segment(&segment, TCP_SEGMENT);
+
+        // TODO(joshlf): Uncomment once we support serializing options
+        // let buffer = segment.body()
+        //     .encapsulate(segment.builder(packet.src_ip(), packet.dst_ip()))
+        //     .encapsulate(packet.builder())
+        //     .encapsulate(frame.builder())
+        //     .serialize_vec_outer().unwrap();
+        // assert_eq!(buffer.as_ref(), ETHERNET_FRAME_BYTES);
+    }
+
+    #[test]
+    fn test_parse_serialize_full_ipv6() {
+        use crate::wire::testdata::syn_v6::*;
+
+        let mut buf = &ETHERNET_FRAME.bytes[..];
+        let frame = buf.parse::<EthernetFrame<_>>().unwrap();
+        verify_ethernet_frame(&frame, ETHERNET_FRAME);
+
+        let mut body = frame.body();
+        let packet = body.parse::<Ipv6Packet<_>>().unwrap();
+        verify_ipv6_packet(&packet, IPV6_PACKET);
+
+        let mut body = packet.body();
+        let segment = body
+            .parse_with::<_, TcpSegment<_>>(TcpParseArgs::new(packet.src_ip(), packet.dst_ip()))
+            .unwrap();
+        verify_tcp_segment(&segment, TCP_SEGMENT);
 
         // TODO(joshlf): Uncomment once we support serializing options
         // let buffer = segment.body()
@@ -503,7 +622,7 @@ mod tests {
         hdr_prefix.dst_port = U16::new(2);
         // data offset of 5
         hdr_prefix.data_offset_reserved_flags = U16::new(5u16 << 12);
-        hdr_prefix.checksum = U16::from([0x9f, 0xce]);
+        hdr_prefix.checksum = [0x9f, 0xce];
         hdr_prefix
     }
 
@@ -530,7 +649,7 @@ mod tests {
             let checksum =
                 compute_transport_checksum(TEST_SRC_IPV4, TEST_DST_IPV4, IpProto::Tcp, buf)
                     .unwrap();
-            NetworkEndian::write_u16(&mut buf[CHECKSUM_OFFSET..], checksum);
+            buf[CHECKSUM_RANGE].copy_from_slice(&checksum[..]);
             assert_eq!(
                 buf.parse_with::<_, TcpSegment<_>>(TcpParseArgs::new(TEST_SRC_IPV4, TEST_DST_IPV4))
                     .unwrap_err(),
@@ -581,8 +700,11 @@ mod tests {
         builder.rst(true);
         builder.syn(true);
 
-        let mut buf =
-            (&[0, 1, 2, 3, 3, 4, 5, 7, 8, 9]).encapsulate(builder).serialize_outer().unwrap();
+        let mut buf = (&[0, 1, 2, 3, 3, 4, 5, 7, 8, 9])
+            .into_serializer()
+            .encapsulate(builder)
+            .serialize_vec_outer()
+            .unwrap();
         // assert that we get the literal bytes we expected
         assert_eq!(
             buf.as_ref(),
@@ -609,14 +731,14 @@ mod tests {
         // Test that TcpSegmentBuilder::serialize properly zeroes memory before
         // serializing the header.
         let mut buf_0 = [0; HDR_PREFIX_LEN];
-        BufferSerializer::new_vec(Buf::new(&mut buf_0[..], HDR_PREFIX_LEN..))
+        Buf::new(&mut buf_0[..], HDR_PREFIX_LEN..)
             .encapsulate(new_builder(TEST_SRC_IPV4, TEST_DST_IPV4))
-            .serialize_outer()
+            .serialize_vec_outer()
             .unwrap();
         let mut buf_1 = [0xFF; HDR_PREFIX_LEN];
-        BufferSerializer::new_vec(Buf::new(&mut buf_1[..], HDR_PREFIX_LEN..))
+        Buf::new(&mut buf_1[..], HDR_PREFIX_LEN..)
             .encapsulate(new_builder(TEST_SRC_IPV4, TEST_DST_IPV4))
-            .serialize_outer()
+            .serialize_vec_outer()
             .unwrap();
         assert_eq!(&buf_0[..], &buf_1[..]);
     }
@@ -626,9 +748,9 @@ mod tests {
     fn test_serialize_panic_segment_too_long_ipv4() {
         // Test that a segment length which overflows u16 is rejected because it
         // can't fit in the length field in the IPv4 pseudo-header.
-        BufferSerializer::new_vec(Buf::new(&mut [0; (1 << 16) - HDR_PREFIX_LEN][..], ..))
+        Buf::new(&mut [0; (1 << 16) - HDR_PREFIX_LEN][..], ..)
             .encapsulate(new_builder(TEST_SRC_IPV4, TEST_DST_IPV4))
-            .serialize_outer()
+            .serialize_vec_outer()
             .unwrap();
     }
 
@@ -639,57 +761,112 @@ mod tests {
     fn test_serialize_panic_segment_too_long_ipv6() {
         // Test that a segment length which overflows u32 is rejected because it
         // can't fit in the length field in the IPv4 pseudo-header.
-        BufferSerializer::new_vec(Buf::new(&mut [0; (1 << 32) - HDR_PREFIX_LEN][..], ..))
+        Buf::new(&mut [0; (1 << 32) - HDR_PREFIX_LEN][..], ..)
             .encapsulate(new_builder(TEST_SRC_IPV6, TEST_DST_IPV6))
-            .serialize_outer()
+            .serialize_vec_outer()
             .unwrap();
     }
-}
 
-#[cfg(all(test, feature = "benchmark"))]
-mod benchmarks {
-    use std::num::NonZeroU16;
+    #[test]
+    fn test_partial_parse() {
+        /// Parse options partially:
+        let mut hdr_prefix = new_hdr_prefix();
+        hdr_prefix.set_data_offset(8);
+        let mut bytes = hdr_prefix_to_bytes(hdr_prefix)[..].to_owned();
+        bytes.extend(&[1, 2, 3, 4, 5]);
+        let mut buf = &bytes[..];
+        let packet = buf.parse::<TcpSegmentRaw<_>>().unwrap();
+        assert_eq!(packet.hdr_prefix.as_ref().unwrap().bytes(), &bytes[0..20]);
+        assert_eq!(packet.options.as_ref().unwrap_incomplete().len(), 5);
+        assert_eq!(packet.body.len(), 0);
+        // validation should fail:
+        assert!(TcpSegment::try_from_raw_with(
+            packet,
+            TcpParseArgs::new(TEST_SRC_IPV4, TEST_DST_IPV4),
+        )
+        .is_err());
 
-    use packet::{ParseBuffer, Serializer};
-    use test::{black_box, Bencher};
+        /// Parse header partially:
+        let mut hdr_prefix = new_hdr_prefix();
+        let mut bytes = hdr_prefix_to_bytes(hdr_prefix);
+        let mut buf = &bytes[0..10];
+        let packet = buf.parse::<TcpSegmentRaw<_>>().unwrap();
+        let partial = packet.hdr_prefix.as_ref().unwrap_incomplete();
+        assert_eq!(partial.flow.src_port.get(), 1);
+        assert_eq!(partial.flow.dst_port.get(), 2);
+        assert_eq!(partial.rest.len(), 6);
+        assert!(packet.options.is_incomplete());
+        assert_eq!(packet.body.len(), 0);
+        // validation should fail:
+        assert!(TcpSegment::try_from_raw_with(
+            packet,
+            TcpParseArgs::new(TEST_SRC_IPV4, TEST_DST_IPV4),
+        )
+        .is_err());
 
-    use super::*;
-    use crate::ip::Ipv4;
-    use crate::testutil::parse_ip_packet_in_ethernet_frame;
+        let mut hdr_prefix = new_hdr_prefix();
+        let mut bytes = hdr_prefix_to_bytes(hdr_prefix);
+        /// If we don't even have enough header bytes, we should fail partial
+        /// parsing:
+        let mut buf = &bytes[0..3];
+        assert!(buf.parse::<TcpSegmentRaw<_>>().is_err());
+        /// If we don't even have exactly 4 header bytes, we should succeed
+        /// partial parsing:
+        let mut buf = &bytes[0..4];
+        assert!(buf.parse::<TcpSegmentRaw<_>>().is_ok());
+    }
 
-    #[bench]
-    fn bench_parse(b: &mut Bencher) {
-        use crate::wire::testdata::tls_client_hello::*;
-        let bytes = parse_ip_packet_in_ethernet_frame::<Ipv4>(ETHERNET_FRAME_BYTES).unwrap().0;
+    //
+    // Benchmarks
+    //
+
+    fn bench_parse_inner<B: Bencher>(b: &mut B) {
+        use crate::wire::testdata::tls_client_hello_v4::*;
+        let bytes = parse_ip_packet_in_ethernet_frame::<Ipv4>(ETHERNET_FRAME.bytes).unwrap().0;
 
         b.iter(|| {
             let mut buf = bytes;
             black_box(
                 black_box(buf)
-                    .parse_with::<_, TcpSegment<_>>(TcpParseArgs::new(IP_SRC_IP, IP_DST_IP))
+                    .parse_with::<_, TcpSegment<_>>(TcpParseArgs::new(
+                        IPV4_PACKET.metadata.src_ip,
+                        IPV4_PACKET.metadata.dst_ip,
+                    ))
                     .unwrap(),
             );
         })
     }
 
-    #[bench]
-    fn bench_serialize(b: &mut Bencher) {
-        use crate::wire::testdata::tls_client_hello::*;
+    bench!(bench_parse, bench_parse_inner);
+
+    fn bench_serialize_inner<B: Bencher>(b: &mut B) {
+        use crate::wire::testdata::tls_client_hello_v4::*;
 
         let builder = TcpSegmentBuilder::new(
-            IP_SRC_IP,
-            IP_DST_IP,
-            NonZeroU16::new(TCP_SRC_PORT).unwrap(),
-            NonZeroU16::new(TCP_DST_PORT).unwrap(),
+            IPV4_PACKET.metadata.src_ip,
+            IPV4_PACKET.metadata.dst_ip,
+            NonZeroU16::new(TCP_SEGMENT.metadata.src_port).unwrap(),
+            NonZeroU16::new(TCP_SEGMENT.metadata.dst_port).unwrap(),
             0,
             None,
             0,
         );
-        let mut buf = vec![0; builder.header_len() + TCP_BODY.len()];
-        buf[builder.header_len()..].copy_from_slice(TCP_BODY);
+
+        let header_len = builder.constraints().header_len();
+        let total_len = header_len + TCP_SEGMENT.bytes[TCP_SEGMENT.body_range].len();
+        let mut buf = vec![0; total_len];
+        buf[header_len..].copy_from_slice(&TCP_SEGMENT.bytes[TCP_SEGMENT.body_range]);
 
         b.iter(|| {
-            black_box(black_box((&mut buf[..]).encapsulate(builder.clone())).serialize_outer());
+            black_box(
+                black_box(
+                    Buf::new(&mut buf[..], header_len..total_len).encapsulate(builder.clone()),
+                )
+                .serialize_no_alloc_outer(),
+            )
+            .unwrap();
         })
     }
+
+    bench!(bench_serialize, bench_serialize_inner);
 }

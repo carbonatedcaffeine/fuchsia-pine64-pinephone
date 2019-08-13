@@ -6,11 +6,13 @@ group("lib") {
   testonly = true
   deps = [
     ":tests",
+    "argh",
     "cobalt",
     "elflib",
     "fidl_table_validation",
     "files",
     "icu_data",
+    "inet",
     "isolated_devmgr",
     "pkg_url",
     "ui",
@@ -23,12 +25,17 @@ group("tests") {
   testonly = true
 
   deps = [
+    "argh/argh_tests",
     "cobalt:tests",
     "containers/cpp:tests",
+    "cstr:tests",
     "fidl_table_validation:tests",
+    "fuzzing:tests",
     "isolated_devmgr:tests",
+    "line_input:tests",
     "process_builder:tests",
     "rust_backtrace:tests",
+    "test_util:tests",
     "ui:tests",
   ]
 }

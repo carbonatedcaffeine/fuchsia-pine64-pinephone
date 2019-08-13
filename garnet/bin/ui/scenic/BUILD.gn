@@ -21,7 +21,7 @@ executable("scenic") {
 
   deps = [
     "//garnet/bin/ui/scenic:base_deps",
-    "//garnet/public/lib/inspect",
+    "//garnet/public/lib/inspect_deprecated",
   ]
   defines = []
 
@@ -43,6 +43,7 @@ executable("scenic") {
 source_set("base_deps") {
   public_deps = [
     "//garnet/lib/ui/scenic",
+    "//garnet/public/lib/async_promise",
     "//garnet/public/lib/fsl",
     "//sdk/lib/fidl/cpp",
     "//sdk/lib/sys/cpp",

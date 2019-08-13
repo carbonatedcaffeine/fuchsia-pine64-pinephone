@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_PARSER_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_PARSER_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_PARSER_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_PARSER_H_
 
 #include <memory>
 #include <optional>
@@ -11,6 +11,7 @@
 #include "error_reporter.h"
 #include "lexer.h"
 #include "raw_ast.h"
+#include "types.h"
 
 namespace fidl {
 
@@ -40,15 +41,13 @@ class Parser {
   // something that will result in a new AST node.
   class ASTScope {
    public:
-    explicit ASTScope(Parser* parser)
-        : parser_(parser) {
+    explicit ASTScope(Parser* parser) : parser_(parser) {
       suppress_ = parser_->suppress_gap_checks_;
       parser_->suppress_gap_checks_ = false;
       parser_->active_ast_scopes_.push_back(raw::SourceElement(Token(), Token()));
     }
     // The suppress mechanism
-    ASTScope(Parser* parser, bool suppress)
-        : parser_(parser), suppress_(suppress) {
+    ASTScope(Parser* parser, bool suppress) : parser_(parser), suppress_(suppress) {
       parser_->active_ast_scopes_.push_back(raw::SourceElement(Token(), Token()));
       suppress_ = parser_->suppress_gap_checks_;
       parser_->suppress_gap_checks_ = suppress;
@@ -174,9 +173,13 @@ class Parser {
 
   decltype(nullptr) Fail();
   decltype(nullptr) Fail(std::string_view message);
+  decltype(nullptr) Fail(Token token, std::string_view message);
+
+  types::Strictness MaybeParseStrictness();
 
   std::unique_ptr<raw::Identifier> ParseIdentifier(bool is_discarded = false);
   std::unique_ptr<raw::CompoundIdentifier> ParseCompoundIdentifier();
+  std::unique_ptr<raw::CompoundIdentifier> ParseLibraryName();
 
   std::unique_ptr<raw::StringLiteral> ParseStringLiteral();
   std::unique_ptr<raw::NumericLiteral> ParseNumericLiteral();
@@ -199,14 +202,14 @@ class Parser {
 
   std::unique_ptr<raw::BitsMember> ParseBitsMember();
   std::unique_ptr<raw::BitsDeclaration> ParseBitsDeclaration(
-      std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
+      std::unique_ptr<raw::AttributeList> attributes, ASTScope&, types::Strictness);
 
   std::unique_ptr<raw::ConstDeclaration> ParseConstDeclaration(
       std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
 
   std::unique_ptr<raw::EnumMember> ParseEnumMember();
   std::unique_ptr<raw::EnumDeclaration> ParseEnumDeclaration(
-      std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
+      std::unique_ptr<raw::AttributeList> attributes, ASTScope&, types::Strictness);
 
   std::unique_ptr<raw::Parameter> ParseParameter();
   std::unique_ptr<raw::ParameterList> ParseParameterList();
@@ -223,13 +226,17 @@ class Parser {
   std::unique_ptr<raw::ProtocolDeclaration> ParseProtocolDeclaration(
       std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
 
+  std::unique_ptr<raw::ServiceMember> ParseServiceMember();
+  std::unique_ptr<raw::ServiceDeclaration> ParseServiceDeclaration(
+      std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
+
   std::unique_ptr<raw::StructMember> ParseStructMember();
   std::unique_ptr<raw::StructDeclaration> ParseStructDeclaration(
       std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
 
   std::unique_ptr<raw::TableMember> ParseTableMember();
   std::unique_ptr<raw::TableDeclaration> ParseTableDeclaration(
-      std::unique_ptr<raw::AttributeList> attributes, ASTScope&);
+      std::unique_ptr<raw::AttributeList> attributes, ASTScope&, types::Strictness);
 
   std::unique_ptr<raw::UnionMember> ParseUnionMember();
   std::unique_ptr<raw::UnionDeclaration> ParseUnionDeclaration(
@@ -267,4 +274,4 @@ class Parser {
 
 }  // namespace fidl
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_PARSER_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_PARSER_H_

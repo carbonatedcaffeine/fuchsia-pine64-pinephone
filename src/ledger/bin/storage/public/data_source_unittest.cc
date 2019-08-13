@@ -54,9 +54,8 @@ TEST_F(DataSourceTest, String) {
 TEST_F(DataSourceTest, Array) {
   std::string value = "Hello World";
 
-  fidl::VectorPtr<uint8_t> array;
-  array.resize(value.size());
-  memcpy(&array->at(0), value.data(), value.size());
+  std::vector<uint8_t> array(value.size());
+  memcpy(&array.at(0), value.data(), value.size());
 
   EXPECT_TRUE(TestDataSource(value, DataSource::Create(std::move(array))));
 }
@@ -106,22 +105,22 @@ TEST_F(DataSourceTest, SocketMultipleChunk) {
   });
 
   for (size_t i = 0; i < nb_iterations; ++i) {
-    EXPECT_EQ(i, chunks.size());
+    EXPECT_EQ(chunks.size(), i);
 
     size_t actual = 0;
-    EXPECT_EQ(ZX_OK, socket_pair.socket1.write(0, value.c_str(), value.size(), &actual));
-    EXPECT_EQ(value.size(), actual);
+    EXPECT_EQ(socket_pair.socket1.write(0, value.c_str(), value.size(), &actual), ZX_OK);
+    EXPECT_EQ(actual, value.size());
 
     RunLoopUntilIdle();
   }
 
   socket_pair.socket1.reset();
   RunLoopUntilIdle();
-  EXPECT_EQ(DataSource::Status::DONE, status);
+  EXPECT_EQ(status, DataSource::Status::DONE);
 
-  EXPECT_EQ(nb_iterations, chunks.size());
+  EXPECT_EQ(chunks.size(), nb_iterations);
   for (const auto& string : chunks) {
-    EXPECT_EQ(value, string);
+    EXPECT_EQ(string, value);
   }
 }
 

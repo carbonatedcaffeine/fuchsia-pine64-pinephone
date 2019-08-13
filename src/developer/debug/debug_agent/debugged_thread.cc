@@ -5,6 +5,7 @@
 #include "src/developer/debug/debug_agent/debugged_thread.h"
 
 #include <inttypes.h>
+#include <lib/zx/clock.h>
 #include <zircon/status.h>
 #include <zircon/syscalls/debug.h>
 #include <zircon/syscalls/exception.h>
@@ -66,6 +67,17 @@ const char* ExceptionTypeToString(uint32_t type) {
   }
 
   return "<unknown>";
+}
+
+void LogHitBreakpoint(const DebuggedThread* thread, ProcessBreakpoint* process_breakpoint,
+                      uint64_t address) {
+  std::stringstream ss;
+  ss << ThreadPreamble(thread) << "Hit SW breakpoint on 0x" << std::hex << address << " for: ";
+  for (Breakpoint* breakpoint : process_breakpoint->breakpoints()) {
+    ss << breakpoint->settings().name << ", ";
+  }
+
+  DEBUG_LOG(Thread) << ss.str();
 }
 
 }  // namespace
@@ -143,7 +155,7 @@ void DebuggedThread::HandleSingleStep(debug_ipc::NotifyException* exception,
     // This means that we cannot resume from suspension here, as the breakpoint is owning the
     // thread "run-lifetime".
     //
-    // We can, though, resume from the exception, as effectivelly we already handled the single-step
+    // We can, though, resume from the exception, as effectively we already handled the single-step
     // exception, so there is no more need to keep the thread in an excepted state. The suspend
     // handle will take care of keeping the thread stopped.
     //
@@ -257,7 +269,7 @@ void DebuggedThread::ResumeException() {
 void DebuggedThread::ResumeSuspension() { suspend_token_.reset(); }
 
 bool DebuggedThread::Suspend(bool synchronous) {
-  // Subsequent suspend calls should return immediatelly. Note that this does
+  // Subsequent suspend calls should return immediately. Note that this does
   // not mean that the thread is in that state, but rather that that operation
   // was sent to the kernel.
   if (IsSuspended() || IsInException())
@@ -308,7 +320,7 @@ bool DebuggedThread::WaitForSuspension(zx::time deadline) {
   auto poll_time = zx::msec(10);
   zx_status_t status = ZX_OK;
   do {
-    // Always check the thread state from the kernel because of queue desribed
+    // Always check the thread state from the kernel because of queue described
     // above.
     if (IsBlockedOnException(thread_))
       return true;
@@ -458,11 +470,12 @@ DebuggedThread::OnStop DebuggedThread::UpdateForSoftwareBreakpoint(
       arch::ArchProvider::Get().BreakpointInstructionForSoftwareExceptionAddress(
           *arch::ArchProvider::Get().IPInRegs(regs));
 
-  DEBUG_LOG(Thread) << ThreadPreamble(this) << "Hit SW breakpoint on 0x" << std::hex
-                    << breakpoint_address;
 
   ProcessBreakpoint* found_bp = process_->FindProcessBreakpointForAddr(breakpoint_address);
   if (found_bp) {
+    if (debug_ipc::IsDebugModeActive())
+      LogHitBreakpoint(this, found_bp, breakpoint_address);
+
     FixSoftwareBreakpointAddress(found_bp, regs);
 
     // When hitting a breakpoint, we need to check if indeed this exception
@@ -501,18 +514,21 @@ DebuggedThread::OnStop DebuggedThread::UpdateForSoftwareBreakpoint(
 
       if (!process_->dl_debug_addr() && process_->RegisterDebugState()) {
         DEBUG_LOG(Thread) << ThreadPreamble(this) << "Found ld.so breakpoint. Sending modules.";
-        // This breakpoint was the explicit breakpoint ld.so executes to
-        // notify us that the loader is ready. Send the current module list
-        // and silently keep this thread stopped. The client will explicitly
-        // resume this thread when it's ready to continue (it will need to
-        // load symbols for the modules and may need to set breakpoints based
-        // on them).
+        // This breakpoint was the explicit breakpoint ld.so executes to notify us that the loader
+        // is ready (see DebuggerProcess::RegisterDebugState).
+        //
+        // Send the current module list and silently keep this thread stopped. The client will
+        // explicitly resume this thread when it's ready to continue (it will need to load symbols
+        // for the modules and may need to set breakpoints based on them).
         std::vector<uint64_t> paused_threads;
         paused_threads.push_back(koid());
         process_->SendModuleNotification(std::move(paused_threads));
         return OnStop::kIgnore;
       }
     } else {
+      DEBUG_LOG(Thread) << ThreadPreamble(this) << "Hit non debugger SW breakpoint on 0x"
+                        << std::hex << breakpoint_address;
+
       // Not a breakpoint instruction. Probably the breakpoint instruction
       // used to be ours but its removal raced with the exception handler.
       // Resume from the instruction that used to be the breakpoint.
@@ -634,7 +650,7 @@ void DebuggedThread::UpdateForWatchpointHit(
 
 void DebuggedThread::ResumeForRunMode() {
   // We check if we're set to currently step over a breakpoint. If so we need to do some special
-  // handling, as going over a breakpoint is always a single-step opearation.
+  // handling, as going over a breakpoint is always a single-step operation.
   // After that we can continue according to the set run-mode.
   if (IsInException() && current_breakpoint_) {
     DEBUG_LOG(Thread) << ThreadPreamble(this) << "Stepping over breakpoint: 0x" << std::hex

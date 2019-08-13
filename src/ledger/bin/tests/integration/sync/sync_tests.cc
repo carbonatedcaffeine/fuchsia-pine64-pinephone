@@ -66,7 +66,7 @@ TEST_P(SyncIntegrationTest, SerialConnection) {
   EXPECT_TRUE(WaitUntilSyncIsIdle(page2_state_watcher.get()));
 
   PageSnapshotPtr snapshot;
-  page2->GetSnapshot(snapshot.NewRequest(), fidl::VectorPtr<uint8_t>::New(0), nullptr);
+  page2->GetSnapshot(snapshot.NewRequest(), {}, nullptr);
 
   loop_waiter = NewWaiter();
   fuchsia::ledger::PageSnapshot_GetInline_Result result;
@@ -117,7 +117,7 @@ TEST_P(SyncIntegrationTest, ConcurrentConnection) {
   }));
 
   PageSnapshotPtr snapshot;
-  page2->GetSnapshot(snapshot.NewRequest(), fidl::VectorPtr<uint8_t>::New(0), nullptr);
+  page2->GetSnapshot(snapshot.NewRequest(), {}, nullptr);
 
   loop_waiter = NewWaiter();
   fuchsia::ledger::PageSnapshot_GetInline_Result result;
@@ -138,7 +138,7 @@ TEST_P(SyncIntegrationTest, ConcurrentConnection) {
 // it. After that, the first connection re-uploads the same value, but with an
 // EAGER priority. When the second connection receives the changes, we verify
 // that the object is fully present on disk and can be retrieved by calling Get.
-TEST_P(SyncIntegrationTest, LazyToEagerTransition) {
+TEST_P(SyncIntegrationTest, DISABLED_LazyToEagerTransition) {
   auto instance1 = NewLedgerAppInstance();
   auto instance2 = NewLedgerAppInstance();
 
@@ -153,13 +153,13 @@ TEST_P(SyncIntegrationTest, LazyToEagerTransition) {
   PageSnapshotPtr snapshot;
   PageWatcherPtr watcher_ptr;
   TestPageWatcher page2_watcher(watcher_ptr.NewRequest(), []() {});
-  page2->GetSnapshot(snapshot.NewRequest(), fidl::VectorPtr<uint8_t>::New(0),
+  page2->GetSnapshot(snapshot.NewRequest(), {},
                      std::move(watcher_ptr));
 
   DataGenerator generator = DataGenerator(GetRandom());
 
   std::vector<uint8_t> key = convert::ToArray("Hello");
-  std::vector<uint8_t> big_value = generator.MakeValue(2 * 65536 + 1).take();
+  std::vector<uint8_t> big_value = generator.MakeValue(2 * 65536 + 1);
   fsl::SizedVmo vmo;
   ASSERT_TRUE(fsl::VmoFromVector(big_value, &vmo));
   fuchsia::ledger::Page_CreateReferenceFromBuffer_Result create_result;
@@ -186,6 +186,7 @@ TEST_P(SyncIntegrationTest, LazyToEagerTransition) {
   // Fetch only a small part.
   snapshot->FetchPartial(convert::ToArray("Hello"), 0, 10,
                          callback::Capture(loop_waiter->GetCallback(), &fetch_result));
+  // TODO(LE-812): this assertion is flaky. Re-enable this test once fixed.
   ASSERT_TRUE(loop_waiter->RunUntilCalled());
   EXPECT_THAT(fetch_result, MatchesString(SizeIs(10)));
 
@@ -232,7 +233,7 @@ TEST_P(SyncIntegrationTest, PageChangeLazyEntry) {
   PageSnapshotPtr snapshot;
   PageWatcherPtr watcher_ptr;
   TestPageWatcher watcher(watcher_ptr.NewRequest(), loop_waiter->GetCallback());
-  page2->GetSnapshot(snapshot.NewRequest(), fidl::VectorPtr<uint8_t>::New(0),
+  page2->GetSnapshot(snapshot.NewRequest(), {},
                      std::move(watcher_ptr));
   auto sync_waiter = NewWaiter();
   page2->Sync(sync_waiter->GetCallback());
@@ -240,11 +241,11 @@ TEST_P(SyncIntegrationTest, PageChangeLazyEntry) {
   page1->PutReference(std::move(key), std::move(result.response().reference), Priority::LAZY);
   ASSERT_TRUE(loop_waiter->RunUntilCalled());
 
-  EXPECT_EQ(1u, watcher.GetChangesSeen());
-  EXPECT_EQ(ResultState::COMPLETED, watcher.GetLastResultState());
+  EXPECT_EQ(watcher.GetChangesSeen(), 1u);
+  EXPECT_EQ(watcher.GetLastResultState(), ResultState::COMPLETED);
   auto change = &(watcher.GetLastPageChange());
-  EXPECT_EQ(1u, change->changed_entries.size());
-  EXPECT_EQ(nullptr, change->changed_entries[0].value);
+  EXPECT_EQ(change->changed_entries.size(), 1u);
+  EXPECT_EQ(change->changed_entries[0].value, nullptr);
 }
 
 INSTANTIATE_TEST_SUITE_P(

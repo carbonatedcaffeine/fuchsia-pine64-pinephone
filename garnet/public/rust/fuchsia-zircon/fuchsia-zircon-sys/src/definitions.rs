@@ -4,10 +4,6 @@
 #[link(name = "zircon")]
 extern {
     pub fn zx_clock_get(
-        clock_id: zx_clock_t
-        ) -> zx_time_t;
-
-    pub fn zx_clock_get_new(
         clock_id: zx_clock_t,
         out: *mut zx_time_t
         ) -> zx_status_t;
@@ -199,16 +195,6 @@ extern {
         buffer: *mut u8,
         buffer_size: usize,
         actual: *mut usize
-        ) -> zx_status_t;
-
-    pub fn zx_socket_share(
-        handle: zx_handle_t,
-        socket_to_share: zx_handle_t
-        ) -> zx_status_t;
-
-    pub fn zx_socket_accept(
-        handle: zx_handle_t,
-        out_socket: *mut zx_handle_t
         ) -> zx_status_t;
 
     pub fn zx_socket_shutdown(

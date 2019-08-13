@@ -180,7 +180,7 @@ impl Peer {
         }
     }
 
-    /// Takes the command stream for incoming commands from the remote device.
+    /// Takes the command stream for incoming commands from the remote peer.
     pub fn take_command_stream(&self) -> CommandStream {
         self.inner
             .take_command_stream()
@@ -242,9 +242,10 @@ impl Peer {
 
         let timeout = Time::after(Peer::passthrough_command_timeout());
         loop {
-            if let Some(resp) = await!(response_stream
+            if let Some(resp) = response_stream
                 .next()
-                .on_timeout(timeout, || return Some(Err(Error::Timeout))))
+                .on_timeout(timeout, || return Some(Err(Error::Timeout)))
+                .await
             {
                 let value = CommandResponse::try_from(resp?)?;
                 if value.0 == ResponseType::Interim {

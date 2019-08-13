@@ -23,7 +23,7 @@
 //! # FIDL Worker
 //!
 //! The FIDL part of the event loop implements the fuchsia.net.stack.Stack and
-//! fuchsia.net.SocketProvider interfaces. The type of the event loop message for a FIDL call is
+//! fuchsia.posix.socket.Provider interfaces. The type of the event loop message for a FIDL call is
 //! simply the generated FIDL type. When the event loop starts up, we use `fuchsia_component` to
 //! start a FIDL server that simply sends all of the events it receives to the event loop
 //! (via the sender end of the mpsc queue).
@@ -75,6 +75,8 @@
 
 #[cfg(test)]
 mod integration_tests;
+mod socket;
+mod timers;
 mod util;
 
 use ethernet as eth;
@@ -84,14 +86,15 @@ use fuchsia_zircon as zx;
 use std::convert::TryFrom;
 use std::fs::File;
 use std::marker::PhantomData;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use failure::{bail, format_err, Error};
-use fidl::endpoints::{RequestStream, ServiceMarker};
+use fidl::endpoints::{ClientEnd, RequestStream, ServiceMarker};
 use fidl_fuchsia_hardware_ethernet as fidl_ethernet;
 use fidl_fuchsia_hardware_ethernet_ext::{EthernetInfo, EthernetStatus, MacAddress};
+use fidl_fuchsia_io;
 use fidl_fuchsia_net as fidl_net;
-use fidl_fuchsia_net::{SocketControlRequest, SocketProviderRequest};
 use fidl_fuchsia_net_stack as fidl_net_stack;
 use fidl_fuchsia_net_stack::{
     AdministrativeStatus, ForwardingEntry, InterfaceAddress, InterfaceInfo, InterfaceProperties,
@@ -102,6 +105,8 @@ use fidl_fuchsia_net_stack::{
     StackGetForwardingTableResponder, StackGetInterfaceInfoResponder, StackListInterfacesResponder,
     StackMarker, StackRequest, StackRequestStream,
 };
+use fidl_fuchsia_posix_socket as psocket;
+use fidl_fuchsia_posix_socket::ProviderRequest;
 use futures::channel::mpsc;
 use futures::future::{AbortHandle, Abortable};
 use futures::prelude::*;
@@ -109,20 +114,24 @@ use futures::{select, TryFutureExt, TryStreamExt};
 #[cfg(test)]
 use integration_tests::TestEvent;
 use log::{debug, error, info, trace};
+use net_types::ethernet::Mac;
+use net_types::ip::{AddrSubnet, AddrSubnetEither, IpAddr, IpVersion, Subnet, SubnetEither};
+use packet::{Buf, BufferMut, Serializer};
+use rand::{rngs::OsRng, Rng};
 use std::convert::TryInto;
-use util::{CoreCompatible, FidlCompatible};
-
-use crate::devices::{BindingId, CommonInfo, DeviceInfo, Devices};
-
-use netstack3_core::{
-    add_device_route, del_device_route, get_all_routes, get_ip_addr_subnet, handle_timeout,
-    icmp as core_icmp, receive_frame, set_ip_addr_subnet, AddrSubnet, AddrSubnetEither, Context,
-    DeviceId, DeviceLayerEventDispatcher, EntryDest, EntryEither, EventDispatcher,
-    IpLayerEventDispatcher, Mac, NetstackError, StackState, Subnet, SubnetEither, TimerId,
-    TransportLayerEventDispatcher, UdpEventDispatcher,
+use util::{
+    ContextCoreCompatible, ContextFidlCompatible, ConversionContext, CoreCompatible, FidlCompatible,
 };
 
-type IcmpConnectionId = u64;
+use crate::devices::{BindingId, CommonInfo, DeviceInfo, Devices, ToggleError};
+
+use netstack3_core::icmp::{IcmpConnId, IcmpEventDispatcher};
+use netstack3_core::{
+    add_route, del_device_route, get_all_ip_addr_subnet, get_all_routes, handle_timeout,
+    initialize_device, receive_frame, remove_device, set_ip_addr_subnet, Context, DeviceId,
+    DeviceLayerEventDispatcher, EntryDest, EntryEither, EventDispatcher, IpLayerEventDispatcher,
+    NetstackError, StackState, TimerId, TransportLayerEventDispatcher, UdpEventDispatcher,
+};
 
 macro_rules! stack_fidl_error {
     ($err:tt) => {
@@ -169,14 +178,14 @@ impl EthernetSetupWorker {
         fasync::spawn_local(
             async move {
                 let vmo = zx::Vmo::create(256 * eth::DEFAULT_BUFFER_SIZE as u64)?;
-                let eth_client = await!(eth::Client::new(
+                let eth_client = eth::Client::new(
                     self.dev,
                     vmo,
                     eth::DEFAULT_BUFFER_SIZE,
-                    "recovery-ns"
-                ))?;
-                let info = await!(eth_client.info())?;
-                await!(eth_client.start())?;
+                    "recovery-ns",
+                ).await?;
+                let info = eth_client.info().await?;
+                eth_client.start().await?;
                 let eth_device_event = Event::EthSetupEvent(EthernetDeviceReady {
                     path: self.path,
                     client: eth_client,
@@ -208,7 +217,7 @@ impl EthernetWorker {
         let id = self.id;
         fasync::spawn_local(
             async move {
-                while let Some(evt) = await!(events.try_next())? {
+                while let Some(evt) = events.try_next().await? {
                     sender.unbounded_send(Event::EthEvent((id, evt)));
                 }
                 Ok(())
@@ -223,16 +232,22 @@ impl EthernetWorker {
 pub enum Event {
     /// A request from the fuchsia.net.stack.Stack FIDL interface.
     FidlStackEvent(StackRequest),
-    /// A request from the fuchsia.net.SocketProvider FIDL interface.
-    FidlSocketProviderEvent(SocketProviderRequest),
-    /// A request from the fuchsia.net.SocketControl FIDL interface.
-    FidlSocketControlEvent(SocketControlRequest),
+    /// A request from the fuchsia.posix.socket.Provider FIDL interface.
+    FidlSocketProviderEvent(psocket::ProviderRequest),
+    /// A request from the fuchsia.posix.socket.Control FIDL interface.
+    FidlSocketControlEvent((Arc<Mutex<socket::SocketControlWorkerInner>>, psocket::ControlRequest)),
     /// An event from an ethernet interface. Either a status change or a frame.
     EthEvent((BindingId, eth::Event)),
     /// An indication that an ethernet device is ready to be used.
     EthSetupEvent(EthernetDeviceReady),
     /// A timer firing.
-    TimerEvent(TimerId),
+    TimerEvent(timers::TimerEvent<TimerId>),
+}
+
+impl From<timers::TimerEvent<TimerId>> for Event {
+    fn from(e: timers::TimerEvent<TimerId>) -> Self {
+        Event::TimerEvent(e)
+    }
 }
 
 /// The event loop.
@@ -258,7 +273,11 @@ impl EventLoop {
                 StackState::default(),
                 EventLoopInner {
                     devices: Devices::default(),
-                    timers: vec![],
+                    timers: timers::TimerDispatcher::new(event_send.clone()),
+                    // TODO(joshlf): Is unwrapping safe here? Alternatively,
+                    // wait until we upgrade to rand 0.7, where OsRng is an
+                    // empty struct.
+                    rng: OsRng::new().unwrap(),
                     event_send: event_send.clone(),
                     #[cfg(test)]
                     test_events: None,
@@ -276,7 +295,7 @@ impl EventLoop {
         trace!("Handling Event: {:?}", evt);
         match evt {
             Some(Event::EthSetupEvent(setup)) => {
-                let (mut state, mut disp) = self.ctx.state_and_dispatcher();
+                let (state, disp) = self.ctx.state_and_dispatcher();
                 let client_stream = setup.client.get_stream();
                 let eth_id =
                     state.add_ethernet_device(Mac::new(setup.info.mac.octets), setup.info.mtu);
@@ -287,6 +306,9 @@ impl EventLoop {
                     Some(id) => {
                         let eth_worker = EthernetWorker::new(id, client_stream);
                         eth_worker.spawn(self.ctx.dispatcher().event_send.clone());
+
+                        initialize_device(&mut self.ctx, eth_id);
+
                         setup.responder.send(None, id);
                     }
                     None => {
@@ -296,13 +318,13 @@ impl EventLoop {
                 }
             }
             Some(Event::FidlStackEvent(req)) => {
-                await!(self.handle_fidl_stack_request(req));
+                self.handle_fidl_stack_request(req).await;
             }
             Some(Event::FidlSocketProviderEvent(req)) => {
-                await!(self.handle_fidl_socket_provider_request(req));
+                self.handle_fidl_socket_provider_request(req).await;
             }
-            Some(Event::FidlSocketControlEvent(req)) => {
-                await!(self.handle_fidl_socket_control_request(req));
+            Some(Event::FidlSocketControlEvent((sock, req))) => {
+                sock.lock().unwrap().handle_request(self, req);
             }
             Some(Event::EthEvent((id, eth::Event::StatusChanged))) => {
                 info!("device {:?} status changed signal", id);
@@ -310,12 +332,12 @@ impl EventLoop {
                 // acks the message, and prevents the device from sending more status changed
                 // messages.
                 if let Some(device) = self.ctx.dispatcher().get_device_info(id) {
-                    if let Ok(status) = await!(device.client().get_status()) {
+                    if let Ok(status) = device.client().get_status().await {
                         info!("device {:?} status changed to: {:?}", id, status);
                         #[cfg(test)]
                         self.ctx
                             .dispatcher_mut()
-                            .send_test_event(TestEvent::DeviceStatusChanged { id: id, status });
+                            .send_test_event(TestEvent::DeviceStatusChanged { id, status });
                     }
                 }
             }
@@ -323,19 +345,19 @@ impl EventLoop {
                 // TODO(wesleyac): Check flags
                 let len = rx.read(buf);
                 if let Some(id) = self.ctx.dispatcher().devices.get_core_id(id) {
-                    receive_frame(&mut self.ctx, id, &mut buf[..len]);
+                    receive_frame(&mut self.ctx, id, Buf::new(&mut buf[..len], ..));
                 } else {
                     debug!("Received ethernet frame on disabled device: {}", id);
                 }
             }
             Some(Event::TimerEvent(id)) => {
-                // cancel_timeout() should be called before handle_timeout().
-                // Suppose handle_timeout() is called first and it reinstalls
-                // the timer event, the timer event will be erroneously cancelled by the
-                // cancel_timeout() before it's being triggered.
-                // TODO(NET-2138): Create a unit test for the processing logic.
-                self.ctx.dispatcher_mut().cancel_timeout(id);
-                handle_timeout(&mut self.ctx, id);
+                // By reaching into the TimerDispatcher to commit the timer, we
+                // guarantee that the timer hasn't been cancelled while it was
+                // in the EventLoop's event stream. commit_timer will only
+                // return Some if the timer is still valid.
+                if let Some(id) = self.ctx.dispatcher_mut().timers.commit_timer(id) {
+                    handle_timeout(&mut self.ctx, id);
+                }
             }
             None => bail!("Stream of events ended unexpectedly"),
         }
@@ -346,9 +368,9 @@ impl EventLoop {
         let mut buf = [0; 2048];
         let mut fut = Some(fut);
         loop {
-            match await!(futures::future::select(self.event_recv.next(), fut.take().unwrap())) {
+            match futures::future::select(self.event_recv.next(), fut.take().unwrap()).await {
                 future::Either::Left((evt, f)) => {
-                    await!(self.handle_event(&mut buf, evt))?;
+                    self.handle_event(&mut buf, evt).await?;
                     fut = Some(f);
                 }
                 future::Either::Right((result, _)) => break Ok(result),
@@ -360,39 +382,54 @@ impl EventLoop {
     pub async fn run(mut self) -> Result<(), Error> {
         let mut buf = [0; 2048];
         loop {
-            let evt = await!(self.event_recv.next());
-            self.handle_event(&mut buf, evt);
+            let evt = self.event_recv.next().await;
+            self.handle_event(&mut buf, evt).await?;
         }
         Ok(())
     }
 
-    async fn handle_fidl_socket_provider_request(&mut self, req: SocketProviderRequest) {
+    async fn handle_fidl_socket_provider_request(&mut self, req: psocket::ProviderRequest) {
         match req {
-            SocketProviderRequest::Socket { domain, type_, protocol, responder } => {
-                match (domain as i32, type_ as i32) {
+            psocket::ProviderRequest::Socket { domain, type_, protocol, responder } => {
+                let domain = i32::from(domain);
+                let nonblock = i32::from(type_) & libc::SOCK_NONBLOCK != 0;
+                let type_ = i32::from(type_) & !(libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC);
+                let net_proto = match domain {
+                    libc::AF_INET => IpVersion::V4,
+                    libc::AF_INET6 => IpVersion::V6,
                     _ => {
-                        responder.send(libc::ENOSYS as i16, None);
+                        responder.send(libc::EAFNOSUPPORT as i16, None);
+                        return;
                     }
+                };
+                let trans_proto = match i32::from(type_) {
+                    libc::SOCK_DGRAM => socket::TransProto::UDP,
+                    libc::SOCK_STREAM => socket::TransProto::TCP,
+                    _ => {
+                        responder.send(libc::EAFNOSUPPORT as i16, None);
+                        return;
+                    }
+                };
+
+                if let Ok((c0, c1)) = zx::Channel::create() {
+                    let worker = socket::SocketControlWorker::new(
+                        psocket::ControlRequestStream::from_channel(
+                            fasync::Channel::from_channel(c0).unwrap(),
+                        ),
+                        net_proto,
+                        trans_proto,
+                        nonblock,
+                    );
+                    if let Ok(worker) = worker {
+                        worker.spawn(self.ctx.dispatcher().event_send.clone());
+                        responder.send(0, Some(ClientEnd::new(c1)));
+                    } else {
+                        responder.send(libc::ENOBUFS as i16, None);
+                    }
+                } else {
+                    responder.send(libc::ENOBUFS as i16, None);
                 }
             }
-            SocketProviderRequest::GetAddrInfo { node, service, hints, responder } => {
-                // TODO(wesleyac)
-            }
-        }
-    }
-
-    async fn handle_fidl_socket_control_request(&mut self, req: SocketControlRequest) {
-        match req {
-            SocketControlRequest::Close { responder } => {}
-            SocketControlRequest::Ioctl { req, in_, responder } => {}
-            SocketControlRequest::Connect { addr, responder } => {}
-            SocketControlRequest::Accept { flags, responder } => {}
-            SocketControlRequest::Bind { addr, responder } => {}
-            SocketControlRequest::Listen { backlog, responder } => {}
-            SocketControlRequest::GetSockName { responder } => {}
-            SocketControlRequest::GetPeerName { responder } => {}
-            SocketControlRequest::SetSockOpt { level, optname, optval, responder } => {}
-            SocketControlRequest::GetSockOpt { level, optname, responder } => {}
         }
     }
 
@@ -407,10 +444,10 @@ impl EventLoop {
                 );
             }
             StackRequest::ListInterfaces { responder } => {
-                responder.send(&mut await!(self.fidl_list_interfaces()).iter_mut());
+                responder.send(&mut self.fidl_list_interfaces().await.iter_mut());
             }
             StackRequest::GetInterfaceInfo { id, responder } => {
-                let (mut info, mut error) = match (await!(self.fidl_get_interface_info(id))) {
+                let (mut info, mut error) = match (self.fidl_get_interface_info(id).await) {
                     Ok(info) => (Some(info), None),
                     Err(error) => (None, Some(error)),
                 };
@@ -420,12 +457,17 @@ impl EventLoop {
                 );
             }
             StackRequest::EnableInterface { id, responder } => {
-                responder
-                    .send(self.fidl_enable_interface(id).as_mut().map(fidl::encoding::OutOfLine));
+                responder.send(
+                    self.fidl_enable_interface(id).await
+                        .err()
+                        .as_mut()
+                        .map(fidl::encoding::OutOfLine),
+                );
             }
             StackRequest::DisableInterface { id, responder } => {
-                responder
-                    .send(self.fidl_disable_interface(id).as_mut().map(fidl::encoding::OutOfLine));
+                responder.send(
+                    self.fidl_disable_interface(id).err().as_mut().map(fidl::encoding::OutOfLine),
+                );
             }
             StackRequest::AddInterfaceAddress { id, addr, responder } => {
                 responder.send(
@@ -458,6 +500,12 @@ impl EventLoop {
                 // TODO(toshik)
             }
             StackRequest::DisablePacketFilter { id, responder } => {
+                // TODO(toshik)
+            }
+            StackRequest::EnableIpForwarding { responder } => {
+                // TODO(toshik)
+            }
+            StackRequest::DisableIpForwarding { responder } => {
                 // TODO(toshik)
             }
         }
@@ -494,16 +542,34 @@ impl EventLoop {
         let mut devices = vec![];
         for device in self.ctx.dispatcher().devices.iter_devices() {
             // TODO(wesleyac): Cache info and status
-            let info = await!(device.client().info());
-            let status = await!(device.client().get_status());
+            let info = device.client().info().await;
+            let status = device.client().get_status().await;
+            let is_active = device.is_active();
+            let mut addresses = vec![];
+            if let Some(core_id) = device.core_id() {
+                for addr in get_all_ip_addr_subnet(&self.ctx, core_id) {
+                    match addr.try_into_fidl() {
+                        Ok(addr) => addresses.push(addr),
+                        Err(e) => {
+                            error!("failed to map interface address/subnet into FIDL: {:?}", e)
+                        }
+                    }
+                }
+            };
             devices.push(InterfaceInfo {
                 id: device.id(),
                 properties: InterfaceProperties {
-                    path: device.path().clone(),
+                    name: "[TBD]".to_owned(), // TODO(porce): Follow up to populate the name
+                    topopath: device.path().clone(),
+                    filepath: "[TBD]".to_owned(), // TODO(porce): Follow up to populate
                     mac: if let Ok(info) = &info { Some(Box::new(info.mac.into())) } else { None },
                     mtu: if let Ok(info) = &info { info.mtu } else { 0 },
                     features: if let Ok(info) = &info { info.features.bits() } else { 0 },
-                    administrative_status: AdministrativeStatus::Enabled, // TODO(wesleyac) this
+                    administrative_status: if is_active {
+                        AdministrativeStatus::Enabled
+                    } else {
+                        AdministrativeStatus::Disabled
+                    },
                     physical_status: match status {
                         Ok(status) => {
                             if status.contains(EthernetStatus::ONLINE) {
@@ -514,7 +580,7 @@ impl EventLoop {
                         }
                         Err(_) => PhysicalStatus::Down,
                     },
-                    addresses: vec![], //TODO(wesleyac): this
+                    addresses, // TODO(gongt) Handle tentative IPv6 addresses
                 },
             });
         }
@@ -528,35 +594,80 @@ impl EventLoop {
         let device =
             self.ctx.dispatcher().get_device_info(id).ok_or(stack_fidl_error!(NotFound))?;
         // TODO(wesleyac): Cache info and status
-        let info = await!(device.client().info()).map_err(|_| stack_fidl_error!(Internal))?;
+        let info = device.client().info().await.map_err(|_| stack_fidl_error!(Internal))?;
         let status =
-            await!(device.client().get_status()).map_err(|_| stack_fidl_error!(Internal))?;
+            device.client().get_status().await.map_err(|_| stack_fidl_error!(Internal))?;
+        let is_active = device.is_active();
+        let mut addresses = vec![];
+        if let Some(core_id) = device.core_id() {
+            for addr in get_all_ip_addr_subnet(&self.ctx, core_id) {
+                match addr.try_into_fidl() {
+                    Ok(addr) => addresses.push(addr),
+                    Err(e) => error!("failed to map interface address/subnet into FIDL: {:?}", e),
+                }
+            }
+        };
         return Ok(InterfaceInfo {
             id: device.id(),
             properties: InterfaceProperties {
-                path: device.path().clone(),
+                name: "[TBD]".to_owned(), // TODO(porce): Follow up to populate the name
+                topopath: device.path().clone(),
+                filepath: "[TBD]".to_owned(), // TODO(porce): Follow up to populate
                 mac: Some(Box::new(info.mac.into())),
                 mtu: info.mtu,
                 features: info.features.bits(),
-                administrative_status: AdministrativeStatus::Enabled, // TODO(wesleyac) this
+                administrative_status: if is_active {
+                    AdministrativeStatus::Enabled
+                } else {
+                    AdministrativeStatus::Disabled
+                },
                 physical_status: if status.contains(EthernetStatus::ONLINE) {
                     PhysicalStatus::Up
                 } else {
                     PhysicalStatus::Down
                 },
-                addresses: vec![], //TODO(wesleyac): this
+                addresses, // TODO(gongt) Handle tentative IPv6 addresses
             },
         });
     }
 
-    fn fidl_enable_interface(&mut self, id: u64) -> Option<fidl_net_stack::Error> {
-        // TODO(eyalsoha): Implement this.
-        None
+    async fn fidl_enable_interface(&mut self, id: u64) -> Result<(), fidl_net_stack::Error> {
+        let (state, disp) = self.ctx.state_and_dispatcher();
+        let device = disp.get_device_info(id).ok_or(stack_fidl_error!(NotFound))?;
+        let info = device.client().info().await.map_err(|_| stack_fidl_error!(Internal))?;
+        // TODO(rheacock, NET-2140): Handle core and driver state in two stages: add device to the
+        // core to get an id, then reach into the driver to get updated info before triggering the
+        // core to allow traffic on the interface.
+        let generate_core_id =
+            |dev_info: &DeviceInfo| state.add_ethernet_device(Mac::new(info.mac.octets), info.mtu);
+        match disp.devices.activate_device(id, generate_core_id) {
+            Ok(_) => Ok(()),
+            Err(toggle_error) => {
+                match toggle_error {
+                    ToggleError::NoChange => Ok(()),
+                    ToggleError::NotFound => Err(stack_fidl_error!(NotFound)), // Invalid device ID
+                }
+            }
+        }
     }
 
-    fn fidl_disable_interface(&mut self, id: u64) -> Option<fidl_net_stack::Error> {
-        // TODO(eyalsoha): Implement this.
-        None
+    fn fidl_disable_interface(&mut self, id: u64) -> Result<(), fidl_net_stack::Error> {
+        match self.ctx.dispatcher_mut().devices.deactivate_device(id) {
+            Ok((core_id, device_info)) => {
+                // Disabling the interface deactivates it in the bindings, and will remove
+                // it completely from the core.
+                match remove_device(&mut self.ctx, core_id) {
+                    Some(_) => Ok(()), // TODO(rheacock): schedule and send the received frames
+                    None => Ok(()),
+                }
+            }
+            Err(toggle_error) => {
+                match toggle_error {
+                    ToggleError::NoChange => Ok(()),
+                    ToggleError::NotFound => Err(stack_fidl_error!(NotFound)), // Invalid device ID
+                }
+            }
+        }
     }
 
     fn fidl_add_interface_address(
@@ -577,7 +688,7 @@ impl EventLoop {
                 }
                 None => {
                     // TODO(brunodalbo): We should probably allow adding static addresses
-                    //  to interfaces that are not installed, return BadState for now
+                    // to interfaces that are not installed, return BadState for now
                     Some(stack_fidl_error!(BadState))
                 }
             }
@@ -595,59 +706,14 @@ impl EventLoop {
         None
     }
 
-    // TODO(brunodalbo): make this &self once the split between dispatcher and
-    //  dispatcher_mut lands.
-    fn fidl_get_forwarding_table(&mut self) -> Vec<fidl_net_stack::ForwardingEntry> {
-        // TODO(brunodalbo): we don't need to copy the routes once the split
-        //  between dispatcher and dispatcher_mut lands.
-        let routes: Vec<_> = get_all_routes(&self.ctx).collect();
-        routes
-            .into_iter()
-            .map(|entry| match entry {
-                EntryEither::V4(v4_entry) => fidl_net_stack::ForwardingEntry {
-                    subnet: fidl_net::Subnet {
-                        addr: fidl_net::IpAddress::Ipv4(fidl_net::Ipv4Address {
-                            addr: v4_entry.subnet.network().ipv4_bytes(),
-                        }),
-                        prefix_len: v4_entry.subnet.prefix(),
-                    },
-                    destination: match v4_entry.dest {
-                        EntryDest::Local { device } => {
-                            fidl_net_stack::ForwardingDestination::DeviceId(
-                                self.ctx.dispatcher().devices.get_binding_id(device).unwrap(),
-                            )
-                        }
-                        EntryDest::Remote { next_hop } => {
-                            fidl_net_stack::ForwardingDestination::NextHop(
-                                fidl_net::IpAddress::Ipv4(fidl_net::Ipv4Address {
-                                    addr: next_hop.ipv4_bytes(),
-                                }),
-                            )
-                        }
-                    },
-                },
-                EntryEither::V6(v6_entry) => fidl_net_stack::ForwardingEntry {
-                    subnet: fidl_net::Subnet {
-                        addr: fidl_net::IpAddress::Ipv6(fidl_net::Ipv6Address {
-                            addr: v6_entry.subnet.network().ipv6_bytes(),
-                        }),
-                        prefix_len: v6_entry.subnet.prefix(),
-                    },
-                    destination: match v6_entry.dest {
-                        EntryDest::Local { device } => {
-                            fidl_net_stack::ForwardingDestination::DeviceId(
-                                self.ctx.dispatcher().devices.get_binding_id(device).unwrap(),
-                            )
-                        }
-                        EntryDest::Remote { next_hop } => {
-                            fidl_net_stack::ForwardingDestination::NextHop(
-                                fidl_net::IpAddress::Ipv6(fidl_net::Ipv6Address {
-                                    addr: next_hop.ipv6_bytes(),
-                                }),
-                            )
-                        }
-                    },
-                },
+    fn fidl_get_forwarding_table(&self) -> Vec<fidl_net_stack::ForwardingEntry> {
+        get_all_routes(&self.ctx)
+            .filter_map(|entry| match entry.try_into_fidl_with_ctx(self.ctx.dispatcher()) {
+                Ok(entry) => Some(entry),
+                Err(e) => {
+                    error!("Failed to map forwarding entry into FIDL");
+                    None
+                }
             })
             .collect()
     }
@@ -656,41 +722,17 @@ impl EventLoop {
         &mut self,
         entry: ForwardingEntry,
     ) -> Option<fidl_net_stack::Error> {
-        match entry.destination {
-            fidl_net_stack::ForwardingDestination::DeviceId(id) => {
-                let device_info =
-                    if let Some(device_info) = self.ctx.dispatcher().get_device_info(id) {
-                        device_info
-                    } else {
-                        // Invalid device ID
-                        return Some(stack_fidl_error!(NotFound));
-                    };
-                let subnet = if let Ok(subnet) = entry.subnet.try_into_core() {
-                    subnet
-                } else {
-                    // Invalid subnet
-                    return Some(stack_fidl_error!(InvalidArgs));
-                };
-
-                match device_info.core_id() {
-                    Some(device_id) => {
-                        match add_device_route(&mut self.ctx, subnet, device_id) {
-                            Ok(_) => None,
-                            Err(NetstackError::Exists) => {
-                                // Subnet already in routing table.
-                                Some(stack_fidl_error!(AlreadyExists))
-                            }
-                            Err(_) => unreachable!(),
-                        }
-                    }
-                    None => {
-                        // TODO(brunodalbo): We should probably allow adding routes
-                        //  to interfaces that are not installed, return BadState for now
-                        Some(stack_fidl_error!(BadState)) // Invalid device ID
-                    }
-                }
+        let entry = match EntryEither::try_from_fidl_with_ctx(self.ctx.dispatcher(), entry) {
+            Ok(entry) => entry,
+            Err(e) => return Some(e.into()),
+        };
+        match add_route(&mut self.ctx, entry) {
+            Ok(_) => None,
+            Err(NetstackError::Exists) => {
+                // Subnet already in routing table.
+                Some(fidl_net_stack::Error { type_: fidl_net_stack::ErrorType::AlreadyExists })
             }
-            fidl_net_stack::ForwardingDestination::NextHop(x) => None,
+            Err(_) => unreachable!(),
         }
     }
 
@@ -718,7 +760,8 @@ struct TimerInfo {
 
 struct EventLoopInner {
     devices: Devices,
-    timers: Vec<TimerInfo>,
+    timers: timers::TimerDispatcher<TimerId, Event>,
+    rng: OsRng,
     event_send: mpsc::UnboundedSender<Event>,
     #[cfg(test)]
     test_events: Option<mpsc::UnboundedSender<TestEvent>>,
@@ -741,8 +784,18 @@ impl EventLoopInner {
     }
 }
 
+impl ConversionContext for EventLoopInner {
+    fn get_core_id(&self, binding_id: u64) -> Option<DeviceId> {
+        self.devices.get_core_id(binding_id)
+    }
+
+    fn get_binding_id(&self, core_id: DeviceId) -> Option<u64> {
+        self.devices.get_binding_id(core_id)
+    }
+}
+
 /// A thin wrapper around `zx::Time` that implements `core::Instant`.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug)]
 struct ZxTime(zx::Time);
 
 impl netstack3_core::Instant for ZxTime {
@@ -775,90 +828,53 @@ impl EventDispatcher for EventLoopInner {
     }
 
     fn schedule_timeout_instant(&mut self, time: ZxTime, id: TimerId) -> Option<ZxTime> {
-        let old_timer = self.cancel_timeout(id);
-
-        let mut timer_send = self.event_send.clone();
-        let timeout = async move {
-            await!(fasync::Timer::new(fasync::Time::from_zx(time.0)));
-            timer_send.send(Event::TimerEvent(id));
-            // The timer's cancel function is called by the receiver, so that
-            // this async block does not need to have a reference to the
-            // eventloop.
-        };
-
-        let (abort_handle, abort_registration) = AbortHandle::new_pair();
-        self.timers.push(TimerInfo { time: time.0, id, abort_handle });
-
-        let timeout = Abortable::new(timeout, abort_registration);
-        let timeout = timeout.unwrap_or_else(|_| ());
-
-        fasync::spawn_local(timeout);
-        old_timer
+        self.timers.schedule_timer(id, time)
     }
 
-    // TODO(wesleyac): Fix race
-    //
-    // There is a potential race in the following condition:
-    //
-    // 1. Timer is set
-    // 2. Ethernet event gets enqueued
-    // 3. Timer future fires (enqueueing timer message - timer has _not_ been cancelled yet)
-    // 4. Ethernet event gets handled. This attempts to reschedule the timer into the future.
-    // 5. Timer message gets handled - event is triggered as if it happened at a time in the
-    //    future!
-    //
-    // The fix to this should be to have the event loop drain the queue without yielding, thus
-    // ensuring that the timer future cannot fire until the main queue is empty.
-    // See `GroupAvailable` in `src/connectivity/wlan/wlanstack/src/future_util.rs`
-    // for an example of how to do this.
     fn cancel_timeout(&mut self, id: TimerId) -> Option<ZxTime> {
-        let index =
-            self.timers.iter().enumerate().find_map(
-                |x| {
-                    if x.1.id == id {
-                        Some(x.0)
-                    } else {
-                        None
-                    }
-                },
-            )?;
-        self.timers[index].abort_handle.abort();
-        Some(ZxTime(self.timers.remove(index).time))
+        self.timers.cancel_timer(&id)
+    }
+
+    fn cancel_timeouts_with<F: FnMut(&TimerId) -> bool>(&mut self, f: F) {
+        self.timers.cancel_timers_with(f);
+    }
+
+    type Rng = OsRng;
+
+    fn rng(&mut self) -> &mut OsRng {
+        &mut self.rng
     }
 }
 
-impl DeviceLayerEventDispatcher for EventLoopInner {
-    fn send_frame(&mut self, device: DeviceId, frame: &[u8]) {
+impl<B: BufferMut> DeviceLayerEventDispatcher<B> for EventLoopInner {
+    fn send_frame<S: Serializer>(&mut self, device: DeviceId, frame: S) -> Result<(), S> {
         // TODO(wesleyac): Error handling
+        let frame = frame.serialize_vec_outer().map_err(|(_, ser)| ser)?;
         match self.devices.get_core_device_mut(device) {
             Some(dev) => {
-                dev.client_mut().send(&frame);
+                dev.client_mut().send(frame.as_ref());
             }
             None => error!("Tried to send frame on device that is not listed: {:?}", device),
         }
+        Ok(())
     }
 }
 
-impl UdpEventDispatcher for EventLoopInner {
-    type UdpConn = ();
-    type UdpListener = ();
-}
+impl UdpEventDispatcher for EventLoopInner {}
 
 impl TransportLayerEventDispatcher for EventLoopInner {}
 
-impl core_icmp::IcmpEventDispatcher for EventLoopInner {
-    type IcmpConn = IcmpConnectionId;
-
-    fn receive_icmp_echo_reply(&mut self, conn: &Self::IcmpConn, seq_num: u16, data: &[u8]) {
+impl<B: BufferMut> IcmpEventDispatcher<B> for EventLoopInner {
+    fn receive_icmp_echo_reply(&mut self, conn: IcmpConnId, seq_num: u16, data: B) {
         #[cfg(test)]
         self.send_test_event(TestEvent::IcmpEchoReply {
-            conn: *conn,
+            conn,
             seq_num,
-            data: data.to_owned(),
+            data: data.as_ref().to_owned(),
         });
 
         // TODO(brunodalbo) implement actual handling of icmp echo replies
     }
 }
 
-impl IpLayerEventDispatcher for EventLoopInner {}
+impl<B: BufferMut> IpLayerEventDispatcher<B> for EventLoopInner {}

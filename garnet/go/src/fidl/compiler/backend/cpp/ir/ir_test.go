@@ -5,8 +5,9 @@
 package ir
 
 import (
-	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"fidl/compiler/backend/types"
 	. "fidl/compiler/backend/typestest"
@@ -82,14 +83,22 @@ func TestCompileInterface(t *testing.T) {
 				EventSenderName:       "Test_EventSender",
 				SyncName:              "Test_Sync",
 				SyncProxyName:         "Test_SyncProxy",
+				RequestEncoderName:    "Test_RequestEncoder",
+				RequestDecoderName:    "Test_RequestDecoder",
+				ResponseEncoderName:   "Test_ResponseEncoder",
+				ResponseDecoderName:   "Test_ResponseDecoder",
 				HasEvents:             false,
 				StackAllocEventBuffer: true,
 				Methods: []Method{
 					{
-						Ordinal:              1,
-						OrdinalName:          "kTest_First_Ordinal",
-						GenOrdinal:           314159,
-						GenOrdinalName:       "kTest_First_GenOrdinal",
+						Ordinals: types.NewOrdinalsStep3(
+							types.Method{
+								Ordinal:    1,
+								GenOrdinal: 314159,
+							},
+							"kTest_First_Ordinal",
+							"kTest_First_GenOrdinal",
+						),
 						Name:                 "First",
 						NameInLowerSnakeCase: "first",
 						HasRequest:           true,
@@ -120,17 +129,29 @@ func TestCompileInterface(t *testing.T) {
 							CBindingCompatible: true,
 							LinearizeRequest:   false,
 							LinearizeResponse:  false,
-							StackAllocRequest:  true,
-							StackAllocResponse: true,
-							EncodeRequest:      false,
-							DecodeResponse:     false,
+							ClientContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           18,
+							},
+							ServerContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           18,
+							},
+							EncodeRequest:  false,
+							DecodeResponse: false,
 						},
 					},
 					{
-						Ordinal:              2,
-						OrdinalName:          "kTest_Second_Ordinal",
-						GenOrdinal:           271828,
-						GenOrdinalName:       "kTest_Second_GenOrdinal",
+						Ordinals: types.NewOrdinalsStep3(
+							types.Method{
+								Ordinal:    2,
+								GenOrdinal: 271828,
+							},
+							"kTest_Second_Ordinal",
+							"kTest_Second_GenOrdinal",
+						),
 						Name:                 "Second",
 						NameInLowerSnakeCase: "second",
 						HasRequest:           true,
@@ -173,10 +194,18 @@ func TestCompileInterface(t *testing.T) {
 							CBindingCompatible: true,
 							LinearizeRequest:   false,
 							LinearizeResponse:  false,
-							StackAllocRequest:  true,
-							StackAllocResponse: true,
-							EncodeRequest:      false,
-							DecodeResponse:     false,
+							ClientContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           52,
+							},
+							ServerContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           52,
+							},
+							EncodeRequest:  false,
+							DecodeResponse: false,
 						},
 					},
 				},
@@ -222,14 +251,22 @@ func TestCompileInterface(t *testing.T) {
 				EventSenderName:       "EventTest_EventSender",
 				SyncName:              "EventTest_Sync",
 				SyncProxyName:         "EventTest_SyncProxy",
+				RequestEncoderName:    "EventTest_RequestEncoder",
+				RequestDecoderName:    "EventTest_RequestDecoder",
+				ResponseEncoderName:   "EventTest_ResponseEncoder",
+				ResponseDecoderName:   "EventTest_ResponseDecoder",
 				HasEvents:             true,
 				StackAllocEventBuffer: true,
 				Methods: []Method{
 					{
-						Ordinal:              1,
-						OrdinalName:          "kEventTest_First_Ordinal",
-						GenOrdinal:           314159,
-						GenOrdinalName:       "kEventTest_First_GenOrdinal",
+						Ordinals: types.NewOrdinalsStep3(
+							types.Method{
+								Ordinal:    1,
+								GenOrdinal: 314159,
+							},
+							"kEventTest_First_Ordinal",
+							"kEventTest_First_GenOrdinal",
+						),
 						Name:                 "First",
 						NameInLowerSnakeCase: "first",
 						Request:              []Parameter{},
@@ -259,10 +296,18 @@ func TestCompileInterface(t *testing.T) {
 							CBindingCompatible: true,
 							LinearizeRequest:   false,
 							LinearizeResponse:  false,
-							StackAllocRequest:  true,
-							StackAllocResponse: true,
-							EncodeRequest:      false,
-							DecodeResponse:     false,
+							ClientContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           18,
+							},
+							ServerContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           18,
+							},
+							EncodeRequest:  false,
+							DecodeResponse: false,
 						},
 					},
 				},
@@ -315,14 +360,22 @@ func TestCompileInterface(t *testing.T) {
 				EventSenderName:       "EventTest_EventSender",
 				SyncName:              "EventTest_Sync",
 				SyncProxyName:         "EventTest_SyncProxy",
+				RequestEncoderName:    "EventTest_RequestEncoder",
+				RequestDecoderName:    "EventTest_RequestDecoder",
+				ResponseEncoderName:   "EventTest_ResponseEncoder",
+				ResponseDecoderName:   "EventTest_ResponseDecoder",
 				HasEvents:             true,
 				StackAllocEventBuffer: false,
 				Methods: []Method{
 					{
-						Ordinal:              2,
-						OrdinalName:          "kEventTest_Second_Ordinal",
-						GenOrdinal:           271828,
-						GenOrdinalName:       "kEventTest_Second_GenOrdinal",
+						Ordinals: types.NewOrdinalsStep3(
+							types.Method{
+								Ordinal:    2,
+								GenOrdinal: 271828,
+							},
+							"kEventTest_Second_Ordinal",
+							"kEventTest_Second_GenOrdinal",
+						),
 						Name:                 "Second",
 						NameInLowerSnakeCase: "second",
 						HasRequest:           false,
@@ -356,10 +409,18 @@ func TestCompileInterface(t *testing.T) {
 							CBindingCompatible: true,
 							LinearizeRequest:   false,
 							LinearizeResponse:  false,
-							StackAllocRequest:  true,
-							StackAllocResponse: false,
-							EncodeRequest:      false,
-							DecodeResponse:     false,
+							ClientContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: false,
+								StackUse:           0,
+							},
+							ServerContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: false,
+								StackUse:           0,
+							},
+							EncodeRequest:  false,
+							DecodeResponse: false,
 						},
 					},
 				},
@@ -379,8 +440,8 @@ func TestCompileInterface(t *testing.T) {
 			if !ok || actual == nil {
 				t.Fatalf("decls[0] not an interface, was instead %T", result.Decls[0])
 			}
-			if !reflect.DeepEqual(ex.expected, *actual) {
-				t.Fatalf("expected %+v\nactual %+v", ex.expected, *actual)
+			if diff := cmp.Diff(ex.expected, *actual, cmp.AllowUnexported(types.Ordinals{})); diff != "" {
+				t.Errorf("expected != actual (-want +got)\n%s", diff)
 			}
 		})
 	}
@@ -456,14 +517,22 @@ func TestCompileInterfaceLLCPP(t *testing.T) {
 				EventSenderName:       "Test_EventSender",
 				SyncName:              "Test_Sync",
 				SyncProxyName:         "Test_SyncProxy",
+				RequestEncoderName:    "Test_RequestEncoder",
+				RequestDecoderName:    "Test_RequestDecoder",
+				ResponseEncoderName:   "Test_ResponseEncoder",
+				ResponseDecoderName:   "Test_ResponseDecoder",
 				HasEvents:             false,
 				StackAllocEventBuffer: true,
 				Methods: []Method{
 					{
-						Ordinal:              1,
-						OrdinalName:          "kTest_First_Ordinal",
-						GenOrdinal:           314159,
-						GenOrdinalName:       "kTest_First_GenOrdinal",
+						Ordinals: types.NewOrdinalsStep3(
+							types.Method{
+								Ordinal:    1,
+								GenOrdinal: 314159,
+							},
+							"kTest_First_Ordinal",
+							"kTest_First_GenOrdinal",
+						),
 						Name:                 "First",
 						NameInLowerSnakeCase: "first",
 						HasRequest:           true,
@@ -494,17 +563,29 @@ func TestCompileInterfaceLLCPP(t *testing.T) {
 							CBindingCompatible: true,
 							LinearizeRequest:   false,
 							LinearizeResponse:  false,
-							StackAllocRequest:  true,
-							StackAllocResponse: true,
-							EncodeRequest:      false,
-							DecodeResponse:     false,
+							ClientContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           18,
+							},
+							ServerContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           18,
+							},
+							EncodeRequest:  false,
+							DecodeResponse: false,
 						},
 					},
 					{
-						Ordinal:              2,
-						OrdinalName:          "kTest_Second_Ordinal",
-						GenOrdinal:           271828,
-						GenOrdinalName:       "kTest_Second_GenOrdinal",
+						Ordinals: types.NewOrdinalsStep3(
+							types.Method{
+								Ordinal:    2,
+								GenOrdinal: 271828,
+							},
+							"kTest_Second_Ordinal",
+							"kTest_Second_GenOrdinal",
+						),
 						Name:                 "Second",
 						NameInLowerSnakeCase: "second",
 						HasRequest:           true,
@@ -547,10 +628,18 @@ func TestCompileInterfaceLLCPP(t *testing.T) {
 							CBindingCompatible: true,
 							LinearizeRequest:   false,
 							LinearizeResponse:  false,
-							StackAllocRequest:  true,
-							StackAllocResponse: true,
-							EncodeRequest:      false,
-							DecodeResponse:     false,
+							ClientContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           52,
+							},
+							ServerContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           52,
+							},
+							EncodeRequest:  false,
+							DecodeResponse: false,
 						},
 					},
 				},
@@ -596,14 +685,22 @@ func TestCompileInterfaceLLCPP(t *testing.T) {
 				EventSenderName:       "EventTest_EventSender",
 				SyncName:              "EventTest_Sync",
 				SyncProxyName:         "EventTest_SyncProxy",
+				RequestEncoderName:    "EventTest_RequestEncoder",
+				RequestDecoderName:    "EventTest_RequestDecoder",
+				ResponseEncoderName:   "EventTest_ResponseEncoder",
+				ResponseDecoderName:   "EventTest_ResponseDecoder",
 				HasEvents:             true,
 				StackAllocEventBuffer: true,
 				Methods: []Method{
 					{
-						Ordinal:              1,
-						OrdinalName:          "kEventTest_First_Ordinal",
-						GenOrdinal:           314159,
-						GenOrdinalName:       "kEventTest_First_GenOrdinal",
+						Ordinals: types.NewOrdinalsStep3(
+							types.Method{
+								Ordinal:    1,
+								GenOrdinal: 314159,
+							},
+							"kEventTest_First_Ordinal",
+							"kEventTest_First_GenOrdinal",
+						),
 						Name:                 "First",
 						NameInLowerSnakeCase: "first",
 						Request:              []Parameter{},
@@ -633,10 +730,18 @@ func TestCompileInterfaceLLCPP(t *testing.T) {
 							CBindingCompatible: true,
 							LinearizeRequest:   false,
 							LinearizeResponse:  false,
-							StackAllocRequest:  true,
-							StackAllocResponse: true,
-							EncodeRequest:      false,
-							DecodeResponse:     false,
+							ClientContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           18,
+							},
+							ServerContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: true,
+								StackUse:           18,
+							},
+							EncodeRequest:  false,
+							DecodeResponse: false,
 						},
 					},
 				},
@@ -689,14 +794,22 @@ func TestCompileInterfaceLLCPP(t *testing.T) {
 				EventSenderName:       "EventTest_EventSender",
 				SyncName:              "EventTest_Sync",
 				SyncProxyName:         "EventTest_SyncProxy",
+				RequestEncoderName:    "EventTest_RequestEncoder",
+				RequestDecoderName:    "EventTest_RequestDecoder",
+				ResponseEncoderName:   "EventTest_ResponseEncoder",
+				ResponseDecoderName:   "EventTest_ResponseDecoder",
 				HasEvents:             true,
 				StackAllocEventBuffer: false,
 				Methods: []Method{
 					{
-						Ordinal:              2,
-						OrdinalName:          "kEventTest_Second_Ordinal",
-						GenOrdinal:           271828,
-						GenOrdinalName:       "kEventTest_Second_GenOrdinal",
+						Ordinals: types.NewOrdinalsStep3(
+							types.Method{
+								Ordinal:    2,
+								GenOrdinal: 271828,
+							},
+							"kEventTest_Second_Ordinal",
+							"kEventTest_Second_GenOrdinal",
+						),
 						Name:                 "Second",
 						NameInLowerSnakeCase: "second",
 						HasRequest:           false,
@@ -730,10 +843,18 @@ func TestCompileInterfaceLLCPP(t *testing.T) {
 							CBindingCompatible: true,
 							LinearizeRequest:   false,
 							LinearizeResponse:  false,
-							StackAllocRequest:  true,
-							StackAllocResponse: false,
-							EncodeRequest:      false,
-							DecodeResponse:     false,
+							ClientContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: false,
+								StackUse:           0,
+							},
+							ServerContext: LLContextProps{
+								StackAllocRequest:  true,
+								StackAllocResponse: false,
+								StackUse:           0,
+							},
+							EncodeRequest:  false,
+							DecodeResponse: false,
 						},
 					},
 				},
@@ -753,8 +874,8 @@ func TestCompileInterfaceLLCPP(t *testing.T) {
 			if !ok || actual == nil {
 				t.Fatalf("decls[0] not an interface, was instead %T", result.Decls[0])
 			}
-			if !reflect.DeepEqual(ex.expected, *actual) {
-				t.Fatalf("expected %+v\nactual %+v", ex.expected, *actual)
+			if diff := cmp.Diff(ex.expected, *actual, cmp.AllowUnexported(types.Ordinals{})); diff != "" {
+				t.Errorf("expected != actual (-want +got)\n%s", diff)
 			}
 		})
 	}
@@ -835,8 +956,8 @@ func TestCompileTable(t *testing.T) {
 			if !ok || actual == nil {
 				t.Fatalf("decls[0] not an table, was instead %T", result.Decls[0])
 			}
-			if !reflect.DeepEqual(ex.expected, *actual) {
-				t.Fatalf("expected %+v\nactual %+v", ex.expected, *actual)
+			if diff := cmp.Diff(ex.expected, *actual, cmp.AllowUnexported(types.Ordinals{})); diff != "" {
+				t.Errorf("expected != actual (-want +got)\n%s", diff)
 			}
 		})
 	}
@@ -918,8 +1039,8 @@ func TestCompileTableLlcppNamespaceShouldBeRenamed(t *testing.T) {
 			if !ok || actual == nil {
 				t.Fatalf("decls[0] not an table, was instead %T", result.Decls[0])
 			}
-			if !reflect.DeepEqual(ex.expected, *actual) {
-				t.Fatalf("expected %+v\nactual %+v", ex.expected, *actual)
+			if diff := cmp.Diff(ex.expected, *actual, cmp.AllowUnexported(types.Ordinals{})); diff != "" {
+				t.Errorf("expected != actual (-want +got)\n%s", diff)
 			}
 		})
 	}
@@ -1100,8 +1221,8 @@ func TestCompileXUnion(t *testing.T) {
 			if !ok || actual == nil {
 				t.Fatalf("decls[0] not a xunion, was instead %T", result.Decls[0])
 			}
-			if !reflect.DeepEqual(ex.expected, *actual) {
-				t.Fatalf("expected %+v\nactual %+v", ex.expected, *actual)
+			if diff := cmp.Diff(ex.expected, *actual, cmp.AllowUnexported(types.Ordinals{})); diff != "" {
+				t.Errorf("expected != actual (-want +got)\n%s", diff)
 			}
 		})
 	}

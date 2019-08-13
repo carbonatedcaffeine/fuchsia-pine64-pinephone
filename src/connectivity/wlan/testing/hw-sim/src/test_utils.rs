@@ -3,10 +3,12 @@
 // found in the LICENSE file.
 
 use {
+    fidl_fuchsia_wlan_service::WlanMarker,
     fidl_fuchsia_wlan_tap as wlantap,
-    fuchsia_async::{self as fasync, temp::TempStreamExt, DurationExt, TimeoutExt},
+    fuchsia_async::{self as fasync, DurationExt, TimeoutExt},
+    fuchsia_component::client::connect_to_service,
     fuchsia_zircon::{self as zx, prelude::*},
-    futures::{channel::mpsc, ready, task::Context, Future, FutureExt, Poll, StreamExt},
+    futures::{channel::oneshot, ready, task::Context, Future, FutureExt, Poll, StreamExt},
     std::{marker::Unpin, pin::Pin, sync::Arc},
     wlantap_client::Wlantap,
 };
@@ -36,18 +38,17 @@ where
 {
 }
 
-impl<T, E, F, H> Future for TestHelperFuture<F, H>
+impl<F, H> Future for TestHelperFuture<F, H>
 where
-    F: Future<Output = Result<T, E>> + Unpin,
+    F: Future + Unpin,
     H: FnMut(wlantap::WlantapPhyEvent),
 {
-    type Output = Result<(T, EventStream), (E, EventStream)>;
+    type Output = (F::Output, EventStream);
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
         match this.main_future.poll_unpin(cx) {
-            Poll::Ready(Err(e)) => Poll::Ready(Err((e, this.event_stream.take().unwrap()))),
-            Poll::Ready(Ok(item)) => Poll::Ready(Ok((item, this.event_stream.take().unwrap()))),
+            Poll::Ready(x) => Poll::Ready((x, this.event_stream.take().unwrap())),
             Poll::Pending => {
                 let stream = this.event_stream.as_mut().unwrap();
                 loop {
@@ -63,7 +64,11 @@ where
 
 impl TestHelper {
     pub fn begin_test(exec: &mut fasync::Executor, config: wlantap::WlantapPhyConfig) -> Self {
-        let wlantap = Wlantap::open().expect("Failed to open wlantapctl.");
+        // If injected, wlancfg does not start automatically in a test component.
+        // Connecting to the service to start wlancfg so that it can create new interfaces.
+        let _wlan_proxy = connect_to_service::<WlanMarker>().expect("starting wlancfg");
+
+        let wlantap = Wlantap::open_from_isolated_devmgr().expect("Failed to open wlantapctl");
         let proxy = wlantap.create_phy(config).expect("Failed to create wlantap PHY");
         let event_stream = Some(proxy.take_event_stream());
         let mut helper = TestHelper { _wlantap: wlantap, proxy: Arc::new(proxy), event_stream };
@@ -72,39 +77,40 @@ impl TestHelper {
     }
 
     fn wait_for_wlanmac_start(&mut self, exec: &mut fasync::Executor) {
-        let (mut sender, receiver) = mpsc::channel::<()>(1);
+        let (sender, receiver) = oneshot::channel::<()>();
+        let mut sender = Some(sender);
         self.run(
             exec,
             5.seconds(),
             "receive a WlanmacStart event",
             move |event| match event {
                 wlantap::WlantapPhyEvent::WlanmacStart { .. } => {
-                    sender.try_send(()).unwrap();
+                    sender.take().map(|s| s.send(()));
                 }
                 _ => {}
             },
-            receiver.map(Ok).try_into_future(),
+            receiver,
         )
-        .unwrap_or_else(|()| unreachable!());
+        .unwrap_or_else(|oneshot::Canceled| panic!());
     }
 
     pub fn proxy(&self) -> Arc<wlantap::WlantapPhyProxy> {
         self.proxy.clone()
     }
 
-    pub fn run<T, E, F, H>(
+    pub fn run<R, F, H>(
         &mut self,
         exec: &mut fasync::Executor,
         timeout: zx::Duration,
         context: &str,
         event_handler: H,
         future: F,
-    ) -> Result<T, E>
+    ) -> R
     where
         H: FnMut(wlantap::WlantapPhyEvent),
-        F: Future<Output = Result<T, E>> + Unpin,
+        F: Future<Output = R> + Unpin,
     {
-        let res = exec.run_singlethreaded(
+        let (item, stream) = exec.run_singlethreaded(
             TestHelperFuture {
                 event_stream: Some(self.event_stream.take().unwrap()),
                 event_handler,
@@ -112,16 +118,8 @@ impl TestHelper {
             }
             .on_timeout(timeout.after_now(), || panic!("Did not complete in time: {}", context)),
         );
-        match res {
-            Ok((item, stream)) => {
-                self.event_stream = Some(stream);
-                Ok(item)
-            }
-            Err((err, stream)) => {
-                self.event_stream = Some(stream);
-                Err(err)
-            }
-        }
+        self.event_stream = Some(stream);
+        item
     }
 }
 

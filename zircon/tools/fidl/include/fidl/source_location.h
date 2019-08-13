@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_SOURCE_LOCATION_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_SOURCE_LOCATION_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_SOURCE_LOCATION_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_SOURCE_LOCATION_H_
 
 #include <cstdint>
 #include <string_view>
@@ -21,8 +21,7 @@ class SourceLocation {
   SourceLocation(std::string_view data, const SourceFile& source_file)
       : data_(data), source_file_(&source_file) {}
 
-  SourceLocation()
-      : data_(std::string_view()), source_file_(nullptr) {}
+  SourceLocation() : data_(std::string_view()), source_file_(nullptr) {}
 
   bool valid() const { return source_file_ != nullptr; }
 
@@ -55,4 +54,4 @@ class SourceLocation {
 
 }  // namespace fidl
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_SOURCE_LOCATION_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_SOURCE_LOCATION_H_

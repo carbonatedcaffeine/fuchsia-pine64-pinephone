@@ -5,10 +5,10 @@
 #ifndef SRC_UI_LIB_ESCHER_PAPER_PAPER_SHAPE_CACHE_H_
 #define SRC_UI_LIB_ESCHER_PAPER_PAPER_SHAPE_CACHE_H_
 
-#include <lib/fit/function.h>
-
 #include <functional>
 #include <vector>
+
+#include <lib/fit/function.h>
 
 #include "src/ui/lib/escher/forward_declarations.h"
 #include "src/ui/lib/escher/geometry/types.h"
@@ -62,8 +62,13 @@ class PaperShapeCache {
     return GetRectMesh(-half_extent, half_extent, clip_planes, num_clip_planes);
   }
 
+  // Used for wireframe debugging.
+  const PaperShapeCacheEntry& GetBoxMesh(const plane3* clip_planes, size_t num_clip_planes);
+
   void BeginFrame(BatchGpuUploader* uploader, uint64_t frame_number);
   void EndFrame();
+
+  uint64_t frame_number() const { return frame_number_; }
 
   void SetConfig(const PaperRendererConfig& config);
 
@@ -76,7 +81,7 @@ class PaperShapeCache {
   uint64_t cache_miss_count() const { return cache_miss_count_; }
 
  private:
-  enum class ShapeType { kRect, kRoundedRect, kCircle };
+  enum class ShapeType { kRect, kRoundedRect, kCircle, kBox };
 
   // Args: array of planes to clip the generated mesh, and size of the array.
   using CacheMissMeshGenerator =

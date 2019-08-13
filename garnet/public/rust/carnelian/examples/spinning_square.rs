@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 use carnelian::{
     set_node_color, AnimationMode, App, AppAssistant, Color, ViewAssistant, ViewAssistantContext,
@@ -63,7 +63,7 @@ impl SpinningSquareAppAssistant {
             async move {
                 let mut stream = EchoRequestStream::from_channel(channel);
                 while let Some(EchoRequest::EchoString { value, responder }) =
-                    await!(stream.try_next()).context("error running echo server")?
+                    stream.try_next().await.context("error running echo server")?
                 {
                     if !quiet {
                         println!("Spinning Square received echo request for string {:?}", value);
@@ -92,17 +92,17 @@ struct SpinningSquareViewAssistant {
 impl ViewAssistant for SpinningSquareViewAssistant {
     fn setup(&mut self, context: &ViewAssistantContext) -> Result<(), Error> {
         set_node_color(
-            context.session,
+            context.session(),
             &self.background_node,
             &Color { r: 0xb7, g: 0x41, b: 0x0e, a: 0xff },
         );
         set_node_color(
-            context.session,
+            context.session(),
             &self.spinning_square_node,
             &Color { r: 0xff, g: 0x00, b: 0xff, a: 0xff },
         );
-        context.root_node.add_child(&self.background_node);
-        context.root_node.add_child(&self.spinning_square_node);
+        context.root_node().add_child(&self.background_node);
+        context.root_node().add_child(&self.spinning_square_node);
         Ok(())
     }
 
@@ -113,7 +113,7 @@ impl ViewAssistant for SpinningSquareViewAssistant {
         let center_x = context.size.width * 0.5;
         let center_y = context.size.height * 0.5;
         self.background_node.set_shape(&Rectangle::new(
-            context.session.clone(),
+            context.session().clone(),
             context.size.width,
             context.size.height,
         ));
@@ -127,7 +127,7 @@ impl ViewAssistant for SpinningSquareViewAssistant {
         if self.rounded {
             let corner_radius = (square_size / 4.0).ceil();
             self.spinning_square_node.set_shape(&RoundedRectangle::new(
-                context.session.clone(),
+                context.session().clone(),
                 square_size,
                 square_size,
                 corner_radius,
@@ -137,7 +137,7 @@ impl ViewAssistant for SpinningSquareViewAssistant {
             ));
         } else {
             self.spinning_square_node.set_shape(&Rectangle::new(
-                context.session.clone(),
+                context.session().clone(),
                 square_size,
                 square_size,
             ));

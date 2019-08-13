@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_CODED_AST_H_
-#define ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_CODED_AST_H_
+#ifndef ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_CODED_AST_H_
+#define ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_CODED_AST_H_
 
 #include <stdint.h>
 
@@ -72,8 +72,7 @@ struct StructField {
 };
 
 struct UnionField {
-  UnionField(const Type* type, uint32_t padding)
-      : type(type), padding(padding) {}
+  UnionField(const Type* type, uint32_t padding) : type(type), padding(padding) {}
 
   const Type* type;
   const uint32_t padding;
@@ -85,8 +84,7 @@ struct UnionField {
 // if necessary. (Gotta do something at least three times before we abstract it
 // out, right?)
 struct TableField {
-  TableField(const Type* type, uint32_t ordinal)
-      : type(type), ordinal(ordinal) {}
+  TableField(const Type* type, uint32_t ordinal) : type(type), ordinal(ordinal) {}
 
   const Type* type;
   const uint32_t ordinal;
@@ -97,8 +95,7 @@ struct TableField {
 // use-case in code, and also to make it easier to change later if necessary.
 // (Gotta do something at least three times before we abstract it out, right?)
 struct XUnionField {
-  XUnionField(const Type* type, uint32_t ordinal)
-      : type(type), ordinal(ordinal) {}
+  XUnionField(const Type* type, uint32_t ordinal) : type(type), ordinal(ordinal) {}
 
   const Type* type;
   const uint32_t ordinal;
@@ -308,4 +305,4 @@ struct VectorType : public Type {
 }  // namespace coded
 }  // namespace fidl
 
-#endif  // ZIRCON_SYSTEM_HOST_FIDL_INCLUDE_FIDL_CODED_AST_H_
+#endif  // ZIRCON_TOOLS_FIDL_INCLUDE_FIDL_CODED_AST_H_

@@ -8,6 +8,7 @@
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/sys/cpp/termination_reason.h>
 #include <zircon/features.h>
+#include <zircon/status.h>
 #include <zircon/syscalls/debug.h>
 #include <zircon/syscalls/exception.h>
 
@@ -39,13 +40,27 @@ constexpr size_t kMegabyte = 1024 * 1024;
 
 }  // namespace
 
-DebugAgent::DebugAgent(debug_ipc::StreamBuffer* stream,
-                       std::shared_ptr<sys::ServiceDirectory> services)
-    : stream_(stream), services_(services), weak_factory_(this) {}
+DebugAgent::DebugAgent(std::shared_ptr<sys::ServiceDirectory> services)
+    : services_(services), weak_factory_(this) {}
 
 DebugAgent::~DebugAgent() = default;
 
 fxl::WeakPtr<DebugAgent> DebugAgent::GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
+
+void DebugAgent::Connect(debug_ipc::StreamBuffer* stream) {
+  FXL_DCHECK(!stream_) << "A debug agent should not be connected twice!";
+  stream_ = stream;
+}
+
+void DebugAgent::Disconnect() {
+  FXL_DCHECK(stream_);
+  stream_ = nullptr;
+}
+
+debug_ipc::StreamBuffer* DebugAgent::stream() {
+  FXL_DCHECK(stream_);
+  return stream_;
+}
 
 void DebugAgent::RemoveDebuggedProcess(zx_koid_t process_koid) {
   auto found = procs_.find(process_koid);
@@ -159,6 +174,8 @@ void DebugAgent::OnAttach(uint32_t transaction_id, const debug_ipc::AttachReques
     reply.koid = job_koid;
     reply.status = AddDebuggedJob(job_koid, std::move(job));
   }
+
+  DEBUG_LOG(Agent) << "Attaching to job " << job_koid << ": " << zx_status_get_string(reply.status);
 
   // Send the reply.
   debug_ipc::MessageWriter writer;
@@ -463,13 +480,17 @@ zx_status_t DebugAgent::AddDebuggedJob(zx_koid_t job_koid, zx::job zx_job) {
   return ZX_OK;
 }
 
-zx_status_t DebugAgent::AddDebuggedProcess(DebuggedProcessCreateInfo&& create_info) {
+zx_status_t DebugAgent::AddDebuggedProcess(DebuggedProcessCreateInfo&& create_info,
+                                           DebuggedProcess** new_process) {
+  *new_process = nullptr;
+
   zx_koid_t process_koid = create_info.koid;
   auto proc = std::make_unique<DebuggedProcess>(this, std::move(create_info));
   zx_status_t status = proc->Init();
   if (status != ZX_OK)
     return status;
 
+  *new_process = proc.get();
   procs_[process_koid] = std::move(proc);
   return ZX_OK;
 }
@@ -480,6 +501,7 @@ void DebugAgent::AttachToProcess(uint32_t transaction_id, zx_koid_t process_koid
   reply.status = ZX_ERR_NOT_FOUND;
 
   zx::process process = GetProcessFromKoid(process_koid);
+  DebuggedProcess* new_process = nullptr;
   if (process.is_valid()) {
     reply.name = NameForObject(process);
     reply.koid = process_koid;
@@ -490,7 +512,7 @@ void DebugAgent::AttachToProcess(uint32_t transaction_id, zx_koid_t process_koid
     create_info.name = reply.name;
     create_info.koid = process_koid;
     create_info.handle = std::move(process);
-    reply.status = AddDebuggedProcess(std::move(create_info));
+    reply.status = AddDebuggedProcess(std::move(create_info), &new_process);
   }
 
   // Send the reply.
@@ -498,20 +520,13 @@ void DebugAgent::AttachToProcess(uint32_t transaction_id, zx_koid_t process_koid
   debug_ipc::WriteReply(reply, transaction_id, &writer);
   stream()->Write(writer.MessageComplete());
 
-  // For valid attaches, follow up with the current module and thread lists.
-  DebuggedProcess* new_process = GetDebuggedProcess(process_koid);
+  // For valid attaches, the client will as for the thread list, but we need to populate our list
+  // of threads and send the modules over.
   if (new_process) {
-    new_process->PopulateCurrentThreads();
+    DEBUG_LOG(Agent) << "Attached to process " << process_koid;
 
-    if (new_process->RegisterDebugState()) {
-      // Suspend all threads while the module list is being sent. The client
-      // will resume the threads once it's loaded symbols and processed
-      // breakpoints (this may take a while and we'd like to get any
-      // breakpoints as early as possible).
-      std::vector<uint64_t> paused_thread_koids;
-      new_process->SuspendAll(false, &paused_thread_koids);
-      new_process->SendModuleNotification(std::move(paused_thread_koids));
-    }
+    new_process->PopulateCurrentThreads();
+    new_process->SuspendAndSendModulesIfKnown();
   }
 }
 
@@ -535,7 +550,9 @@ void DebugAgent::LaunchProcess(const debug_ipc::LaunchRequest& request,
   create_info.handle = std::move(process);
   create_info.out = launcher.ReleaseStdout();
   create_info.err = launcher.ReleaseStderr();
-  zx_status_t status = AddDebuggedProcess(std::move(create_info));
+
+  DebuggedProcess* new_process = nullptr;
+  zx_status_t status = AddDebuggedProcess(std::move(create_info), &new_process);
   if (status != ZX_OK) {
     reply->status = status;
     return;
@@ -672,7 +689,15 @@ void DebugAgent::OnProcessStart(const std::string& filter, zx::process process_h
   create_info.name = description.process_name;
   create_info.out = std::move(handles.out);
   create_info.err = std::move(handles.err);
-  AddDebuggedProcess(std::move(create_info));
+
+  DebuggedProcess* new_process = nullptr;
+  AddDebuggedProcess(std::move(create_info), &new_process);
+
+  if (new_process) {
+    // In some edge-cases (see DebuggedProcess::RegisterDebugState() for more) the loader state is
+    // known at startup. Send it if so.
+    new_process->SuspendAndSendModulesIfKnown();
+  }
 }
 
 void DebugAgent::OnComponentTerminated(int64_t return_code, const ComponentDescription& description,

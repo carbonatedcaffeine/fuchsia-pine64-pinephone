@@ -34,7 +34,7 @@ a specific part of the code should be kept in the same directory as the source c
 Documentation that should be generally available to developers must be
 available in one of two locations:
 
-* Zircon specific documentation should be created in `/zircon/docs`.
+* Zircon specific documentation should be created in `/docs/zircon`.
 * Fuchsia documentation that is not specific to Zircon specific should
    be created in `/docs`.  In the `/docs/` directory, you should create your
    documentation or images in one of these sub-directories:
@@ -81,6 +81,11 @@ It is important to try to follow documentation style guidelines to ensure that t
 created by a large number of contributors can flow together. See
 [Documentation Style Guide](documentation_style_guide.md).
 
+## How can I link to source code in my documentation?
+
+Use absolute paths starting with '/', like [`/zircon/public/sysroot/BUILD.gn`](/zircon/public/sysroot/BUILD.gn).
+Never use relative paths with ".." that point to content outside of `/docs`.
+
 ## How can I expose my documentation?
 
 Documentation is only useful when users can find it. Adding links to or from existing documentation
@@ -88,6 +93,9 @@ greatly improves the chances that someone can find your documentation.
 
 Tips for leaving breadcrumbs:
 
+- Table of contents: Add links to documentation in the left sided navigation
+  on fuchsia.dev. See
+  [Change table of contents navigation](documentation_navigation_toc.md).
 - Top-down linkage: Add links from more general documents to more specific documents to help
   readers learn more about specific topics. The [Fuchsia book](../the-book/README.md) is a good
   starting point for top-down linkage.
@@ -97,3 +105,4 @@ Tips for leaving breadcrumbs:
   particularly effective.
 - Sideways linkage: Add links to documents on subjects that help readers better understand the
   content of your document.
+

@@ -5,13 +5,13 @@
 #ifndef SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SESSION_H_
 #define SRC_DEVELOPER_DEBUG_ZXDB_CLIENT_SESSION_H_
 
-#include <functional>
 #include <map>
 #include <memory>
 #include <set>
 #include <vector>
 
 #include "lib/fit/function.h"
+#include "src/developer/debug/zxdb/client/download_observer.h"
 #include "src/developer/debug/zxdb/client/filter_observer.h"
 #include "src/developer/debug/zxdb/client/session_observer.h"
 #include "src/developer/debug/zxdb/client/system_impl.h"
@@ -60,6 +60,9 @@ class Session : public SettingStoreObserver {
   void AddFilterObserver(FilterObserver* observer);
   void RemoveFilterObserver(FilterObserver* observer);
 
+  void AddDownloadObserver(DownloadObserver* observer);
+  void RemoveDownloadObserver(DownloadObserver* observer);
+
   // Returns information about whether this session is connected to a minidump
   // instead of a live system.
   bool is_minidump() const { return is_minidump_; }
@@ -76,9 +79,10 @@ class Session : public SettingStoreObserver {
   const std::string connected_host() const { return connected_host_; }
   uint16_t connected_port() const { return connected_port_; }
 
-  // Connects to a remote system. Calling when there is already a connection
-  // will issue the callback with an error.
-  void Connect(const std::string& host, uint16_t port, std::function<void(const Err&)> callback);
+  // Call with an empty host and 0 port to reconnect to the last attempted
+  // connection destination. If there is no previous destination, this will be
+  // issue an error.
+  void Connect(const std::string& host, uint16_t port, fit::callback<void(const Err&)> cb);
 
   // Disconnects from the remote system. Calling when there is no connection
   // connection will issue the callback with an error.
@@ -87,12 +91,12 @@ class Session : public SettingStoreObserver {
   // called but the callback has not been issued yet) which will cancel the
   // pending connection. The Connect() callback will still be issued but
   // will indicate failure.
-  void Disconnect(std::function<void(const Err&)> callback);
+  void Disconnect(fit::callback<void(const Err&)> callback);
 
   // Open a minidump instead of connecting to a running system. The callback
   // will be issued with an error if the file cannot be opened or if there is
   // already a connection.
-  void OpenMinidump(const std::string& path, std::function<void(const Err&)> callback);
+  void OpenMinidump(const std::string& path, fit::callback<void(const Err&)> callback);
 
   // Frees all connection-related data. A helper for different modes of
   // cleanup. Returns true if there was a connection to clear.
@@ -121,6 +125,9 @@ class Session : public SettingStoreObserver {
   // Get the list of filter observers.
   fxl::ObserverList<FilterObserver>& filter_observers() { return filter_observers_; }
 
+  // Get the list of filter observers.
+  fxl::ObserverList<DownloadObserver>& download_observers() { return download_observers_; }
+
   // When the client tells the agent to launch a component, it will return an
   // unique id identifying that launch. Later, when the component effectively
   // starts, the session will use that ID to know which component it is.
@@ -142,7 +149,7 @@ class Session : public SettingStoreObserver {
   void DispatchNotifyIO(const debug_ipc::NotifyIO& notify);
 
   // Sends an explicit quit cmd to the agent.
-  void QuitAgent(std::function<void(const Err&)> callback);
+  void QuitAgent(fit::callback<void(const Err&)> callback);
 
   // SettingStoreObserver
   void OnSettingChanged(const SettingStore&, const std::string& setting_name) override;
@@ -160,7 +167,7 @@ class Session : public SettingStoreObserver {
   // the type-specific parameter pre-bound). The uint32_t is the transaction
   // ID. If the error is set, the data will be invalid and the callback should
   // be issued with the error instead of trying to deserialize.
-  using Callback = fit::function<void(const Err&, std::vector<char>)>;
+  using Callback = fit::callback<void(const Err&, std::vector<char>)>;
 
   // Set the arch_ and arch_info_ fields.
   Err SetArch(debug_ipc::Arch arch);
@@ -169,7 +176,7 @@ class Session : public SettingStoreObserver {
   // callback is invoked with details. The opening_dump argument indicates
   // whether we are trying to open a dump file rather than connect to a debug
   // agent.
-  bool ConnectCanProceed(std::function<void(const Err&)> callback, bool opening_dump);
+  bool ConnectCanProceed(fit::callback<void(const Err&)>& callback, bool opening_dump);
 
   // Dispatches unsolicited notifications sent from the agent.
   void DispatchNotification(const debug_ipc::MsgHeader& header, std::vector<char> data);
@@ -181,7 +188,7 @@ class Session : public SettingStoreObserver {
   void ConnectionResolved(fxl::RefPtr<PendingConnection> pending, const Err& err,
                           const debug_ipc::HelloReply& reply,
                           std::unique_ptr<debug_ipc::BufferedFD> buffer,
-                          std::function<void(const Err&)> callback);
+                          fit::callback<void(const Err&)> callback);
 
   // Sends a notification to all the UI observers.
   void SendSessionNotification(SessionObserver::NotificationType, const char* fmt, ...)
@@ -207,6 +214,9 @@ class Session : public SettingStoreObserver {
 
   // Observers for filter changes within this session.
   fxl::ObserverList<FilterObserver> filter_observers_;
+  //
+  // Observers for download activity.
+  fxl::ObserverList<DownloadObserver> download_observers_;
 
   // Non-owning pointer to the connected stream. If this is non-null and
   // connection_storage_ is null, the connection is persistent (made via the
@@ -245,6 +255,15 @@ class Session : public SettingStoreObserver {
 
   debug_ipc::Arch arch_ = debug_ipc::Arch::kUnknown;
   std::unique_ptr<ArchInfo> arch_info_;
+
+  // The last host:port that a connection was made to. Will be empty/0 if there
+  // has never been a connection or if using an internal connection.
+  //
+  // Note: if we support more types in the future, there should probably be a
+  // ConnectionDest struct that contains all the different parameters so this
+  // can be passed to Connect() and stored here.
+  std::string last_host_;
+  uint64_t last_port_ = 0;
 
   fxl::WeakPtrFactory<Session> weak_factory_;
 };

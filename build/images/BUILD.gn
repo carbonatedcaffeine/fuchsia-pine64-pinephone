@@ -8,6 +8,7 @@ import("//build/config.gni")
 import("//build/config/clang/clang.gni")
 import("//build/config/fuchsia/zbi.gni")
 import("//build/config/fuchsia/zircon.gni")
+import("//build/config/fuchsia/zircon_legacy_vars.gni")
 import("//build/images/boot.gni")
 import("//build/images/collect_blob_manifest.gni")
 import("//build/images/custom_signing.gni")
@@ -16,11 +17,12 @@ import("//build/images/fvm.gni")
 import("//build/images/json.gni")
 import("//build/images/manifest.gni")
 import("//build/images/max_fvm_size.gni")
+import("//build/images/pkgfs.gni")
 import("//build/images/shell_commands.gni")
+import("//build/images/vbmeta.gni")
 import("//build/images/zxcrypt.gni")
 import("//build/info/info.gni")
 import("//build/package.gni")
-import("//garnet/build/pkgfs.gni")
 import("//garnet/go/src/pm/pm.gni")
 
 declare_args() {
@@ -63,6 +65,10 @@ assert(
 
 assert(custom_signing_script == "" || !use_vboot,
        "custom_signing_script and use_vboot cannot be used together!")
+
+assert(
+    !include_devmgr_config_in_vbmeta || use_vbmeta,
+    "include_devmgr_config_in_vbmeta cannot be used if use_vbmeta is not set!")
 
 board_name_file = "$root_build_dir/board_name"
 write_file(board_name_file, "${board_name}")
@@ -473,7 +479,7 @@ declare_args() {
   devmgr_config = []
 
   # List of kernel command line arguments to bake into the boot image.
-  # See also //zircon/docs/kernel_cmdline.md and
+  # See also //docs/zircon/kernel_cmdline.md and
   # [`devmgr_config`](#devmgr_config).
   kernel_cmdline_args = []
 
@@ -531,7 +537,12 @@ images += [
 # line file, but is read by devmgr (in addition to kernel command line
 # arguments), not by the kernel or boot loader.
 action("devmgr_config.txt") {
-  visibility = [ ":fuchsia" ]
+  visibility = [
+    ":fuchsia",
+    ":fuchsia.vbmeta",
+    ":fuchsia.vbmeta__zbi_props",
+    ":fuchsia.vbmeta__vb_desc",
+  ]
   testonly = true
 
   script = "manifest.py"
@@ -586,8 +597,8 @@ action("devmgr_config.txt") {
     # Add the backstop UTC value from the integration repo latest commit
     args += [
       "--contents",
-      "--entry=devmgr.epoch=" +
-          rebase_path(build_info_files.latest_unix_stamp, root_build_dir),
+      "--entry=clock.backstop=" +
+          rebase_path(build_info_files.minimum_utc_stamp, root_build_dir),
       "--no-contents",
       "--reset-rewrite",
     ]
@@ -651,14 +662,17 @@ zbi("fuchsia") {
     root_manifests_manifest,
     zircon_kernel_zbi,
   ]
-  manifest = [
-    {
-      outputs = [
-        "config/devmgr",
-      ]
-      sources = get_target_outputs(":devmgr_config.txt")
-    },
-  ]
+  manifest = []
+  if (!include_devmgr_config_in_vbmeta) {
+    manifest += [
+      {
+        outputs = [
+          "config/devmgr",
+        ]
+        sources = get_target_outputs(":devmgr_config.txt")
+      },
+    ]
+  }
   if (!bootfs_only) {
     deps += [ ":zxcrypt_config.txt" ]
     manifest += [
@@ -743,26 +757,6 @@ if (custom_signing_script != "") {
       ]
     },
   ]
-  if (use_vbmeta) {
-    images += [
-      {
-        deps = [
-          ":signed",
-        ]
-        sources = [
-          "$root_out_dir/fuchsia.zbi.vbmeta",
-        ]
-        json = {
-          name = "zircon-a.vbmeta"
-          type = "vbmeta"
-          bootserver_pave = [ "--vbmetaa" ]
-        }
-        public = [
-          "IMAGE_VBMETAA_RAW",
-        ]
-      },
-    ]
-  }
 } else if (use_vboot) {
   # ChromeOS vboot images.
   vboot("signed") {
@@ -785,6 +779,64 @@ if (custom_signing_script != "") {
       }
       public = [
         "IMAGE_ZIRCONA_SIGNEDZBI",
+      ]
+    },
+  ]
+}
+
+if (use_vbmeta) {
+  vbmeta("fuchsia.vbmeta") {
+    output_name = "fuchsia"
+    testonly = true
+    if (custom_signing_script != "") {
+      deps = [
+        ":signed",
+      ]
+      zbi = get_target_outputs(":signed")
+    } else {
+      deps = [
+        ":fuchsia",
+      ]
+      zbi = get_target_outputs(":fuchsia")
+    }
+    if (include_devmgr_config_in_vbmeta) {
+      deps += [ ":devmgr_config.txt" ]
+
+      boot_args_file = get_target_outputs(":devmgr_config.txt")
+
+      # expecting a single file
+      assert([ boot_args_file[0] ] == boot_args_file,
+             "expect a single output file form 'devmgr_config.txt' target")
+
+      prop_from_file = [
+        {
+          # zbi item type w/o ZBI_TYPE_ prefix
+          type = "IMAGE_ARGS"
+          file = boot_args_file[0]
+        },
+      ]
+    }
+  }
+
+  images += [
+    {
+      deps = [
+        ":fuchsia.vbmeta",
+      ]
+      sources = [
+        "$root_out_dir/fuchsia.vbmeta",
+      ]
+      json = {
+        name = "zircon-a.vbmeta"
+        type = "vbmeta"
+
+        # TODO (dmitryya@) netsvc does not support correct
+        # flashing vbmeta images to a device.
+        # Comment out this till this will be fixed.
+        #bootserver_pave = [ "--vbmetaa" ]
+      }
+      public = [
+        "IMAGE_VBMETAA_RAW",
       ]
     },
   ]
@@ -829,6 +881,19 @@ if (custom_signing_script != "") {
     },
   ]
 }
+if (use_vbmeta) {
+  images += [
+    {
+      deps = [
+        "zedboot:zedboot.vbmeta",
+      ]
+      sources = [
+        "$root_out_dir/zedboot.vbmeta",
+      ]
+      updater = "zedboot.vbmeta"
+    },
+  ]
+}
 
 ###
 ### Complete images for booting and installing the whole system.
@@ -839,7 +904,13 @@ declare_args() {
   always_zedboot = false
 }
 
+# All deps for the filesystem_sizes group.
 record_filesystem_sizes_deps = []
+
+# deps, inputs and args for the filesystem_sizes.json action.
+filesystem_sizes_deps = []
+filesystem_sizes_inputs = []
+filesystem_sizes_args = []
 
 if (!bootfs_only) {
   data_image_path = "$target_out_dir/data.blk"
@@ -986,51 +1057,40 @@ if (!bootfs_only) {
     },
   ]
 
-  action("filesystem_sizes.json") {
-    testonly = true
-    script = "format_filesystem_sizes.py"
-    deps = [
-      ":blob.blk",
-      ":data.blk",
-      ":fvm.sparse.blk",
-    ]
-    output_name = "$root_build_dir/filesystem_sizes.json"
-    outputs = [
-      output_name,
-    ]
-    inputs = [
-      blob_image_path,
-      data_image_path,
-      fvm_sparse_blk_path,
-    ]
-    args = [
-      "--fvm-blk",
-      rebase_path(fvm_sparse_blk_path),
-      "--blob-blk",
-      rebase_path(blob_image_path),
-      "--data-blk",
-      rebase_path(data_image_path),
-      "--fvm-tool",
-      rebase_path("$zircon_tools_dir/fvm"),
-      "--blobfs-tool",
-      rebase_path("$zircon_tools_dir/blobfs"),
-      "--minfs-tool",
-      rebase_path("$zircon_tools_dir/minfs"),
-      "--max-fvm-contents-size",
-      max_fvm_size,
-      "--max-blob-contents-size",
-      max_blob_contents_size,
-      "--max-blob-image-size",
-      max_blob_image_size,
-      "--max-data-contents-size",
-      max_data_contents_size,
-      "--max-data-image-size",
-      max_data_image_size,
-      "--output",
-      rebase_path(output_name),
-    ]
-  }
-  record_filesystem_sizes_deps += [ ":filesystem_sizes.json" ]
+  filesystem_sizes_deps += [
+    ":blob.blk",
+    ":data.blk",
+    ":fvm.sparse.blk",
+  ]
+  filesystem_sizes_inputs += [
+    blob_image_path,
+    data_image_path,
+    fvm_sparse_blk_path,
+  ]
+  filesystem_sizes_args += [
+    "--fvm-blk",
+    rebase_path(fvm_sparse_blk_path),
+    "--blob-blk",
+    rebase_path(blob_image_path),
+    "--data-blk",
+    rebase_path(data_image_path),
+    "--fvm-tool",
+    rebase_path("$zircon_tools_dir/fvm"),
+    "--blobfs-tool",
+    rebase_path("$zircon_tools_dir/blobfs"),
+    "--minfs-tool",
+    rebase_path("$zircon_tools_dir/minfs"),
+    "--max-fvm-contents-size",
+    max_fvm_size,
+    "--max-blob-contents-size",
+    max_blob_contents_size,
+    "--max-blob-image-size",
+    max_blob_image_size,
+    "--max-data-contents-size",
+    max_data_contents_size,
+    "--max-data-image-size",
+    max_data_image_size,
+  ]
 
   # fvm.blob.sparse.blk creates a sprase FVM partition image containing the blob
   # partition produced by blob.blk.
@@ -1045,9 +1105,9 @@ if (!bootfs_only) {
       {
         type = "blob"
         dep = ":blob.blk"
-        minimum_inodes = blobfs_minimum_inodes
-        minimum_data_bytes = blobfs_minimum_data_bytes
-        maximum_bytes = blobfs_maximum_bytes
+        minimum_inodes = blob_blobfs_minimum_inodes
+        minimum_data_bytes = blob_blobfs_minimum_data_bytes
+        maximum_bytes = blob_blobfs_maximum_bytes
       },
     ]
   }
@@ -1184,6 +1244,15 @@ if (target_cpu != "arm64" && !use_vboot) {
   ]
 } else {
   if (bootloader_prebuilt != "") {
+    copy("bootloader_image") {
+      testonly = true
+      sources = [
+        rebase_path("$bootloader_prebuilt$bootloader_hw_revision", root_build_dir),
+      ]
+      outputs = [
+        "$root_out_dir/bootloader.img",
+      ]
+    }
     images += [
       {
         deps = []
@@ -1197,13 +1266,49 @@ if (target_cpu != "arm64" && !use_vboot) {
         public = [
           "IMAGE_BOOTLOADER_RAW",
         ]
+        deps = [
+          ":bootloader_image",
+        ]
         sources = [
-          "$bootloader_prebuilt$bootloader_hw_revision",
+          "$root_out_dir/bootloader.img",
         ]
       },
     ]
   }
 }
+
+action("filesystem_sizes.json") {
+  testonly = true
+  script = "format_filesystem_sizes.py"
+  deps = filesystem_sizes_deps + [
+           ":fuchsia",
+           "zedboot:zbi",
+         ]
+  output_name = "$root_build_dir/filesystem_sizes.json"
+  outputs = [
+    output_name,
+  ]
+  fuchsia_target_outputs = get_target_outputs(":fuchsia")
+
+  # Can't use get_target_outputs() because this defined in another file.
+  zedboot_zbi_file = "$root_out_dir/zedboot.zbi"
+  inputs =
+      filesystem_sizes_inputs + fuchsia_target_outputs + [ zedboot_zbi_file ]
+  args = filesystem_sizes_args + [
+           "--fuchsia-zbi",
+           rebase_path(fuchsia_target_outputs[0]),
+           "--zedboot-zbi",
+           rebase_path(zedboot_zbi_file),
+           "--max-fuchsia-zbi-size",
+           max_fuchsia_zbi_size,
+           "--max-zedboot-zbi-size",
+           max_zedboot_zbi_size,
+           "--output",
+           rebase_path(output_name),
+         ]
+}
+
+record_filesystem_sizes_deps += [ ":filesystem_sizes.json" ]
 
 # Pseudo-target to record information about the sizes of filesystems assembled
 # during the build for later analysis.
@@ -1212,13 +1317,25 @@ group("record_filesystem_sizes") {
   deps = record_filesystem_sizes_deps
 }
 
+# These steps run through the build and symbol archiving logic to make sure they
+# work but does not produce populated archives.
+group("nil-archives") {
+  testonly = true
+  deps = [
+    ":archive-nil",
+    ":symbol-archive-nil",
+  ]
+}
+
 group("images") {
   testonly = true
   deps = [
     ":ids.txt",
+    ":nil-archives",
     ":package_lists",
     ":paver-script",
     ":record_filesystem_sizes",
+    ":root_component_index_metadata",
     "zedboot",
   ]
 }
@@ -1291,6 +1408,7 @@ foreach(format,
         [
           "tgz",
           "zip",
+          "nil",
         ]) {
   paver_targets += [
     {
@@ -1552,7 +1670,10 @@ package_metadata_list("all_package_manifests.list") {
 # The component index is the index of components in all universe packages.
 component_index_metadata = "$target_out_dir/component_index_metadata"
 component_index_metadata_list("component_index_metadata") {
-  visibility = [ "//src/sys/component_index:*" ]
+  visibility = [
+    "//build/images:*",
+    "//src/sys/component_index:*",
+  ]
 
   testonly = true
 
@@ -1562,6 +1683,21 @@ component_index_metadata_list("component_index_metadata") {
 
   deps = [
     ":universe_packages",
+  ]
+}
+
+# We copy the metatdata to the root dir so that it can easily be used by host
+# tools
+copy("root_component_index_metadata") {
+  testonly = true
+  sources = [
+    component_index_metadata,
+  ]
+  outputs = [
+    "$root_out_dir/component_index_metadata",
+  ]
+  deps = [
+    ":component_index_metadata",
   ]
 }
 
@@ -1692,6 +1828,7 @@ group("updates") {
     ":ids.txt",
     ":package_lists",
     ":publish",
+    ":root_component_index_metadata",
     ":system_snapshot",
   ]
 }
@@ -1741,6 +1878,51 @@ compiled_action("package-ids.txt") {
   args = rebase_path(inputs + outputs + [ depfile ], root_build_dir)
 }
 
+# The vDSO doesn't appear in any package and so doesn't get into any
+# ids.txt file produced by generate_manifest().  But it appears in memory
+# at runtime and in backtraces, so it should be in the aggregated ids.txt
+# for symbolization.  Likewise for the kernel itself, whose build ID is
+# useful to have in the map.
+action("kernel-ids.txt") {
+  outputs = [
+    "$target_out_dir/kernel-ids.txt",
+  ]
+
+  foreach(entry, zircon_legacy_sysroot) {
+    if (defined(entry.vdso)) {
+      vdso = entry.vdso
+    }
+  }
+
+  entries = []
+  binaries = read_file("$zircon_root_build_dir/binaries.json", "json")
+  foreach(entry, binaries) {
+    if (entry.cpu == target_cpu && entry.os == "fuchsia") {
+      if (defined(entry.debug) &&
+          (entry.debug == vdso ||
+           get_path_info(entry.debug, "file") == "zircon.elf")) {
+        entries += [ entry ]
+      }
+    }
+  }
+
+  sources = []
+  command = "("
+  foreach(entry, entries) {
+    sources += [ "$zircon_root_build_dir/${entry.debug}" ]
+    id = rebase_path(entry.elf_build_id, root_build_dir, zircon_root_build_dir)
+    file = rebase_path(entry.debug, root_build_dir, zircon_root_build_dir)
+    command += "echo \"\$(cat \"$id\") $file\"; "
+  }
+  command += ") > " + rebase_path(outputs[0], root_build_dir)
+
+  script = "/bin/sh"
+  args = [
+    "-c",
+    command,
+  ]
+}
+
 # Combine the /boot, /system, and package build ID maps into one.
 # Nothing in the build uses this, but top-level targets always update
 # it so that debugging tools can rely on it.
@@ -1766,31 +1948,6 @@ action("ids.txt") {
            "-u",
            "-o",
          ] + rebase_path(outputs + sources, root_build_dir)
-}
-
-# The vDSO doesn't appear in any package and so doesn't get into any
-# ids.txt file produced by generate_manifest().  But it appears in memory
-# at runtime and in backtraces, so it should be in the aggregated ids.txt
-# for symbolization.  The vDSO doesn't appear in zircon_boot_manifests, so
-# fetching it out of Zircon's own ids.txt by name is the only thing to do.
-# Likewise for the kernel itself, whose build ID is useful to have in the map.
-action("kernel-ids.txt") {
-  script = "manifest.py"
-  sources = [
-    "$zircon_root_build_dir/ids-$current_cpu.txt",
-  ]
-  outputs = [
-    "$target_out_dir/kernel-ids.txt",
-  ]
-  args = [
-    "--separator= ",
-    "--absolute",
-    "--output=" + rebase_path(outputs[0], root_build_dir),
-    "--include-source=*/libzircon.so.debug",
-    "--include-source=*/zircon.elf",
-    "--cwd=" + rebase_path(zircon_root_build_dir, root_build_dir),
-    "--manifest=" + rebase_path(sources[0], root_build_dir),
-  ]
 }
 
 images += [

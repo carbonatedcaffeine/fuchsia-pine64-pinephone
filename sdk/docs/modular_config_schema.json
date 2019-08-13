@@ -105,10 +105,10 @@
     },
     "component_args": {
       "type": "object",
-      "items": {
+      "properties": {
         "uri": {
           "type": "string",
-          "pattern": "w+:(/?/?)[^s]+"
+          "pattern": "^[a-z|-]+://.+"
         },
         "args": {
           "type": "array",
@@ -124,7 +124,7 @@
       "properties": {
         "service_name": {
           "type": "string",
-          "pattern": "^(fuchsia|chromium)[.][^.]+([.][^.]+)*$"
+          "pattern": "^[^.]+[.][^.]+([.][^.]+)*$"
         },
         "agent_url": {
           "type": "string",

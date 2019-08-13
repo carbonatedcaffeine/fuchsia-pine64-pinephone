@@ -5,13 +5,16 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT
 
-#pragma once
+#ifndef ZIRCON_KERNEL_INCLUDE_ASM_H_
+#define ZIRCON_KERNEL_INCLUDE_ASM_H_
 
 #ifndef __ASSEMBLER__
 #error for assembly files only
 #endif
 
 #include <arch/asm_macros.h>
+
+// clang-format off
 
 // for functions that don't have an "end" or don't want .cfi_startproc
 #define LOCAL_FUNCTION_LABEL(x) .type x,STT_FUNC; x:
@@ -34,9 +37,11 @@
 #define DW_OP_lit0            0x30
 
 .macro cfi_register_is_zero reg
-    .cfi_escape DW_CFA_val_expression, \reg, 1, DW_OP_lit0
+  .cfi_escape DW_CFA_val_expression, \reg, 1, DW_OP_lit0
 .endm
 
 // We want .debug_frame not .eh_frame.
 // WARNING: This is a subtle side-effect of including this file. Heads up!
 .cfi_sections .debug_frame
+
+#endif  // ZIRCON_KERNEL_INCLUDE_ASM_H_

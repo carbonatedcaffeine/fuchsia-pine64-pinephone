@@ -4,21 +4,6 @@
 
 import("//build/package.gni")
 
-package("unit_tests") {
-  testonly = true
-  deps = [
-    ":virtmagma_unit_tests_linux(//build/toolchain:linux_x64)",
-  ]
-
-  resources = [
-    {
-      path =
-          rebase_path("${root_build_dir}/linux_x64/virtmagma_unit_tests_linux")
-      dest = "virtmagma_unit_tests_linux"
-    },
-  ]
-}
-
 executable("virtmagma_unit_tests_linux") {
   # TODO(MA-586): formalize guest-targeted tests
   testonly = true
@@ -27,6 +12,7 @@ executable("virtmagma_unit_tests_linux") {
     "//garnet/lib/magma/src/libmagma_linux",
     "//src/graphics/lib/vulkan:headers",
     "//third_party/googletest:gtest_main",
+    "//third_party/rapidjson",
   ]
 
   sources = [
@@ -81,6 +67,6 @@ executable("drm_unit_tests") {
 
   deps = [
     "..:drm_test_runner",
-    "../../tests/unit_tests:magma_platform_device_test",
+    "//garnet/lib/magma/tests/unit_tests:magma_platform_hardware_tests",
   ]
 }

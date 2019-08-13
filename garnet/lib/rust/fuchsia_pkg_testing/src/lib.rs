@@ -4,14 +4,16 @@
 
 //! Test tools for building Fuchsia packages and TUF repositories.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 #![deny(missing_docs)]
 
 mod package;
 pub use crate::package::{Package, PackageBuilder, PackageDir};
 
 mod repo;
-pub use crate::repo::{BlobEncryptionKey, PackageEntry, Repository, RepositoryBuilder};
+pub use crate::repo::{
+    BlobEncryptionKey, PackageEntry, Repository, RepositoryBuilder, ServedRepository,
+};
 
 mod blobfs;
 

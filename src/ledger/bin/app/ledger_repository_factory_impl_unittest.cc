@@ -74,7 +74,7 @@ class LedgerRepositoryFactoryImplTest : public TestWithEnvironment {
 
 ::testing::AssertionResult LedgerRepositoryFactoryImplTest::CallGetRepository(
     const std::string& name, ledger_internal::LedgerRepositoryPtr* ledger_repository_ptr) {
-  fxl::UniqueFD fd(openat(tmpfs_.root_fd(), name.c_str(), O_RDONLY));
+  fbl::unique_fd fd(openat(tmpfs_.root_fd(), name.c_str(), O_RDONLY));
   if (!fd.is_valid()) {
     return ::testing::AssertionFailure() << "Failed to validate directory \"" << name << "\"!";
   }
@@ -214,7 +214,7 @@ TEST_F(LedgerRepositoryFactoryImplTest, CloseOnFilesystemUnavailableNoCrash) {
   RunLoopUntilIdle();
 
   EXPECT_TRUE(get_repository_called);
-  EXPECT_EQ(Status::OK, status);
+  EXPECT_EQ(status, Status::OK);
   EXPECT_FALSE(channel_closed);
 
   tmpfs.reset();
@@ -270,8 +270,8 @@ TEST_F(LedgerRepositoryFactoryImplTest, CloseLedgerRepository) {
   EXPECT_TRUE(ptr1_closed);
   EXPECT_TRUE(ptr2_closed);
 
-  EXPECT_EQ(ZX_OK, ptr1_closed_status);
-  EXPECT_EQ(ZX_OK, ptr2_closed_status);
+  EXPECT_EQ(ptr1_closed_status, ZX_OK);
+  EXPECT_EQ(ptr2_closed_status, ZX_OK);
 }
 
 }  // namespace

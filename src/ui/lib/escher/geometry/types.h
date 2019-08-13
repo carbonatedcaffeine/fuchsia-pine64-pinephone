@@ -52,7 +52,7 @@ struct ray4 {
 constexpr float kEpsilon = 0.000001f;
 
 inline ray4 operator*(const glm::mat4& matrix, const ray4& ray) {
-  return ray4{matrix * ray.origin, matrix * ray.direction};
+  return ray4{matrix * ray.origin, glm::normalize(matrix * ray.direction)};
 }
 
 // Oriented plane described by a normal vector and a distance from the origin
@@ -66,7 +66,7 @@ struct planeN {
 
   // |direction| must be normalized.
   planeN(VecT direction, float distance) : dir_(direction), dist_(distance) {
-    FXL_DCHECK(std::abs(glm::dot(direction, direction) - 1.f) < kEpsilon);
+    FXL_DCHECK(std::abs(glm::dot(direction, direction) - 1.f) < kEpsilon) << direction;
   }
 
   planeN(VecT point_on_plane, VecT direction)

@@ -7,10 +7,13 @@
 #include <fbl/string_printf.h>
 #include <fs/remote-dir.h>
 #include <fuchsia/boot/c/fidl.h>
+#include <fuchsia/device/c/fidl.h>
 #include <fuchsia/device/manager/c/fidl.h>
 #include <fuchsia/fshost/c/fidl.h>
+#include <fuchsia/kernel/c/fidl.h>
 #include <fuchsia/net/llcpp/fidl.h>
 #include <fuchsia/paver/c/fidl.h>
+#include <fuchsia/posix/socket/llcpp/fidl.h>
 #include <fuchsia/virtualconsole/c/fidl.h>
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/fdio/directory.h>
@@ -113,8 +116,8 @@ static constexpr const char* deprecated_services[] = {
     "fuchsia.amber.Control", "fuchsia.cobalt.LoggerFactory",
     "fuchsia.devicesettings.DeviceSettingsManager", "fuchsia.logger.Log", "fuchsia.logger.LogSink",
     // Interface to resolve shell commands.
-    "fuchsia.process.Resolver", ::llcpp::fuchsia::net::SocketProvider::Name_,
-    ::llcpp::fuchsia::net::NameLookup::Name_,
+    "fuchsia.process.Resolver", ::llcpp::fuchsia::net::NameLookup::Name,
+    ::llcpp::fuchsia::net::SocketProvider::Name, ::llcpp::fuchsia::posix::socket::Provider::Name,
     // Legacy interface for netstack, defined in //garnet
     "fuchsia.netstack.Netstack",
     // New interface for netstack (WIP), defined in //zircon
@@ -142,6 +145,7 @@ static constexpr const char* fshost_services[] = {
 
 // Forward these Zircon services to miscsvc.
 static constexpr const char* miscsvc_services[] = {
+    fuchsia_kernel_Counter_Name,
     fuchsia_paver_Paver_Name,
     nullptr,
 };
@@ -151,6 +155,7 @@ static constexpr const char* bootsvc_services[] = {
     fuchsia_boot_FactoryItems_Name,
     fuchsia_boot_Items_Name,
     fuchsia_boot_Log_Name,
+    fuchsia_boot_RootJob_Name,
     fuchsia_boot_RootResource_Name,
     nullptr,
 };
@@ -252,6 +257,7 @@ int main(int argc, char** argv) {
   zx::channel virtcon_proxy_channel = zx::channel(zx_take_startup_handle(PA_HND(PA_USER0, 5)));
   zx::channel miscsvc_svc = zx::channel(zx_take_startup_handle(PA_HND(PA_USER0, 6)));
   zx::channel bootsvc_svc = zx::channel(zx_take_startup_handle(PA_HND(PA_USER0, 7)));
+  zx::channel device_name_provider_svc = zx::channel(zx_take_startup_handle(PA_HND(PA_USER0, 8)));
 
   zx_status_t status = outgoing.ServeFromStartupInfo();
   if (status != ZX_OK) {
@@ -310,6 +316,8 @@ int main(int argc, char** argv) {
   publish_services(outgoing.svc_dir(), miscsvc_services, zx::unowned_channel(miscsvc_svc));
   publish_services(outgoing.svc_dir(), bootsvc_services, zx::unowned_channel(bootsvc_svc));
   publish_services(outgoing.svc_dir(), devmgr_services, zx::unowned_channel(devmgr_proxy_channel));
+  publish_service(outgoing.svc_dir(), fuchsia_device_NameProvider_Name,
+                  zx::unowned_channel(device_name_provider_svc));
 
   if (virtcon_proxy_channel.is_valid()) {
     publish_proxy_service(outgoing.svc_dir(), fuchsia_virtualconsole_SessionManager_Name,

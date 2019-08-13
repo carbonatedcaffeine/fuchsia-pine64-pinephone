@@ -5,13 +5,13 @@
 #ifndef GARNET_LIB_UI_GFX_ENGINE_ENGINE_H_
 #define GARNET_LIB_UI_GFX_ENGINE_ENGINE_H_
 
-#include <fbl/ref_ptr.h>
 #include <lib/fit/function.h>
-#include <lib/inspect/inspect.h>
-#include <lib/sys/cpp/component_context.h>
+#include <lib/inspect_deprecated/inspect.h>
 
 #include <set>
 #include <vector>
+
+#include <fbl/ref_ptr.h>
 
 #include "garnet/lib/ui/gfx/displays/display_manager.h"
 #include "garnet/lib/ui/gfx/engine/engine_renderer.h"
@@ -24,7 +24,6 @@
 #include "garnet/lib/ui/gfx/id.h"
 #include "garnet/lib/ui/gfx/resources/import.h"
 #include "garnet/lib/ui/gfx/resources/nodes/scene.h"
-#include "garnet/lib/ui/gfx/util/event_timestamper.h"
 #include "garnet/lib/ui/scenic/event_reporter.h"
 #include "src/ui/lib/escher/escher.h"
 #include "src/ui/lib/escher/flib/release_fence_signaller.h"
@@ -55,13 +54,11 @@ using OnPresentedCallback = fit::function<void(PresentationInfo)>;
 // producing output when prompted through the FrameRenderer interface.
 class Engine : public FrameRenderer {
  public:
-  Engine(sys::ComponentContext* component_context,
-         const std::shared_ptr<FrameScheduler>& frame_scheduler, DisplayManager* display_manager,
-         escher::EscherWeakPtr escher, inspect::Node inspect_node);
+  Engine(const std::shared_ptr<FrameScheduler>& frame_scheduler, DisplayManager* display_manager,
+         escher::EscherWeakPtr escher, inspect_deprecated::Node inspect_node);
 
   // Only used for testing.
-  Engine(sys::ComponentContext* component_context,
-         const std::shared_ptr<FrameScheduler>& frame_scheduler, DisplayManager* display_manager,
+  Engine(const std::shared_ptr<FrameScheduler>& frame_scheduler, DisplayManager* display_manager,
          std::unique_ptr<escher::ReleaseFenceSignaller> release_fence_signaller,
          escher::EscherWeakPtr escher);
 
@@ -88,8 +85,7 @@ class Engine : public FrameRenderer {
                           escher_image_factory(),
                           escher_rounded_rect_factory(),
                           release_fence_signaller(),
-                          event_timestamper(),
-                          frame_scheduler_.get(),
+                          frame_scheduler_,
                           display_manager_,
                           scene_graph(),
                           &resource_linker_,
@@ -108,16 +104,14 @@ class Engine : public FrameRenderer {
   // |FrameRenderer|
   //
   // Renders a new frame. Returns true if successful, false otherwise.
-  bool RenderFrame(const FrameTimingsPtr& frame, zx_time_t presentation_time) override;
+  bool RenderFrame(const FrameTimingsPtr& frame, zx::time presentation_time) override;
 
  private:
-  // Initialize all inspect::Nodes, so that the Engine state can be observed.
+  // Initialize all inspect_deprecated::Nodes, so that the Engine state can be observed.
   void InitializeInspectObjects();
 
   // Takes care of cleanup between frames.
   void EndCurrentFrame(uint64_t frame_number);
-
-  EventTimestamper* event_timestamper() { return &event_timestamper_; }
 
   escher::ResourceRecycler* escher_resource_recycler() {
     return escher_ ? escher_->resource_recycler() : nullptr;
@@ -135,7 +129,7 @@ class Engine : public FrameRenderer {
 
   // Update and deliver metrics for all nodes which subscribe to metrics
   // events.
-  void UpdateAndDeliverMetrics(uint64_t presentation_time);
+  void UpdateAndDeliverMetrics(zx::time presentation_time);
 
   // Update reported metrics for nodes which subscribe to metrics events.
   // If anything changed, append the node to |updated_nodes|.
@@ -150,7 +144,6 @@ class Engine : public FrameRenderer {
   ResourceLinker resource_linker_;
   ViewLinker view_linker_;
 
-  EventTimestamper event_timestamper_;
   std::unique_ptr<escher::ImageFactoryAdapter> image_factory_;
   std::unique_ptr<escher::RoundedRectFactory> rounded_rect_factory_;
   std::unique_ptr<escher::ReleaseFenceSignaller> release_fence_signaller_;
@@ -165,8 +158,8 @@ class Engine : public FrameRenderer {
 
   bool render_continuously_ = false;
 
-  inspect::Node inspect_node_;
-  inspect::LazyStringProperty inspect_scene_dump_;
+  inspect_deprecated::Node inspect_node_;
+  inspect_deprecated::LazyStringProperty inspect_scene_dump_;
 
   fxl::WeakPtrFactory<Engine> weak_factory_;  // must be last
 

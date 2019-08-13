@@ -1,8 +1,9 @@
 // Copyright 2018 The Fuchsia Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+// Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 #include "src/media/audio/audio_core/mixer/test/audio_performance.h"
+
+#include <lib/zx/clock.h>
 
 #include <string>
 
@@ -23,7 +24,7 @@ void AudioPerformance::Profile() {
 }
 
 void AudioPerformance::ProfileMixers() {
-  zx_time_t start_time = zx_clock_get_monotonic();
+  auto start_time = zx::clock::get_monotonic();
 
   DisplayMixerConfigLegend();
   DisplayMixerColumnHeader();
@@ -35,7 +36,7 @@ void AudioPerformance::ProfileMixers() {
   DisplayMixerConfigLegend();
 
   printf("   Total time to profile Mixers: %lu ms\n   --------\n\n",
-         (zx_clock_get_monotonic() - start_time) / 1000000);
+         (zx::clock::get_monotonic() - start_time).get() / ZX_MSEC(1));
 }
 
 void AudioPerformance::DisplayMixerColumnHeader() {
@@ -63,8 +64,8 @@ void AudioPerformance::ProfileSampler(Resampler sampler_type) {
   ProfileSamplerIn(4, sampler_type);
 }
 
-// Based on our lack of support for arbitrary channelization, only profile the
-// following channel configurations: 1-1, 1-2, 2-1, 2-2, 3-3, 4-4
+// Based on our lack of support for arbitrary channelization, only profile the following channel
+// configurations: 1-1, 1-2, 2-1, 2-2, 3-3, 4-4
 void AudioPerformance::ProfileSamplerIn(uint32_t num_input_chans, Resampler sampler_type) {
   if (num_input_chans > 2) {
     ProfileSamplerChans(num_input_chans, num_input_chans, sampler_type);
@@ -132,19 +133,19 @@ void AudioPerformance::ProfileMixer(uint32_t num_input_chans, uint32_t num_outpu
   fuchsia::media::AudioSampleFormat sample_format;
   double amplitude;
   std::string format;
-  if (std::is_same<SampleType, uint8_t>::value) {
+  if (std::is_same_v<SampleType, uint8_t>) {
     sample_format = fuchsia::media::AudioSampleFormat::UNSIGNED_8;
     amplitude = std::numeric_limits<int8_t>::max();
     format = "Un8";
-  } else if (std::is_same<SampleType, int16_t>::value) {
+  } else if (std::is_same_v<SampleType, int16_t>) {
     sample_format = fuchsia::media::AudioSampleFormat::SIGNED_16;
     amplitude = std::numeric_limits<int16_t>::max();
     format = "I16";
-  } else if (std::is_same<SampleType, int32_t>::value) {
+  } else if (std::is_same_v<SampleType, int32_t>) {
     sample_format = fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32;
     amplitude = std::numeric_limits<int32_t>::max() & ~0x0FF;
     format = "I24";
-  } else if (std::is_same<SampleType, float>::value) {
+  } else if (std::is_same_v<SampleType, float>) {
     sample_format = fuchsia::media::AudioSampleFormat::FLOAT;
     amplitude = 1.0;
     format = "F32";
@@ -161,7 +162,7 @@ void AudioPerformance::ProfileMixer(uint32_t num_input_chans, uint32_t num_outpu
   }
 
   uint32_t source_buffer_size = kFreqTestBufSize * dest_rate / source_rate;
-  uint32_t source_frames = source_buffer_size + 1;
+  uint32_t source_frames = source_buffer_size;
 
   auto source = std::make_unique<SampleType[]>(source_frames * num_input_chans);
   auto accum = std::make_unique<float[]>(kFreqTestBufSize * num_output_chans);
@@ -209,19 +210,19 @@ void AudioPerformance::ProfileMixer(uint32_t num_input_chans, uint32_t num_outpu
 
   info.gain.SetDestGain(Gain::kUnityGainDb);
   info.gain.SetDestMute(false);
+  auto width = mixer->pos_filter_width();
 
   for (uint32_t i = 0; i < kNumMixerProfilerRuns; ++i) {
     info.gain.SetSourceGain(gain_db);
     info.gain.SetSourceMute(source_mute);
 
     if (gain_type == GainType::Ramped) {
-      // Ramp within the "greater than Mute but less than Unity" range.
-      // Ramp duration assumes a mix duration of less than two secs.
+      // Ramp within the "greater than Mute but less than Unity" range. Ramp duration assumes a mix
+      // duration of less than two secs.
       info.gain.SetSourceGainWithRamp(Gain::kMinGainDb + 1.0f, ZX_SEC(2));
     }
 
-    zx_duration_t elapsed;
-    zx_time_t start_time = zx_clock_get_monotonic();
+    auto start_time = zx::clock::get_monotonic();
 
     dest_offset = 0;
     frac_src_offset = 0;
@@ -234,9 +235,12 @@ void AudioPerformance::ProfileMixer(uint32_t num_input_chans, uint32_t num_outpu
 
       // Mix() might process less than all of accum, so Advance() after each.
       info.gain.Advance(dest_offset - previous_dest_offset, TimelineRate(source_rate, ZX_SEC(1)));
+      if (frac_src_offset + width >= frac_src_frames) {
+        frac_src_offset -= frac_src_frames;
+      }
     }
 
-    elapsed = zx_clock_get_monotonic() - start_time;
+    auto elapsed = (zx::clock::get_monotonic() - start_time).get();
 
     if (i > 0) {
       worst = std::max(worst, elapsed);
@@ -285,7 +289,7 @@ void AudioPerformance::DisplayOutputConfigLegend() {
 }
 
 void AudioPerformance::ProfileOutputProducers() {
-  zx_time_t start_time = zx_clock_get_monotonic();
+  auto start_time = zx::clock::get_monotonic();
 
   DisplayOutputConfigLegend();
   DisplayOutputColumnHeader();
@@ -300,7 +304,7 @@ void AudioPerformance::ProfileOutputProducers() {
   DisplayOutputConfigLegend();
 
   printf("   Total time to profile OutputProducers: %lu ms\n   --------\n\n",
-         (zx_clock_get_monotonic() - start_time) / 1000000);
+         (zx::clock::get_monotonic() - start_time).get() / ZX_MSEC(1));
 }
 
 void AudioPerformance::ProfileOutputChans(uint32_t num_chans) {
@@ -322,16 +326,16 @@ void AudioPerformance::ProfileOutputType(uint32_t num_chans, OutputDataRange dat
   std::string format;
   char range;
 
-  if (std::is_same<SampleType, uint8_t>::value) {
+  if (std::is_same_v<SampleType, uint8_t>) {
     sample_format = fuchsia::media::AudioSampleFormat::UNSIGNED_8;
     format = "Un8";
-  } else if (std::is_same<SampleType, int16_t>::value) {
+  } else if (std::is_same_v<SampleType, int16_t>) {
     sample_format = fuchsia::media::AudioSampleFormat::SIGNED_16;
     format = "I16";
-  } else if (std::is_same<SampleType, int32_t>::value) {
+  } else if (std::is_same_v<SampleType, int32_t>) {
     sample_format = fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32;
     format = "I24";
-  } else if (std::is_same<SampleType, float>::value) {
+  } else if (std::is_same_v<SampleType, float>) {
     sample_format = fuchsia::media::AudioSampleFormat::FLOAT;
     format = "F32";
   } else {
@@ -370,11 +374,10 @@ void AudioPerformance::ProfileOutputType(uint32_t num_chans, OutputDataRange dat
 
   if (data_range == OutputDataRange::Silence) {
     for (uint32_t i = 0; i < kNumOutputProfilerRuns; ++i) {
-      zx_duration_t elapsed;
-      zx_time_t start_time = zx_clock_get_monotonic();
+      auto start_time = zx::clock::get_monotonic();
 
       output_producer->FillWithSilence(dest.get(), kFreqTestBufSize);
-      elapsed = zx_clock_get_monotonic() - start_time;
+      auto elapsed = (zx::clock::get_monotonic() - start_time).get();
 
       if (i > 0) {
         worst = std::max(worst, elapsed);
@@ -388,11 +391,10 @@ void AudioPerformance::ProfileOutputType(uint32_t num_chans, OutputDataRange dat
     }
   } else {
     for (uint32_t i = 0; i < kNumOutputProfilerRuns; ++i) {
-      zx_duration_t elapsed;
-      zx_time_t start_time = zx_clock_get_monotonic();
+      auto start_time = zx::clock::get_monotonic();
 
       output_producer->ProduceOutput(accum.get(), dest.get(), kFreqTestBufSize);
-      elapsed = zx_clock_get_monotonic() - start_time;
+      auto elapsed = (zx::clock::get_monotonic() - start_time).get();
 
       if (i > 0) {
         worst = std::max(worst, elapsed);
@@ -410,4 +412,5 @@ void AudioPerformance::ProfileOutputType(uint32_t num_chans, OutputDataRange dat
   printf("%s-%c%u:\t%9.3lf\t%9.3lf\t%9.3lf\t%9.3lf\n", format.c_str(), range, num_chans,
          mean / 1000.0, first / 1000.0, best / 1000.0, worst / 1000.0);
 }
+
 }  // namespace media::audio::test

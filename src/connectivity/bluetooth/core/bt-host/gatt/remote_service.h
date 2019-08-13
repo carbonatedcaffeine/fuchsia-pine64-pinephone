@@ -5,12 +5,13 @@
 #ifndef SRC_CONNECTIVITY_BLUETOOTH_CORE_BT_HOST_GATT_REMOTE_SERVICE_H_
 #define SRC_CONNECTIVITY_BLUETOOTH_CORE_BT_HOST_GATT_REMOTE_SERVICE_H_
 
+#include <lib/fit/function.h>
+#include <zircon/assert.h>
+
 #include <fbl/intrusive_hash_table.h>
 #include <fbl/macros.h>
 #include <fbl/ref_counted.h>
 #include <fbl/ref_ptr.h>
-#include <lib/fit/function.h>
-#include <zircon/assert.h>
 
 #include "src/connectivity/bluetooth/core/bt-host/att/att.h"
 #include "src/connectivity/bluetooth/core/bt-host/gatt/client.h"
@@ -28,7 +29,9 @@ using ServiceList = std::vector<fbl::RefPtr<RemoteService>>;
 using ServiceListCallback = fit::function<void(att::Status, ServiceList)>;
 
 using RemoteServiceCallback = fit::function<void(fbl::RefPtr<RemoteService>)>;
-using RemoteCharacteristicList = std::vector<RemoteCharacteristic>;
+using DescriptorMap = std::map<DescriptorHandle, DescriptorData>;
+using CharacteristicMap =
+    std::map<CharacteristicHandle, std::pair<CharacteristicData, DescriptorMap>>;
 
 namespace internal {
 class RemoteServiceManager;
@@ -61,8 +64,7 @@ class RemoteService : public fbl::RefCounted<RemoteService> {
   // Adds a handler which will be called when this service gets removed.
   // Returns false if the service was already shut down. |callback| will be
   // posted on |dispatcher|.
-  bool AddRemovedHandler(fit::closure handler,
-                         async_dispatcher_t* dispatcher = nullptr);
+  bool AddRemovedHandler(fit::closure handler, async_dispatcher_t* dispatcher = nullptr);
 
   // Returns true if all contents of this service have been discovered. This can
   // only be called on the GATT thread and is primarily intended for unit tests.
@@ -73,8 +75,7 @@ class RemoteService : public fbl::RefCounted<RemoteService> {
   // Performs characteristic discovery and reports the result asynchronously in
   // |callback|. Returns the cached results if characteristics were already
   // discovered.
-  using CharacteristicCallback =
-      fit::function<void(att::Status, const RemoteCharacteristicList&)>;
+  using CharacteristicCallback = fit::function<void(att::Status, const CharacteristicMap&)>;
   void DiscoverCharacteristics(CharacteristicCallback callback,
                                async_dispatcher_t* dispatcher = nullptr);
 
@@ -83,7 +84,7 @@ class RemoteService : public fbl::RefCounted<RemoteService> {
   //
   // NOTE: Providing a |dispatcher| results in a copy of the resulting value.
   using ReadValueCallback = fit::function<void(att::Status, const ByteBuffer&)>;
-  void ReadCharacteristic(IdType id, ReadValueCallback callback,
+  void ReadCharacteristic(CharacteristicHandle id, ReadValueCallback callback,
                           async_dispatcher_t* dispatcher = nullptr);
 
   // Performs the "Read Long Characteristic Values" procedure which allows
@@ -92,46 +93,51 @@ class RemoteService : public fbl::RefCounted<RemoteService> {
   //
   // The read will start at |offset| and will return at most |max_bytes| octets.
   // The resulting value will be returned via |callback|.
-  void ReadLongCharacteristic(IdType id, uint16_t offset, size_t max_bytes,
-                              ReadValueCallback callback,
-                              async_dispatcher_t* dispatcher = nullptr);
+  void ReadLongCharacteristic(CharacteristicHandle id, uint16_t offset, size_t max_bytes,
+                              ReadValueCallback callback, async_dispatcher_t* dispatcher = nullptr);
 
   // Sends a write request to the characteristic with the given identifier.
-  // If there is an offset or the value too large for the mtu, this will
-  // execute a long write. Fails if characteristics have not been discovered.
   //
   // TODO(armansito): Add a ByteBuffer version.
-  void WriteCharacteristic(IdType id, uint16_t offset,
-                           std::vector<uint8_t> value,
-                           att::StatusCallback callback,
-                           async_dispatcher_t* dispatcher = nullptr);
+  void WriteCharacteristic(CharacteristicHandle id, std::vector<uint8_t> value,
+                           att::StatusCallback callback, async_dispatcher_t* dispatcher = nullptr);
+
+  // Sends a write request to the characteristic with the given identifier at
+  // the given offset, will write over multiple requests if needed. Fails if
+  // characteristics have not been discovered.
+  //
+  // TODO(armansito): Add a ByteBuffer version.
+  void WriteLongCharacteristic(CharacteristicHandle id, uint16_t offset, std::vector<uint8_t> value,
+                               att::StatusCallback callback,
+                               async_dispatcher_t* dispatcher = nullptr);
 
   // Sends a "Write Without Response" to the characteristic with the given
   // identifier. Fails if characteristics have not been discovered.
-  void WriteCharacteristicWithoutResponse(IdType id,
-                                          std::vector<uint8_t> value);
+  void WriteCharacteristicWithoutResponse(CharacteristicHandle id, std::vector<uint8_t> value);
 
   // Performs the "Read Characteristic Descriptors" procedure (v5.0, Vol 3, Part
   // G, 4.12.1).
-  void ReadDescriptor(IdType id, ReadValueCallback callback,
+  void ReadDescriptor(DescriptorHandle id, ReadValueCallback callback,
                       async_dispatcher_t* dispatcher = nullptr);
 
   // Performs the "Read Long Characteristic Descriptors" procedure (v5.0, Vol 3,
   // Part G, 4.12.2).
-  void ReadLongDescriptor(IdType id, uint16_t offset, size_t max_bytes,
-                          ReadValueCallback callback,
-                          async_dispatcher_t* dispatcher = nullptr);
+  void ReadLongDescriptor(DescriptorHandle id, uint16_t offset, size_t max_bytes,
+                          ReadValueCallback callback, async_dispatcher_t* dispatcher = nullptr);
 
   // Performs the "Write Characteristic Descriptors" procedure (v5.0, Vol 3,
   // Part G, 4.12.3).
   //
   // TODO(armansito): Add a ByteBuffer version.
-  void WriteDescriptor(IdType id, uint16_t offset, std::vector<uint8_t> value,
-                       att::StatusCallback callback,
-                       async_dispatcher_t* dispatcher = nullptr);
+  void WriteDescriptor(DescriptorHandle id, std::vector<uint8_t> value,
+                       att::StatusCallback callback, async_dispatcher_t* dispatcher = nullptr);
 
-  // TODO(NET-1713): Add support for "write long characteristic descriptors"
-  // procedure.
+  // Performs the "Write Long Characteristic Descriptors" procedure (v5.0, Vol 3,
+  // Part G, 4.12.4).
+  //
+  // TODO(armansito): Add a ByteBuffer version.
+  void WriteLongDescriptor(DescriptorHandle id, uint16_t offset, std::vector<uint8_t> value,
+                           att::StatusCallback callback, async_dispatcher_t* dispatcher = nullptr);
 
   // Subscribe to characteristic handle/value notifications or indications
   // from the characteristic with the given identifier. Either notifications or
@@ -150,14 +156,14 @@ class RemoteService : public fbl::RefCounted<RemoteService> {
   // NOTE: Providing a |dispatcher| results in a copy of the notified value.
   using ValueCallback = RemoteCharacteristic::ValueCallback;
   using NotifyStatusCallback = RemoteCharacteristic::NotifyStatusCallback;
-  void EnableNotifications(IdType id, ValueCallback callback,
+  void EnableNotifications(CharacteristicHandle id, ValueCallback callback,
                            NotifyStatusCallback status_callback,
                            async_dispatcher_t* dispatcher = nullptr);
 
   // Disables characteristic notifications for the given |handler_id| previously
   // obtained via EnableNotifications. The value of the Client Characteristic
   // Configuration descriptor will be cleared if no subscribers remain.
-  void DisableNotifications(IdType characteristic_id, IdType handler_id,
+  void DisableNotifications(CharacteristicHandle characteristic_id, IdType handler_id,
                             att::StatusCallback status_callback,
                             async_dispatcher_t* dispatcher = nullptr);
 
@@ -194,12 +200,11 @@ class RemoteService : public fbl::RefCounted<RemoteService> {
 
   // Returns a pointer to the characteristic with |id|. Returns nullptr if not
   // found.
-  HostError GetCharacteristic(IdType id, RemoteCharacteristic** out_char);
+  HostError GetCharacteristic(CharacteristicHandle id, RemoteCharacteristic** out_char);
 
   // Returns a pointer to the characteristic descriptor with |id|. Returns
   // nullptr if not found.
-  HostError GetDescriptor(IdType id,
-                          const RemoteCharacteristic::Descriptor** out_desc);
+  HostError GetDescriptor(DescriptorHandle id, const DescriptorData** out_desc);
 
   // Called immediately after characteristic discovery to initiate descriptor
   // discovery.
@@ -211,10 +216,8 @@ class RemoteService : public fbl::RefCounted<RemoteService> {
   void RunGattTask(fit::closure task) __TA_EXCLUDES(mtx_);
 
   // Used to complete a characteristic discovery request.
-  void ReportCharacteristics(att::Status status,
-                             CharacteristicCallback callback,
-                             async_dispatcher_t* dispatcher)
-      __TA_EXCLUDES(mtx_);
+  void ReportCharacteristics(att::Status status, CharacteristicCallback callback,
+                             async_dispatcher_t* dispatcher) __TA_EXCLUDES(mtx_);
 
   // Completes all pending characteristic discovery requests.
   void CompleteCharacteristicDiscovery(att::Status status) __TA_EXCLUDES(mtx_);
@@ -222,28 +225,25 @@ class RemoteService : public fbl::RefCounted<RemoteService> {
   // Sends an ATT_Read_Request and reports the result via |cb| on |dispatcher|.
   // |cb| executes on the GATT dispatcher if the provided |dispatcher| is
   // nullptr.
-  void SendReadRequest(att::Handle handle, ReadValueCallback cb,
-                       async_dispatcher_t* dispatcher);
+  void SendReadRequest(att::Handle handle, ReadValueCallback cb, async_dispatcher_t* dispatcher);
 
   // Sends an ATT_Write_Request and reports the result via |cb| on |dispatcher|.
   // |cb| executes on the GATT dispatcher if the provided |dispatcher| is
   // nullptr.
-  void SendWriteRequest(att::Handle handle, const ByteBuffer& value,
-                        att::StatusCallback cb, async_dispatcher_t* dispatcher);
+  void SendWriteRequest(att::Handle handle, const ByteBuffer& value, att::StatusCallback cb,
+                        async_dispatcher_t* dispatcher);
 
   // Breaks Long Write requests down into a PrepareWriteQueue, then enqueues
   // for the client to process. Drives the "Write Long Characteristic/
   // Descriptor Values" procedure. Called by WriteCharacteristic() and
   // WriteDescriptor().
-  void SendLongWriteRequest(att::Handle value_handle, uint16_t offset,
-                            BufferView value, att::StatusCallback callback,
-                            async_dispatcher_t* dispatcher);
+  void SendLongWriteRequest(att::Handle value_handle, uint16_t offset, BufferView value,
+                            att::StatusCallback callback, async_dispatcher_t* dispatcher);
 
   // Helper function that drives the recursive "Read Long Characteristic Values"
   // procedure. Called by ReadLongCharacteristic().
-  void ReadLongHelper(att::Handle value_handle, uint16_t offset,
-                      MutableByteBufferPtr buffer, size_t bytes_read,
-                      ReadValueCallback callback,
+  void ReadLongHelper(att::Handle value_handle, uint16_t offset, MutableByteBufferPtr buffer,
+                      size_t bytes_read, ReadValueCallback callback,
                       async_dispatcher_t* dispatcher);
 
   // Returns true if characteristic discovery has completed. This must be
@@ -278,7 +278,7 @@ class RemoteService : public fbl::RefCounted<RemoteService> {
   // NOTE: This collection gets populated on |gatt_dispatcher_| and does not get
   // modified after discovery finishes. It is not publicly exposed until
   // discovery completes.
-  RemoteCharacteristicList characteristics_;
+  std::map<CharacteristicHandle, RemoteCharacteristic> characteristics_;
 
   // The number of pending characteristic descriptor discoveries.
   // Characteristics get marked as ready when this number reaches 0.

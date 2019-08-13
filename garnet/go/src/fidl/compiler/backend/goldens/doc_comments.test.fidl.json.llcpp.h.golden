@@ -7,6 +7,7 @@
 #include <lib/fidl/cpp/string_view.h>
 #include <lib/fidl/llcpp/array.h>
 #include <lib/fidl/llcpp/coding.h>
+#include <lib/fidl/llcpp/sync_call.h>
 #include <lib/fidl/llcpp/traits.h>
 #include <lib/fidl/llcpp/transaction.h>
 #include <lib/fit/function.h>
@@ -19,7 +20,7 @@ namespace test {
 namespace name {
 
 struct Union;
-using Table = ::fidl::VectorView<fidl_envelope_t>;
+struct Table;
 struct Struct;
 class Interface;
 
@@ -101,6 +102,70 @@ struct Union {
   };
 };
 
+extern "C" const fidl_type_t test_name_TableTable;
+
+// table comment #1
+//
+// table comment #3
+struct Table final : private ::fidl::VectorView<fidl_envelope_t> {
+  using EnvelopesView = ::fidl::VectorView<fidl_envelope_t>;
+ public:
+  // Returns if any table field is set.
+  bool IsEmpty() const { return EnvelopesView::empty(); }
+
+  // table field comment #1
+  //
+  // table field comment #3
+  const int32_t& Field() const {
+    ZX_ASSERT(has_Field());
+    return *reinterpret_cast<const int32_t*>(EnvelopesView::at(1 - 1).data);
+  }
+  int32_t& Field() {
+    ZX_ASSERT(has_Field());
+    return *reinterpret_cast<int32_t*>(EnvelopesView::at(1 - 1).data);
+  }
+  bool has_Field() const {
+    return EnvelopesView::count() >= 1 && EnvelopesView::at(1 - 1).data != nullptr;
+  }
+
+  Table() = default;
+  ~Table() = default;
+  Table(Table&& other) noexcept = default;
+  Table& operator=(Table&& other) noexcept = default;
+
+  class Builder;
+  friend class Builder;
+  static Builder Build();
+  static constexpr const fidl_type_t* Type = &test_name_TableTable;
+  static constexpr uint32_t MaxNumHandles = 0;
+  static constexpr uint32_t PrimarySize = 16;
+  [[maybe_unused]]
+  static constexpr uint32_t MaxOutOfLine = 24;
+
+ private:
+  Table(uint64_t max_ordinal, fidl_envelope_t* data) : EnvelopesView(max_ordinal, data) {}
+};
+
+class Table::Builder {
+ public:
+  Table view() { return Table(max_ordinal_, envelopes_.data_); }
+  ~Builder() = default;
+  Builder(Builder&& other) noexcept = default;
+  Builder& operator=(Builder&& other) noexcept = default;
+
+  // table field comment #1
+  //
+  // table field comment #3
+  Builder&& set_Field(int32_t* elem);
+
+ private:
+  Builder() = default;
+  friend Builder Table::Build();
+
+  uint64_t max_ordinal_ = 0;
+  ::fidl::Array<fidl_envelope_t, 1> envelopes_ = {};
+};
+
 
 
 // struct comment #1
@@ -116,13 +181,14 @@ struct Struct {
   // struct member comment #1
   //
   // struct member comment #3
-  int32_t Field{};
+  int32_t Field = {};
 };
 
 // interface comment #1
 //
 // interface comment #3
 class Interface final {
+  Interface() = delete;
  public:
 
   using MethodRequest = ::fidl::AnyZeroArgMessage;
@@ -133,22 +199,60 @@ class Interface final {
     // event comment #1
     //
     // event comment #3
-    fit::function<zx_status_t()> on_event;
+    fit::callback<zx_status_t()> on_event;
 
     // Fallback handler when an unknown ordinal is received.
     // Caller may put custom error handling logic here.
-    fit::function<zx_status_t()> unknown;
+    fit::callback<zx_status_t()> unknown;
+  };
+
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+    class Method_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      Method_Impl(zx::unowned_channel _client_end);
+      ~Method_Impl() = default;
+      Method_Impl(Method_Impl&& other) = default;
+      Method_Impl& operator=(Method_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+
+   public:
+    using Method = Method_Impl;
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+    class Method_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      Method_Impl(zx::unowned_channel _client_end);
+      ~Method_Impl() = default;
+      Method_Impl(Method_Impl&& other) = default;
+      Method_Impl& operator=(Method_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+
+   public:
+    using Method = Method_Impl;
   };
 
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
@@ -157,7 +261,14 @@ class Interface final {
     // method comment #1
     //
     // method comment #3
-    zx_status_t Method();
+    // Allocates 16 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::Method Method();
+
+
+    // method comment #1
+    //
+    // method comment #3
+    zx_status_t Method_Deprecated();
 
     // Handle all possible events defined in this protocol.
     // Blocks to consume exactly one message from the channel, then call the corresponding handler
@@ -170,18 +281,39 @@ class Interface final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
    public:
 
     // method comment #1
     //
     // method comment #3
-    static zx_status_t Method(zx::unowned_channel _client_end);
+    // Allocates 16 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::Method Method(zx::unowned_channel _client_end);
+
+
+    // method comment #1
+    //
+    // method comment #3
+    static zx_status_t Method_Deprecated(zx::unowned_channel _client_end);
 
     // Handle all possible events defined in this protocol.
     // Blocks to consume exactly one message from the channel, then call the corresponding handler
     // defined in |EventHandlers|. The return status of the handler function is folded with any
     // transport-level errors and returned.
     static zx_status_t HandleEvents(zx::unowned_channel client_end, EventHandlers handlers);
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
+
+    // method comment #1
+    //
+    // method comment #3
+    static ::fidl::internal::StatusAndError Method(zx::unowned_channel _client_end);
+
   };
 
   // Pure-virtual interface to be implemented by a server.
@@ -237,6 +369,10 @@ namespace fidl {
 template <>
 struct IsFidlType<::llcpp::test::name::Union> : public std::true_type {};
 static_assert(std::is_standard_layout_v<::llcpp::test::name::Union>);
+
+template <>
+struct IsFidlType<::llcpp::test::name::Table> : public std::true_type {};
+static_assert(std::is_standard_layout_v<::llcpp::test::name::Table>);
 
 template <>
 struct IsFidlType<::llcpp::test::name::Struct> : public std::true_type {};

@@ -10,7 +10,7 @@ set -eo pipefail
 
 declare -r LINUX_GUEST_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 declare -r FUCHSIA_DIR=$(git rev-parse --show-toplevel)
-declare -r CIPD="${FUCHSIA_DIR}/buildtools/cipd"
+declare -r CIPD="${FUCHSIA_DIR}/.jiri_root/bin/cipd"
 declare -r SOURCE_DIR="/tmp/linux_guest"
 declare -r LINUX_VERSION="4.18"
 
@@ -24,7 +24,18 @@ x64)
   exit 1;;
 esac
 
-${CIPD} auth-login
+if [[ -z "$(which cargo)" ]]; then
+  if [[ -f "$HOME/.cargo/env" ]]; then
+    source "$HOME/.cargo/env"
+  else
+    echo "you must have rust installed on your host - see https://www.rust-lang.org/tools/install"
+    exit 2
+  fi
+fi
+
+if [[ "$(${CIPD} acl-check fuchsia_internal/ -writer)" == *"doesn't"* ]]; then
+  ${CIPD} auth-login
+fi
 
 # Clean the existing source checkout.
 rm -rf "${SOURCE_DIR}"

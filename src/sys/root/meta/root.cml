@@ -2,51 +2,64 @@
   "children": [
     {
       "name": "devcoordinator",
-      "url": "fuchsia-boot:///boot#meta/devcoordinator.cm",
+      "url": "fuchsia-boot:///#meta/devcoordinator.cm",
       "startup": "eager",
+    },
+    {
+      "name": "console",
+      "url": "fuchsia-boot:///#meta/console.cm",
     },
   ],
   "offer": [
+    // These services and directories routed from "realm" at the root are provided by bootsvc
+    // through component_manager's namespace.
     {
       "directory": "/boot",
       "from": "realm",
       "to": [ { "dest": "#devcoordinator" } ],
     },
-    // TODO: Update bootsvc to export services under /svc instead of /bootsvc
     {
-      "service": "/bootsvc/fuchsia.boot.RootJob",
+      "legacy_service": "/svc/fuchsia.boot.RootJob",
       "from": "realm",
       "to": [ { "dest": "#devcoordinator" } ],
     },
     {
-      "service": "/bootsvc/fuchsia.boot.RootResource",
+      "legacy_service": "/svc/fuchsia.boot.RootResource",
+      "from": "realm",
+      "to": [ { "dest": "#devcoordinator" }, { "dest": "#console" } ],
+    },
+    {
+      "legacy_service": "/svc/fuchsia.boot.Arguments",
       "from": "realm",
       "to": [ { "dest": "#devcoordinator" } ],
     },
     {
-      "service": "/bootsvc/fuchsia.boot.Arguments",
+      "legacy_service": "/svc/fuchsia.boot.FactoryItems",
       "from": "realm",
       "to": [ { "dest": "#devcoordinator" } ],
     },
     {
-      "service": "/bootsvc/fuchsia.boot.FactoryItems",
+      "legacy_service": "/svc/fuchsia.boot.Items",
       "from": "realm",
       "to": [ { "dest": "#devcoordinator" } ],
     },
     {
-      "service": "/bootsvc/fuchsia.boot.Items",
+      "legacy_service": "/svc/fuchsia.boot.Log",
       "from": "realm",
       "to": [ { "dest": "#devcoordinator" } ],
     },
+    // ...except for this one, which is provided by component_manager itself.
+    // TODO: Implement routing from /builtin (this doesn't actually work yet), and consider making
+    // the distinction from bootsvc services clearer.
     {
-      "service": "/bootsvc/fuchsia.boot.Log",
+      "legacy_service": "/builtin/fuchsia.process.Launcher",
       "from": "realm",
       "to": [ { "dest": "#devcoordinator" } ],
     },
-    // TODO: Implement routing from /builtin
+    // Offer the kernel serial console to the devcoordinator
     {
-      "service": "/builtin/fuchsia.process.Launcher",
-      "from": "realm",
+      "legacy_service": "/svc/fuchsia.hardware.pty.Device",
+      "from": "#console",
       "to": [ { "dest": "#devcoordinator" } ],
     },
   ],

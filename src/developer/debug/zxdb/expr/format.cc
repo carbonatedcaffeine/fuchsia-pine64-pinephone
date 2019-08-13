@@ -5,11 +5,11 @@
 #include "src/developer/debug/zxdb/expr/format.h"
 
 #include "src/developer/debug/shared/zx_status.h"
-#include "src/developer/debug/zxdb/common/function.h"
 #include "src/developer/debug/zxdb/expr/eval_context.h"
 #include "src/developer/debug/zxdb/expr/expr.h"
 #include "src/developer/debug/zxdb/expr/format_node.h"
 #include "src/developer/debug/zxdb/expr/format_options.h"
+#include "src/developer/debug/zxdb/expr/pretty_type_manager.h"
 #include "src/developer/debug/zxdb/expr/resolve_array.h"
 #include "src/developer/debug/zxdb/expr/resolve_collection.h"
 #include "src/developer/debug/zxdb/expr/resolve_ptr_ref.h"
@@ -243,7 +243,9 @@ void FormatEnum(FormatNode* node, const Enumeration* enum_type, const FormatOpti
   FormatNumeric(node, modified_opts);
 }
 
-// Rust enums are formatted with the enum name in the description.
+// Rust enums will resolve to a different type. We put the resolved type in a child of this node.
+// As with references, this is not the best presentation for a GUI. See FormatReference() for
+// some thoughts on how this could be improved.
 //
 // The active variant will have a set of data members of which only one will be used. It will refer
 // to a collection which will have the set of members. This structure will vary according to the
@@ -287,22 +289,15 @@ void FormatRustEnum(FormatNode* node, const Collection* coll, const FormatOption
       enum_name = member->GetAssignedName();
 
     // TODO(brettw) this will append a child unconditionally.
-    ExprValue member_value;
-    err = ResolveMember(eval_context, node->value(), member, &member_value);
-    if (err.has_error()) {
+    ErrOrValue member_value = ResolveMember(eval_context, node->value(), member);
+    if (member_value.has_error()) {
       // In the error case, still append a child so that the child can have
       // the error associated with it.
-      node->children().push_back(std::make_unique<FormatNode>(member->GetAssignedName(), err));
+      node->children().push_back(
+          std::make_unique<FormatNode>(member->GetAssignedName(), member_value.err()));
     } else {
-      // Only append as a child if the variant has "stuff". The case here is to skip adding children
-      // for enums with no data like "Optional<Foo>::None" which will have a struct called "None"
-      // with no members.
-      auto member_type = member_value.GetConcreteType(eval_context.get());
-      const Collection* member_coll_type = member_type->AsCollection();
-      if (!member_coll_type || !member_coll_type->data_members().empty()) {
-        node->children().push_back(
-            std::make_unique<FormatNode>(member->GetAssignedName(), std::move(member_value)));
-      }
+      node->children().push_back(
+          std::make_unique<FormatNode>(member->GetAssignedName(), std::move(member_value.value())));
     }
   }
 
@@ -310,9 +305,10 @@ void FormatRustEnum(FormatNode* node, const Collection* coll, const FormatOption
   node->set_description(enum_name);
 }
 
-void FormatRustTuple(FormatNode* node, const Collection* coll, const FormatOptions& options,
-                     fxl::RefPtr<EvalContext> eval_context) {
-  node->set_description_kind(FormatNode::kRustTuple);
+// Handles both tuples and tuple structs. The "kind" differentiates these.
+void FormatRustTuple(FormatNode* node, const Collection* coll, FormatNode::DescriptionKind kind,
+                     const FormatOptions& options, fxl::RefPtr<EvalContext> eval_context) {
+  node->set_description_kind(kind);
 
   // Rust tuple (and tuple struct) symbols have the tuple members encoded as "__0", "__1", etc.
   for (const auto& lazy_member : coll->data_members()) {
@@ -320,20 +316,18 @@ void FormatRustTuple(FormatNode* node, const Collection* coll, const FormatOptio
     if (!member)
       continue;
 
-    ExprValue member_value;
-    Err err = ResolveMember(eval_context, node->value(), member, &member_value);
-
     // Convert the names to indices "__0" -> 0.
     auto name = member->GetAssignedName();
     if (name.size() > 2 && name[0] == '_' && name[1] == '_')
       name.erase(name.begin(), name.begin() + 2);
 
-    if (err.has_error()) {
+    ErrOrValue member_value = ResolveMember(eval_context, node->value(), member);
+    if (member_value.has_error()) {
       // In the error case, still append a child so that the child can have the error associated
       // with it.
-      node->children().push_back(std::make_unique<FormatNode>(name, err));
+      node->children().push_back(std::make_unique<FormatNode>(name, member_value.err()));
     } else {
-      node->children().push_back(std::make_unique<FormatNode>(name, member_value));
+      node->children().push_back(std::make_unique<FormatNode>(name, member_value.value()));
     }
   }
 
@@ -357,8 +351,10 @@ void FormatCollection(FormatNode* node, const Collection* coll, const FormatOpti
       FormatRustEnum(node, coll, options, std::move(eval_context));
       return;
     case Collection::kRustTuple:
+      FormatRustTuple(node, coll, FormatNode::kRustTuple, options, std::move(eval_context));
+      return;
     case Collection::kRustTupleStruct:
-      FormatRustTuple(node, coll, options, std::move(eval_context));
+      FormatRustTuple(node, coll, FormatNode::kRustTupleStruct, options, std::move(eval_context));
       return;
   }
 
@@ -386,11 +382,12 @@ void FormatCollection(FormatNode* node, const Collection* coll, const FormatOpti
     std::string from_name = from->GetFullName();
     std::unique_ptr<FormatNode> base_class_node;
 
-    ExprValue from_value;
-    if (Err err = ResolveInherited(node->value(), inherited, &from_value); err.has_error())
-      base_class_node = std::make_unique<FormatNode>(from_name, err);
+    ErrOrValue from_value = ResolveInherited(node->value(), inherited);
+    // TODO(brettw) make FormatNode take a ErrOrValue constructor.
+    if (from_value.has_error())
+      base_class_node = std::make_unique<FormatNode>(from_name, from_value.err());
     else
-      base_class_node = std::make_unique<FormatNode>(from_name, from_value);
+      base_class_node = std::make_unique<FormatNode>(from_name, from_value.value());
 
     base_class_node->set_child_kind(FormatNode::kBaseClass);
     node->children().push_back(std::move(base_class_node));
@@ -407,49 +404,15 @@ void FormatCollection(FormatNode* node, const Collection* coll, const FormatOpti
 
     std::string member_name = member->GetAssignedName();
 
-    ExprValue member_value;
-    Err err = ResolveMember(eval_context, node->value(), member, &member_value);
-    if (err.has_error()) {
-      node->children().push_back(std::make_unique<FormatNode>(member_name, err));
+    ErrOrValue member_value = ResolveMember(eval_context, node->value(), member);
+    if (member_value.has_error()) {
+      node->children().push_back(std::make_unique<FormatNode>(member_name, member_value.err()));
     } else {
-      node->children().push_back(std::make_unique<FormatNode>(member_name, member_value));
+      node->children().push_back(std::make_unique<FormatNode>(member_name, member_value.value()));
     }
   }
 
   node->set_description_kind(FormatNode::kCollection);
-}
-
-void FormatPointer(FormatNode* node, const FormatOptions& options,
-                   fxl::RefPtr<EvalContext> eval_context) {
-  node->set_description_kind(FormatNode::kPointer);
-
-  // Note: don't make assumptions about the type of value.type() since it isn't necessarily a
-  // ModifiedType representing a pointer, but could be other things like a pointer to a member.
-
-  Err err = node->value().EnsureSizeIs(kTargetPointerSize);
-  if (err.has_error()) {
-    node->set_err(err);
-    return;
-  }
-
-  // The address goes in the description.
-  TargetPointer pointer_value = node->value().GetAs<TargetPointer>();
-  node->set_description(fxl::StringPrintf("0x%" PRIx64, pointer_value));
-
-  // Make a child node that's the dereferenced pointer value. If/when we support GUIs, we should
-  // probably remove the intermediate node and put the dereferenced struct members directly as
-  // children on this node. Otherwise it's an annoying extra step to expand to things.
-  if (pointer_value != 0) {
-    // Use our name but with a "*" to show it dereferenced.
-    auto deref_node = std::make_unique<FormatNode>(
-        "*" + node->name(),
-        [ptr_value = node->value()](fxl::RefPtr<EvalContext> context,
-                                    fit::callback<void(const Err& err, ExprValue value)> cb) {
-          ResolvePointer(context, ptr_value, FitCallbackToStdFunction(std::move(cb)));
-        });
-    deref_node->set_child_kind(FormatNode::kPointerExpansion);
-    node->children().push_back(std::move(deref_node));
-  }
 }
 
 // For now a reference is formatted like a pointer where the outer node is the address, and the
@@ -459,6 +422,10 @@ void FormatPointer(FormatNode* node, const FormatOptions& options,
 // If this is put into a GUI, we'll want the reference value to be in the main description and not
 // have any children. Visual Studio shows references the same as if it was a value which is probably
 // the correct behavior.
+//
+// To do this we'll likely want to add another ExprValue to the FormatNode (maybe it's in a
+// std::optional?) that contains the "resolved value" of the node. This would also be useful for
+// Rust enums.
 void FormatReference(FormatNode* node, const FormatOptions& options,
                      fxl::RefPtr<EvalContext> eval_context) {
   node->set_description_kind(FormatNode::kReference);
@@ -476,7 +443,7 @@ void FormatReference(FormatNode* node, const FormatOptions& options,
       std::string(),
       [ref = node->value()](fxl::RefPtr<EvalContext> context,
                             fit::callback<void(const Err& err, ExprValue value)> cb) {
-        EnsureResolveReference(context, ref, FitCallbackToStdFunction(std::move(cb)));
+        EnsureResolveReference(context, ref, ErrOrValue::FromPairCallback(std::move(cb)));
       });
   deref_node->set_child_kind(FormatNode::kPointerExpansion);
   node->children().push_back(std::move(deref_node));
@@ -550,132 +517,17 @@ void FormatMemberPtr(FormatNode* node, const MemberPtr* type, const FormatOption
   }
 }
 
-// Sometimes we know the real length of the array as in c "char[12]" type. In this case the expanded
-// children should always include all elements, even if there is a null in the middle. This is what
-// length_was_known means. When unset we assume a guessed length (as in "char*"), stop at the first
-// null, and don't include it.
-//
-// TODO(brettw) currently this handles 8-bit chracters only.
-void FormatCharArray(FormatNode* node, fxl::RefPtr<Type> char_type, const uint8_t* data,
-                     size_t length, bool length_was_known, bool truncated) {
-  node->set_description_kind(FormatNode::kString);
-
-  // Expect the string to be null-terminated. If we didn't find a null before the end of the buffer,
-  // mark as truncated.
-  size_t output_len = strnlen(reinterpret_cast<const char*>(data), length);
-
-  // It's possible a null happened before the end of the buffer, in which case it's no longer
-  // truncated.
-  if (output_len < length)
-    truncated = false;
-
-  // Generate the string in the desciption. Stop at the first null (computed above) and don't
-  // include it.
-  std::string result("\"");
-  for (size_t i = 0; i < output_len; i++)
-    AppendEscapedChar(data[i], &result);
-  result.push_back('"');
-
-  // Add children to the first null unless the length was known in advance.
-  size_t child_len = length_was_known ? length : output_len;
-  for (size_t i = 0; i < child_len; i++) {
-    auto char_node = std::make_unique<FormatNode>(fxl::StringPrintf("[%zu]", i),
-                                                  ExprValue(char_type, {data[i]}));
-    char_node->set_child_kind(FormatNode::kArrayItem);
-    node->children().push_back(std::move(char_node));
-  }
-
-  // Add an indication if the string was truncated to the max size.
-  if (truncated) {
-    result += "...";
-    node->children().push_back(std::make_unique<FormatNode>("..."));
-  }
-
-  node->set_description(result);
-}
-
 void FormatCharPointer(FormatNode* node, const Type* char_type, const FormatOptions& options,
                        fxl::RefPtr<EvalContext> eval_context, fit::deferred_callback cb) {
   node->set_description_kind(FormatNode::kString);
 
+  // Extracts the pointer and calls the general "char*" formatter.
   if (node->value().data().size() != kTargetPointerSize) {
     node->set_err(Err("Bad pointer data."));
     return;
   }
-
-  TargetPointer address = node->value().GetAs<TargetPointer>();
-  if (!address) {
-    // Special-case null pointers to just print a null address.
-    node->set_description("0x0");
-    return;
-  }
-
-  // Speculatively request the max string size.
-  uint32_t bytes_to_fetch = options.max_array_size;
-  if (bytes_to_fetch == 0) {
-    // No array data should be fetched. Indicate that the result was truncated.
-    node->set_description("\"\"...");
-    return;
-  }
-
-  fxl::RefPtr<SymbolDataProvider> data_provider = eval_context->GetDataProvider();
-
-  // TODO(brettw) When GetMemoryAsync takes a move-only fit::callback the cb can just be
-  // std::move-ed into the lambda.
-  auto shared_cb = std::make_shared<fit::deferred_callback>(std::move(cb));
-  data_provider->GetMemoryAsync(
-      address, bytes_to_fetch,
-      [address, bytes_to_fetch, char_type = RefPtrTo(char_type), weak_node = node->GetWeakPtr(),
-       shared_cb](const Err& err, std::vector<uint8_t> data) {
-        if (!weak_node)
-          return;
-
-        if (data.empty()) {
-          // Should not have requested 0 size, so it if came back empty the pointer was invalid.
-          weak_node->set_err(Err("0x%" PRIx64 " «invalid pointer»", address));
-          return;
-        }
-
-        // Report as truncated because if the string goes to the end of this array it will be.
-        // FormatCharArray will clear this flag if it finds a null before the end of the buffer.
-        //
-        // Don't want to set truncated if the data ended before the requested size, this means it
-        // hit the end of valid memory, so we're not omitting data by only showing that part of it.
-        bool truncated = data.size() == bytes_to_fetch;
-        FormatCharArray(weak_node.get(), char_type, &data[0], data.size(), false, truncated);
-      });
-}
-
-// Formats an array with a known length. This is for non-char arrays (which are special-cased in
-// FormatCharArray).
-void FormatArray(FormatNode* node, int elt_count, const FormatOptions& options,
-                 fxl::RefPtr<EvalContext> eval_context) {
-  node->set_description_kind(FormatNode::kArray);
-
-  // Arrays should have known non-zero sizes.
-  FXL_DCHECK(elt_count >= 0);
-  int print_count = std::min(static_cast<int>(options.max_array_size), elt_count);
-
-  std::vector<ExprValue> items;
-  Err err = ResolveArray(eval_context, node->value(), 0, print_count, &items);
-  if (err.has_error()) {
-    node->set_err(err);
-    return;
-  }
-
-  for (size_t i = 0; i < items.size(); i++) {
-    auto item_node =
-        std::make_unique<FormatNode>(fxl::StringPrintf("[%zu]", i), std::move(items[i]));
-    item_node->set_child_kind(FormatNode::kArrayItem);
-    node->children().push_back(std::move(item_node));
-  }
-
-  if (static_cast<uint32_t>(elt_count) > items.size()) {
-    // Add "..." annotation to show some things were clipped.
-    //
-    // We may want to put a flag on the node that it was clipped.
-    node->children().push_back(std::make_unique<FormatNode>("..."));
-  }
+  FormatCharPointerNode(node, node->value().GetAs<TargetPointer>(), char_type, std::nullopt,
+                        options, eval_context, std::move(cb));
 }
 
 // Attempts to format arrays, char arrays, and char pointers. Because these are many different types
@@ -719,9 +571,9 @@ bool TryFormatArrayOrString(FormatNode* node, const Type* type, const FormatOpti
         length = options.max_array_size;
         truncated = true;
       }
-      FormatCharArray(node, value_type, node->value().data().data(), length, true, truncated);
+      FormatCharArrayNode(node, value_type, node->value().data().data(), length, true, truncated);
     } else {
-      FormatArray(node, array->num_elts(), options, eval_context);
+      FormatArrayNode(node, node->value(), array->num_elts(), options, eval_context, std::move(cb));
     }
     return true;
   }
@@ -763,6 +615,11 @@ void FillFormatNodeDescriptionFromValue(FormatNode* node, const FormatOptions& o
   }
   node->set_type(node->value().type()->GetFullName());
 
+  // Check for pretty-printers. This also happens again below if the type changed.
+  if (options.enable_pretty_printing &&
+      context->GetPrettyTypeManager().Format(node, node->value().type(), options, context, cb))
+    return;
+
   // Special-case zx_status_t. Long-term this should be removed and replaced with a pretty-printing
   // system where this can be expressed generically.
   //
@@ -779,6 +636,12 @@ void FillFormatNodeDescriptionFromValue(FormatNode* node, const FormatOptions& o
   // Always use this variable below instead of value.type().
   fxl::RefPtr<Type> type = node->value().GetConcreteType(context.get());
 
+  // Check for pretty-printers again now that we've resolved concrete types. Either the source or
+  // the destination of a typedef could have a pretty-printer.
+  if (options.enable_pretty_printing && type.get() != node->value().type() &&
+      context->GetPrettyTypeManager().Format(node, type.get(), options, context, cb))
+    return;
+
   // Arrays and strings.
   if (TryFormatArrayOrString(node, type.get(), options, context, cb))
     return;
@@ -791,7 +654,7 @@ void FillFormatNodeDescriptionFromValue(FormatNode* node, const FormatOptions& o
         if (IsPointerToFunction(modified_type))
           FormatFunctionPointer(node, options, context);
         else
-          FormatPointer(node, options, context);
+          FormatPointerNode(node, node->value(), options);
         break;
       case DwarfTag::kReferenceType:
       case DwarfTag::kRvalueReferenceType:
@@ -878,6 +741,185 @@ void FillFormatNodeDescription(FormatNode* node, const FormatOptions& options,
   } else {
     // Value already available, can format now.
     FillFormatNodeDescriptionFromValue(node, options, context, std::move(cb));
+  }
+}
+
+// Sometimes we know the real length of the array as in c "char[12]" type. In this case the expanded
+// children should always include all elements, even if there is a null in the middle. This is what
+// length_was_known means. When unset we assume a guessed length (as in "char*"), stop at the first
+// null, and don't include it.
+//
+// TODO(brettw) currently this handles 8-bit characters only.
+void FormatCharArrayNode(FormatNode* node, fxl::RefPtr<Type> char_type, const uint8_t* data,
+                         size_t length, bool length_was_known, bool truncated) {
+  node->set_description_kind(FormatNode::kString);
+
+  // Expect the string to be null-terminated. If we didn't find a null before the end of the buffer,
+  // mark as truncated.
+  size_t output_len = strnlen(reinterpret_cast<const char*>(data), length);
+
+  // It's possible a null happened before the end of the buffer, in which case it's no longer
+  // truncated.
+  if (output_len < length)
+    truncated = false;
+
+  // Generate the string in the description. Stop at the first null (computed above) and don't
+  // include it.
+  std::string result("\"");
+  for (size_t i = 0; i < output_len; i++)
+    AppendEscapedChar(data[i], &result);
+  result.push_back('"');
+
+  // Add children to the first null unless the length was known in advance.
+  size_t child_len = length_was_known ? length : output_len;
+  for (size_t i = 0; i < child_len; i++) {
+    auto char_node = std::make_unique<FormatNode>(fxl::StringPrintf("[%zu]", i),
+                                                  ExprValue(char_type, {data[i]}));
+    char_node->set_child_kind(FormatNode::kArrayItem);
+    node->children().push_back(std::move(char_node));
+  }
+
+  // Add an indication if the string was truncated to the max size.
+  if (truncated) {
+    result += "...";
+    node->children().push_back(std::make_unique<FormatNode>("..."));
+  }
+
+  node->set_description(result);
+  node->set_state(FormatNode::kDescribed);
+}
+
+void FormatCharPointerNode(FormatNode* node, uint64_t ptr, const Type* char_type,
+                           std::optional<uint32_t> length, const FormatOptions& options,
+                           fxl::RefPtr<EvalContext> eval_context, fit::deferred_callback cb) {
+  node->set_description_kind(FormatNode::kString);
+
+  if (!ptr) {
+    // Special-case null pointers to just print a null address.
+    node->set_description("0x0");
+    return;
+  }
+
+  if (length && *length == 0) {
+    // Empty string.
+    node->set_description("\"\"");
+    return;
+  }
+
+  // Speculatively request the max string size.
+  uint32_t bytes_to_fetch;
+  bool truncated = false;
+  if (length) {
+    if (*length > options.max_array_size) {
+      bytes_to_fetch = options.max_array_size;
+      truncated = true;
+    } else {
+      bytes_to_fetch = *length;
+    }
+  } else {
+    bytes_to_fetch = options.max_array_size;
+
+    // Report as truncated because if the string goes to the end of this array it will be.
+    // FormatCharArrayNode will clear this flag if it finds a null before the end of the buffer.
+    //
+    // Don't want to set truncated if the data ended before the requested size, this means it
+    // hit the end of valid memory, so we're not omitting data by only showing that part of it.
+    truncated = true;
+  }
+
+  if (bytes_to_fetch == 0) {
+    // No array data should be fetched. Indicate that the result was truncated.
+    node->set_description("\"\"...");
+    return;
+  }
+
+  fxl::RefPtr<SymbolDataProvider> data_provider = eval_context->GetDataProvider();
+
+  data_provider->GetMemoryAsync(ptr, bytes_to_fetch,
+                                [ptr, bytes_to_fetch, char_type = RefPtrTo(char_type), truncated,
+                                 weak_node = node->GetWeakPtr(), cb = std::move(cb)](
+                                    const Err& err, std::vector<uint8_t> data) mutable {
+                                  if (!weak_node)
+                                    return;
+
+                                  if (data.empty()) {
+                                    // Should not have requested 0 size, so it if came back empty
+                                    // the pointer was invalid.
+                                    weak_node->set_err(Err("0x%" PRIx64 " invalid pointer", ptr));
+                                    return;
+                                  }
+
+                                  bool new_truncated = truncated && data.size() == bytes_to_fetch;
+                                  FormatCharArrayNode(weak_node.get(), char_type, &data[0],
+                                                      data.size(), false, new_truncated);
+                                });
+}
+
+void FormatArrayNode(FormatNode* node, const ExprValue& value, int elt_count,
+                     const FormatOptions& options, fxl::RefPtr<EvalContext> eval_context,
+                     fit::deferred_callback cb) {
+  node->set_description_kind(FormatNode::kArray);
+
+  if (elt_count < 0)
+    return node->SetDescribedError(Err("Invalid array size of %d.", elt_count));
+  int print_count = std::min(static_cast<int>(options.max_array_size), elt_count);
+
+  ResolveArray(eval_context, value, 0, print_count,
+               [weak_node = node->GetWeakPtr(), elt_count,
+                cb = std::move(cb)](ErrOrValueVector result) mutable {
+                 if (!weak_node)
+                   return;
+                 FormatNode* node = weak_node.get();
+
+                 if (result.has_error())
+                   return node->SetDescribedError(result.err());
+
+                 for (size_t i = 0; i < result.value().size(); i++) {
+                   auto item_node = std::make_unique<FormatNode>(fxl::StringPrintf("[%zu]", i),
+                                                                 std::move(result.value()[i]));
+                   item_node->set_child_kind(FormatNode::kArrayItem);
+                   node->children().push_back(std::move(item_node));
+                 }
+
+                 if (static_cast<uint32_t>(elt_count) > result.value().size()) {
+                   // Add "..." annotation to show some things were clipped.
+                   //
+                   // TODO(brettW) We may want to put a flag on the node that it was clipped,
+                   // and also indicate the number of clipped elements.
+                   node->children().push_back(std::make_unique<FormatNode>("..."));
+                 }
+               });
+}
+
+void FormatPointerNode(FormatNode* node, const ExprValue& value, const FormatOptions& options) {
+  node->set_description_kind(FormatNode::kPointer);
+
+  // Note: don't make assumptions about the type of value.type() since it isn't necessarily a
+  // ModifiedType representing a pointer, but could be other things like a pointer to a member.
+
+  Err err = value.EnsureSizeIs(kTargetPointerSize);
+  if (err.has_error()) {
+    node->set_err(err);
+    return;
+  }
+
+  // The address goes in the description.
+  TargetPointer pointer_value = value.GetAs<TargetPointer>();
+  node->set_description(fxl::StringPrintf("0x%" PRIx64, pointer_value));
+
+  // Make a child node that's the dereferenced pointer value. If/when we support GUIs, we should
+  // probably remove the intermediate node and put the dereferenced struct members directly as
+  // children on this node. Otherwise it's an annoying extra step to expand to things.
+  if (pointer_value != 0) {
+    // Use our name but with a "*" to show it dereferenced.
+    auto deref_node = std::make_unique<FormatNode>(
+        "*" + node->name(),
+        [ptr_value = value](fxl::RefPtr<EvalContext> context,
+                            fit::callback<void(const Err& err, ExprValue value)> cb) {
+          ResolvePointer(context, ptr_value, ErrOrValue::FromPairCallback(std::move(cb)));
+        });
+    deref_node->set_child_kind(FormatNode::kPointerExpansion);
+    node->children().push_back(std::move(deref_node));
   }
 }
 

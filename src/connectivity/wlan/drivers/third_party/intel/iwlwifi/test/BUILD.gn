@@ -17,11 +17,23 @@ source_set("iwlwifi_sim_trans_ss") {
   defines = testing_defines
   testonly = true
 
+  sources = [
+    "sim-mvm.cc",
+    "trans-sim.cc",
+  ]
+
+  deps = [
+    "//garnet/lib/wlan/protocol",
+    "//zircon/public/banjo/ddk.protocol.pci",
+    "//zircon/public/banjo/ddk.protocol.wlanphyimpl",
+    "//zircon/public/lib/ddk",
+    "//zircon/public/lib/driver",
+    "//zircon/public/lib/fake_ddk",
+  ]
+
   public_deps = [
-    "//src/connectivity/wlan/drivers/testing/lib/sim-device:sim-device",
     "//src/connectivity/wlan/drivers/testing/lib/sim-env:simenv",
     "//src/connectivity/wlan/drivers/third_party/intel/iwlwifi:core",
-    "//zircon/public/lib/fake_ddk",
   ]
 }
 
@@ -32,10 +44,10 @@ group("test") {
   ]
 }
 
+# Definition for simulated transportation layer + gtest
 testing_deps = [
   ":iwlwifi_sim_trans_ss",
   "//src/lib/fxl/test:gtest_main",
-  "//third_party/googletest:gmock",
 ]
 
 # The dummy code for developer to start a new test.
@@ -45,6 +57,18 @@ executable("dummy_test") {
 
   sources = [
     "dummy_test.cc",
+  ]
+
+  defines = testing_defines
+  deps = testing_deps
+}
+
+executable("iwl-phy-db_test") {
+  output_name = "iwl-phy-db_test"
+  testonly = true
+
+  sources = [
+    "iwl-phy-db_test.cc",
   ]
 
   defines = testing_defines
@@ -85,11 +109,24 @@ executable("pcie_test") {
   ]
 
   defines = testing_defines
-  deps =
-      testing_deps + [
-        # This test is to test PCIe so that we need to include this explicitly.
-        "//src/connectivity/wlan/drivers/third_party/intel/iwlwifi:pcie",
-      ]
+  deps = [
+    "//src/connectivity/wlan/drivers/third_party/intel/iwlwifi:pcie",
+    "//zircon/public/lib/fake-bti",
+    "//zircon/public/lib/mock-function",
+    "//zircon/public/lib/zxtest",
+  ]
+}
+
+executable("phy-ctxt_test") {
+  output_name = "phy-ctxt_test"
+  testonly = true
+
+  sources = [
+    "phy-ctxt_test.cc",
+  ]
+
+  defines = testing_defines
+  deps = testing_deps
 }
 
 executable("utils_test") {
@@ -109,15 +146,21 @@ unittest_package("iwlwifi_test") {
 
   deps = [
     ":dummy_test",
+    ":iwl-phy-db_test",
     ":mvm_test",
     ":notif-wait_test",
     ":pcie_test",
+    ":phy-ctxt_test",
     ":utils_test",
   ]
 
   tests = [
     {
       name = "dummy_test"
+      environments = basic_envs
+    },
+    {
+      name = "iwl-phy-db_test"
       environments = basic_envs
     },
     {
@@ -130,6 +173,10 @@ unittest_package("iwlwifi_test") {
     },
     {
       name = "pcie_test"
+      environments = basic_envs
+    },
+    {
+      name = "phy-ctxt_test"
       environments = basic_envs
     },
     {

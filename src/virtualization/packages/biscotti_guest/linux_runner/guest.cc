@@ -6,8 +6,6 @@
 
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <grpc++/grpc++.h>
-#include <grpc++/server_posix.h>
 #include <lib/async/default.h>
 #include <lib/fdio/directory.h>
 #include <lib/fdio/fd.h>
@@ -15,7 +13,6 @@
 #include <lib/fidl/cpp/vector.h>
 #include <lib/fzl/fdio.h>
 #include <netinet/in.h>
-#include <src/lib/fxl/logging.h>
 #include <unistd.h>
 #include <zircon/processargs.h>
 
@@ -25,6 +22,9 @@
 #include "src/virtualization/lib/grpc/grpc_vsock_stub.h"
 #include "src/virtualization/packages/biscotti_guest/linux_runner/ports.h"
 #include "src/virtualization/packages/biscotti_guest/third_party/protos/vm_guest.grpc.pb.h"
+
+#include <grpc++/grpc++.h>
+#include <grpc++/server_posix.h>
 
 namespace linux_runner {
 
@@ -90,10 +90,15 @@ static fidl::VectorPtr<fuchsia::virtualization::BlockDevice> GetBlockDevices(
   TRACE_DURATION("linux_runner", "GetBlockDevices");
   auto file_handle = GetOrCreateStatefulPartition(stateful_image_size);
   FXL_CHECK(file_handle) << "Failed to open stateful file";
-  fidl::VectorPtr<fuchsia::virtualization::BlockDevice> devices;
+  std::vector<fuchsia::virtualization::BlockDevice> devices;
+#ifdef USE_VOLATILE_BLOCK
+  auto stateful_block_mode = fuchsia::virtualization::BlockMode::VOLATILE_WRITE;
+#else
+  auto stateful_block_mode = fuchsia::virtualization::BlockMode::READ_WRITE;
+#endif
   devices.push_back({
       "stateful",
-      fuchsia::virtualization::BlockMode::READ_WRITE,
+      stateful_block_mode,
       fuchsia::virtualization::BlockFormat::RAW,
       std::move(file_handle),
   });
@@ -186,7 +191,7 @@ void Guest::StartGuest() {
 
   fuchsia::virtualization::LaunchInfo launch_info;
   launch_info.url = kLinuxGuestPackage;
-  launch_info.args.push_back("--virtio-gpu=false");
+  launch_info.args.emplace({"--virtio-gpu=false"});
   launch_info.block_devices = GetBlockDevices(config_.stateful_image_size);
   launch_info.wayland_device = fuchsia::virtualization::WaylandDevice::New();
   launch_info.wayland_device->dispatcher = wayland_dispatcher_.NewBinding();
@@ -215,7 +220,7 @@ void Guest::MountExtrasPartition() {
 
   request.mutable_source()->assign("/dev/vdc");
   request.mutable_target()->assign("/mnt/shared");
-  request.mutable_fstype()->assign("ext2");
+  request.mutable_fstype()->assign("romfs");
   request.mutable_options()->assign("");
   request.set_mountflags(0);
 

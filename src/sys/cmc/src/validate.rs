@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io::Read;
 use std::iter;
 use std::path::Path;
+use valico::json_schema;
 
 /// Read in and parse one or more manifest files. Returns an Err() if any file is not valid
 /// or Ok(()) if all files are valid.
@@ -33,7 +34,7 @@ pub fn validate<P: AsRef<Path>>(
 
 /// Read in and parse .cml file. Returns a cml::Document if the file is valid, or an Error if not.
 pub fn parse_cml(value: Value) -> Result<cml::Document, Error> {
-    cm_json::validate_json(&value, CML_SCHEMA)?;
+    validate_json(&value, CML_SCHEMA)?;
     let document: cml::Document = serde_json::from_value(value)
         .map_err(|e| Error::parse(format!("Couldn't read input as struct: {}", e)))?;
     let mut ctx = ValidationContext {
@@ -66,12 +67,12 @@ fn validate_file<P: AsRef<Path>>(
     let v = match ext {
         Some("cmx") => {
             let v = cm_json::from_json_str(&buffer)?;
-            cm_json::validate_json(&v, CMX_SCHEMA)?;
+            validate_json(&v, CMX_SCHEMA)?;
             v
         }
         Some("cm") => {
             let v = cm_json::from_json_str(&buffer)?;
-            cm_json::validate_json(&v, CM_SCHEMA)?;
+            validate_json(&v, CM_SCHEMA)?;
             v
         }
         Some("cml") => {
@@ -87,13 +88,44 @@ fn validate_file<P: AsRef<Path>>(
     // Validate against any extra schemas provided.
     for extra_schema in extra_schemas {
         let schema = JsonSchema::new_from_file(&extra_schema.0.as_ref())?;
-        cm_json::validate_json(&v, &schema).map_err(|e| match (&e, &extra_schema.1) {
+        validate_json(&v, &schema).map_err(|e| match (&e, &extra_schema.1) {
             (Error::Validate { schema_name, err }, Some(extra_msg)) => Error::Validate {
                 schema_name: schema_name.clone(),
                 err: format!("{}\n{}", err, extra_msg),
             },
             _ => e,
         })?;
+    }
+    Ok(())
+}
+
+/// Validates a JSON document according to the given schema.
+pub fn validate_json(json: &Value, schema: &JsonSchema) -> Result<(), Error> {
+    // Parse the schema
+    let cmx_schema_json = serde_json::from_str(&schema.schema).map_err(|e| {
+        Error::internal(format!("Couldn't read schema '{}' as JSON: {}", schema.name, e))
+    })?;
+    let mut scope = json_schema::Scope::new();
+    let compiled_schema = scope.compile_and_return(cmx_schema_json, false).map_err(|e| {
+        Error::internal(format!("Couldn't parse schema '{}': {:?}", schema.name, e))
+    })?;
+
+    // Validate the json
+    let res = compiled_schema.validate(json);
+    if !res.is_strictly_valid() {
+        let mut err_msgs = Vec::new();
+        for e in &res.errors {
+            err_msgs.push(format!("{} at {}", e.get_title(), e.get_path()).into_boxed_str());
+        }
+        for u in &res.missing {
+            err_msgs.push(
+                format!("internal error: schema definition is missing URL {}", u).into_boxed_str(),
+            );
+        }
+        // The ordering in which valico emits these errors is unstable.
+        // Sort error messages so that the resulting message is predictable.
+        err_msgs.sort_unstable();
+        return Err(Error::validate_schema(&schema, err_msgs.join(", ")));
     }
     Ok(())
 }
@@ -314,6 +346,8 @@ impl<'a> ValidationContext<'a> {
     {
         // Get the source capability's path.
         let source_path = if let Some(p) = source_obj.service().as_ref() {
+            p
+        } else if let Some(p) = source_obj.legacy_service().as_ref() {
             p
         } else if let Some(p) = source_obj.directory().as_ref() {
             p
@@ -550,6 +584,24 @@ mod tests {
                         }
                     },
                     {
+                        "legacy_service": {
+                            "source": {
+                                "realm": {},
+                            },
+                            "source_path": "/svc/fuchsia.boot.Log",
+                            "target_path": "/svc/fuchsia.logger.Log"
+                        }
+                    },
+                    {
+                        "legacy_service": {
+                            "source": {
+                                "framework": {},
+                            },
+                            "source_path": "/svc/fuchsia.sys2.Realm",
+                            "target_path": "/svc/fuchsia.sys2.Realm"
+                        }
+                    },
+                    {
                         "directory": {
                             "source": {
                                 "realm": {},
@@ -600,6 +652,15 @@ mod tests {
                         }
                     },
                     {
+                        "legacy_service": {
+                            "source_path": "/svc/fuchsia.ui.Scenic",
+                            "source": {
+                                "self": {}
+                            },
+                            "target_path": "/svc/fuchsia.ui.Scenic"
+                        }
+                    },
+                    {
                         "directory": {
                             "source_path": "/data/assets",
                             "source": {
@@ -608,6 +669,15 @@ mod tests {
                                 }
                             },
                             "target_path": "/data/kitten_assets"
+                        }
+                    },
+                    {
+                        "directory": {
+                            "source_path": "/hub",
+                            "source": {
+                                "framework": {}
+                            },
+                            "target_path": "/child_hub"
                         }
                     }
                 ]
@@ -719,6 +789,48 @@ mod tests {
                         }
                     },
                     {
+                        "legacy_service": {
+                            "source": {
+                                "realm": {}
+                            },
+                            "source_path": "/svc/fuchsia.logger.LogSink",
+                            "target": {
+                                "child": {
+                                    "name": "viewer"
+                                }
+                            },
+                            "target_path": "/svc/fuchsia.logger.SysLog"
+                        }
+                    },
+                    {
+                        "legacy_service": {
+                            "source": {
+                                "self": {}
+                            },
+                            "source_path": "/svc/fuchsia.ui.Scenic",
+                            "target": {
+                                "child": {
+                                    "name": "user_shell"
+                                }
+                            },
+                            "target_path": "/svc/fuchsia.ui.Scenic"
+                        }
+                    },
+                    {
+                        "legacy_service": {
+                            "source": {
+                                "self": {}
+                            },
+                            "source_path": "/svc/fuchsia.ui.Scenic",
+                            "target": {
+                                "collection": {
+                                    "name": "modular"
+                                }
+                            },
+                            "target_path": "/services/fuchsia.ui.Scenic"
+                        }
+                    },
+                    {
                         "directory": {
                             "source": {
                                 "child": {
@@ -748,6 +860,20 @@ mod tests {
                                 }
                             },
                             "target_path": "/data/artifacts",
+                        }
+                    },
+                    {
+                        "directory": {
+                            "source": {
+                                "framework": {}
+                            },
+                            "source_path": "/hub",
+                            "target": {
+                                "collection": {
+                                    "name": "modular"
+                                }
+                            },
+                            "target_path": "/hub"
                         }
                     },
                     {
@@ -1332,6 +1458,8 @@ mod tests {
                 "use": [
                   { "service": "/fonts/CoolFonts", "as": "/svc/fuchsia.fonts.Provider" },
                   { "service": "/svc/fuchsia.sys2.Realm", "from": "framework" },
+                  { "legacy_service": "/fonts/CoolFonts", "as": "/svc/fuchsia.fonts.Provider" },
+                  { "legacy_service": "/svc/fuchsia.sys2.Realm", "from": "framework" },
                   { "directory": "/data/assets" },
                   { "directory": "/data/config", "from": "realm" },
                   { "storage": "data", "as": "/example" },
@@ -1377,7 +1505,8 @@ mod tests {
                         "from": "#logger",
                         "as": "/svc/logger"
                     },
-                    { "directory": "/volumes/blobfs", "from": "self" }
+                    { "directory": "/volumes/blobfs", "from": "self" },
+                    { "directory": "/hub", "from": "framework" }
                 ],
                 "children": [
                     {
@@ -1461,6 +1590,21 @@ mod tests {
                         ]
                     },
                     {
+                        "legacy_service": "/svc/fuchsia.logger.LegacyLog",
+                        "from": "#logger",
+                        "to": [
+                            { "dest": "#echo_server" },
+                            { "dest": "#modular", "as": "/svc/fuchsia.logger.LegacySysLog" }
+                        ]
+                    },
+                    {
+                        "legacy_service": "/svc/fuchsia.fonts.LegacyProvider",
+                        "from": "realm",
+                        "to": [
+                            { "dest": "#echo_server" },
+                        ]
+                    },
+                    {
                         "directory": "/data/assets",
                         "from": "self",
                         "to": [
@@ -1472,6 +1616,13 @@ mod tests {
                         "from": "realm",
                         "to": [
                             { "dest": "#modular" },
+                        ]
+                    },
+                    {
+                        "directory": "/hub",
+                        "from": "framework",
+                        "to": [
+                            { "dest": "#modular", "as": "/hub" }
                         ]
                     },
                     {
@@ -2169,6 +2320,78 @@ mod tests {
                 }
             }),
             result = Ok(()),
+        },
+        test_cmx_block_system_data => {
+            input = json!({
+                "program": { "binary": "bin/app" },
+                "sandbox": {
+                    "system": [ "data" ]
+                }
+            }),
+            result = Err(Error::validate_schema(CMX_SCHEMA, "Not condition is not met at /sandbox/system/0")),
+        },
+        test_cmx_block_system_data_stem => {
+            input = json!({
+                "program": { "binary": "bin/app" },
+                "sandbox": {
+                    "system": [ "data-should-pass" ]
+                }
+            }),
+            result = Ok(()),
+        },
+        test_cmx_block_system_data_leading_slash => {
+            input = json!({
+                "program": { "binary": "bin/app" },
+                "sandbox": {
+                    "system": [ "/data" ]
+                }
+            }),
+            result = Err(Error::validate_schema(CMX_SCHEMA, "Not condition is not met at /sandbox/system/0")),
+        },
+        test_cmx_block_system_data_subdir => {
+            input = json!({
+                "program": { "binary": "bin/app" },
+                "sandbox": {
+                    "system": [ "data/should-fail" ]
+                }
+            }),
+            result = Err(Error::validate_schema(CMX_SCHEMA, "Not condition is not met at /sandbox/system/0")),
+        },
+        test_cmx_block_system_deprecated_data => {
+            input = json!({
+                "program": { "binary": "bin/app" },
+                "sandbox": {
+                    "system": [ "deprecated-data" ]
+                }
+            }),
+            result = Err(Error::validate_schema(CMX_SCHEMA, "Not condition is not met at /sandbox/system/0")),
+        },
+        test_cmx_block_system_deprecated_data_stem => {
+            input = json!({
+                "program": { "binary": "bin/app" },
+                "sandbox": {
+                    "system": [ "deprecated-data-should-pass" ]
+                }
+            }),
+            result = Ok(()),
+        },
+        test_cmx_block_system_deprecated_data_leading_slash => {
+            input = json!({
+                "program": { "binary": "bin/app" },
+                "sandbox": {
+                    "system": [ "/deprecated-data" ]
+                }
+            }),
+            result = Err(Error::validate_schema(CMX_SCHEMA, "Not condition is not met at /sandbox/system/0")),
+        },
+        test_cmx_block_system_deprecated_data_subdir => {
+            input = json!({
+                "program": { "binary": "bin/app" },
+                "sandbox": {
+                    "system": [ "deprecated-data/should-fail" ]
+                }
+            }),
+            result = Err(Error::validate_schema(CMX_SCHEMA, "Not condition is not met at /sandbox/system/0")),
         },
     }
 

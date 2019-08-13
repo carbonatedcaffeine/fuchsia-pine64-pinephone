@@ -11,11 +11,12 @@
 #include <lib/fit/defer.h>
 #include <lib/fit/function.h>
 #include <lib/inspect_deprecated/inspect.h>
-#include <trace/event.h>
 
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <trace/event.h>
 
 #include "src/ledger/bin/app/active_page_manager_container.h"
 #include "src/ledger/bin/app/constants.h"
@@ -37,7 +38,7 @@ LedgerManager::LedgerManager(Environment* environment, std::string ledger_name,
                              std::unique_ptr<encryption::EncryptionService> encryption_service,
                              std::unique_ptr<storage::LedgerStorage> storage,
                              std::unique_ptr<sync_coordinator::LedgerSync> ledger_sync,
-                             PageUsageListener* page_usage_listener)
+                             std::vector<PageUsageListener*> page_usage_listeners)
     : environment_(environment),
       ledger_name_(std::move(ledger_name)),
       encryption_service_(std::move(encryption_service)),
@@ -45,7 +46,7 @@ LedgerManager::LedgerManager(Environment* environment, std::string ledger_name,
       ledger_sync_(std::move(ledger_sync)),
       ledger_impl_(environment_, this),
       merge_manager_(environment_),
-      page_usage_listener_(page_usage_listener),
+      page_usage_listeners_(std::move(page_usage_listeners)),
       inspect_node_(std::move(inspect_node)),
       pages_node_(inspect_node_.CreateChild(kPagesInspectPathComponent.ToString())),
       children_manager_retainer_(pages_node_.SetChildrenManager(this)),
@@ -84,6 +85,10 @@ void LedgerManager::PageIsClosedOfflineAndEmpty(
 void LedgerManager::DeletePageStorage(convert::ExtendedStringView page_id,
                                       fit::function<void(storage::Status)> callback) {
   GetOrCreatePageManager(page_id)->DeletePageStorage(std::move(callback));
+}
+
+void LedgerManager::TrySyncClosedPage(convert::ExtendedStringView page_id) {
+  GetOrCreatePageManager(page_id)->StartPageSync();
 }
 
 void LedgerManager::GetPage(storage::PageIdView page_id, PageState page_state,
@@ -126,7 +131,7 @@ PageManager* LedgerManager::GetOrCreatePageManager(convert::ExtendedStringView p
 
   auto ret = page_managers_.emplace(
       std::piecewise_construct, std::forward_as_tuple(page_id.ToString()),
-      std::forward_as_tuple(environment_, ledger_name_, page_id.ToString(), page_usage_listener_,
+      std::forward_as_tuple(environment_, ledger_name_, page_id.ToString(), page_usage_listeners_,
                             storage_.get(), ledger_sync_.get(), &merge_manager_,
                             pages_node_.CreateChild(PageIdToDisplayName(page_id.ToString()))));
   FXL_DCHECK(ret.second);

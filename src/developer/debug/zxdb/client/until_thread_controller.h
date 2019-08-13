@@ -7,8 +7,7 @@
 
 #include <stdint.h>
 
-#include <functional>
-
+#include "lib/fit/function.h"
 #include "src/developer/debug/zxdb/client/frame_fingerprint.h"
 #include "src/developer/debug/zxdb/client/thread_controller.h"
 #include "src/developer/debug/zxdb/symbols/input_location.h"
@@ -49,7 +48,7 @@ class UntilThreadController : public ThreadController {
   ~UntilThreadController() override;
 
   // ThreadController implementation:
-  void InitWithThread(Thread* thread, std::function<void(const Err&)> cb) override;
+  void InitWithThread(Thread* thread, fit::callback<void(const Err&)> cb) override;
   ContinueOp GetContinueOp() override;
   StopOp OnThreadStop(debug_ipc::NotifyException::Type stop_type,
                       const std::vector<fxl::WeakPtr<Breakpoint>>& hit_breakpoints) override;
@@ -61,7 +60,7 @@ class UntilThreadController : public ThreadController {
 
   // Callback for when the breakpoint is set. The parameter is the continue
   // callback from thread initialization.
-  void OnBreakpointSet(const Err& err, std::function<void(const Err&)> cb);
+  void OnBreakpointSet(const Err& err, fit::callback<void(const Err&)> cb);
 
   InputLocation location_;
 
@@ -71,8 +70,6 @@ class UntilThreadController : public ThreadController {
   // When no frame checking is needed, the threshold frame will be !is_valid().
   FrameFingerprint threshold_frame_;
   FrameComparison comparison_ = kRunUntilOlderFrame;
-
-  std::function<void(const Err&)> error_callback_;
 
   fxl::WeakPtr<Breakpoint> breakpoint_;
 

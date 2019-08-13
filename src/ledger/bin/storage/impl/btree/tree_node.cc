@@ -60,10 +60,10 @@ TreeNode::TreeNode(ObjectIdentifier identifier, uint8_t level, std::vector<Entry
 TreeNode::~TreeNode() {}
 
 void TreeNode::FromIdentifier(
-    PageStorage* page_storage, ObjectIdentifier identifier,
+    PageStorage* page_storage, LocatedObjectIdentifier identifier,
     fit::function<void(Status, std::unique_ptr<const TreeNode>)> callback) {
-  page_storage->GetObject(identifier, PageStorage::Location::NETWORK,
-                          [identifier, callback = std::move(callback)](
+  page_storage->GetObject(std::move(identifier.identifier), std::move(identifier.location),
+                          [callback = std::move(callback)](
                               Status status, std::unique_ptr<const Object> object) mutable {
                             if (status != Status::OK) {
                               callback(status, nullptr);
@@ -84,7 +84,7 @@ Status TreeNode::FromObject(const Object& object, std::unique_ptr<const TreeNode
   uint8_t level;
   std::vector<Entry> entries;
   std::map<size_t, ObjectIdentifier> children;
-  if (!DecodeNode(data, &level, &entries, &children)) {
+  if (!DecodeNode(data, object.GetIdentifier().factory(), &level, &entries, &children)) {
     return Status::DATA_INTEGRITY_ERROR;
   }
   node->reset(new TreeNode(object.GetIdentifier(), level, std::move(entries), std::move(children)));

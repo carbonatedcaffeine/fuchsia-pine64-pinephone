@@ -7,8 +7,8 @@
 use {
     crate::eventloop::Event,
     failure::Error,
-    fidl_fuchsia_net::SocketProviderRequestStream,
     fidl_fuchsia_net_stack::StackRequestStream,
+    fidl_fuchsia_posix_socket::ProviderRequestStream,
     fuchsia_async as fasync,
     fuchsia_component::server::ServiceFs,
     futures::{channel::mpsc, FutureExt, SinkExt, StreamExt, TryStreamExt},
@@ -24,13 +24,13 @@ impl FidlWorker {
             .add_fidl_service(|rs: StackRequestStream| {
                 rs.map_ok(Event::FidlStackEvent).left_stream()
             })
-            .add_fidl_service(|rs: SocketProviderRequestStream| {
+            .add_fidl_service(|rs: ProviderRequestStream| {
                 rs.map_ok(Event::FidlSocketProviderEvent).right_stream()
             });
         fs.take_and_serve_directory_handle()?;
 
         fasync::spawn_local(async move {
-            while let Some(event_stream) = await!(fs.next()) {
+            while let Some(event_stream) = fs.next().await {
                 let event_chan = event_chan.clone().sink_map_err(|e| error!("{:?}", e));
                 let event_stream = event_stream.map_err(|e| error!("{:?}", e));
                 fasync::spawn_local(

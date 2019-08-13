@@ -5,14 +5,15 @@
 #ifndef SRC_CAMERA_CAMERA_MANAGER_CAMERA_MANAGER_IMPL_H_
 #define SRC_CAMERA_CAMERA_MANAGER_CAMERA_MANAGER_IMPL_H_
 
-#include <ddk/debug.h>
-#include <ddk/driver.h>
 #include <fuchsia/camera/cpp/fidl.h>
 #include <lib/fidl/cpp/binding.h>
 #include <lib/fsl/io/device_watcher.h>
-#include <src/camera/camera_manager/video_device_client.h>
 
 #include <list>
+
+#include <ddk/debug.h>
+#include <ddk/driver.h>
+#include <src/camera/camera_manager/video_device_client.h>
 
 namespace camera {
 // Implements camera::Manager FIDL service.  Keeps track of the cameras and
@@ -41,8 +42,7 @@ class CameraManagerImpl : public fuchsia::camera::Manager {
 
   // Get all the available formats for a camera.
   // TODO(CAM-17): Add pagination to support cameras with over 16 formats.
-  void GetFormats(uint64_t camera_id, uint32_t index,
-                  GetFormatsCallback callback);
+  void GetFormats(uint64_t camera_id, uint32_t index, GetFormatsCallback callback);
 
   // Establish a camera stream connection, which allows camera image data
   // to be passed over a set of buffers.

@@ -5,8 +5,6 @@
 package netstack
 
 import (
-	"syscall/zx"
-
 	"syslog"
 
 	"netstack/util"
@@ -36,7 +34,7 @@ type socketProviderImpl struct {
 var _ net.SocketProvider = (*socketProviderImpl)(nil)
 
 type providerImpl struct {
-	*socketProviderImpl
+	ns             *Netstack
 	controlService socket.ControlService
 }
 
@@ -61,36 +59,6 @@ func toTransProto(typ, protocol int16) (int16, tcpip.TransportProtocolNumber) {
 }
 
 func (sp *providerImpl) Socket(domain, typ, protocol int16) (int16, socket.ControlInterface, error) {
-	code, ios, peer, err := sp.socket(domain, typ, protocol)
-	if err != nil {
-		return 0, socket.ControlInterface{}, err
-	}
-	if code != 0 {
-		return code, socket.ControlInterface{}, nil
-	}
-	h0, h1, err := zx.NewChannel(0)
-	if err != nil {
-		return 0, socket.ControlInterface{}, err
-	}
-	s := &socketImpl{
-		iostate:        ios,
-		peer:           peer,
-		controlService: &sp.controlService,
-	}
-	bindingKey, err := sp.controlService.Add(s, h0, func(error) { s.close() })
-	if err != nil {
-		return 0, socket.ControlInterface{}, err
-	}
-	s.bindingKey = bindingKey
-	return 0, socket.ControlInterface{Channel: h1}, nil
-}
-
-func (sp *socketProviderImpl) Socket(domain, typ, protocol int16) (int16, zx.Socket, error) {
-	code, _, socket, err := sp.socket(domain, typ, protocol)
-	return code, socket, err
-}
-
-func (sp *socketProviderImpl) socket(domain, typ, protocol int16) (int16, *iostate, zx.Socket, error) {
 	var netProto tcpip.NetworkProtocolNumber
 	switch domain {
 	case C.AF_INET:
@@ -98,12 +66,12 @@ func (sp *socketProviderImpl) socket(domain, typ, protocol int16) (int16, *iosta
 	case C.AF_INET6:
 		netProto = ipv6.ProtocolNumber
 	default:
-		return C.EPFNOSUPPORT, nil, zx.Socket(zx.HandleInvalid), nil
+		return C.EPFNOSUPPORT, socket.ControlInterface{}, nil
 	}
 
 	code, transProto := toTransProto(typ, protocol)
 	if code != 0 {
-		return code, nil, zx.Socket(zx.HandleInvalid), nil
+		return code, socket.ControlInterface{}, nil
 	}
 
 	wq := new(waiter.Queue)
@@ -111,11 +79,12 @@ func (sp *socketProviderImpl) socket(domain, typ, protocol int16) (int16, *iosta
 	ep, err := sp.ns.mu.stack.NewEndpoint(transProto, netProto, wq)
 	sp.ns.mu.Unlock()
 	if err != nil {
-		return tcpipErrorToCode(err), nil, zx.Socket(zx.HandleInvalid), nil
+		return tcpipErrorToCode(err), socket.ControlInterface{}, nil
 	}
-	ios, socket := newIostate(sp.ns, netProto, transProto, wq, ep, false)
-
-	return 0, ios, socket, nil
+	{
+		controlInterface, err := newIostate(sp.ns, netProto, transProto, wq, ep, &sp.controlService)
+		return 0, controlInterface, err
+	}
 }
 
 func (sp *socketProviderImpl) GetAddrInfo(node *string, service *string, hints *net.AddrInfoHints) (net.AddrInfoStatus, uint32, [4]net.AddrInfo, error) {
@@ -153,7 +122,7 @@ func (sp *socketProviderImpl) GetAddrInfo(node *string, service *string, hints *
 	switch {
 	case node == nil || *node == "":
 		addrs = append(addrs, "\x00\x00\x00\x00")
-	case *node == "localhost" || *node == sp.ns.getNodeName():
+	case *node == "localhost" || *node == sp.ns.getDeviceName():
 		switch hints.Family {
 		case C.AF_UNSPEC:
 			addrs = append(addrs, ipv4Loopback, ipv6Loopback)

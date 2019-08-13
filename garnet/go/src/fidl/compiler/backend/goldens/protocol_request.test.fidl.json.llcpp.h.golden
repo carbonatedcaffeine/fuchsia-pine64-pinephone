@@ -7,6 +7,7 @@
 #include <lib/fidl/cpp/string_view.h>
 #include <lib/fidl/llcpp/array.h>
 #include <lib/fidl/llcpp/coding.h>
+#include <lib/fidl/llcpp/sync_call.h>
 #include <lib/fidl/llcpp/traits.h>
 #include <lib/fidl/llcpp/transaction.h>
 #include <lib/fit/function.h>
@@ -27,6 +28,7 @@ extern "C" const fidl_type_t test_name_ParentTakeChildRequestTable;
 extern "C" const fidl_type_t test_name_ParentTakeChildRequestRequestTable;
 
 class Parent final {
+  Parent() = delete;
  public:
 
   struct GetChildResponse final {
@@ -38,6 +40,9 @@ class Parent final {
     static constexpr uint32_t MaxNumHandles = 1;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   using GetChildRequest = ::fidl::AnyZeroArgMessage;
 
@@ -50,6 +55,9 @@ class Parent final {
     static constexpr uint32_t MaxNumHandles = 1;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   using GetChildRequestRequest = ::fidl::AnyZeroArgMessage;
 
@@ -62,6 +70,9 @@ class Parent final {
     static constexpr uint32_t MaxNumHandles = 1;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
   };
 
   struct TakeChildRequestRequest final {
@@ -73,56 +84,201 @@ class Parent final {
     static constexpr uint32_t MaxNumHandles = 1;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
   };
 
 
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class GetChild_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      GetChild_Impl(zx::unowned_channel _client_end);
+      ~GetChild_Impl() = default;
+      GetChild_Impl(GetChild_Impl&& other) = default;
+      GetChild_Impl& operator=(GetChild_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetChildRequest_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      GetChildRequest_Impl(zx::unowned_channel _client_end);
+      ~GetChildRequest_Impl() = default;
+      GetChildRequest_Impl(GetChildRequest_Impl&& other) = default;
+      GetChildRequest_Impl& operator=(GetChildRequest_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    class TakeChild_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      TakeChild_Impl(zx::unowned_channel _client_end, ::zx::channel c);
+      ~TakeChild_Impl() = default;
+      TakeChild_Impl(TakeChild_Impl&& other) = default;
+      TakeChild_Impl& operator=(TakeChild_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+    class TakeChildRequest_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      TakeChildRequest_Impl(zx::unowned_channel _client_end, ::zx::channel r);
+      ~TakeChildRequest_Impl() = default;
+      TakeChildRequest_Impl(TakeChildRequest_Impl&& other) = default;
+      TakeChildRequest_Impl& operator=(TakeChildRequest_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+
+   public:
+    using GetChild = GetChild_Impl<GetChildResponse>;
+    using GetChildRequest = GetChildRequest_Impl<GetChildRequestResponse>;
+    using TakeChild = TakeChild_Impl;
+    using TakeChildRequest = TakeChildRequest_Impl;
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class GetChild_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      GetChild_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~GetChild_Impl() = default;
+      GetChild_Impl(GetChild_Impl&& other) = default;
+      GetChild_Impl& operator=(GetChild_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class GetChildRequest_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      GetChildRequest_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+      ~GetChildRequest_Impl() = default;
+      GetChildRequest_Impl(GetChildRequest_Impl&& other) = default;
+      GetChildRequest_Impl& operator=(GetChildRequest_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    class TakeChild_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      TakeChild_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::zx::channel c);
+      ~TakeChild_Impl() = default;
+      TakeChild_Impl(TakeChild_Impl&& other) = default;
+      TakeChild_Impl& operator=(TakeChild_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+    class TakeChildRequest_Impl final : private ::fidl::internal::StatusAndError {
+      using Super = ::fidl::internal::StatusAndError;
+     public:
+      TakeChildRequest_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::zx::channel r);
+      ~TakeChildRequest_Impl() = default;
+      TakeChildRequest_Impl(TakeChildRequest_Impl&& other) = default;
+      TakeChildRequest_Impl& operator=(TakeChildRequest_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+    };
+
+   public:
+    using GetChild = GetChild_Impl<GetChildResponse>;
+    using GetChildRequest = GetChildRequest_Impl<GetChildRequestResponse>;
+    using TakeChild = TakeChild_Impl;
+    using TakeChildRequest = TakeChildRequest_Impl;
+  };
+
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
     ::zx::channel* mutable_channel() { return &channel_; }
 
-    zx_status_t GetChild(::zx::channel* out_c);
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::GetChild GetChild();
+
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::GetChild GetChild(::fidl::BytePart _response_buffer);
+
+    zx_status_t GetChild_Deprecated(::zx::channel* out_c);
 
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetChildResponse> GetChild(::fidl::BytePart _response_buffer, ::zx::channel* out_c);
+    ::fidl::DecodeResult<GetChildResponse> GetChild_Deprecated(::fidl::BytePart _response_buffer, ::zx::channel* out_c);
 
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetChildResponse> GetChild(::fidl::BytePart response_buffer);
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::GetChildRequest GetChildRequest();
 
-    zx_status_t GetChildRequest(::zx::channel* out_r);
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::GetChildRequest GetChildRequest(::fidl::BytePart _response_buffer);
+
+    zx_status_t GetChildRequest_Deprecated(::zx::channel* out_r);
 
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<GetChildRequestResponse> GetChildRequest(::fidl::BytePart _response_buffer, ::zx::channel* out_r);
+    ::fidl::DecodeResult<GetChildRequestResponse> GetChildRequest_Deprecated(::fidl::BytePart _response_buffer, ::zx::channel* out_r);
 
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<GetChildRequestResponse> GetChildRequest(::fidl::BytePart response_buffer);
-
-    zx_status_t TakeChild(::zx::channel c);
+    // Allocates 24 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::TakeChild TakeChild(::zx::channel c);
 
     // Caller provides the backing storage for FIDL message via request and response buffers.
-    zx_status_t TakeChild(::fidl::BytePart _request_buffer, ::zx::channel c);
+    UnownedResultOf::TakeChild TakeChild(::fidl::BytePart _request_buffer, ::zx::channel c);
 
-    // Messages are encoded and decoded in-place.
-    zx_status_t TakeChild(::fidl::DecodedMessage<TakeChildRequest> params);
-
-    zx_status_t TakeChildRequest(::zx::channel r);
+    zx_status_t TakeChild_Deprecated(::zx::channel c);
 
     // Caller provides the backing storage for FIDL message via request and response buffers.
-    zx_status_t TakeChildRequest(::fidl::BytePart _request_buffer, ::zx::channel r);
+    zx_status_t TakeChild_Deprecated(::fidl::BytePart _request_buffer, ::zx::channel c);
 
-    // Messages are encoded and decoded in-place.
-    zx_status_t TakeChildRequest(::fidl::DecodedMessage<TakeChildRequestRequest> params);
+    // Allocates 24 bytes of message buffer on the stack. No heap allocation necessary.
+    ResultOf::TakeChildRequest TakeChildRequest(::zx::channel r);
+
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::TakeChildRequest TakeChildRequest(::fidl::BytePart _request_buffer, ::zx::channel r);
+
+    zx_status_t TakeChildRequest_Deprecated(::zx::channel r);
+
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    zx_status_t TakeChildRequest_Deprecated(::fidl::BytePart _request_buffer, ::zx::channel r);
 
    private:
     ::zx::channel channel_;
@@ -130,41 +286,70 @@ class Parent final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
    public:
 
-    static zx_status_t GetChild(zx::unowned_channel _client_end, ::zx::channel* out_c);
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::GetChild GetChild(zx::unowned_channel _client_end);
+
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::GetChild GetChild(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+    static zx_status_t GetChild_Deprecated(zx::unowned_channel _client_end, ::zx::channel* out_c);
 
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetChildResponse> GetChild(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, ::zx::channel* out_c);
+    static ::fidl::DecodeResult<GetChildResponse> GetChild_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, ::zx::channel* out_c);
 
-    // Messages are encoded and decoded in-place.
+    // Allocates 40 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::GetChildRequest GetChildRequest(zx::unowned_channel _client_end);
+
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::GetChildRequest GetChildRequest(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer);
+
+    static zx_status_t GetChildRequest_Deprecated(zx::unowned_channel _client_end, ::zx::channel* out_r);
+
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<GetChildRequestResponse> GetChildRequest_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, ::zx::channel* out_r);
+
+    // Allocates 24 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::TakeChild TakeChild(zx::unowned_channel _client_end, ::zx::channel c);
+
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::TakeChild TakeChild(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::zx::channel c);
+
+    static zx_status_t TakeChild_Deprecated(zx::unowned_channel _client_end, ::zx::channel c);
+
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static zx_status_t TakeChild_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::zx::channel c);
+
+    // Allocates 24 bytes of message buffer on the stack. No heap allocation necessary.
+    static ResultOf::TakeChildRequest TakeChildRequest(zx::unowned_channel _client_end, ::zx::channel r);
+
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::TakeChildRequest TakeChildRequest(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::zx::channel r);
+
+    static zx_status_t TakeChildRequest_Deprecated(zx::unowned_channel _client_end, ::zx::channel r);
+
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static zx_status_t TakeChildRequest_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::zx::channel r);
+
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
+
     static ::fidl::DecodeResult<GetChildResponse> GetChild(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
-    static zx_status_t GetChildRequest(zx::unowned_channel _client_end, ::zx::channel* out_r);
-
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<GetChildRequestResponse> GetChildRequest(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, ::zx::channel* out_r);
-
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<GetChildRequestResponse> GetChildRequest(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer);
 
-    static zx_status_t TakeChild(zx::unowned_channel _client_end, ::zx::channel c);
+    static ::fidl::internal::StatusAndError TakeChild(zx::unowned_channel _client_end, ::fidl::DecodedMessage<TakeChildRequest> params);
 
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    static zx_status_t TakeChild(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::zx::channel c);
-
-    // Messages are encoded and decoded in-place.
-    static zx_status_t TakeChild(zx::unowned_channel _client_end, ::fidl::DecodedMessage<TakeChildRequest> params);
-
-    static zx_status_t TakeChildRequest(zx::unowned_channel _client_end, ::zx::channel r);
-
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    static zx_status_t TakeChildRequest(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::zx::channel r);
-
-    // Messages are encoded and decoded in-place.
-    static zx_status_t TakeChildRequest(zx::unowned_channel _client_end, ::fidl::DecodedMessage<TakeChildRequestRequest> params);
+    static ::fidl::internal::StatusAndError TakeChildRequest(zx::unowned_channel _client_end, ::fidl::DecodedMessage<TakeChildRequestRequest> params);
 
   };
 
@@ -235,18 +420,33 @@ class Parent final {
 };
 
 class Child final {
+  Child() = delete;
  public:
 
 
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+
+   public:
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+
+   public:
+  };
+
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
@@ -258,6 +458,15 @@ class Child final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
+   public:
+
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
    public:
 
   };

@@ -5,7 +5,7 @@
 #ifndef SRC_DEVELOPER_DEBUG_ZXDB_EXPR_FORMAT_H_
 #define SRC_DEVELOPER_DEBUG_ZXDB_EXPR_FORMAT_H_
 
-#include <functional>
+#include <optional>
 
 #include "lib/fit/defer.h"
 #include "lib/fit/function.h"
@@ -45,6 +45,33 @@ void FillFormatNodeValue(FormatNode* node, fxl::RefPtr<EvalContext> context,
 // should keep a weak pointer to the node if they do not control its lifetime.
 void FillFormatNodeDescription(FormatNode* node, const FormatOptions& options,
                                fxl::RefPtr<EvalContext> context, fit::deferred_callback cb);
+
+// Formatters for strings. These are public so they can be shared by the pretty-printers.
+//
+// The "char pointer" variant can take a known string length or not. If one is not given, the
+// function will look for a null-terminated string.
+//
+// TODO(brettw) we probably want a more general way for pretty-printers to call into our default
+// code for handling certain types.
+void FormatCharArrayNode(FormatNode* node, fxl::RefPtr<Type> char_type, const uint8_t* data,
+                         size_t length, bool length_was_known, bool truncated);
+void FormatCharPointerNode(FormatNode* node, uint64_t ptr, const Type* char_type,
+                           std::optional<uint32_t> length, const FormatOptions& options,
+                           fxl::RefPtr<EvalContext> eval_context, fit::deferred_callback cb);
+
+// Formats an array with a known length. This is for non-char arrays (which are special-cased in
+// FormatCharArrayNode).
+//
+// The value is given rather than being extracted from the node so it can be different. It can be
+// either an Array symbol type or a pointer.
+void FormatArrayNode(FormatNode* node, const ExprValue& value, int elt_count,
+                     const FormatOptions& options, fxl::RefPtr<EvalContext> eval_context,
+                     fit::deferred_callback cb);
+
+// Formats a node for a pointer. This function is synchronous.
+//
+// The value is given rather than taken from the node to support pretty-printing uses.
+void FormatPointerNode(FormatNode* node, const ExprValue& value, const FormatOptions& options);
 
 }  // namespace zxdb
 

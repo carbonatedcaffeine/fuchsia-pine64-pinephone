@@ -5,7 +5,7 @@
 //! A helper to create files backed by in process callbacks.  For example to expose component
 //! configuration, debug information or statistics.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 #![recursion_limit = "1024"]
 
 use proc_macro_hack::proc_macro_hack;
@@ -46,14 +46,14 @@ pub mod pseudo_directory;
 /// ```
 /// let root = pseudo_directory! {
 ///     "etc" => pseudo_directory! {
-///         "fstab" => read_only(|| Ok(b"/dev/fs /".to_vec())),
-///         "passwd" => read_only(|| Ok(b"[redacted]".to_vec())),
-///         "shells" => read_only(|| Ok(b"/bin/bash".to_vec())),
+///         "fstab" => read_only_static(b"/dev/fs /"),
+///         "passwd" => read_only_static(b"[redacted]"),
+///         "shells" => read_only_static(b"/bin/bash"),
 ///         "ssh" => pseudo_directory! {
-///           "sshd_config" => read_only(|| Ok(b"# Empty".to_vec())),
+///           "sshd_config" => read_only_static(b"# Empty"),
 ///         },
 ///     },
-///     "uname" => read_only(|| Ok(b"Fuchsia".to_vec())),
+///     "uname" => read_only_static(b"Fuchsia"),
 /// };
 /// ```
 ///

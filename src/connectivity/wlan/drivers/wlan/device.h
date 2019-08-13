@@ -5,6 +5,11 @@
 #ifndef SRC_CONNECTIVITY_WLAN_DRIVERS_WLAN_DEVICE_H_
 #define SRC_CONNECTIVITY_WLAN_DRIVERS_WLAN_DEVICE_H_
 
+#include <mutex>
+#include <thread>
+#include <tuple>
+#include <unordered_set>
+
 #include <ddk/driver.h>
 #include <ddktl/protocol/ethernet.h>
 #include <fbl/intrusive_double_list.h>
@@ -22,12 +27,6 @@
 #include <wlan/protocol/mac.h>
 #include <zircon/compiler.h>
 
-#include <mutex>
-#include <thread>
-#include <tuple>
-#include <unordered_set>
-
-#include "lib/svc/cpp/services.h"
 #include "minstrel.h"
 #include "proxy_helpers.h"
 
@@ -45,15 +44,13 @@ class Device : public DeviceInterface {
   // ddk device methods
   void WlanUnbind();
   void WlanRelease();
-  zx_status_t WlanIoctl(uint32_t op, const void* in_buf, size_t in_len,
-                        void* out_buf, size_t out_len, size_t* out_actual);
+  zx_status_t WlanMessage(fidl_msg_t* msg, fidl_txn_t* txn);
   void EthUnbind();
   void EthRelease();
 
   // ddk wlanmac_ifc_t methods
   void WlanmacStatus(uint32_t status);
-  void WlanmacRecv(uint32_t flags, const void* data, size_t length,
-                   wlan_rx_info_t* info);
+  void WlanmacRecv(uint32_t flags, const void* data, size_t length, wlan_rx_info_t* info);
   void WlanmacCompleteTx(wlan_tx_packet_t* pkt, zx_status_t status);
   void WlanmacIndication(uint32_t ind);
   void WlanmacReportTxStatus(const wlan_tx_status_t* tx_status);
@@ -61,20 +58,17 @@ class Device : public DeviceInterface {
 
   // ddk ethernet_impl_protocol_ops methods
   zx_status_t EthernetImplQuery(uint32_t options, ethernet_info_t* info);
-  zx_status_t EthernetImplStart(const ethernet_ifc_protocol_t* ifc)
-      __TA_EXCLUDES(lock_);
+  zx_status_t EthernetImplStart(const ethernet_ifc_protocol_t* ifc) __TA_EXCLUDES(lock_);
   void EthernetImplStop() __TA_EXCLUDES(lock_);
-  zx_status_t EthernetImplQueueTx(uint32_t options, ethernet_netbuf_t* netbuf);
+  void EthernetImplQueueTx(uint32_t options, ethernet_netbuf_t* netbuf,
+                           ethernet_impl_queue_tx_callback completion_cb, void* cookie);
   zx_status_t EthernetImplSetParam(uint32_t param, int32_t value, const void* data,
-                             size_t data_size);
+                                   size_t data_size);
 
   // DeviceInterface methods
-  zx_status_t GetTimer(uint64_t id,
-                       fbl::unique_ptr<Timer>* timer) override final;
-  zx_status_t DeliverEthernet(
-      fbl::Span<const uint8_t> eth_frame) override final;
-  zx_status_t SendWlan(fbl::unique_ptr<Packet> packet,
-                       uint32_t flags) override final;
+  zx_status_t GetTimer(uint64_t id, fbl::unique_ptr<Timer>* timer) override final;
+  zx_status_t DeliverEthernet(fbl::Span<const uint8_t> eth_frame) override final;
+  zx_status_t SendWlan(fbl::unique_ptr<Packet> packet, uint32_t flags) override final;
   zx_status_t SendService(fbl::Span<const uint8_t> span) override final;
   zx_status_t SetChannel(wlan_channel_t chan) override final;
   zx_status_t SetStatus(uint32_t status) override final;
@@ -82,17 +76,14 @@ class Device : public DeviceInterface {
   zx_status_t EnableBeaconing(wlan_bcn_config_t* bcn_cfg) override final;
   zx_status_t ConfigureBeacon(fbl::unique_ptr<Packet> beacon) override final;
   zx_status_t SetKey(wlan_key_config_t* key_config) override final;
-  zx_status_t StartHwScan(
-      const wlan_hw_scan_config_t* scan_config) override final;
+  zx_status_t StartHwScan(const wlan_hw_scan_config_t* scan_config) override final;
   zx_status_t ConfigureAssoc(wlan_assoc_ctx_t* assoc_ctx) override final;
   fbl::RefPtr<DeviceState> GetState() override final;
   zx_status_t ClearAssoc(const common::MacAddr& peer_addr) override final;
   const wlanmac_info_t& GetWlanInfo() const override final;
-  zx_status_t GetMinstrelPeers(
-      ::fuchsia::wlan::minstrel::Peers* peers_fidl) override final;
-  zx_status_t GetMinstrelStats(
-      const common::MacAddr& addr,
-      ::fuchsia::wlan::minstrel::Peer* peer_fidl) override final;
+  zx_status_t GetMinstrelPeers(::fuchsia::wlan::minstrel::Peers* peers_fidl) override final;
+  zx_status_t GetMinstrelStats(const common::MacAddr& addr,
+                               ::fuchsia::wlan::minstrel::Peer* peer_fidl) override final;
 
  private:
   struct TimerSchedulerImpl : public TimerScheduler {
@@ -114,11 +105,10 @@ class Device : public DeviceInterface {
   zx_status_t AddWlanDevice();
   zx_status_t AddEthDevice(zx_device* parent);
 
-  fbl::unique_ptr<Packet> PreparePacket(const void* data, size_t length,
-                                        Packet::Peer peer);
+  fbl::unique_ptr<Packet> PreparePacket(const void* data, size_t length, Packet::Peer peer);
   template <typename T>
-  fbl::unique_ptr<Packet> PreparePacket(const void* data, size_t length,
-                                        Packet::Peer peer, const T& ctrl_data) {
+  fbl::unique_ptr<Packet> PreparePacket(const void* data, size_t length, Packet::Peer peer,
+                                        const T& ctrl_data) {
     auto packet = PreparePacket(data, length, peer);
     if (packet != nullptr) {
       packet->CopyCtrlFrom(ctrl_data);
@@ -126,8 +116,9 @@ class Device : public DeviceInterface {
     return packet;
   }
 
-  zx_status_t QueuePacket(fbl::unique_ptr<Packet> packet)
-      __TA_EXCLUDES(packet_queue_lock_);
+  // Establishes a connection with this interface's SME on the given channel.
+  zx_status_t Connect(zx::channel request);
+  zx_status_t QueuePacket(fbl::unique_ptr<Packet> packet) __TA_EXCLUDES(packet_queue_lock_);
 
   // Waits the main loop to finish and frees itself afterwards.
   void DestroySelf();
@@ -141,8 +132,6 @@ class Device : public DeviceInterface {
   // data or user data is too large and needs to be enqueued into packet_queue_
   // separately.
   zx_status_t QueueDevicePortPacket(DevicePacket id, uint32_t status = 0);
-
-  zx_status_t GetChannel(zx::channel* out) __TA_EXCLUDES(lock_);
 
   void SetStatusLocked(uint32_t status);
   bool ShouldEnableMinstrel();

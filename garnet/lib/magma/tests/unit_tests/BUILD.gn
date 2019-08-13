@@ -89,6 +89,7 @@ source_set("magma_platform_tests") {
     "test_platform_semaphore.cc",
     "test_platform_sysmem_connection.cc",
     "test_platform_thread.cc",
+    "test_platform_trace.cc",
   ]
   deps = [
     "$magma_build_root/src/magma_util/platform:client_connection",
@@ -101,6 +102,7 @@ source_set("magma_platform_tests") {
     "$magma_build_root/src/magma_util/platform:semaphore",
     "$magma_build_root/src/magma_util/platform:sysmem_connection",
     "$magma_build_root/src/magma_util/platform:thread",
+    "$magma_build_root/src/magma_util/platform:trace",
     "$magma_build_root/tests/mock:mmio",
     "//third_party/googletest:gtest",
   ]
@@ -134,9 +136,11 @@ source_set("magma_platform_hardware_tests") {
   sources = [
     "test_platform_buffer.cc",
     "test_platform_bus_mapper.cc",
-    "test_platform_firmware_loader.cc",
     "test_platform_interrupt.cc",
   ]
+  if (is_linux) {
+    sources += [ "test_platform_iommu.cc" ]
+  }
 
   deps = [
     ":magma_platform_device_test",
@@ -145,12 +149,14 @@ source_set("magma_platform_hardware_tests") {
     "$magma_build_root/src/magma_util/platform:buffer",
     "$magma_build_root/src/magma_util/platform:bus_mapper",
     "$magma_build_root/src/magma_util/platform:device",
-    "$magma_build_root/src/magma_util/platform:firmware_loader",
+    "$magma_build_root/src/magma_util/platform:iommu",
     "$magma_build_root/src/magma_util/platform:thread",
     "$magma_build_root/tests/helper:platform_device_helper",
     "//third_party/googletest:gtest",
-    "//zircon/public/lib/zx",
   ]
+  if (is_fuchsia) {
+    deps += [ "//zircon/public/lib/zx" ]
+  }
 }
 
 # Requires hardware

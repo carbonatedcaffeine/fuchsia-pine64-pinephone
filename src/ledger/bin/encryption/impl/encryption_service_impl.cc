@@ -4,14 +4,19 @@
 
 #include "src/ledger/bin/encryption/impl/encryption_service_impl.h"
 
-#include <flatbuffers/flatbuffers.h>
 #include <lib/async/cpp/task.h>
 #include <lib/callback/scoped_callback.h>
 #include <lib/fit/function.h>
 #include <lib/fsl/vmo/strings.h>
 
+#include <algorithm>
+
+#include <flatbuffers/flatbuffers.h>
+
 #include "src/ledger/bin/encryption/impl/encrypted_commit_generated.h"
 #include "src/ledger/bin/encryption/primitives/encrypt.h"
+#include "src/ledger/bin/encryption/primitives/hash.h"
+#include "src/ledger/bin/encryption/primitives/hmac.h"
 #include "src/ledger/bin/encryption/primitives/kdf.h"
 #include "src/lib/fxl/logging.h"
 #include "src/lib/fxl/memory/weak_ptr.h"
@@ -39,6 +44,9 @@ constexpr uint32_t kPerObjectDeletionScopedId = std::numeric_limits<uint32_t>::m
 constexpr size_t kRandomlyGeneratedKeySize = 16u;
 // Size of the derived keys.
 constexpr size_t kDerivedKeySize = 32u;
+
+// Entry id size in bytes.
+constexpr size_t kEntryIdSize = 32u;
 
 // Cache size values.
 constexpr size_t kKeyIndexCacheSize = 10u;
@@ -109,8 +117,9 @@ EncryptionServiceImpl::EncryptionServiceImpl(ledger::Environment* environment,
 EncryptionServiceImpl::~EncryptionServiceImpl() {}
 
 storage::ObjectIdentifier EncryptionServiceImpl::MakeObjectIdentifier(
-    storage::ObjectDigest digest) {
-  return {GetCurrentKeyIndex(), kDefaultDeletionScopeId, std::move(digest)};
+    storage::ObjectIdentifierFactory* factory, storage::ObjectDigest digest) {
+  return factory->MakeObjectIdentifier(GetCurrentKeyIndex(), kDefaultDeletionScopeId,
+                                       std::move(digest));
 }
 
 void EncryptionServiceImpl::EncryptCommit(std::string commit_storage,
@@ -282,6 +291,26 @@ void EncryptionServiceImpl::GetChunkingPermutation(
     };
     callback(Status::OK, std::move(chunking_permutation));
   });
+}
+
+std::string EncryptionServiceImpl::GetEntryId() {
+  std::string entry_id;
+  entry_id.resize(kEntryIdSize);
+  (environment_->random())->Draw(&entry_id[0], kEntryIdSize);
+  return entry_id;
+}
+
+std::string EncryptionServiceImpl::GetEntryIdForMerge(fxl::StringView entry_name,
+                                                      storage::CommitId left_parent_id,
+                                                      storage::CommitId right_parent_id,
+                                                      fxl::StringView operation_list) {
+  FXL_DCHECK(left_parent_id <= right_parent_id);
+  // TODO(LE-827): Concatenation is ineffective; consider doing it once per commit.
+  std::string input =
+      fxl::Concatenate({entry_name, left_parent_id, right_parent_id, operation_list});
+  std::string hash = SHA256WithLengthHash(input);
+  hash.resize(kEntryIdSize);
+  return hash;
 }
 
 }  // namespace encryption

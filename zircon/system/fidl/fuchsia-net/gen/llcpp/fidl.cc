@@ -11,1324 +11,7 @@ namespace net {
 namespace {
 
 [[maybe_unused]]
-constexpr uint64_t kSocketControl_Bind_Ordinal = 2092731140lu << 32;
-extern "C" const fidl_type_t fuchsia_net_SocketControlBindRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlBindResponseTable;
-[[maybe_unused]]
-constexpr uint64_t kSocketControl_Connect_Ordinal = 345505709lu << 32;
-extern "C" const fidl_type_t fuchsia_net_SocketControlConnectRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlConnectResponseTable;
-[[maybe_unused]]
-constexpr uint64_t kSocketControl_Listen_Ordinal = 1117818704lu << 32;
-extern "C" const fidl_type_t fuchsia_net_SocketControlListenRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlListenResponseTable;
-[[maybe_unused]]
-constexpr uint64_t kSocketControl_Accept_Ordinal = 796734679lu << 32;
-extern "C" const fidl_type_t fuchsia_net_SocketControlAcceptRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlAcceptResponseTable;
-[[maybe_unused]]
-constexpr uint64_t kSocketControl_Close_Ordinal = 506040350lu << 32;
-extern "C" const fidl_type_t fuchsia_net_SocketControlCloseResponseTable;
-[[maybe_unused]]
-constexpr uint64_t kSocketControl_GetSockName_Ordinal = 764939941lu << 32;
-extern "C" const fidl_type_t fuchsia_net_SocketControlGetSockNameResponseTable;
-[[maybe_unused]]
-constexpr uint64_t kSocketControl_GetPeerName_Ordinal = 472396488lu << 32;
-extern "C" const fidl_type_t fuchsia_net_SocketControlGetPeerNameResponseTable;
-[[maybe_unused]]
-constexpr uint64_t kSocketControl_SetSockOpt_Ordinal = 1365685084lu << 32;
-extern "C" const fidl_type_t fuchsia_net_SocketControlSetSockOptRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlSetSockOptResponseTable;
-[[maybe_unused]]
-constexpr uint64_t kSocketControl_GetSockOpt_Ordinal = 2132650507lu << 32;
-extern "C" const fidl_type_t fuchsia_net_SocketControlGetSockOptRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlGetSockOptResponseTable;
-[[maybe_unused]]
-constexpr uint64_t kSocketControl_Ioctl_Ordinal = 1157859964lu << 32;
-extern "C" const fidl_type_t fuchsia_net_SocketControlIoctlRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketControlIoctlResponseTable;
-
-}  // namespace
-
-zx_status_t SocketControl::SyncClient::Bind(::fidl::VectorView<uint8_t> addr, int16_t* out_code) {
-  return SocketControl::Call::Bind(zx::unowned_channel(this->channel_), std::move(addr), out_code);
-}
-
-zx_status_t SocketControl::Call::Bind(zx::unowned_channel _client_end, ::fidl::VectorView<uint8_t> addr, int16_t* out_code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<BindRequest>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize];
-  BindRequest _request = {};
-  _request._hdr.ordinal = kSocketControl_Bind_Ordinal;
-  _request.addr = std::move(addr);
-  auto _linearize_result = ::fidl::Linearize(&_request, ::fidl::BytePart(_write_bytes,
-                                                                         _kWriteAllocSize));
-  if (_linearize_result.status != ZX_OK) {
-    return _linearize_result.status;
-  }
-  ::fidl::DecodedMessage<BindRequest> _decoded_request = std::move(_linearize_result.message);
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return _encode_request_result.status;
-  }
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<BindResponse>();
-  FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
-  ::fidl::BytePart _response_bytes(_read_bytes, _kReadAllocSize);
-  auto _call_result = ::fidl::Call<BindRequest, BindResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_bytes));
-  if (_call_result.status != ZX_OK) {
-    return _call_result.status;
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result.status;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return ZX_OK;
-}
-
-::fidl::DecodeResult<SocketControl::BindResponse> SocketControl::SyncClient::Bind(::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> addr, ::fidl::BytePart _response_buffer, int16_t* out_code) {
-  return SocketControl::Call::Bind(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(addr), std::move(_response_buffer), out_code);
-}
-
-::fidl::DecodeResult<SocketControl::BindResponse> SocketControl::Call::Bind(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> addr, ::fidl::BytePart _response_buffer, int16_t* out_code) {
-  if (_request_buffer.capacity() < BindRequest::PrimarySize) {
-    return ::fidl::DecodeResult<BindResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
-  }
-  BindRequest _request = {};
-  _request._hdr.ordinal = kSocketControl_Bind_Ordinal;
-  _request.addr = std::move(addr);
-  auto _linearize_result = ::fidl::Linearize(&_request, std::move(_request_buffer));
-  if (_linearize_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<BindResponse>(_linearize_result.status, _linearize_result.error);
-  }
-  ::fidl::DecodedMessage<BindRequest> _decoded_request = std::move(_linearize_result.message);
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<BindResponse>(_encode_request_result.status, _encode_request_result.error);
-  }
-  auto _call_result = ::fidl::Call<BindRequest, BindResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<BindResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return _decode_result;
-}
-
-::fidl::DecodeResult<SocketControl::BindResponse> SocketControl::SyncClient::Bind(::fidl::DecodedMessage<BindRequest> params, ::fidl::BytePart response_buffer) {
-  return SocketControl::Call::Bind(zx::unowned_channel(this->channel_), std::move(params), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<SocketControl::BindResponse> SocketControl::Call::Bind(zx::unowned_channel _client_end, ::fidl::DecodedMessage<BindRequest> params, ::fidl::BytePart response_buffer) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Bind_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::BindResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketControl::BindResponse>());
-  }
-  auto _call_result = ::fidl::Call<BindRequest, BindResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::BindResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketControl::BindResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
-}
-
-
-zx_status_t SocketControl::SyncClient::Connect(::fidl::VectorView<uint8_t> addr, int16_t* out_code) {
-  return SocketControl::Call::Connect(zx::unowned_channel(this->channel_), std::move(addr), out_code);
-}
-
-zx_status_t SocketControl::Call::Connect(zx::unowned_channel _client_end, ::fidl::VectorView<uint8_t> addr, int16_t* out_code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<ConnectRequest>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize];
-  ConnectRequest _request = {};
-  _request._hdr.ordinal = kSocketControl_Connect_Ordinal;
-  _request.addr = std::move(addr);
-  auto _linearize_result = ::fidl::Linearize(&_request, ::fidl::BytePart(_write_bytes,
-                                                                         _kWriteAllocSize));
-  if (_linearize_result.status != ZX_OK) {
-    return _linearize_result.status;
-  }
-  ::fidl::DecodedMessage<ConnectRequest> _decoded_request = std::move(_linearize_result.message);
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return _encode_request_result.status;
-  }
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<ConnectResponse>();
-  FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
-  ::fidl::BytePart _response_bytes(_read_bytes, _kReadAllocSize);
-  auto _call_result = ::fidl::Call<ConnectRequest, ConnectResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_bytes));
-  if (_call_result.status != ZX_OK) {
-    return _call_result.status;
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result.status;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return ZX_OK;
-}
-
-::fidl::DecodeResult<SocketControl::ConnectResponse> SocketControl::SyncClient::Connect(::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> addr, ::fidl::BytePart _response_buffer, int16_t* out_code) {
-  return SocketControl::Call::Connect(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(addr), std::move(_response_buffer), out_code);
-}
-
-::fidl::DecodeResult<SocketControl::ConnectResponse> SocketControl::Call::Connect(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> addr, ::fidl::BytePart _response_buffer, int16_t* out_code) {
-  if (_request_buffer.capacity() < ConnectRequest::PrimarySize) {
-    return ::fidl::DecodeResult<ConnectResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
-  }
-  ConnectRequest _request = {};
-  _request._hdr.ordinal = kSocketControl_Connect_Ordinal;
-  _request.addr = std::move(addr);
-  auto _linearize_result = ::fidl::Linearize(&_request, std::move(_request_buffer));
-  if (_linearize_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<ConnectResponse>(_linearize_result.status, _linearize_result.error);
-  }
-  ::fidl::DecodedMessage<ConnectRequest> _decoded_request = std::move(_linearize_result.message);
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<ConnectResponse>(_encode_request_result.status, _encode_request_result.error);
-  }
-  auto _call_result = ::fidl::Call<ConnectRequest, ConnectResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<ConnectResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return _decode_result;
-}
-
-::fidl::DecodeResult<SocketControl::ConnectResponse> SocketControl::SyncClient::Connect(::fidl::DecodedMessage<ConnectRequest> params, ::fidl::BytePart response_buffer) {
-  return SocketControl::Call::Connect(zx::unowned_channel(this->channel_), std::move(params), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<SocketControl::ConnectResponse> SocketControl::Call::Connect(zx::unowned_channel _client_end, ::fidl::DecodedMessage<ConnectRequest> params, ::fidl::BytePart response_buffer) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Connect_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::ConnectResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketControl::ConnectResponse>());
-  }
-  auto _call_result = ::fidl::Call<ConnectRequest, ConnectResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::ConnectResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketControl::ConnectResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
-}
-
-
-zx_status_t SocketControl::SyncClient::Listen(int16_t backlog, int16_t* out_code) {
-  return SocketControl::Call::Listen(zx::unowned_channel(this->channel_), std::move(backlog), out_code);
-}
-
-zx_status_t SocketControl::Call::Listen(zx::unowned_channel _client_end, int16_t backlog, int16_t* out_code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<ListenRequest>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _request = *reinterpret_cast<ListenRequest*>(_write_bytes);
-  _request._hdr.ordinal = kSocketControl_Listen_Ordinal;
-  _request.backlog = std::move(backlog);
-  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(ListenRequest));
-  ::fidl::DecodedMessage<ListenRequest> _decoded_request(std::move(_request_bytes));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return _encode_request_result.status;
-  }
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<ListenResponse>();
-  FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
-  ::fidl::BytePart _response_bytes(_read_bytes, _kReadAllocSize);
-  auto _call_result = ::fidl::Call<ListenRequest, ListenResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_bytes));
-  if (_call_result.status != ZX_OK) {
-    return _call_result.status;
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result.status;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return ZX_OK;
-}
-
-::fidl::DecodeResult<SocketControl::ListenResponse> SocketControl::SyncClient::Listen(::fidl::BytePart _request_buffer, int16_t backlog, ::fidl::BytePart _response_buffer, int16_t* out_code) {
-  return SocketControl::Call::Listen(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(backlog), std::move(_response_buffer), out_code);
-}
-
-::fidl::DecodeResult<SocketControl::ListenResponse> SocketControl::Call::Listen(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t backlog, ::fidl::BytePart _response_buffer, int16_t* out_code) {
-  if (_request_buffer.capacity() < ListenRequest::PrimarySize) {
-    return ::fidl::DecodeResult<ListenResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
-  }
-  auto& _request = *reinterpret_cast<ListenRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kSocketControl_Listen_Ordinal;
-  _request.backlog = std::move(backlog);
-  _request_buffer.set_actual(sizeof(ListenRequest));
-  ::fidl::DecodedMessage<ListenRequest> _decoded_request(std::move(_request_buffer));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<ListenResponse>(_encode_request_result.status, _encode_request_result.error);
-  }
-  auto _call_result = ::fidl::Call<ListenRequest, ListenResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<ListenResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return _decode_result;
-}
-
-::fidl::DecodeResult<SocketControl::ListenResponse> SocketControl::SyncClient::Listen(::fidl::DecodedMessage<ListenRequest> params, ::fidl::BytePart response_buffer) {
-  return SocketControl::Call::Listen(zx::unowned_channel(this->channel_), std::move(params), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<SocketControl::ListenResponse> SocketControl::Call::Listen(zx::unowned_channel _client_end, ::fidl::DecodedMessage<ListenRequest> params, ::fidl::BytePart response_buffer) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Listen_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::ListenResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketControl::ListenResponse>());
-  }
-  auto _call_result = ::fidl::Call<ListenRequest, ListenResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::ListenResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketControl::ListenResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
-}
-
-
-zx_status_t SocketControl::SyncClient::Accept(int16_t flags, int16_t* out_code) {
-  return SocketControl::Call::Accept(zx::unowned_channel(this->channel_), std::move(flags), out_code);
-}
-
-zx_status_t SocketControl::Call::Accept(zx::unowned_channel _client_end, int16_t flags, int16_t* out_code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<AcceptRequest>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _request = *reinterpret_cast<AcceptRequest*>(_write_bytes);
-  _request._hdr.ordinal = kSocketControl_Accept_Ordinal;
-  _request.flags = std::move(flags);
-  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(AcceptRequest));
-  ::fidl::DecodedMessage<AcceptRequest> _decoded_request(std::move(_request_bytes));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return _encode_request_result.status;
-  }
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<AcceptResponse>();
-  FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
-  ::fidl::BytePart _response_bytes(_read_bytes, _kReadAllocSize);
-  auto _call_result = ::fidl::Call<AcceptRequest, AcceptResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_bytes));
-  if (_call_result.status != ZX_OK) {
-    return _call_result.status;
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result.status;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return ZX_OK;
-}
-
-::fidl::DecodeResult<SocketControl::AcceptResponse> SocketControl::SyncClient::Accept(::fidl::BytePart _request_buffer, int16_t flags, ::fidl::BytePart _response_buffer, int16_t* out_code) {
-  return SocketControl::Call::Accept(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(flags), std::move(_response_buffer), out_code);
-}
-
-::fidl::DecodeResult<SocketControl::AcceptResponse> SocketControl::Call::Accept(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t flags, ::fidl::BytePart _response_buffer, int16_t* out_code) {
-  if (_request_buffer.capacity() < AcceptRequest::PrimarySize) {
-    return ::fidl::DecodeResult<AcceptResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
-  }
-  auto& _request = *reinterpret_cast<AcceptRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kSocketControl_Accept_Ordinal;
-  _request.flags = std::move(flags);
-  _request_buffer.set_actual(sizeof(AcceptRequest));
-  ::fidl::DecodedMessage<AcceptRequest> _decoded_request(std::move(_request_buffer));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<AcceptResponse>(_encode_request_result.status, _encode_request_result.error);
-  }
-  auto _call_result = ::fidl::Call<AcceptRequest, AcceptResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<AcceptResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return _decode_result;
-}
-
-::fidl::DecodeResult<SocketControl::AcceptResponse> SocketControl::SyncClient::Accept(::fidl::DecodedMessage<AcceptRequest> params, ::fidl::BytePart response_buffer) {
-  return SocketControl::Call::Accept(zx::unowned_channel(this->channel_), std::move(params), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<SocketControl::AcceptResponse> SocketControl::Call::Accept(zx::unowned_channel _client_end, ::fidl::DecodedMessage<AcceptRequest> params, ::fidl::BytePart response_buffer) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Accept_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::AcceptResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketControl::AcceptResponse>());
-  }
-  auto _call_result = ::fidl::Call<AcceptRequest, AcceptResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::AcceptResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketControl::AcceptResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
-}
-
-
-zx_status_t SocketControl::SyncClient::Close(int16_t* out_code) {
-  return SocketControl::Call::Close(zx::unowned_channel(this->channel_), out_code);
-}
-
-zx_status_t SocketControl::Call::Close(zx::unowned_channel _client_end, int16_t* out_code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<CloseRequest>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _request = *reinterpret_cast<CloseRequest*>(_write_bytes);
-  _request._hdr.ordinal = kSocketControl_Close_Ordinal;
-  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(CloseRequest));
-  ::fidl::DecodedMessage<CloseRequest> _decoded_request(std::move(_request_bytes));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return _encode_request_result.status;
-  }
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<CloseResponse>();
-  FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
-  ::fidl::BytePart _response_bytes(_read_bytes, _kReadAllocSize);
-  auto _call_result = ::fidl::Call<CloseRequest, CloseResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_bytes));
-  if (_call_result.status != ZX_OK) {
-    return _call_result.status;
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result.status;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return ZX_OK;
-}
-
-::fidl::DecodeResult<SocketControl::CloseResponse> SocketControl::SyncClient::Close(::fidl::BytePart _response_buffer, int16_t* out_code) {
-  return SocketControl::Call::Close(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_code);
-}
-
-::fidl::DecodeResult<SocketControl::CloseResponse> SocketControl::Call::Close(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int16_t* out_code) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(CloseRequest)] = {};
-  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
-  auto& _request = *reinterpret_cast<CloseRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kSocketControl_Close_Ordinal;
-  _request_buffer.set_actual(sizeof(CloseRequest));
-  ::fidl::DecodedMessage<CloseRequest> _decoded_request(std::move(_request_buffer));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<CloseResponse>(_encode_request_result.status, _encode_request_result.error);
-  }
-  auto _call_result = ::fidl::Call<CloseRequest, CloseResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<CloseResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return _decode_result;
-}
-
-::fidl::DecodeResult<SocketControl::CloseResponse> SocketControl::SyncClient::Close(::fidl::BytePart response_buffer) {
-  return SocketControl::Call::Close(zx::unowned_channel(this->channel_), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<SocketControl::CloseResponse> SocketControl::Call::Close(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(CloseRequest)] = {};
-  constexpr uint32_t _write_num_bytes = sizeof(CloseRequest);
-  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes), _write_num_bytes);
-  ::fidl::DecodedMessage<CloseRequest> params(std::move(_request_buffer));
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Close_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::CloseResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketControl::CloseResponse>());
-  }
-  auto _call_result = ::fidl::Call<CloseRequest, CloseResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::CloseResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketControl::CloseResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
-}
-
-
-::fidl::DecodeResult<SocketControl::GetSockNameResponse> SocketControl::SyncClient::GetSockName(::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_addr) {
-  return SocketControl::Call::GetSockName(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_code, out_addr);
-}
-
-::fidl::DecodeResult<SocketControl::GetSockNameResponse> SocketControl::Call::GetSockName(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_addr) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetSockNameRequest)] = {};
-  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
-  auto& _request = *reinterpret_cast<GetSockNameRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kSocketControl_GetSockName_Ordinal;
-  _request_buffer.set_actual(sizeof(GetSockNameRequest));
-  ::fidl::DecodedMessage<GetSockNameRequest> _decoded_request(std::move(_request_buffer));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<GetSockNameResponse>(_encode_request_result.status, _encode_request_result.error);
-  }
-  auto _call_result = ::fidl::Call<GetSockNameRequest, GetSockNameResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<GetSockNameResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  *out_addr = std::move(_response.addr);
-  return _decode_result;
-}
-
-::fidl::DecodeResult<SocketControl::GetSockNameResponse> SocketControl::SyncClient::GetSockName(::fidl::BytePart response_buffer) {
-  return SocketControl::Call::GetSockName(zx::unowned_channel(this->channel_), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<SocketControl::GetSockNameResponse> SocketControl::Call::GetSockName(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetSockNameRequest)] = {};
-  constexpr uint32_t _write_num_bytes = sizeof(GetSockNameRequest);
-  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes), _write_num_bytes);
-  ::fidl::DecodedMessage<GetSockNameRequest> params(std::move(_request_buffer));
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_GetSockName_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::GetSockNameResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketControl::GetSockNameResponse>());
-  }
-  auto _call_result = ::fidl::Call<GetSockNameRequest, GetSockNameResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::GetSockNameResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketControl::GetSockNameResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
-}
-
-
-::fidl::DecodeResult<SocketControl::GetPeerNameResponse> SocketControl::SyncClient::GetPeerName(::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_addr) {
-  return SocketControl::Call::GetPeerName(zx::unowned_channel(this->channel_), std::move(_response_buffer), out_code, out_addr);
-}
-
-::fidl::DecodeResult<SocketControl::GetPeerNameResponse> SocketControl::Call::GetPeerName(zx::unowned_channel _client_end, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_addr) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetPeerNameRequest)] = {};
-  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
-  auto& _request = *reinterpret_cast<GetPeerNameRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kSocketControl_GetPeerName_Ordinal;
-  _request_buffer.set_actual(sizeof(GetPeerNameRequest));
-  ::fidl::DecodedMessage<GetPeerNameRequest> _decoded_request(std::move(_request_buffer));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<GetPeerNameResponse>(_encode_request_result.status, _encode_request_result.error);
-  }
-  auto _call_result = ::fidl::Call<GetPeerNameRequest, GetPeerNameResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<GetPeerNameResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  *out_addr = std::move(_response.addr);
-  return _decode_result;
-}
-
-::fidl::DecodeResult<SocketControl::GetPeerNameResponse> SocketControl::SyncClient::GetPeerName(::fidl::BytePart response_buffer) {
-  return SocketControl::Call::GetPeerName(zx::unowned_channel(this->channel_), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<SocketControl::GetPeerNameResponse> SocketControl::Call::GetPeerName(zx::unowned_channel _client_end, ::fidl::BytePart response_buffer) {
-  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof(GetPeerNameRequest)] = {};
-  constexpr uint32_t _write_num_bytes = sizeof(GetPeerNameRequest);
-  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes), _write_num_bytes);
-  ::fidl::DecodedMessage<GetPeerNameRequest> params(std::move(_request_buffer));
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_GetPeerName_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::GetPeerNameResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketControl::GetPeerNameResponse>());
-  }
-  auto _call_result = ::fidl::Call<GetPeerNameRequest, GetPeerNameResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::GetPeerNameResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketControl::GetPeerNameResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
-}
-
-
-zx_status_t SocketControl::SyncClient::SetSockOpt(int16_t level, int16_t optname, ::fidl::VectorView<uint8_t> optval, int16_t* out_code) {
-  return SocketControl::Call::SetSockOpt(zx::unowned_channel(this->channel_), std::move(level), std::move(optname), std::move(optval), out_code);
-}
-
-zx_status_t SocketControl::Call::SetSockOpt(zx::unowned_channel _client_end, int16_t level, int16_t optname, ::fidl::VectorView<uint8_t> optval, int16_t* out_code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<SetSockOptRequest>();
-  std::unique_ptr<uint8_t[]> _write_bytes_unique_ptr(new uint8_t[_kWriteAllocSize]);
-  uint8_t* _write_bytes = _write_bytes_unique_ptr.get();
-  SetSockOptRequest _request = {};
-  _request._hdr.ordinal = kSocketControl_SetSockOpt_Ordinal;
-  _request.level = std::move(level);
-  _request.optname = std::move(optname);
-  _request.optval = std::move(optval);
-  auto _linearize_result = ::fidl::Linearize(&_request, ::fidl::BytePart(_write_bytes,
-                                                                         _kWriteAllocSize));
-  if (_linearize_result.status != ZX_OK) {
-    return _linearize_result.status;
-  }
-  ::fidl::DecodedMessage<SetSockOptRequest> _decoded_request = std::move(_linearize_result.message);
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return _encode_request_result.status;
-  }
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<SetSockOptResponse>();
-  FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
-  ::fidl::BytePart _response_bytes(_read_bytes, _kReadAllocSize);
-  auto _call_result = ::fidl::Call<SetSockOptRequest, SetSockOptResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_bytes));
-  if (_call_result.status != ZX_OK) {
-    return _call_result.status;
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result.status;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return ZX_OK;
-}
-
-::fidl::DecodeResult<SocketControl::SetSockOptResponse> SocketControl::SyncClient::SetSockOpt(::fidl::BytePart _request_buffer, int16_t level, int16_t optname, ::fidl::VectorView<uint8_t> optval, ::fidl::BytePart _response_buffer, int16_t* out_code) {
-  return SocketControl::Call::SetSockOpt(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(level), std::move(optname), std::move(optval), std::move(_response_buffer), out_code);
-}
-
-::fidl::DecodeResult<SocketControl::SetSockOptResponse> SocketControl::Call::SetSockOpt(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t level, int16_t optname, ::fidl::VectorView<uint8_t> optval, ::fidl::BytePart _response_buffer, int16_t* out_code) {
-  if (_request_buffer.capacity() < SetSockOptRequest::PrimarySize) {
-    return ::fidl::DecodeResult<SetSockOptResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
-  }
-  SetSockOptRequest _request = {};
-  _request._hdr.ordinal = kSocketControl_SetSockOpt_Ordinal;
-  _request.level = std::move(level);
-  _request.optname = std::move(optname);
-  _request.optval = std::move(optval);
-  auto _linearize_result = ::fidl::Linearize(&_request, std::move(_request_buffer));
-  if (_linearize_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SetSockOptResponse>(_linearize_result.status, _linearize_result.error);
-  }
-  ::fidl::DecodedMessage<SetSockOptRequest> _decoded_request = std::move(_linearize_result.message);
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SetSockOptResponse>(_encode_request_result.status, _encode_request_result.error);
-  }
-  auto _call_result = ::fidl::Call<SetSockOptRequest, SetSockOptResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SetSockOptResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  return _decode_result;
-}
-
-::fidl::DecodeResult<SocketControl::SetSockOptResponse> SocketControl::SyncClient::SetSockOpt(::fidl::DecodedMessage<SetSockOptRequest> params, ::fidl::BytePart response_buffer) {
-  return SocketControl::Call::SetSockOpt(zx::unowned_channel(this->channel_), std::move(params), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<SocketControl::SetSockOptResponse> SocketControl::Call::SetSockOpt(zx::unowned_channel _client_end, ::fidl::DecodedMessage<SetSockOptRequest> params, ::fidl::BytePart response_buffer) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_SetSockOpt_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::SetSockOptResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketControl::SetSockOptResponse>());
-  }
-  auto _call_result = ::fidl::Call<SetSockOptRequest, SetSockOptResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::SetSockOptResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketControl::SetSockOptResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
-}
-
-
-::fidl::DecodeResult<SocketControl::GetSockOptResponse> SocketControl::SyncClient::GetSockOpt(::fidl::BytePart _request_buffer, int16_t level, int16_t optname, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_optval) {
-  return SocketControl::Call::GetSockOpt(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(level), std::move(optname), std::move(_response_buffer), out_code, out_optval);
-}
-
-::fidl::DecodeResult<SocketControl::GetSockOptResponse> SocketControl::Call::GetSockOpt(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t level, int16_t optname, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_optval) {
-  if (_request_buffer.capacity() < GetSockOptRequest::PrimarySize) {
-    return ::fidl::DecodeResult<GetSockOptResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
-  }
-  auto& _request = *reinterpret_cast<GetSockOptRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kSocketControl_GetSockOpt_Ordinal;
-  _request.level = std::move(level);
-  _request.optname = std::move(optname);
-  _request_buffer.set_actual(sizeof(GetSockOptRequest));
-  ::fidl::DecodedMessage<GetSockOptRequest> _decoded_request(std::move(_request_buffer));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<GetSockOptResponse>(_encode_request_result.status, _encode_request_result.error);
-  }
-  auto _call_result = ::fidl::Call<GetSockOptRequest, GetSockOptResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<GetSockOptResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  *out_optval = std::move(_response.optval);
-  return _decode_result;
-}
-
-::fidl::DecodeResult<SocketControl::GetSockOptResponse> SocketControl::SyncClient::GetSockOpt(::fidl::DecodedMessage<GetSockOptRequest> params, ::fidl::BytePart response_buffer) {
-  return SocketControl::Call::GetSockOpt(zx::unowned_channel(this->channel_), std::move(params), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<SocketControl::GetSockOptResponse> SocketControl::Call::GetSockOpt(zx::unowned_channel _client_end, ::fidl::DecodedMessage<GetSockOptRequest> params, ::fidl::BytePart response_buffer) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_GetSockOpt_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::GetSockOptResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketControl::GetSockOptResponse>());
-  }
-  auto _call_result = ::fidl::Call<GetSockOptRequest, GetSockOptResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::GetSockOptResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketControl::GetSockOptResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
-}
-
-
-::fidl::DecodeResult<SocketControl::IoctlResponse> SocketControl::SyncClient::Ioctl(::fidl::BytePart _request_buffer, int16_t req, ::fidl::VectorView<uint8_t> in, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_out) {
-  return SocketControl::Call::Ioctl(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(req), std::move(in), std::move(_response_buffer), out_code, out_out);
-}
-
-::fidl::DecodeResult<SocketControl::IoctlResponse> SocketControl::Call::Ioctl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t req, ::fidl::VectorView<uint8_t> in, ::fidl::BytePart _response_buffer, int16_t* out_code, ::fidl::VectorView<uint8_t>* out_out) {
-  if (_request_buffer.capacity() < IoctlRequest::PrimarySize) {
-    return ::fidl::DecodeResult<IoctlResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
-  }
-  IoctlRequest _request = {};
-  _request._hdr.ordinal = kSocketControl_Ioctl_Ordinal;
-  _request.req = std::move(req);
-  _request.in = std::move(in);
-  auto _linearize_result = ::fidl::Linearize(&_request, std::move(_request_buffer));
-  if (_linearize_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<IoctlResponse>(_linearize_result.status, _linearize_result.error);
-  }
-  ::fidl::DecodedMessage<IoctlRequest> _decoded_request = std::move(_linearize_result.message);
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<IoctlResponse>(_encode_request_result.status, _encode_request_result.error);
-  }
-  auto _call_result = ::fidl::Call<IoctlRequest, IoctlResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<IoctlResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  *out_out = std::move(_response.out);
-  return _decode_result;
-}
-
-::fidl::DecodeResult<SocketControl::IoctlResponse> SocketControl::SyncClient::Ioctl(::fidl::DecodedMessage<IoctlRequest> params, ::fidl::BytePart response_buffer) {
-  return SocketControl::Call::Ioctl(zx::unowned_channel(this->channel_), std::move(params), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<SocketControl::IoctlResponse> SocketControl::Call::Ioctl(zx::unowned_channel _client_end, ::fidl::DecodedMessage<IoctlRequest> params, ::fidl::BytePart response_buffer) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Ioctl_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::IoctlResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketControl::IoctlResponse>());
-  }
-  auto _call_result = ::fidl::Call<IoctlRequest, IoctlResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketControl::IoctlResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketControl::IoctlResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
-}
-
-
-bool SocketControl::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* txn) {
-  if (msg->num_bytes < sizeof(fidl_message_header_t)) {
-    zx_handle_close_many(msg->handles, msg->num_handles);
-    txn->Close(ZX_ERR_INVALID_ARGS);
-    return true;
-  }
-  fidl_message_header_t* hdr = reinterpret_cast<fidl_message_header_t*>(msg->bytes);
-  switch (hdr->ordinal) {
-    case kSocketControl_Bind_Ordinal: {
-      auto result = ::fidl::DecodeAs<BindRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      auto message = result.message.message();
-      impl->Bind(std::move(message->addr),
-        Interface::BindCompleter::Sync(txn));
-      return true;
-    }
-    case kSocketControl_Connect_Ordinal: {
-      auto result = ::fidl::DecodeAs<ConnectRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      auto message = result.message.message();
-      impl->Connect(std::move(message->addr),
-        Interface::ConnectCompleter::Sync(txn));
-      return true;
-    }
-    case kSocketControl_Listen_Ordinal: {
-      auto result = ::fidl::DecodeAs<ListenRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      auto message = result.message.message();
-      impl->Listen(std::move(message->backlog),
-        Interface::ListenCompleter::Sync(txn));
-      return true;
-    }
-    case kSocketControl_Accept_Ordinal: {
-      auto result = ::fidl::DecodeAs<AcceptRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      auto message = result.message.message();
-      impl->Accept(std::move(message->flags),
-        Interface::AcceptCompleter::Sync(txn));
-      return true;
-    }
-    case kSocketControl_Close_Ordinal: {
-      auto result = ::fidl::DecodeAs<CloseRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      impl->Close(
-        Interface::CloseCompleter::Sync(txn));
-      return true;
-    }
-    case kSocketControl_GetSockName_Ordinal: {
-      auto result = ::fidl::DecodeAs<GetSockNameRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      impl->GetSockName(
-        Interface::GetSockNameCompleter::Sync(txn));
-      return true;
-    }
-    case kSocketControl_GetPeerName_Ordinal: {
-      auto result = ::fidl::DecodeAs<GetPeerNameRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      impl->GetPeerName(
-        Interface::GetPeerNameCompleter::Sync(txn));
-      return true;
-    }
-    case kSocketControl_SetSockOpt_Ordinal: {
-      auto result = ::fidl::DecodeAs<SetSockOptRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      auto message = result.message.message();
-      impl->SetSockOpt(std::move(message->level), std::move(message->optname), std::move(message->optval),
-        Interface::SetSockOptCompleter::Sync(txn));
-      return true;
-    }
-    case kSocketControl_GetSockOpt_Ordinal: {
-      auto result = ::fidl::DecodeAs<GetSockOptRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      auto message = result.message.message();
-      impl->GetSockOpt(std::move(message->level), std::move(message->optname),
-        Interface::GetSockOptCompleter::Sync(txn));
-      return true;
-    }
-    case kSocketControl_Ioctl_Ordinal: {
-      auto result = ::fidl::DecodeAs<IoctlRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      auto message = result.message.message();
-      impl->Ioctl(std::move(message->req), std::move(message->in),
-        Interface::IoctlCompleter::Sync(txn));
-      return true;
-    }
-    default: {
-      return false;
-    }
-  }
-}
-
-bool SocketControl::Dispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* txn) {
-  bool found = TryDispatch(impl, msg, txn);
-  if (!found) {
-    zx_handle_close_many(msg->handles, msg->num_handles);
-    txn->Close(ZX_ERR_NOT_SUPPORTED);
-  }
-  return found;
-}
-
-
-void SocketControl::Interface::BindCompleterBase::Reply(int16_t code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<BindResponse>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _response = *reinterpret_cast<BindResponse*>(_write_bytes);
-  _response._hdr.ordinal = kSocketControl_Bind_Ordinal;
-  _response.code = std::move(code);
-  ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(BindResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<BindResponse>(std::move(_response_bytes)));
-}
-
-void SocketControl::Interface::BindCompleterBase::Reply(::fidl::BytePart _buffer, int16_t code) {
-  if (_buffer.capacity() < BindResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  auto& _response = *reinterpret_cast<BindResponse*>(_buffer.data());
-  _response._hdr.ordinal = kSocketControl_Bind_Ordinal;
-  _response.code = std::move(code);
-  _buffer.set_actual(sizeof(BindResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<BindResponse>(std::move(_buffer)));
-}
-
-void SocketControl::Interface::BindCompleterBase::Reply(::fidl::DecodedMessage<BindResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Bind_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
-void SocketControl::Interface::ConnectCompleterBase::Reply(int16_t code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<ConnectResponse>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _response = *reinterpret_cast<ConnectResponse*>(_write_bytes);
-  _response._hdr.ordinal = kSocketControl_Connect_Ordinal;
-  _response.code = std::move(code);
-  ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(ConnectResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<ConnectResponse>(std::move(_response_bytes)));
-}
-
-void SocketControl::Interface::ConnectCompleterBase::Reply(::fidl::BytePart _buffer, int16_t code) {
-  if (_buffer.capacity() < ConnectResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  auto& _response = *reinterpret_cast<ConnectResponse*>(_buffer.data());
-  _response._hdr.ordinal = kSocketControl_Connect_Ordinal;
-  _response.code = std::move(code);
-  _buffer.set_actual(sizeof(ConnectResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<ConnectResponse>(std::move(_buffer)));
-}
-
-void SocketControl::Interface::ConnectCompleterBase::Reply(::fidl::DecodedMessage<ConnectResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Connect_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
-void SocketControl::Interface::ListenCompleterBase::Reply(int16_t code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<ListenResponse>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _response = *reinterpret_cast<ListenResponse*>(_write_bytes);
-  _response._hdr.ordinal = kSocketControl_Listen_Ordinal;
-  _response.code = std::move(code);
-  ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(ListenResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<ListenResponse>(std::move(_response_bytes)));
-}
-
-void SocketControl::Interface::ListenCompleterBase::Reply(::fidl::BytePart _buffer, int16_t code) {
-  if (_buffer.capacity() < ListenResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  auto& _response = *reinterpret_cast<ListenResponse*>(_buffer.data());
-  _response._hdr.ordinal = kSocketControl_Listen_Ordinal;
-  _response.code = std::move(code);
-  _buffer.set_actual(sizeof(ListenResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<ListenResponse>(std::move(_buffer)));
-}
-
-void SocketControl::Interface::ListenCompleterBase::Reply(::fidl::DecodedMessage<ListenResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Listen_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
-void SocketControl::Interface::AcceptCompleterBase::Reply(int16_t code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<AcceptResponse>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _response = *reinterpret_cast<AcceptResponse*>(_write_bytes);
-  _response._hdr.ordinal = kSocketControl_Accept_Ordinal;
-  _response.code = std::move(code);
-  ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(AcceptResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<AcceptResponse>(std::move(_response_bytes)));
-}
-
-void SocketControl::Interface::AcceptCompleterBase::Reply(::fidl::BytePart _buffer, int16_t code) {
-  if (_buffer.capacity() < AcceptResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  auto& _response = *reinterpret_cast<AcceptResponse*>(_buffer.data());
-  _response._hdr.ordinal = kSocketControl_Accept_Ordinal;
-  _response.code = std::move(code);
-  _buffer.set_actual(sizeof(AcceptResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<AcceptResponse>(std::move(_buffer)));
-}
-
-void SocketControl::Interface::AcceptCompleterBase::Reply(::fidl::DecodedMessage<AcceptResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Accept_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
-void SocketControl::Interface::CloseCompleterBase::Reply(int16_t code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<CloseResponse>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _response = *reinterpret_cast<CloseResponse*>(_write_bytes);
-  _response._hdr.ordinal = kSocketControl_Close_Ordinal;
-  _response.code = std::move(code);
-  ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(CloseResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<CloseResponse>(std::move(_response_bytes)));
-}
-
-void SocketControl::Interface::CloseCompleterBase::Reply(::fidl::BytePart _buffer, int16_t code) {
-  if (_buffer.capacity() < CloseResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  auto& _response = *reinterpret_cast<CloseResponse*>(_buffer.data());
-  _response._hdr.ordinal = kSocketControl_Close_Ordinal;
-  _response.code = std::move(code);
-  _buffer.set_actual(sizeof(CloseResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<CloseResponse>(std::move(_buffer)));
-}
-
-void SocketControl::Interface::CloseCompleterBase::Reply(::fidl::DecodedMessage<CloseResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Close_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
-void SocketControl::Interface::GetSockNameCompleterBase::Reply(int16_t code, ::fidl::VectorView<uint8_t> addr) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetSockNameResponse>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize];
-  GetSockNameResponse _response = {};
-  _response._hdr.ordinal = kSocketControl_GetSockName_Ordinal;
-  _response.code = std::move(code);
-  _response.addr = std::move(addr);
-  auto _linearize_result = ::fidl::Linearize(&_response, ::fidl::BytePart(_write_bytes,
-                                                                          _kWriteAllocSize));
-  if (_linearize_result.status != ZX_OK) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  CompleterBase::SendReply(std::move(_linearize_result.message));
-}
-
-void SocketControl::Interface::GetSockNameCompleterBase::Reply(::fidl::BytePart _buffer, int16_t code, ::fidl::VectorView<uint8_t> addr) {
-  if (_buffer.capacity() < GetSockNameResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  GetSockNameResponse _response = {};
-  _response._hdr.ordinal = kSocketControl_GetSockName_Ordinal;
-  _response.code = std::move(code);
-  _response.addr = std::move(addr);
-  auto _linearize_result = ::fidl::Linearize(&_response, std::move(_buffer));
-  if (_linearize_result.status != ZX_OK) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  CompleterBase::SendReply(std::move(_linearize_result.message));
-}
-
-void SocketControl::Interface::GetSockNameCompleterBase::Reply(::fidl::DecodedMessage<GetSockNameResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_GetSockName_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
-void SocketControl::Interface::GetPeerNameCompleterBase::Reply(int16_t code, ::fidl::VectorView<uint8_t> addr) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetPeerNameResponse>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize];
-  GetPeerNameResponse _response = {};
-  _response._hdr.ordinal = kSocketControl_GetPeerName_Ordinal;
-  _response.code = std::move(code);
-  _response.addr = std::move(addr);
-  auto _linearize_result = ::fidl::Linearize(&_response, ::fidl::BytePart(_write_bytes,
-                                                                          _kWriteAllocSize));
-  if (_linearize_result.status != ZX_OK) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  CompleterBase::SendReply(std::move(_linearize_result.message));
-}
-
-void SocketControl::Interface::GetPeerNameCompleterBase::Reply(::fidl::BytePart _buffer, int16_t code, ::fidl::VectorView<uint8_t> addr) {
-  if (_buffer.capacity() < GetPeerNameResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  GetPeerNameResponse _response = {};
-  _response._hdr.ordinal = kSocketControl_GetPeerName_Ordinal;
-  _response.code = std::move(code);
-  _response.addr = std::move(addr);
-  auto _linearize_result = ::fidl::Linearize(&_response, std::move(_buffer));
-  if (_linearize_result.status != ZX_OK) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  CompleterBase::SendReply(std::move(_linearize_result.message));
-}
-
-void SocketControl::Interface::GetPeerNameCompleterBase::Reply(::fidl::DecodedMessage<GetPeerNameResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_GetPeerName_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
-void SocketControl::Interface::SetSockOptCompleterBase::Reply(int16_t code) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<SetSockOptResponse>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _response = *reinterpret_cast<SetSockOptResponse*>(_write_bytes);
-  _response._hdr.ordinal = kSocketControl_SetSockOpt_Ordinal;
-  _response.code = std::move(code);
-  ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(SetSockOptResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<SetSockOptResponse>(std::move(_response_bytes)));
-}
-
-void SocketControl::Interface::SetSockOptCompleterBase::Reply(::fidl::BytePart _buffer, int16_t code) {
-  if (_buffer.capacity() < SetSockOptResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  auto& _response = *reinterpret_cast<SetSockOptResponse*>(_buffer.data());
-  _response._hdr.ordinal = kSocketControl_SetSockOpt_Ordinal;
-  _response.code = std::move(code);
-  _buffer.set_actual(sizeof(SetSockOptResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<SetSockOptResponse>(std::move(_buffer)));
-}
-
-void SocketControl::Interface::SetSockOptCompleterBase::Reply(::fidl::DecodedMessage<SetSockOptResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_SetSockOpt_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
-void SocketControl::Interface::GetSockOptCompleterBase::Reply(int16_t code, ::fidl::VectorView<uint8_t> optval) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetSockOptResponse>();
-  std::unique_ptr<uint8_t[]> _write_bytes_unique_ptr(new uint8_t[_kWriteAllocSize]);
-  uint8_t* _write_bytes = _write_bytes_unique_ptr.get();
-  GetSockOptResponse _response = {};
-  _response._hdr.ordinal = kSocketControl_GetSockOpt_Ordinal;
-  _response.code = std::move(code);
-  _response.optval = std::move(optval);
-  auto _linearize_result = ::fidl::Linearize(&_response, ::fidl::BytePart(_write_bytes,
-                                                                          _kWriteAllocSize));
-  if (_linearize_result.status != ZX_OK) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  CompleterBase::SendReply(std::move(_linearize_result.message));
-}
-
-void SocketControl::Interface::GetSockOptCompleterBase::Reply(::fidl::BytePart _buffer, int16_t code, ::fidl::VectorView<uint8_t> optval) {
-  if (_buffer.capacity() < GetSockOptResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  GetSockOptResponse _response = {};
-  _response._hdr.ordinal = kSocketControl_GetSockOpt_Ordinal;
-  _response.code = std::move(code);
-  _response.optval = std::move(optval);
-  auto _linearize_result = ::fidl::Linearize(&_response, std::move(_buffer));
-  if (_linearize_result.status != ZX_OK) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  CompleterBase::SendReply(std::move(_linearize_result.message));
-}
-
-void SocketControl::Interface::GetSockOptCompleterBase::Reply(::fidl::DecodedMessage<GetSockOptResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_GetSockOpt_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
-void SocketControl::Interface::IoctlCompleterBase::Reply(int16_t code, ::fidl::VectorView<uint8_t> out) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<IoctlResponse>();
-  std::unique_ptr<uint8_t[]> _write_bytes_unique_ptr(new uint8_t[_kWriteAllocSize]);
-  uint8_t* _write_bytes = _write_bytes_unique_ptr.get();
-  IoctlResponse _response = {};
-  _response._hdr.ordinal = kSocketControl_Ioctl_Ordinal;
-  _response.code = std::move(code);
-  _response.out = std::move(out);
-  auto _linearize_result = ::fidl::Linearize(&_response, ::fidl::BytePart(_write_bytes,
-                                                                          _kWriteAllocSize));
-  if (_linearize_result.status != ZX_OK) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  CompleterBase::SendReply(std::move(_linearize_result.message));
-}
-
-void SocketControl::Interface::IoctlCompleterBase::Reply(::fidl::BytePart _buffer, int16_t code, ::fidl::VectorView<uint8_t> out) {
-  if (_buffer.capacity() < IoctlResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  IoctlResponse _response = {};
-  _response._hdr.ordinal = kSocketControl_Ioctl_Ordinal;
-  _response.code = std::move(code);
-  _response.out = std::move(out);
-  auto _linearize_result = ::fidl::Linearize(&_response, std::move(_buffer));
-  if (_linearize_result.status != ZX_OK) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  CompleterBase::SendReply(std::move(_linearize_result.message));
-}
-
-void SocketControl::Interface::IoctlCompleterBase::Reply(::fidl::DecodedMessage<IoctlResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketControl_Ioctl_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
-namespace {
-
-[[maybe_unused]]
-constexpr uint64_t kConnectivity_OnNetworkReachable_Ordinal = 1703348424lu << 32;
+constexpr uint64_t kConnectivity_OnNetworkReachable_GenOrdinal = 0x658708c800000000lu;
 extern "C" const fidl_type_t fuchsia_net_ConnectivityOnNetworkReachableEventTable;
 
 }  // namespace
@@ -1346,8 +29,8 @@ zx_status_t Connectivity::Call::HandleEvents(zx::unowned_channel client_end,
   }
   constexpr uint32_t kReadAllocSize = ([]() constexpr {
     uint32_t x = 0;
-    if (::fidl::internal::ClampedMessageSize<OnNetworkReachableResponse>() >= x) {
-      x = ::fidl::internal::ClampedMessageSize<OnNetworkReachableResponse>();
+    if (::fidl::internal::ClampedMessageSize<OnNetworkReachableResponse, ::fidl::MessageDirection::kReceiving>() >= x) {
+      x = ::fidl::internal::ClampedMessageSize<OnNetworkReachableResponse, ::fidl::MessageDirection::kReceiving>();
     }
     return x;
   })();
@@ -1390,7 +73,8 @@ zx_status_t Connectivity::Call::HandleEvents(zx::unowned_channel client_end,
   };
   fidl_message_header_t* hdr = reinterpret_cast<fidl_message_header_t*>(msg.bytes);
   switch (hdr->ordinal) {
-    case kConnectivity_OnNetworkReachable_Ordinal: {
+    case kConnectivity_OnNetworkReachable_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<OnNetworkReachableResponse>(&msg);
       if (result.status != ZX_OK) {
         return result.status;
@@ -1429,11 +113,11 @@ bool Connectivity::Dispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transactio
 
 
 zx_status_t Connectivity::SendOnNetworkReachableEvent(::zx::unowned_channel _chan, bool reachable) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<OnNetworkReachableResponse>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<OnNetworkReachableResponse, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _response = *reinterpret_cast<OnNetworkReachableResponse*>(_write_bytes);
   _response._hdr = {};
-  _response._hdr.ordinal = kConnectivity_OnNetworkReachable_Ordinal;
+  _response._hdr.ordinal = kConnectivity_OnNetworkReachable_GenOrdinal;
   _response.reachable = std::move(reachable);
   ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(OnNetworkReachableResponse));
   return ::fidl::Write(zx::unowned_channel(_chan), ::fidl::DecodedMessage<OnNetworkReachableResponse>(std::move(_response_bytes)));
@@ -1445,7 +129,7 @@ zx_status_t Connectivity::SendOnNetworkReachableEvent(::zx::unowned_channel _cha
   }
   auto& _response = *reinterpret_cast<OnNetworkReachableResponse*>(_buffer.data());
   _response._hdr = {};
-  _response._hdr.ordinal = kConnectivity_OnNetworkReachable_Ordinal;
+  _response._hdr.ordinal = kConnectivity_OnNetworkReachable_GenOrdinal;
   _response.reachable = std::move(reachable);
   _buffer.set_actual(sizeof(OnNetworkReachableResponse));
   return ::fidl::Write(zx::unowned_channel(_chan), ::fidl::DecodedMessage<OnNetworkReachableResponse>(std::move(_buffer)));
@@ -1453,7 +137,7 @@ zx_status_t Connectivity::SendOnNetworkReachableEvent(::zx::unowned_channel _cha
 
 zx_status_t Connectivity::SendOnNetworkReachableEvent(::zx::unowned_channel _chan, ::fidl::DecodedMessage<OnNetworkReachableResponse> params) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kConnectivity_OnNetworkReachable_Ordinal;
+  params.message()->_hdr.ordinal = kConnectivity_OnNetworkReachable_GenOrdinal;
   return ::fidl::Write(zx::unowned_channel(_chan), std::move(params));
 }
 
@@ -1647,26 +331,78 @@ Ipv6Address& ::llcpp::fuchsia::net::IpAddress::mutable_ipv6() {
 namespace {
 
 [[maybe_unused]]
-constexpr uint64_t kNameLookup_LookupIp_Ordinal = 818031436lu << 32;
+constexpr uint64_t kNameLookup_LookupIp_GenOrdinal = 0x30c22b4c00000000lu;
 extern "C" const fidl_type_t fuchsia_net_NameLookupLookupIpRequestTable;
 extern "C" const fidl_type_t fuchsia_net_NameLookupLookupIpResponseTable;
 [[maybe_unused]]
-constexpr uint64_t kNameLookup_LookupHostname_Ordinal = 391654548lu << 32;
+constexpr uint64_t kNameLookup_LookupHostname_GenOrdinal = 0x17582c9400000000lu;
 extern "C" const fidl_type_t fuchsia_net_NameLookupLookupHostnameRequestTable;
 extern "C" const fidl_type_t fuchsia_net_NameLookupLookupHostnameResponseTable;
 
 }  // namespace
-
-::fidl::DecodeResult<NameLookup::LookupIpResponse> NameLookup::SyncClient::LookupIp(::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer, NameLookup_LookupIp_Result* out_result) {
-  return NameLookup::Call::LookupIp(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(hostname), std::move(options), std::move(_response_buffer), out_result);
+template <>
+NameLookup::ResultOf::LookupIp_Impl<NameLookup::LookupIpResponse>::LookupIp_Impl(zx::unowned_channel _client_end, ::fidl::StringView hostname, LookupIpOptions options) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<LookupIpRequest, ::fidl::MessageDirection::kSending>();
+  ::fidl::internal::AlignedBuffer<_kWriteAllocSize> _write_bytes_inlined;
+  auto& _write_bytes_array = _write_bytes_inlined;
+  LookupIpRequest _request = {};
+  _request.hostname = std::move(hostname);
+  _request.options = std::move(options);
+  auto _linearize_result = ::fidl::Linearize(&_request, _write_bytes_array.view());
+  if (_linearize_result.status != ZX_OK) {
+    Super::SetFailure(std::move(_linearize_result));
+    return;
+  }
+  ::fidl::DecodedMessage<LookupIpRequest> _decoded_request = std::move(_linearize_result.message);
+  Super::SetResult(
+      NameLookup::InPlace::LookupIp(std::move(_client_end), std::move(_decoded_request), Super::response_buffer()));
 }
 
-::fidl::DecodeResult<NameLookup::LookupIpResponse> NameLookup::Call::LookupIp(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer, NameLookup_LookupIp_Result* out_result) {
+NameLookup::ResultOf::LookupIp NameLookup::SyncClient::LookupIp(::fidl::StringView hostname, LookupIpOptions options) {
+  return ResultOf::LookupIp(zx::unowned_channel(this->channel_), std::move(hostname), std::move(options));
+}
+
+NameLookup::ResultOf::LookupIp NameLookup::Call::LookupIp(zx::unowned_channel _client_end, ::fidl::StringView hostname, LookupIpOptions options) {
+  return ResultOf::LookupIp(std::move(_client_end), std::move(hostname), std::move(options));
+}
+
+template <>
+NameLookup::UnownedResultOf::LookupIp_Impl<NameLookup::LookupIpResponse>::LookupIp_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer) {
+  if (_request_buffer.capacity() < LookupIpRequest::PrimarySize) {
+    Super::SetFailure(::fidl::DecodeResult<LookupIpResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall));
+    return;
+  }
+  LookupIpRequest _request = {};
+  _request.hostname = std::move(hostname);
+  _request.options = std::move(options);
+  auto _linearize_result = ::fidl::Linearize(&_request, std::move(_request_buffer));
+  if (_linearize_result.status != ZX_OK) {
+    Super::SetFailure(std::move(_linearize_result));
+    return;
+  }
+  ::fidl::DecodedMessage<LookupIpRequest> _decoded_request = std::move(_linearize_result.message);
+  Super::SetResult(
+      NameLookup::InPlace::LookupIp(std::move(_client_end), std::move(_decoded_request), std::move(_response_buffer)));
+}
+
+NameLookup::UnownedResultOf::LookupIp NameLookup::SyncClient::LookupIp(::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::LookupIp(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(hostname), std::move(options), std::move(_response_buffer));
+}
+
+NameLookup::UnownedResultOf::LookupIp NameLookup::Call::LookupIp(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::LookupIp(std::move(_client_end), std::move(_request_buffer), std::move(hostname), std::move(options), std::move(_response_buffer));
+}
+
+::fidl::DecodeResult<NameLookup::LookupIpResponse> NameLookup::SyncClient::LookupIp_Deprecated(::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer, NameLookup_LookupIp_Result* out_result) {
+  return NameLookup::Call::LookupIp_Deprecated(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(hostname), std::move(options), std::move(_response_buffer), out_result);
+}
+
+::fidl::DecodeResult<NameLookup::LookupIpResponse> NameLookup::Call::LookupIp_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView hostname, LookupIpOptions options, ::fidl::BytePart _response_buffer, NameLookup_LookupIp_Result* out_result) {
   if (_request_buffer.capacity() < LookupIpRequest::PrimarySize) {
     return ::fidl::DecodeResult<LookupIpResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
   }
   LookupIpRequest _request = {};
-  _request._hdr.ordinal = kNameLookup_LookupIp_Ordinal;
+  _request._hdr.ordinal = kNameLookup_LookupIp_GenOrdinal;
   _request.hostname = std::move(hostname);
   _request.options = std::move(options);
   auto _linearize_result = ::fidl::Linearize(&_request, std::move(_request_buffer));
@@ -1692,42 +428,79 @@ extern "C" const fidl_type_t fuchsia_net_NameLookupLookupHostnameResponseTable;
   return _decode_result;
 }
 
-::fidl::DecodeResult<NameLookup::LookupIpResponse> NameLookup::SyncClient::LookupIp(::fidl::DecodedMessage<LookupIpRequest> params, ::fidl::BytePart response_buffer) {
-  return NameLookup::Call::LookupIp(zx::unowned_channel(this->channel_), std::move(params), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<NameLookup::LookupIpResponse> NameLookup::Call::LookupIp(zx::unowned_channel _client_end, ::fidl::DecodedMessage<LookupIpRequest> params, ::fidl::BytePart response_buffer) {
+::fidl::DecodeResult<NameLookup::LookupIpResponse> NameLookup::InPlace::LookupIp(zx::unowned_channel _client_end, ::fidl::DecodedMessage<LookupIpRequest> params, ::fidl::BytePart response_buffer) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kNameLookup_LookupIp_Ordinal;
+  params.message()->_hdr.ordinal = kNameLookup_LookupIp_GenOrdinal;
   auto _encode_request_result = ::fidl::Encode(std::move(params));
   if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<NameLookup::LookupIpResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<NameLookup::LookupIpResponse>());
+    return ::fidl::DecodeResult<NameLookup::LookupIpResponse>::FromFailure(
+        std::move(_encode_request_result));
   }
   auto _call_result = ::fidl::Call<LookupIpRequest, LookupIpResponse>(
     std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
   if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<NameLookup::LookupIpResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<NameLookup::LookupIpResponse>());
+    return ::fidl::DecodeResult<NameLookup::LookupIpResponse>::FromFailure(
+        std::move(_call_result));
   }
   return ::fidl::Decode(std::move(_call_result.message));
 }
 
-
-::fidl::DecodeResult<NameLookup::LookupHostnameResponse> NameLookup::SyncClient::LookupHostname(::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer, NameLookup_LookupHostname_Result* out_result) {
-  return NameLookup::Call::LookupHostname(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(addr), std::move(_response_buffer), out_result);
+template <>
+NameLookup::ResultOf::LookupHostname_Impl<NameLookup::LookupHostnameResponse>::LookupHostname_Impl(zx::unowned_channel _client_end, IpAddress addr) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<LookupHostnameRequest, ::fidl::MessageDirection::kSending>();
+  ::fidl::internal::AlignedBuffer<_kWriteAllocSize> _write_bytes_inlined;
+  auto& _write_bytes_array = _write_bytes_inlined;
+  uint8_t* _write_bytes = _write_bytes_array.view().data();
+  memset(_write_bytes, 0, LookupHostnameRequest::PrimarySize);
+  auto& _request = *reinterpret_cast<LookupHostnameRequest*>(_write_bytes);
+  _request.addr = std::move(addr);
+  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(LookupHostnameRequest));
+  ::fidl::DecodedMessage<LookupHostnameRequest> _decoded_request(std::move(_request_bytes));
+  Super::SetResult(
+      NameLookup::InPlace::LookupHostname(std::move(_client_end), std::move(_decoded_request), Super::response_buffer()));
 }
 
-::fidl::DecodeResult<NameLookup::LookupHostnameResponse> NameLookup::Call::LookupHostname(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer, NameLookup_LookupHostname_Result* out_result) {
+NameLookup::ResultOf::LookupHostname NameLookup::SyncClient::LookupHostname(IpAddress addr) {
+  return ResultOf::LookupHostname(zx::unowned_channel(this->channel_), std::move(addr));
+}
+
+NameLookup::ResultOf::LookupHostname NameLookup::Call::LookupHostname(zx::unowned_channel _client_end, IpAddress addr) {
+  return ResultOf::LookupHostname(std::move(_client_end), std::move(addr));
+}
+
+template <>
+NameLookup::UnownedResultOf::LookupHostname_Impl<NameLookup::LookupHostnameResponse>::LookupHostname_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer) {
+  if (_request_buffer.capacity() < LookupHostnameRequest::PrimarySize) {
+    Super::SetFailure(::fidl::DecodeResult<LookupHostnameResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall));
+    return;
+  }
+  memset(_request_buffer.data(), 0, LookupHostnameRequest::PrimarySize);
+  auto& _request = *reinterpret_cast<LookupHostnameRequest*>(_request_buffer.data());
+  _request.addr = std::move(addr);
+  _request_buffer.set_actual(sizeof(LookupHostnameRequest));
+  ::fidl::DecodedMessage<LookupHostnameRequest> _decoded_request(std::move(_request_buffer));
+  Super::SetResult(
+      NameLookup::InPlace::LookupHostname(std::move(_client_end), std::move(_decoded_request), std::move(_response_buffer)));
+}
+
+NameLookup::UnownedResultOf::LookupHostname NameLookup::SyncClient::LookupHostname(::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::LookupHostname(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(addr), std::move(_response_buffer));
+}
+
+NameLookup::UnownedResultOf::LookupHostname NameLookup::Call::LookupHostname(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::LookupHostname(std::move(_client_end), std::move(_request_buffer), std::move(addr), std::move(_response_buffer));
+}
+
+::fidl::DecodeResult<NameLookup::LookupHostnameResponse> NameLookup::SyncClient::LookupHostname_Deprecated(::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer, NameLookup_LookupHostname_Result* out_result) {
+  return NameLookup::Call::LookupHostname_Deprecated(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(addr), std::move(_response_buffer), out_result);
+}
+
+::fidl::DecodeResult<NameLookup::LookupHostnameResponse> NameLookup::Call::LookupHostname_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, IpAddress addr, ::fidl::BytePart _response_buffer, NameLookup_LookupHostname_Result* out_result) {
   if (_request_buffer.capacity() < LookupHostnameRequest::PrimarySize) {
     return ::fidl::DecodeResult<LookupHostnameResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
   }
   auto& _request = *reinterpret_cast<LookupHostnameRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kNameLookup_LookupHostname_Ordinal;
+  _request._hdr.ordinal = kNameLookup_LookupHostname_GenOrdinal;
   _request.addr = std::move(addr);
   _request_buffer.set_actual(sizeof(LookupHostnameRequest));
   ::fidl::DecodedMessage<LookupHostnameRequest> _decoded_request(std::move(_request_buffer));
@@ -1749,27 +522,19 @@ extern "C" const fidl_type_t fuchsia_net_NameLookupLookupHostnameResponseTable;
   return _decode_result;
 }
 
-::fidl::DecodeResult<NameLookup::LookupHostnameResponse> NameLookup::SyncClient::LookupHostname(::fidl::DecodedMessage<LookupHostnameRequest> params, ::fidl::BytePart response_buffer) {
-  return NameLookup::Call::LookupHostname(zx::unowned_channel(this->channel_), std::move(params), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<NameLookup::LookupHostnameResponse> NameLookup::Call::LookupHostname(zx::unowned_channel _client_end, ::fidl::DecodedMessage<LookupHostnameRequest> params, ::fidl::BytePart response_buffer) {
+::fidl::DecodeResult<NameLookup::LookupHostnameResponse> NameLookup::InPlace::LookupHostname(zx::unowned_channel _client_end, ::fidl::DecodedMessage<LookupHostnameRequest> params, ::fidl::BytePart response_buffer) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kNameLookup_LookupHostname_Ordinal;
+  params.message()->_hdr.ordinal = kNameLookup_LookupHostname_GenOrdinal;
   auto _encode_request_result = ::fidl::Encode(std::move(params));
   if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<NameLookup::LookupHostnameResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<NameLookup::LookupHostnameResponse>());
+    return ::fidl::DecodeResult<NameLookup::LookupHostnameResponse>::FromFailure(
+        std::move(_encode_request_result));
   }
   auto _call_result = ::fidl::Call<LookupHostnameRequest, LookupHostnameResponse>(
     std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
   if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<NameLookup::LookupHostnameResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<NameLookup::LookupHostnameResponse>());
+    return ::fidl::DecodeResult<NameLookup::LookupHostnameResponse>::FromFailure(
+        std::move(_call_result));
   }
   return ::fidl::Decode(std::move(_call_result.message));
 }
@@ -1783,7 +548,8 @@ bool NameLookup::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transacti
   }
   fidl_message_header_t* hdr = reinterpret_cast<fidl_message_header_t*>(msg->bytes);
   switch (hdr->ordinal) {
-    case kNameLookup_LookupIp_Ordinal: {
+    case kNameLookup_LookupIp_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<LookupIpRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);
@@ -1794,7 +560,8 @@ bool NameLookup::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transacti
         Interface::LookupIpCompleter::Sync(txn));
       return true;
     }
-    case kNameLookup_LookupHostname_Ordinal: {
+    case kNameLookup_LookupHostname_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<LookupHostnameRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);
@@ -1822,11 +589,11 @@ bool NameLookup::Dispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction*
 
 
 void NameLookup::Interface::LookupIpCompleterBase::Reply(NameLookup_LookupIp_Result result) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<LookupIpResponse>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<LookupIpResponse, ::fidl::MessageDirection::kSending>();
   std::unique_ptr<uint8_t[]> _write_bytes_unique_ptr(new uint8_t[_kWriteAllocSize]);
   uint8_t* _write_bytes = _write_bytes_unique_ptr.get();
   LookupIpResponse _response = {};
-  _response._hdr.ordinal = kNameLookup_LookupIp_Ordinal;
+  _response._hdr.ordinal = kNameLookup_LookupIp_GenOrdinal;
   _response.result = std::move(result);
   auto _linearize_result = ::fidl::Linearize(&_response, ::fidl::BytePart(_write_bytes,
                                                                           _kWriteAllocSize));
@@ -1843,7 +610,7 @@ void NameLookup::Interface::LookupIpCompleterBase::Reply(::fidl::BytePart _buffe
     return;
   }
   LookupIpResponse _response = {};
-  _response._hdr.ordinal = kNameLookup_LookupIp_Ordinal;
+  _response._hdr.ordinal = kNameLookup_LookupIp_GenOrdinal;
   _response.result = std::move(result);
   auto _linearize_result = ::fidl::Linearize(&_response, std::move(_buffer));
   if (_linearize_result.status != ZX_OK) {
@@ -1855,16 +622,16 @@ void NameLookup::Interface::LookupIpCompleterBase::Reply(::fidl::BytePart _buffe
 
 void NameLookup::Interface::LookupIpCompleterBase::Reply(::fidl::DecodedMessage<LookupIpResponse> params) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kNameLookup_LookupIp_Ordinal;
+  params.message()->_hdr.ordinal = kNameLookup_LookupIp_GenOrdinal;
   CompleterBase::SendReply(std::move(params));
 }
 
 
 void NameLookup::Interface::LookupHostnameCompleterBase::Reply(NameLookup_LookupHostname_Result result) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<LookupHostnameResponse>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<LookupHostnameResponse, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize];
   LookupHostnameResponse _response = {};
-  _response._hdr.ordinal = kNameLookup_LookupHostname_Ordinal;
+  _response._hdr.ordinal = kNameLookup_LookupHostname_GenOrdinal;
   _response.result = std::move(result);
   auto _linearize_result = ::fidl::Linearize(&_response, ::fidl::BytePart(_write_bytes,
                                                                           _kWriteAllocSize));
@@ -1881,7 +648,7 @@ void NameLookup::Interface::LookupHostnameCompleterBase::Reply(::fidl::BytePart 
     return;
   }
   LookupHostnameResponse _response = {};
-  _response._hdr.ordinal = kNameLookup_LookupHostname_Ordinal;
+  _response._hdr.ordinal = kNameLookup_LookupHostname_GenOrdinal;
   _response.result = std::move(result);
   auto _linearize_result = ::fidl::Linearize(&_response, std::move(_buffer));
   if (_linearize_result.status != ZX_OK) {
@@ -1893,7 +660,7 @@ void NameLookup::Interface::LookupHostnameCompleterBase::Reply(::fidl::BytePart 
 
 void NameLookup::Interface::LookupHostnameCompleterBase::Reply(::fidl::DecodedMessage<LookupHostnameResponse> params) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kNameLookup_LookupHostname_Ordinal;
+  params.message()->_hdr.ordinal = kNameLookup_LookupHostname_GenOrdinal;
   CompleterBase::SendReply(std::move(params));
 }
 
@@ -1901,122 +668,76 @@ void NameLookup::Interface::LookupHostnameCompleterBase::Reply(::fidl::DecodedMe
 namespace {
 
 [[maybe_unused]]
-constexpr uint64_t kSocketProvider_Socket_Ordinal = 316444173lu << 32;
-extern "C" const fidl_type_t fuchsia_net_SocketProviderSocketRequestTable;
-extern "C" const fidl_type_t fuchsia_net_SocketProviderSocketResponseTable;
-[[maybe_unused]]
-constexpr uint64_t kSocketProvider_GetAddrInfo_Ordinal = 498796293lu << 32;
+constexpr uint64_t kSocketProvider_GetAddrInfo_GenOrdinal = 0x1dbb070500000000lu;
 extern "C" const fidl_type_t fuchsia_net_SocketProviderGetAddrInfoRequestTable;
 extern "C" const fidl_type_t fuchsia_net_SocketProviderGetAddrInfoResponseTable;
 
 }  // namespace
-
-zx_status_t SocketProvider::SyncClient::Socket(int16_t domain, int16_t type, int16_t protocol, int16_t* out_code, ::zx::socket* out_s) {
-  return SocketProvider::Call::Socket(zx::unowned_channel(this->channel_), std::move(domain), std::move(type), std::move(protocol), out_code, out_s);
+template <>
+SocketProvider::ResultOf::GetAddrInfo_Impl<SocketProvider::GetAddrInfoResponse>::GetAddrInfo_Impl(zx::unowned_channel _client_end, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetAddrInfoRequest, ::fidl::MessageDirection::kSending>();
+  std::unique_ptr _write_bytes_boxed = std::make_unique<::fidl::internal::AlignedBuffer<_kWriteAllocSize>>();
+  auto& _write_bytes_array = *_write_bytes_boxed;
+  GetAddrInfoRequest _request = {};
+  _request.node = std::move(node);
+  _request.service = std::move(service);
+  _request.hints = std::move(hints);
+  auto _linearize_result = ::fidl::Linearize(&_request, _write_bytes_array.view());
+  if (_linearize_result.status != ZX_OK) {
+    Super::SetFailure(std::move(_linearize_result));
+    return;
+  }
+  ::fidl::DecodedMessage<GetAddrInfoRequest> _decoded_request = std::move(_linearize_result.message);
+  Super::SetResult(
+      SocketProvider::InPlace::GetAddrInfo(std::move(_client_end), std::move(_decoded_request), Super::response_buffer()));
 }
 
-zx_status_t SocketProvider::Call::Socket(zx::unowned_channel _client_end, int16_t domain, int16_t type, int16_t protocol, int16_t* out_code, ::zx::socket* out_s) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<SocketRequest>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _request = *reinterpret_cast<SocketRequest*>(_write_bytes);
-  _request._hdr.ordinal = kSocketProvider_Socket_Ordinal;
-  _request.domain = std::move(domain);
-  _request.type = std::move(type);
-  _request.protocol = std::move(protocol);
-  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(SocketRequest));
-  ::fidl::DecodedMessage<SocketRequest> _decoded_request(std::move(_request_bytes));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return _encode_request_result.status;
-  }
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<SocketResponse>();
-  FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
-  ::fidl::BytePart _response_bytes(_read_bytes, _kReadAllocSize);
-  auto _call_result = ::fidl::Call<SocketRequest, SocketResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_bytes));
-  if (_call_result.status != ZX_OK) {
-    return _call_result.status;
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result.status;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  *out_s = std::move(_response.s);
-  return ZX_OK;
+SocketProvider::ResultOf::GetAddrInfo SocketProvider::SyncClient::GetAddrInfo(::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints) {
+  return ResultOf::GetAddrInfo(zx::unowned_channel(this->channel_), std::move(node), std::move(service), std::move(hints));
 }
 
-::fidl::DecodeResult<SocketProvider::SocketResponse> SocketProvider::SyncClient::Socket(::fidl::BytePart _request_buffer, int16_t domain, int16_t type, int16_t protocol, ::fidl::BytePart _response_buffer, int16_t* out_code, ::zx::socket* out_s) {
-  return SocketProvider::Call::Socket(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(domain), std::move(type), std::move(protocol), std::move(_response_buffer), out_code, out_s);
+SocketProvider::ResultOf::GetAddrInfo SocketProvider::Call::GetAddrInfo(zx::unowned_channel _client_end, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints) {
+  return ResultOf::GetAddrInfo(std::move(_client_end), std::move(node), std::move(service), std::move(hints));
 }
 
-::fidl::DecodeResult<SocketProvider::SocketResponse> SocketProvider::Call::Socket(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, int16_t domain, int16_t type, int16_t protocol, ::fidl::BytePart _response_buffer, int16_t* out_code, ::zx::socket* out_s) {
-  if (_request_buffer.capacity() < SocketRequest::PrimarySize) {
-    return ::fidl::DecodeResult<SocketResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
+template <>
+SocketProvider::UnownedResultOf::GetAddrInfo_Impl<SocketProvider::GetAddrInfoResponse>::GetAddrInfo_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer) {
+  if (_request_buffer.capacity() < GetAddrInfoRequest::PrimarySize) {
+    Super::SetFailure(::fidl::DecodeResult<GetAddrInfoResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall));
+    return;
   }
-  auto& _request = *reinterpret_cast<SocketRequest*>(_request_buffer.data());
-  _request._hdr.ordinal = kSocketProvider_Socket_Ordinal;
-  _request.domain = std::move(domain);
-  _request.type = std::move(type);
-  _request.protocol = std::move(protocol);
-  _request_buffer.set_actual(sizeof(SocketRequest));
-  ::fidl::DecodedMessage<SocketRequest> _decoded_request(std::move(_request_buffer));
-  auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketResponse>(_encode_request_result.status, _encode_request_result.error);
+  GetAddrInfoRequest _request = {};
+  _request.node = std::move(node);
+  _request.service = std::move(service);
+  _request.hints = std::move(hints);
+  auto _linearize_result = ::fidl::Linearize(&_request, std::move(_request_buffer));
+  if (_linearize_result.status != ZX_OK) {
+    Super::SetFailure(std::move(_linearize_result));
+    return;
   }
-  auto _call_result = ::fidl::Call<SocketRequest, SocketResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(_response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketResponse>(_call_result.status, _call_result.error);
-  }
-  auto _decode_result = ::fidl::Decode(std::move(_call_result.message));
-  if (_decode_result.status != ZX_OK) {
-    return _decode_result;
-  }
-  auto& _response = *_decode_result.message.message();
-  *out_code = std::move(_response.code);
-  *out_s = std::move(_response.s);
-  return _decode_result;
+  ::fidl::DecodedMessage<GetAddrInfoRequest> _decoded_request = std::move(_linearize_result.message);
+  Super::SetResult(
+      SocketProvider::InPlace::GetAddrInfo(std::move(_client_end), std::move(_decoded_request), std::move(_response_buffer)));
 }
 
-::fidl::DecodeResult<SocketProvider::SocketResponse> SocketProvider::SyncClient::Socket(::fidl::DecodedMessage<SocketRequest> params, ::fidl::BytePart response_buffer) {
-  return SocketProvider::Call::Socket(zx::unowned_channel(this->channel_), std::move(params), std::move(response_buffer));
+SocketProvider::UnownedResultOf::GetAddrInfo SocketProvider::SyncClient::GetAddrInfo(::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::GetAddrInfo(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(node), std::move(service), std::move(hints), std::move(_response_buffer));
 }
 
-::fidl::DecodeResult<SocketProvider::SocketResponse> SocketProvider::Call::Socket(zx::unowned_channel _client_end, ::fidl::DecodedMessage<SocketRequest> params, ::fidl::BytePart response_buffer) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketProvider_Socket_Ordinal;
-  auto _encode_request_result = ::fidl::Encode(std::move(params));
-  if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketProvider::SocketResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketProvider::SocketResponse>());
-  }
-  auto _call_result = ::fidl::Call<SocketRequest, SocketResponse>(
-    std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
-  if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketProvider::SocketResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketProvider::SocketResponse>());
-  }
-  return ::fidl::Decode(std::move(_call_result.message));
+SocketProvider::UnownedResultOf::GetAddrInfo SocketProvider::Call::GetAddrInfo(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer) {
+  return UnownedResultOf::GetAddrInfo(std::move(_client_end), std::move(_request_buffer), std::move(node), std::move(service), std::move(hints), std::move(_response_buffer));
 }
 
-
-zx_status_t SocketProvider::SyncClient::GetAddrInfo(::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res) {
-  return SocketProvider::Call::GetAddrInfo(zx::unowned_channel(this->channel_), std::move(node), std::move(service), std::move(hints), out_status, out_nres, out_res);
+zx_status_t SocketProvider::SyncClient::GetAddrInfo_Deprecated(::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res) {
+  return SocketProvider::Call::GetAddrInfo_Deprecated(zx::unowned_channel(this->channel_), std::move(node), std::move(service), std::move(hints), out_status, out_nres, out_res);
 }
 
-zx_status_t SocketProvider::Call::GetAddrInfo(zx::unowned_channel _client_end, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetAddrInfoRequest>();
+zx_status_t SocketProvider::Call::GetAddrInfo_Deprecated(zx::unowned_channel _client_end, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetAddrInfoRequest, ::fidl::MessageDirection::kSending>();
   std::unique_ptr<uint8_t[]> _write_bytes_unique_ptr(new uint8_t[_kWriteAllocSize]);
   uint8_t* _write_bytes = _write_bytes_unique_ptr.get();
   GetAddrInfoRequest _request = {};
-  _request._hdr.ordinal = kSocketProvider_GetAddrInfo_Ordinal;
+  _request._hdr.ordinal = kSocketProvider_GetAddrInfo_GenOrdinal;
   _request.node = std::move(node);
   _request.service = std::move(service);
   _request.hints = std::move(hints);
@@ -2030,7 +751,7 @@ zx_status_t SocketProvider::Call::GetAddrInfo(zx::unowned_channel _client_end, :
   if (_encode_request_result.status != ZX_OK) {
     return _encode_request_result.status;
   }
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<GetAddrInfoResponse>();
+  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<GetAddrInfoResponse, ::fidl::MessageDirection::kReceiving>();
   FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
   ::fidl::BytePart _response_bytes(_read_bytes, _kReadAllocSize);
   auto _call_result = ::fidl::Call<GetAddrInfoRequest, GetAddrInfoResponse>(
@@ -2049,16 +770,16 @@ zx_status_t SocketProvider::Call::GetAddrInfo(zx::unowned_channel _client_end, :
   return ZX_OK;
 }
 
-::fidl::DecodeResult<SocketProvider::GetAddrInfoResponse> SocketProvider::SyncClient::GetAddrInfo(::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res) {
-  return SocketProvider::Call::GetAddrInfo(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(node), std::move(service), std::move(hints), std::move(_response_buffer), out_status, out_nres, out_res);
+::fidl::DecodeResult<SocketProvider::GetAddrInfoResponse> SocketProvider::SyncClient::GetAddrInfo_Deprecated(::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res) {
+  return SocketProvider::Call::GetAddrInfo_Deprecated(zx::unowned_channel(this->channel_), std::move(_request_buffer), std::move(node), std::move(service), std::move(hints), std::move(_response_buffer), out_status, out_nres, out_res);
 }
 
-::fidl::DecodeResult<SocketProvider::GetAddrInfoResponse> SocketProvider::Call::GetAddrInfo(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res) {
+::fidl::DecodeResult<SocketProvider::GetAddrInfoResponse> SocketProvider::Call::GetAddrInfo_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::StringView node, ::fidl::StringView service, AddrInfoHints* hints, ::fidl::BytePart _response_buffer, AddrInfoStatus* out_status, uint32_t* out_nres, ::fidl::Array<AddrInfo, 4>* out_res) {
   if (_request_buffer.capacity() < GetAddrInfoRequest::PrimarySize) {
     return ::fidl::DecodeResult<GetAddrInfoResponse>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall);
   }
   GetAddrInfoRequest _request = {};
-  _request._hdr.ordinal = kSocketProvider_GetAddrInfo_Ordinal;
+  _request._hdr.ordinal = kSocketProvider_GetAddrInfo_GenOrdinal;
   _request.node = std::move(node);
   _request.service = std::move(service);
   _request.hints = std::move(hints);
@@ -2087,27 +808,19 @@ zx_status_t SocketProvider::Call::GetAddrInfo(zx::unowned_channel _client_end, :
   return _decode_result;
 }
 
-::fidl::DecodeResult<SocketProvider::GetAddrInfoResponse> SocketProvider::SyncClient::GetAddrInfo(::fidl::DecodedMessage<GetAddrInfoRequest> params, ::fidl::BytePart response_buffer) {
-  return SocketProvider::Call::GetAddrInfo(zx::unowned_channel(this->channel_), std::move(params), std::move(response_buffer));
-}
-
-::fidl::DecodeResult<SocketProvider::GetAddrInfoResponse> SocketProvider::Call::GetAddrInfo(zx::unowned_channel _client_end, ::fidl::DecodedMessage<GetAddrInfoRequest> params, ::fidl::BytePart response_buffer) {
+::fidl::DecodeResult<SocketProvider::GetAddrInfoResponse> SocketProvider::InPlace::GetAddrInfo(zx::unowned_channel _client_end, ::fidl::DecodedMessage<GetAddrInfoRequest> params, ::fidl::BytePart response_buffer) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketProvider_GetAddrInfo_Ordinal;
+  params.message()->_hdr.ordinal = kSocketProvider_GetAddrInfo_GenOrdinal;
   auto _encode_request_result = ::fidl::Encode(std::move(params));
   if (_encode_request_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketProvider::GetAddrInfoResponse>(
-      _encode_request_result.status,
-      _encode_request_result.error,
-      ::fidl::DecodedMessage<SocketProvider::GetAddrInfoResponse>());
+    return ::fidl::DecodeResult<SocketProvider::GetAddrInfoResponse>::FromFailure(
+        std::move(_encode_request_result));
   }
   auto _call_result = ::fidl::Call<GetAddrInfoRequest, GetAddrInfoResponse>(
     std::move(_client_end), std::move(_encode_request_result.message), std::move(response_buffer));
   if (_call_result.status != ZX_OK) {
-    return ::fidl::DecodeResult<SocketProvider::GetAddrInfoResponse>(
-      _call_result.status,
-      _call_result.error,
-      ::fidl::DecodedMessage<SocketProvider::GetAddrInfoResponse>());
+    return ::fidl::DecodeResult<SocketProvider::GetAddrInfoResponse>::FromFailure(
+        std::move(_call_result));
   }
   return ::fidl::Decode(std::move(_call_result.message));
 }
@@ -2121,18 +834,8 @@ bool SocketProvider::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Trans
   }
   fidl_message_header_t* hdr = reinterpret_cast<fidl_message_header_t*>(msg->bytes);
   switch (hdr->ordinal) {
-    case kSocketProvider_Socket_Ordinal: {
-      auto result = ::fidl::DecodeAs<SocketRequest>(msg);
-      if (result.status != ZX_OK) {
-        txn->Close(ZX_ERR_INVALID_ARGS);
-        return true;
-      }
-      auto message = result.message.message();
-      impl->Socket(std::move(message->domain), std::move(message->type), std::move(message->protocol),
-        Interface::SocketCompleter::Sync(txn));
-      return true;
-    }
-    case kSocketProvider_GetAddrInfo_Ordinal: {
+    case kSocketProvider_GetAddrInfo_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<GetAddrInfoRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);
@@ -2159,42 +862,11 @@ bool SocketProvider::Dispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transact
 }
 
 
-void SocketProvider::Interface::SocketCompleterBase::Reply(int16_t code, ::zx::socket s) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<SocketResponse>();
-  FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
-  auto& _response = *reinterpret_cast<SocketResponse*>(_write_bytes);
-  _response._hdr.ordinal = kSocketProvider_Socket_Ordinal;
-  _response.code = std::move(code);
-  _response.s = std::move(s);
-  ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(SocketResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<SocketResponse>(std::move(_response_bytes)));
-}
-
-void SocketProvider::Interface::SocketCompleterBase::Reply(::fidl::BytePart _buffer, int16_t code, ::zx::socket s) {
-  if (_buffer.capacity() < SocketResponse::PrimarySize) {
-    CompleterBase::Close(ZX_ERR_INTERNAL);
-    return;
-  }
-  auto& _response = *reinterpret_cast<SocketResponse*>(_buffer.data());
-  _response._hdr.ordinal = kSocketProvider_Socket_Ordinal;
-  _response.code = std::move(code);
-  _response.s = std::move(s);
-  _buffer.set_actual(sizeof(SocketResponse));
-  CompleterBase::SendReply(::fidl::DecodedMessage<SocketResponse>(std::move(_buffer)));
-}
-
-void SocketProvider::Interface::SocketCompleterBase::Reply(::fidl::DecodedMessage<SocketResponse> params) {
-  params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketProvider_Socket_Ordinal;
-  CompleterBase::SendReply(std::move(params));
-}
-
-
 void SocketProvider::Interface::GetAddrInfoCompleterBase::Reply(AddrInfoStatus status, uint32_t nres, ::fidl::Array<AddrInfo, 4> res) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetAddrInfoResponse>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<GetAddrInfoResponse, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _response = *reinterpret_cast<GetAddrInfoResponse*>(_write_bytes);
-  _response._hdr.ordinal = kSocketProvider_GetAddrInfo_Ordinal;
+  _response._hdr.ordinal = kSocketProvider_GetAddrInfo_GenOrdinal;
   _response.status = std::move(status);
   _response.nres = std::move(nres);
   _response.res = std::move(res);
@@ -2208,7 +880,7 @@ void SocketProvider::Interface::GetAddrInfoCompleterBase::Reply(::fidl::BytePart
     return;
   }
   auto& _response = *reinterpret_cast<GetAddrInfoResponse*>(_buffer.data());
-  _response._hdr.ordinal = kSocketProvider_GetAddrInfo_Ordinal;
+  _response._hdr.ordinal = kSocketProvider_GetAddrInfo_GenOrdinal;
   _response.status = std::move(status);
   _response.nres = std::move(nres);
   _response.res = std::move(res);
@@ -2218,7 +890,7 @@ void SocketProvider::Interface::GetAddrInfoCompleterBase::Reply(::fidl::BytePart
 
 void SocketProvider::Interface::GetAddrInfoCompleterBase::Reply(::fidl::DecodedMessage<GetAddrInfoResponse> params) {
   params.message()->_hdr = {};
-  params.message()->_hdr.ordinal = kSocketProvider_GetAddrInfo_Ordinal;
+  params.message()->_hdr.ordinal = kSocketProvider_GetAddrInfo_GenOrdinal;
   CompleterBase::SendReply(std::move(params));
 }
 

@@ -14,14 +14,39 @@ use fidl_fuchsia_web::{
     NavigationEventListenerMarker, NavigationEventListenerRequest,
     NavigationEventListenerRequestStream, PageType,
 };
+use futures::future::FutureObj;
 use futures::prelude::*;
 use log::warn;
 use url::Url;
 
 type AuthProviderResult<T> = Result<T, AuthProviderError>;
 
-/// A representation of a web frame that is the only frame in a web context.
-pub struct StandaloneWebFrame {
+/// A trait for representations of a web frame that is the only frame in a web context.
+pub trait StandaloneWebFrame {
+    /// Creates a new scenic view using the given |view_token| and loads the
+    /// given |url| as a webpage in the view.  The view must be attached to
+    /// the global Scenic graph using the ViewHolderToken paired with
+    /// |view_token|.  This method should be called prior to attaching to the
+    /// Scenic graph to ensure that loading is successful prior to displaying
+    /// the page to the user.
+    fn display_url<'a>(
+        &'a mut self,
+        view_token: ViewToken,
+        url: Url,
+    ) -> FutureObj<'a, AuthProviderResult<()>>;
+
+    /// Waits until the frame redirects to a URL matching the scheme,
+    /// domain, and path of |redirect_target|. Returns the matching URL,
+    /// including any query parameters.
+    fn wait_for_redirect<'a>(
+        &'a mut self,
+        redirect_target: Url,
+    ) -> FutureObj<'a, AuthProviderResult<Url>>;
+}
+
+/// A `StandaloneWebFrame` implementation that uses the default fuchsia.web
+/// implementation to display a web frame.
+pub struct DefaultStandaloneWebFrame {
     /// Connection to the web context.  Needs to be kept in scope to
     /// keep context alive.
     _context: ContextProxy,
@@ -29,22 +54,37 @@ pub struct StandaloneWebFrame {
     frame: FrameProxy,
 }
 
+impl StandaloneWebFrame for DefaultStandaloneWebFrame {
+    fn display_url<'a>(
+        &'a mut self,
+        view_token: ViewToken,
+        url: Url,
+    ) -> FutureObj<'a, AuthProviderResult<()>> {
+        FutureObj::new(Box::new(
+            async move { Self::display_url_inner(self, view_token, url).await },
+        ))
+    }
+
+    fn wait_for_redirect<'a>(
+        &'a mut self,
+        redirect_target: Url,
+    ) -> FutureObj<'a, AuthProviderResult<Url>> {
+        FutureObj::new(Box::new(async move {
+            Self::wait_for_redirect_inner(self, redirect_target).await
+        }))
+    }
+}
+
 // TODO(satsukiu): return resource errors instead of UnknownError once a
 // distinct errortype exists
-impl StandaloneWebFrame {
+impl DefaultStandaloneWebFrame {
     /// Create a new `StandaloneWebFrame`.  The context and frame passed
     /// in should not be reused.
     pub fn new(context: ContextProxy, frame: FrameProxy) -> Self {
-        StandaloneWebFrame { _context: context, frame }
+        DefaultStandaloneWebFrame { _context: context, frame }
     }
 
-    /// Creates a new scenic view using the given |view_token| and loads the
-    /// given |url| as a webpage in the view.  The view must be attached to
-    /// the global Scenic graph using the ViewHolderToken paired with
-    /// |view_token|.  This method should be called prior to attaching to the
-    /// Scenic graph to ensure that loading is successful prior to displaying
-    /// the page to the user.
-    pub async fn display_url(
+    async fn display_url_inner(
         &mut self,
         mut view_token: ViewToken,
         url: Url,
@@ -56,35 +96,35 @@ impl StandaloneWebFrame {
             .get_navigation_controller(navigation_controller_server_end)
             .auth_provider_status(AuthProviderStatus::UnknownError)?;
 
-        await!(navigation_controller_proxy.load_url(
-            url.as_str(),
-            LoadUrlParams {
-                type_: None,
-                referrer_url: None,
-                was_user_activated: None,
-                headers: None
-            }
-        ))
-        .auth_provider_status(AuthProviderStatus::UnknownError)??;
+        navigation_controller_proxy
+            .load_url(
+                url.as_str(),
+                LoadUrlParams {
+                    type_: None,
+                    referrer_url: None,
+                    was_user_activated: None,
+                    headers: None,
+                },
+            )
+            .await
+            .auth_provider_status(AuthProviderStatus::UnknownError)??;
         self.frame
             .create_view(&mut view_token)
             .auth_provider_status(AuthProviderStatus::UnknownError)?;
 
         let navigation_event_stream = self.get_navigation_event_stream()?;
-        await!(Self::poll_until_loaded(navigation_event_stream))
+        Self::poll_until_loaded(navigation_event_stream).await
     }
 
-    /// Waits until the frame redirects to a URL matching the scheme,
-    /// domain, and path of |redirect_target|. Returns the matching URL,
-    /// including any query parameters.
-    pub async fn wait_for_redirect(&mut self, redirect_target: Url) -> AuthProviderResult<Url> {
+    async fn wait_for_redirect_inner(&mut self, redirect_target: Url) -> AuthProviderResult<Url> {
         let navigation_event_stream = self.get_navigation_event_stream()?;
 
         // pull redirect URL out from events.
-        await!(Self::poll_for_url_navigation_event(navigation_event_stream, |url| {
+        Self::poll_for_url_navigation_event(navigation_event_stream, |url| {
             (url.scheme(), url.domain(), url.path())
                 == (redirect_target.scheme(), redirect_target.domain(), redirect_target.path())
-        }))
+        })
+        .await
     }
 
     /// Registers a navigation listener with the Chrome frame and returns the created event
@@ -112,7 +152,9 @@ impl StandaloneWebFrame {
     {
         // Any errors encountered with the stream here may be a result of the
         // overlay being canceled externally.
-        while let Some(request) = await!(request_stream.try_next())
+        while let Some(request) = request_stream
+            .try_next()
+            .await
             .auth_provider_status(AuthProviderStatus::UnknownError)?
         {
             let NavigationEventListenerRequest::OnNavigationStateChanged { change, responder } =
@@ -146,7 +188,9 @@ impl StandaloneWebFrame {
         // until both points are found.
         let mut known_page_type: Option<PageType> = None;
         let mut main_document_loaded = false;
-        while let Some(request) = await!(request_stream.try_next())
+        while let Some(request) = request_stream
+            .try_next()
+            .await
             .auth_provider_status(AuthProviderStatus::UnknownError)?
         {
             // update known state.
@@ -186,25 +230,29 @@ mod test {
     use fuchsia_async as fasync;
     use log::error;
 
-    fn create_frame_with_events(events: Vec<NavigationState>) -> Result<StandaloneWebFrame, Error> {
+    fn create_frame_with_events(
+        events: Vec<NavigationState>,
+    ) -> Result<DefaultStandaloneWebFrame, Error> {
         let (context, _) = create_proxy::<ContextMarker>()?;
         let (frame, frame_server_end) = create_request_stream::<FrameMarker>()?;
         fasync::spawn(async move {
-            await!(handle_frame_stream(frame_server_end, events))
+            handle_frame_stream(frame_server_end, events)
+                .await
                 .unwrap_or_else(|e| error!("Error running frame stream: {:?}", e));
         });
-        Ok(StandaloneWebFrame::new(context, frame.into_proxy()?))
+        Ok(DefaultStandaloneWebFrame::new(context, frame.into_proxy()?))
     }
 
     async fn handle_frame_stream(
         mut stream: FrameRequestStream,
         events: Vec<NavigationState>,
     ) -> Result<(), Error> {
-        if let Some(request) = await!(stream.try_next())? {
+        if let Some(request) = stream.try_next().await? {
             match request {
                 FrameRequest::SetNavigationEventListener { listener, .. } => {
                     fasync::spawn(async move {
-                        await!(feed_event_requests(listener.unwrap(), events))
+                        feed_event_requests(listener.unwrap(), events)
+                            .await
                             .unwrap_or_else(|e| error!("Error in event sender: {:?}", e));
                     });
                 }
@@ -220,7 +268,7 @@ mod test {
     ) -> Result<(), Error> {
         let client_end = client_end.into_proxy()?;
         for event in events.into_iter() {
-            await!(client_end.on_navigation_state_changed(event))?;
+            client_end.on_navigation_state_changed(event).await?;
         }
         Ok(())
     }
@@ -263,7 +311,7 @@ mod test {
 
         let mut web_frame = create_frame_with_events(events)?;
         let target_url = Url::parse("http://test/")?;
-        let matched_url = await!(web_frame.wait_for_redirect(target_url))?;
+        let matched_url = web_frame.wait_for_redirect(target_url).await?;
         assert_eq!(matched_url, Url::parse("http://test/?key=val").unwrap());
         Ok(())
     }
@@ -277,7 +325,7 @@ mod test {
 
         let mut web_frame = create_frame_with_events(events)?;
         let target_url = Url::parse("http://test/")?;
-        let result = await!(web_frame.wait_for_redirect(target_url));
+        let result = web_frame.wait_for_redirect(target_url).await;
         assert!(result.is_err());
         Ok(())
     }
@@ -291,7 +339,7 @@ mod test {
 
         let web_frame = create_frame_with_events(events)?;
         let stream = web_frame.get_navigation_event_stream()?;
-        assert!(await!(StandaloneWebFrame::poll_until_loaded(stream)).is_ok());
+        assert!(DefaultStandaloneWebFrame::poll_until_loaded(stream).await.is_ok());
 
         // Verify functionality when pagetype and document_loaded events sent
         // separately
@@ -303,7 +351,7 @@ mod test {
 
         let web_frame = create_frame_with_events(events)?;
         let stream = web_frame.get_navigation_event_stream()?;
-        assert!(await!(StandaloneWebFrame::poll_until_loaded(stream)).is_ok());
+        assert!(DefaultStandaloneWebFrame::poll_until_loaded(stream).await.is_ok());
         Ok(())
     }
 
@@ -318,7 +366,7 @@ mod test {
         let web_frame = create_frame_with_events(events)?;
         let stream = web_frame.get_navigation_event_stream()?;
         assert_eq!(
-            await!(StandaloneWebFrame::poll_until_loaded(stream)).unwrap_err().status,
+            DefaultStandaloneWebFrame::poll_until_loaded(stream).await.unwrap_err().status,
             AuthProviderStatus::NetworkError
         );
         Ok(())
@@ -334,7 +382,7 @@ mod test {
         let web_frame = create_frame_with_events(events)?;
         let stream = web_frame.get_navigation_event_stream()?;
         assert_eq!(
-            await!(StandaloneWebFrame::poll_until_loaded(stream)).unwrap_err().status,
+            DefaultStandaloneWebFrame::poll_until_loaded(stream).await.unwrap_err().status,
             AuthProviderStatus::UnknownError
         );
         Ok(())

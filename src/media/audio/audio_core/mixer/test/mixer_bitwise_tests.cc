@@ -24,8 +24,8 @@ using Resampler = ::media::audio::Mixer::Resampler;
 TEST(DataFormats, PointSampler_8) {
   EXPECT_NE(nullptr, SelectMixer(fuchsia::media::AudioSampleFormat::UNSIGNED_8, 2, 32000, 1, 16000,
                                  Resampler::SampleAndHold));
-  EXPECT_NE(nullptr,
-            SelectMixer(fuchsia::media::AudioSampleFormat::UNSIGNED_8, 4, 48000, 4, 48000));
+  EXPECT_NE(nullptr, SelectMixer(fuchsia::media::AudioSampleFormat::UNSIGNED_8, 4, 48000, 4, 48000,
+                                 Resampler::LinearInterpolation));
 }
 
 // Create PointSampler objects for incoming buffers of type int16
@@ -39,12 +39,17 @@ TEST(DataFormats, PointSampler_16) {
 // Create PointSampler objects for incoming buffers of type int24-in-32
 TEST(DataFormats, PointSampler_24) {
   EXPECT_NE(nullptr, SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32, 2, 8000, 1,
+                                 8000, Resampler::LinearInterpolation));
+  EXPECT_NE(nullptr, SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32, 1, 8000, 4,
                                  8000, Resampler::SampleAndHold));
 }
 
 // Create PointSampler objects for incoming buffers of type float
 TEST(DataFormats, PointSampler_Float) {
-  EXPECT_NE(nullptr, SelectMixer(fuchsia::media::AudioSampleFormat::FLOAT, 2, 48000, 2, 16000));
+  EXPECT_NE(nullptr, SelectMixer(fuchsia::media::AudioSampleFormat::FLOAT, 2, 48000, 2, 16000,
+                                 Resampler::Default));
+  EXPECT_NE(nullptr, SelectMixer(fuchsia::media::AudioSampleFormat::FLOAT, 2, 48000, 4, 16000,
+                                 Resampler::LinearInterpolation));
 }
 
 // If the source sample rate is NOT an integer-multiple of the destination rate
@@ -70,11 +75,14 @@ TEST(DataFormats, LinearSampler_16) {
 TEST(DataFormats, LinearSampler_24) {
   EXPECT_NE(nullptr, SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32, 2, 16000, 2,
                                  48000, Resampler::LinearInterpolation));
+  EXPECT_NE(nullptr, SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32, 1, 16000, 4,
+                                 48000, Resampler::LinearInterpolation));
 }
 
 // Create LinearSampler objects for incoming buffers of type float
 TEST(DataFormats, LinearSampler_Float) {
   EXPECT_NE(nullptr, SelectMixer(fuchsia::media::AudioSampleFormat::FLOAT, 2, 48000, 2, 44100));
+  EXPECT_NE(nullptr, SelectMixer(fuchsia::media::AudioSampleFormat::FLOAT, 2, 48000, 4, 44100));
 }
 
 // Create OutputProducer objects for outgoing buffers of type uint8
@@ -236,6 +244,7 @@ TEST(PassThru, MonoToStereo) {
 
   auto mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_16, 1, 48000, 2, 48000,
                            Resampler::SampleAndHold);
+
   DoMix(mixer.get(), source, accum, false, fbl::count_of(accum) / 2);
   EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
 }
@@ -247,6 +256,13 @@ TEST(PassThru, StereoToMono_Cancel) {
 
   auto mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_16, 2, 48000, 1, 48000,
                            Resampler::SampleAndHold);
+
+  DoMix(mixer.get(), source, accum, false, fbl::count_of(accum));
+  EXPECT_TRUE(CompareBufferToVal(accum, 0.0f, fbl::count_of(accum)));
+
+  std::memset(accum, 0, fbl::count_of(accum) * sizeof(float));
+  mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_16, 2, 48000, 1, 48000,
+                      Resampler::LinearInterpolation);
 
   DoMix(mixer.get(), source, accum, false, fbl::count_of(accum));
   EXPECT_TRUE(CompareBufferToVal(accum, 0.0f, fbl::count_of(accum)));
@@ -265,7 +281,138 @@ TEST(PassThru, StereoToMono_Round) {
 
   auto mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_16, 2, 48000, 1, 48000,
                            Resampler::SampleAndHold);
+
   DoMix(mixer.get(), source, accum, false, fbl::count_of(accum));
+  EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
+
+  // Now try with the other resampler
+  std::memset(accum, 0, fbl::count_of(accum) * sizeof(float));
+  mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_16, 2, 48000, 1, 48000,
+                      Resampler::LinearInterpolation);
+
+  DoMix(mixer.get(), source, accum, false, fbl::count_of(accum));
+  EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
+}
+
+// Validate that we correctly mix quad->mono, including rounding.
+TEST(PassThru, QuadToMono) {
+  // combinations: positive even, neg even, pos odd, neg odd, pos limit, neg limit, zero
+  int32_t source[] = {                  // clang-format off
+     0x100,         0,              0,              0,               // should become 0.25
+    -0x100,         0,              0,              0,               // should become -0.25
+     kMinInt24In32, kMinInt24In32,  kMinInt24In32,  kMinInt24In32,   // should become kMinInt32In32
+     kMaxInt24In32, kMaxInt24In32,  kMaxInt24In32,  kMaxInt24In32,   // should become kMaxInt24In32
+     kMaxInt24In32, kMaxInt24In32, -kMaxInt24In32, -kMaxInt24In32};  // should become 0
+                                        // clang-format on
+  // Will be overwritten
+  float accum[] = {-0x1234, 0x4321, -0x13579, 0xC0FF, -0xAAAA};
+  static_assert(fbl::count_of(source) == fbl::count_of(accum) * 4, "buf sizes must match");
+
+  // Equivalent to 0.25, -0.25, min val (largest neg), max val, 0
+  float expect[] = {0x0000004, -0x0000004, (kMinInt24In32 >> 4), (kMaxInt24In32) >> 4, 0};
+  static_assert(fbl::count_of(accum) == fbl::count_of(expect), "buf sizes must match");
+  NormalizeInt28ToPipelineBitwidth(expect, fbl::count_of(expect));
+
+  auto mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32, 4, 24000, 1, 24000,
+                           Resampler::SampleAndHold);
+
+  DoMix(mixer.get(), source, accum, false, fbl::count_of(accum));
+  EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
+
+  // Now try with the other resampler
+  std::memset(accum, 0, fbl::count_of(accum) * sizeof(float));
+  mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32, 4, 8000, 1, 8000,
+                      Resampler::LinearInterpolation);
+
+  DoMix(mixer.get(), source, accum, false, fbl::count_of(accum));
+  EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
+}
+
+// Validate that we correctly mix quad->stereo, including rounding. Note: 0|1|2|3 becomes 0+2 | 1+3
+TEST(PassThru, QuadToStereo_Round) {
+  // combinations: positive even, neg even, pos odd, neg odd, pos limit, neg limit, zero
+  int32_t source[] = {// clang-format off
+                       0x100,        -0x100,
+                       0,             0,
+                       kMinInt24In32, kMaxInt24In32,
+                       kMinInt24In32, kMaxInt24In32,
+                       kMaxInt24In32, 0,
+                      -kMaxInt24In32, 0 };
+                      // clang-format on
+
+  // Will be overwritten
+  float accum[] = {-0x1234, 0x4321, -0x13579, 0xC0FF, -0xAAAA, 0x555};
+  static_assert(fbl::count_of(source) == fbl::count_of(accum) * 2, "buf sizes must match");
+
+  // Equivalent to 0.5, -0.5, min val (largest neg), max val, 0
+  float expect[] = {0x0000008, -0x0000008, (kMinInt24In32 >> 4), (kMaxInt24In32) >> 4, 0, 0};
+  static_assert(fbl::count_of(accum) == fbl::count_of(expect), "buf sizes must match");
+  NormalizeInt28ToPipelineBitwidth(expect, fbl::count_of(expect));
+
+  auto mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32, 4, 22050, 2, 22050,
+                           Resampler::SampleAndHold);
+
+  DoMix(mixer.get(), source, accum, false, fbl::count_of(accum) / 2);  // dest frames have 2 samples
+  EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
+
+  // Now try with the other resampler
+  std::memset(accum, 0, fbl::count_of(accum) * sizeof(float));
+  mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32, 4, 44100, 2, 44100,
+                      Resampler::LinearInterpolation);
+
+  DoMix(mixer.get(), source, accum, false, fbl::count_of(accum) / 2);  // dest frames have 2 samples
+  EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
+}
+
+// Are all valid data values passed correctly to 16-bit outputs
+TEST(PassThru, MonoToQuad) {
+  int16_t source[] = {-0x8000, -0x3FFF, -1, 0, 1, 0x7FFF};
+  float accum[6 * 4];
+  float expect[] = {-0x08000000, -0x08000000, -0x08000000, -0x08000000, -0x03FFF000, -0x03FFF000,
+                    -0x03FFF000, -0x03FFF000, -0x0001000,  -0x00001000, -0x0001000,  -0x00001000,
+                    0,           0,           0,           0,           0x0001000,   0x00001000,
+                    0x0001000,   0x00001000,  0x07FFF000,  0x07FFF000,  0x07FFF000,  0x07FFF000};
+
+  static_assert(fbl::count_of(source) * 4 == fbl::count_of(accum), "buf sizes must match");
+  static_assert(fbl::count_of(accum) == fbl::count_of(expect), "buf sizes must match");
+  NormalizeInt28ToPipelineBitwidth(expect, fbl::count_of(expect));
+
+  auto mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_16, 1, 48000, 4, 48000,
+                           Resampler::LinearInterpolation);
+
+  DoMix(mixer.get(), source, accum, false, fbl::count_of(accum) / 4);
+  EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
+
+  std::memset(accum, 0, fbl::count_of(accum) * sizeof(float));
+  mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_16, 1, 48000, 4, 48000,
+                      Resampler::SampleAndHold);
+
+  DoMix(mixer.get(), source, accum, false, fbl::count_of(accum) / 4);
+  EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
+}
+
+// Are all valid data values passed correctly to 16-bit outputs
+TEST(PassThru, StereoToQuad) {
+  int32_t source[] = {kMinInt24In32, -0x3FFFFF00, -0x100, 0, 0x100, kMaxInt24In32};
+  float accum[3 * 4];
+  float expect[] = {-0x08000000, -0x03FFFFF0, -0x08000000, -0x03FFFFF0, -0x0000010, 0,
+                    -0x00000010, 0,           0x0000010,   0x07FFFFF0,  0x00000010, 0x07FFFFF0};
+
+  static_assert((fbl::count_of(source) / 2) * 4 == fbl::count_of(accum), "buf sizes must match");
+  static_assert(fbl::count_of(accum) == fbl::count_of(expect), "buf sizes must match");
+  NormalizeInt28ToPipelineBitwidth(expect, fbl::count_of(expect));
+
+  auto mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32, 2, 48000, 4, 48000,
+                           Resampler::SampleAndHold);
+
+  DoMix(mixer.get(), source, accum, false, fbl::count_of(accum) / 4);
+  EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
+
+  std::memset(accum, 0, fbl::count_of(accum) * sizeof(float));
+  mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_24_IN_32, 2, 48000, 4, 48000,
+                      Resampler::LinearInterpolation);
+
+  DoMix(mixer.get(), source, accum, false, fbl::count_of(accum) / 4);
   EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
 }
 
@@ -280,6 +427,7 @@ TEST(PassThru, Accumulate) {
 
   auto mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_16, 2, 48000, 2, 48000,
                            Resampler::SampleAndHold);
+
   DoMix(mixer.get(), source, accum, true, fbl::count_of(accum) / 2);
   EXPECT_TRUE(CompareBuffers(accum, expect, fbl::count_of(accum)));
 
@@ -287,6 +435,7 @@ TEST(PassThru, Accumulate) {
   NormalizeInt28ToPipelineBitwidth(expect2, fbl::count_of(expect2));
   mixer = SelectMixer(fuchsia::media::AudioSampleFormat::SIGNED_16, 2, 48000, 2, 48000,
                       Resampler::SampleAndHold);
+
   DoMix(mixer.get(), source, accum, false, fbl::count_of(accum) / 2);
   EXPECT_TRUE(CompareBuffers(accum, expect2, fbl::count_of(accum)));
 }

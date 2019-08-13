@@ -15,7 +15,7 @@ namespace archive {
 
 class ArchiveReader {
  public:
-  explicit ArchiveReader(fxl::UniqueFD fd);
+  explicit ArchiveReader(fbl::unique_fd fd);
   ~ArchiveReader();
   ArchiveReader(const ArchiveReader& other) = delete;
 
@@ -39,15 +39,12 @@ class ArchiveReader {
   bool ExtractFile(fxl::StringView archive_path, const char* output_path) const;
   bool CopyFile(fxl::StringView archive_path, int dst_fd) const;
 
-  bool GetDirectoryEntryByIndex(uint64_t index,
-                                DirectoryTableEntry* entry) const;
-  bool GetDirectoryEntryByPath(fxl::StringView archive_path,
-                               DirectoryTableEntry* entry) const;
+  bool GetDirectoryEntryByIndex(uint64_t index, DirectoryTableEntry* entry) const;
+  bool GetDirectoryEntryByPath(fxl::StringView archive_path, DirectoryTableEntry* entry) const;
 
-  bool GetDirectoryIndexByPath(fxl::StringView archive_path,
-                               uint64_t* index) const;
+  bool GetDirectoryIndexByPath(fxl::StringView archive_path, uint64_t* index) const;
 
-  fxl::UniqueFD TakeFileDescriptor();
+  fbl::unique_fd TakeFileDescriptor();
 
   fxl::StringView GetPathView(const DirectoryTableEntry& entry) const;
 
@@ -57,7 +54,7 @@ class ArchiveReader {
 
   const IndexEntry* GetIndexEntry(uint64_t type) const;
 
-  fxl::UniqueFD fd_;
+  fbl::unique_fd fd_;
   std::vector<IndexEntry> index_;
   std::vector<DirectoryTableEntry> directory_table_;
   std::vector<char> path_data_;

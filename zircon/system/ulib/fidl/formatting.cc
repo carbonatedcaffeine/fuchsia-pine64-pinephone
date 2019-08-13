@@ -6,6 +6,7 @@
 #include <lib/fidl/coding.h>
 #include <lib/fidl/internal.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 #include <zircon/assert.h>
 #include <zircon/compiler.h>
@@ -14,8 +15,7 @@ namespace {
 
 class StringBuilder {
  public:
-  StringBuilder(char* buffer, size_t capacity)
-      : buffer_(buffer), capacity_(capacity) {}
+  StringBuilder(char* buffer, size_t capacity) : buffer_(buffer), capacity_(capacity) {}
 
   size_t length() const { return length_; }
 
@@ -126,17 +126,8 @@ void FormatTypeName(StringBuilder* str, const fidl_type_t* type) {
           case fidl::kFidlHandleSubtypeHandle:
             str->Append("handle");
             break;
-          case fidl::kFidlHandleSubtypeException:
-            str->Append("exception");
-            break;
-          case fidl::kFidlHandleSubtypeProcess:
-            str->Append("process");
-            break;
-          case fidl::kFidlHandleSubtypeThread:
-            str->Append("thread");
-            break;
-          case fidl::kFidlHandleSubtypeVmo:
-            str->Append("vmo");
+          case fidl::kFidlHandleSubtypeBti:
+            str->Append("bti");
             break;
           case fidl::kFidlHandleSubtypeChannel:
             str->Append("channel");
@@ -144,29 +135,11 @@ void FormatTypeName(StringBuilder* str, const fidl_type_t* type) {
           case fidl::kFidlHandleSubtypeEvent:
             str->Append("event");
             break;
-          case fidl::kFidlHandleSubtypePort:
-            str->Append("port");
-            break;
-          case fidl::kFidlHandleSubtypeInterrupt:
-            str->Append("interrupt");
-            break;
-          case fidl::kFidlHandleSubtypeLog:
-            str->Append("log");
-            break;
-          case fidl::kFidlHandleSubtypeSocket:
-            str->Append("socket");
-            break;
-          case fidl::kFidlHandleSubtypeResource:
-            str->Append("resource");
-            break;
           case fidl::kFidlHandleSubtypeEventpair:
             str->Append("eventpair");
             break;
-          case fidl::kFidlHandleSubtypeJob:
-            str->Append("job");
-            break;
-          case fidl::kFidlHandleSubtypeVmar:
-            str->Append("vmar");
+          case fidl::kFidlHandleSubtypeException:
+            str->Append("exception");
             break;
           case fidl::kFidlHandleSubtypeFifo:
             str->Append("fifo");
@@ -174,11 +147,60 @@ void FormatTypeName(StringBuilder* str, const fidl_type_t* type) {
           case fidl::kFidlHandleSubtypeGuest:
             str->Append("guest");
             break;
+          case fidl::kFidlHandleSubtypeInterrupt:
+            str->Append("interrupt");
+            break;
+          case fidl::kFidlHandleSubtypeIommu:
+            str->Append("iommu");
+            break;
+          case fidl::kFidlHandleSubtypeJob:
+            str->Append("job");
+            break;
+          case fidl::kFidlHandleSubtypeLog:
+            str->Append("log");
+            break;
+          case fidl::kFidlHandleSubtypePager:
+            str->Append("pager");
+            break;
+          case fidl::kFidlHandleSubtypePciDevice:
+            str->Append("pcidevice");
+            break;
+          case fidl::kFidlHandleSubtypePmt:
+            str->Append("pmt");
+            break;
+          case fidl::kFidlHandleSubtypePort:
+            str->Append("port");
+            break;
+          case fidl::kFidlHandleSubtypeProcess:
+            str->Append("process");
+            break;
+          case fidl::kFidlHandleSubtypeProfile:
+            str->Append("profile");
+            break;
+          case fidl::kFidlHandleSubtypeResource:
+            str->Append("resource");
+            break;
+          case fidl::kFidlHandleSubtypeSocket:
+            str->Append("socket");
+            break;
+          case fidl::kFidlHandleSubtypeSuspendToken:
+            str->Append("suspendtoken");
+            break;
+          case fidl::kFidlHandleSubtypeThread:
+            str->Append("thread");
+            break;
           case fidl::kFidlHandleSubtypeTimer:
             str->Append("timer");
             break;
-          // TODO(pascallouis): Add support for iomap, pci, and hypervisor
-          // when they are supported in FIDL.
+          case fidl::kFidlHandleSubtypeVcpu:
+            str->Append("vcpu");
+            break;
+          case fidl::kFidlHandleSubtypeVmar:
+            str->Append("vmar");
+            break;
+          case fidl::kFidlHandleSubtypeVmo:
+            str->Append("vmo");
+            break;
           default:
             str->AppendPrintf("%" PRIu32, type->coded_handle.handle_subtype);
             break;

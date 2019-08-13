@@ -8,9 +8,9 @@
 
 #include "src/ui/lib/escher/escher.h"
 #include "src/ui/lib/escher/geometry/bounding_box.h"
-#include "src/ui/lib/escher/geometry/indexed_triangle_mesh_clip.h"
-#include "src/ui/lib/escher/geometry/indexed_triangle_mesh_upload.h"
-#include "src/ui/lib/escher/geometry/tessellation.h"
+#include "src/ui/lib/escher/mesh/indexed_triangle_mesh_clip.h"
+#include "src/ui/lib/escher/mesh/indexed_triangle_mesh_upload.h"
+#include "src/ui/lib/escher/mesh/tessellation.h"
 #include "src/ui/lib/escher/renderer/batch_gpu_uploader.h"
 #include "src/ui/lib/escher/shape/mesh_spec.h"
 #include "src/ui/lib/escher/shape/rounded_rect.h"
@@ -172,6 +172,24 @@ PaperShapeCacheEntry ProcessTriangleMesh2d(IndexedTriangleMesh2d<vec2> mesh,
   }
 }
 
+PaperShapeCacheEntry ProcessTriangleMesh3d(IndexedTriangleMesh3d<vec2> mesh,
+                                           const MeshSpec& mesh_spec, const plane3* clip_planes,
+                                           size_t num_clip_planes, const BoundingBox& bounding_box,
+                                           PaperRendererShadowType shadow_type, Escher* escher,
+                                           BatchGpuUploader* uploader) {
+  TRACE_DURATION("gfx", "PaperShapeCache::ProcessTriangleMesh3d");
+  FXL_DCHECK((mesh_spec == MeshSpec{{MeshAttribute::kPosition3D, MeshAttribute::kUV}}));
+
+  IndexedTriangleMesh3d<vec2> tri_mesh;
+  std::tie(tri_mesh, std::ignore) =
+      IndexedTriangleMeshClip(std::move(mesh), clip_planes, num_clip_planes);
+
+  return PaperShapeCacheEntry{
+      .mesh = IndexedTriangleMeshUpload(escher, uploader, mesh_spec, bounding_box, tri_mesh),
+      .num_indices = tri_mesh.index_count(),
+      .num_shadow_volume_indices = 0,
+  };
+}
 }  // namespace
 
 PaperShapeCache::PaperShapeCache(EscherWeakPtr escher, const PaperRendererConfig& config)
@@ -331,6 +349,28 @@ const PaperShapeCacheEntry& PaperShapeCache::GetRectMesh(vec2 min, vec2 max,
         mesh.attributes1 = std::vector<vec2>{vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1)};
 
         return ProcessTriangleMesh2d(std::move(mesh), mesh_spec, unculled_clip_planes,
+                                     num_unculled_clip_planes, bounding_box, shadow_type_,
+                                     escher_.get(), uploader_);
+      });
+}
+
+const PaperShapeCacheEntry& PaperShapeCache::GetBoxMesh(const plane3* clip_planes,
+                                                        size_t num_clip_planes) {
+  Hash box_hash;
+  {
+    Hasher h;
+    h.u32(EnumCast(ShapeType::kBox));
+    box_hash = h.value();
+  }
+
+  const BoundingBox bounding_box(vec3(0, 0, 0), vec3(1, 1, 1));
+  return GetShapeMesh(
+      box_hash, bounding_box, nullptr, 0,
+      [this, &bounding_box](const plane3* unculled_clip_planes, size_t num_unculled_clip_planes) {
+        // No mesh was found, so we need to generate one.
+        MeshSpec mesh_spec{{MeshAttribute::kPosition3D, MeshAttribute::kUV}};
+        IndexedTriangleMesh3d<vec2> mesh = NewCubeIndexedTriangleMesh(mesh_spec);
+        return ProcessTriangleMesh3d(std::move(mesh), mesh_spec, unculled_clip_planes,
                                      num_unculled_clip_planes, bounding_box, shadow_type_,
                                      escher_.get(), uploader_);
       });

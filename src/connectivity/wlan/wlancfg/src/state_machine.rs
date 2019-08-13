@@ -63,22 +63,20 @@ mod tests {
         let (sender, receiver) = mpsc::unbounded();
         let mut state_machine = sum_state(0, receiver).into_state_machine();
 
-        let r = exec.run_until_stalled(&mut state_machine);
-        assert_eq!(Poll::Pending, r);
+        assert_eq!(Poll::Pending, exec.run_until_stalled(&mut state_machine));
 
         sender.unbounded_send(2).unwrap();
         sender.unbounded_send(3).unwrap();
         mem::drop(sender);
 
-        let r = exec.run_until_stalled(&mut state_machine);
-        assert_eq!(Poll::Ready(Err(5)), r);
+        assert_eq!(Poll::Ready(Err(5)), exec.run_until_stalled(&mut state_machine));
     }
 
     async fn sum_state(
         current: u32,
         stream: mpsc::UnboundedReceiver<u32>,
     ) -> Result<State<u32>, u32> {
-        let (number, stream) = await!(stream.into_future());
+        let (number, stream) = stream.into_future().await;
         match number {
             Some(number) => Ok(make_sum_state(current + number, stream)),
             None => Err(current),

@@ -3,9 +3,14 @@
 // found in the LICENSE file.
 
 #include <assert.h>
+#include <lib/zx/bti.h>
+#include <lib/zx/iommu.h>
 #include <lib/zx/vmo.h>
 #include <limits.h>
+#include <zircon/syscalls/iommu.h>
 #include <zxtest/zxtest.h>
+
+extern "C" __WEAK zx_handle_t get_root_resource(void);
 
 namespace {
 
@@ -111,8 +116,7 @@ TEST(VmoSliceTestCase, NonSlice) {
             vmo.create_child(ZX_VMO_CHILD_SLICE, PAGE_SIZE, PAGE_SIZE * 2, &slice_vmo));
   EXPECT_EQ(ZX_ERR_INVALID_ARGS,
             vmo.create_child(ZX_VMO_CHILD_SLICE, PAGE_SIZE * 2, PAGE_SIZE, &slice_vmo));
-  EXPECT_EQ(ZX_ERR_OUT_OF_RANGE,
-            vmo.create_child(ZX_VMO_CHILD_SLICE, 0, UINT64_MAX, &slice_vmo));
+  EXPECT_EQ(ZX_ERR_OUT_OF_RANGE, vmo.create_child(ZX_VMO_CHILD_SLICE, 0, UINT64_MAX, &slice_vmo));
   const uint64_t nearly_int_max = UINT64_MAX - PAGE_SIZE + 1;
   EXPECT_EQ(ZX_ERR_OUT_OF_RANGE,
             vmo.create_child(ZX_VMO_CHILD_SLICE, 0, nearly_int_max, &slice_vmo));
@@ -122,7 +126,6 @@ TEST(VmoSliceTestCase, NonSlice) {
             vmo.create_child(ZX_VMO_CHILD_SLICE, nearly_int_max, nearly_int_max, &slice_vmo));
   EXPECT_EQ(ZX_ERR_OUT_OF_RANGE,
             vmo.create_child(ZX_VMO_CHILD_SLICE, nearly_int_max, UINT64_MAX, &slice_vmo));
-
 }
 
 TEST(VmoSliceTestCase, NonResizable) {
@@ -199,6 +202,110 @@ TEST(VmoSliceTestCase, ZeroSized) {
   EXPECT_EQ(slice_vmo2.read(&val, 0, 1), ZX_ERR_OUT_OF_RANGE);
   EXPECT_EQ(slice_vmo1.write(&val, 0, 1), ZX_ERR_OUT_OF_RANGE);
   EXPECT_EQ(slice_vmo2.write(&val, 0, 1), ZX_ERR_OUT_OF_RANGE);
+}
+
+TEST(VmoSliceTestCase, ChildSliceOfContiguousParentIsContiguous) {
+  if (!get_root_resource) {
+    printf("Root resource not available, skipping\n");
+    return;
+  }
+  const size_t size = PAGE_SIZE;
+
+  zx::vmo parent_contig_vmo;
+  zx::unowned_resource root_res(get_root_resource());
+
+  zx::iommu iommu;
+  zx::bti bti;
+
+  zx_iommu_desc_dummy_t desc;
+  EXPECT_OK(zx::iommu::create(*root_res, ZX_IOMMU_TYPE_DUMMY, &desc, sizeof(desc), &iommu));
+
+  EXPECT_OK(zx::bti::create(iommu, 0, 0xdeadbeef, &bti));
+
+  EXPECT_OK(zx::vmo::create_contiguous(bti, size, 0, &parent_contig_vmo));
+
+  // Create child slice.
+  zx::vmo child;
+  ASSERT_OK(parent_contig_vmo.create_child(ZX_VMO_CHILD_SLICE, 0, PAGE_SIZE, &child));
+
+  zx_info_vmo_t info;
+  ASSERT_OK(child.get_info(ZX_INFO_VMO, &info, sizeof(info), nullptr, nullptr));
+  EXPECT_EQ(info.flags & ZX_INFO_VMO_CONTIGUOUS, ZX_INFO_VMO_CONTIGUOUS);
+}
+
+TEST(VmoSliceTestCase, ZeroChildren) {
+  // Create parent VMO.
+  zx::vmo vmo;
+  ASSERT_OK(zx::vmo::create(PAGE_SIZE, 0, &vmo));
+
+  // Currently the parent has no children, so ZX_VMO_ZERO_CHILDREN should be set.
+  zx_signals_t pending;
+  ASSERT_OK(vmo.wait_one(ZX_VMO_ZERO_CHILDREN, zx::time::infinite(), &pending));
+  ASSERT_EQ(pending & ZX_VMO_ZERO_CHILDREN, ZX_VMO_ZERO_CHILDREN);
+
+  // Create child slice.
+  zx::vmo child;
+  ASSERT_OK(vmo.create_child(ZX_VMO_CHILD_SLICE, 0, PAGE_SIZE, &child));
+
+  // Currently the parent has one child, so ZX_VMO_ZERO_CHILDREN should be
+  // cleared.  Since child VMO creation is synchronous, this signal must already
+  // be clear.
+  ASSERT_EQ(ZX_ERR_TIMED_OUT, vmo.wait_one(ZX_VMO_ZERO_CHILDREN, zx::time::infinite_past(), &pending));
+  ASSERT_EQ(pending & ZX_VMO_ZERO_CHILDREN, 0);
+
+  // Close child slice.
+  child.reset();
+
+  // Closing the child doesn't strictly guarantee that ZX_VMO_ZERO_CHILDREN is set
+  // immediately, but it should be set very soon if not already.
+  ASSERT_OK(vmo.wait_one(ZX_VMO_ZERO_CHILDREN, zx::time::infinite(), &pending));
+  ASSERT_EQ(pending & ZX_VMO_ZERO_CHILDREN, ZX_VMO_ZERO_CHILDREN);
+}
+
+TEST(VmoSliceTestCase, ZeroChildrenGrandchildClosedLast) {
+  // Create parent VMO.
+  zx::vmo vmo;
+  ASSERT_OK(zx::vmo::create(PAGE_SIZE, 0, &vmo));
+
+  // Currently the parent has no children, so ZX_VMO_ZERO_CHILDREN should be set.
+  zx_signals_t pending;
+  ASSERT_OK(vmo.wait_one(ZX_VMO_ZERO_CHILDREN, zx::time::infinite(), &pending));
+  ASSERT_EQ(pending & ZX_VMO_ZERO_CHILDREN, ZX_VMO_ZERO_CHILDREN);
+
+  // Create child slice.
+  zx::vmo child;
+  ASSERT_OK(vmo.create_child(ZX_VMO_CHILD_SLICE, 0, PAGE_SIZE, &child));
+
+  // Currently the parent has one child, so ZX_VMO_ZERO_CHILDREN should be
+  // cleared.  Since child VMO creation is synchronous, this signal must already
+  // be clear.
+  ASSERT_EQ(ZX_ERR_TIMED_OUT, vmo.wait_one(ZX_VMO_ZERO_CHILDREN, zx::time::infinite_past(), &pending));
+  ASSERT_EQ(pending & ZX_VMO_ZERO_CHILDREN, 0);
+
+  // Create grandchild slice.
+  zx::vmo grandchild;
+  ASSERT_OK(child.create_child(ZX_VMO_CHILD_SLICE, 0, PAGE_SIZE, &grandchild));
+
+  // Currently the parent has one child and one grandchild, so ZX_VMO_ZERO_CHILDREN should be
+  // cleared.
+  ASSERT_EQ(ZX_ERR_TIMED_OUT, vmo.wait_one(ZX_VMO_ZERO_CHILDREN, zx::time::infinite_past(), &pending));
+  ASSERT_EQ(pending & ZX_VMO_ZERO_CHILDREN, 0);
+
+  // Close child slice.  Leave grandchild alone.
+  child.reset();
+
+  // Currently the parent has one grandchild, so ZX_VMO_ZERO_CHILDREN should be
+  // cleared.
+  ASSERT_EQ(ZX_ERR_TIMED_OUT, vmo.wait_one(ZX_VMO_ZERO_CHILDREN, zx::time::infinite_past(), &pending));
+  ASSERT_EQ(pending & ZX_VMO_ZERO_CHILDREN, 0);
+
+  // Close grandchild slice.
+  grandchild.reset();
+
+  // Closing the grandchild (last of all direct or indirect children) doesn't strictly guarantee
+  // that ZX_VMO_ZERO_CHILDREN is set immediately, but it should be set very soon if not already.
+  ASSERT_OK(vmo.wait_one(ZX_VMO_ZERO_CHILDREN, zx::time::infinite(), &pending));
+  ASSERT_EQ(pending & ZX_VMO_ZERO_CHILDREN, ZX_VMO_ZERO_CHILDREN);
 }
 
 }  // namespace

@@ -24,8 +24,7 @@ class ResponsePrinter {
  public:
   void Run(async::Loop* loop, http::URLResponse response) const {
     if (response.error) {
-      printf("Got error: %d (%s)\n", response.error->code,
-             response.error->description->c_str());
+      printf("Got error: %d (%s)\n", response.error->code, response.error->description->c_str());
     } else {
       PrintResponse(response);
       PrintResponseBody(std::move(response.body->stream()));
@@ -36,7 +35,7 @@ class ResponsePrinter {
 
   void PrintResponse(const http::URLResponse& response) const {
     printf(">>> Headers <<< \n");
-    printf("  %s\n", response.status_line.get().c_str());
+    printf("  %s\n", response.status_line.value_or("").c_str());
     if (response.headers) {
       for (size_t i = 0; i < response.headers->size(); ++i)
         printf("  %s=%s\n", response.headers->at(i).name.c_str(),
@@ -54,8 +53,7 @@ class ResponsePrinter {
       zx_status_t result = body.read(0u, buf, num_bytes, &num_bytes);
 
       if (result == ZX_ERR_SHOULD_WAIT) {
-        body.wait_one(ZX_SOCKET_READABLE | ZX_SOCKET_PEER_CLOSED,
-                      zx::time::infinite(), nullptr);
+        body.wait_one(ZX_SOCKET_READABLE | ZX_SOCKET_PEER_CLOSED, zx::time::infinite(), nullptr);
       } else if (result == ZX_OK) {
         if (fwrite(buf, num_bytes, 1, stdout) != 1) {
           printf("\nUnexpected error writing to file\n");
@@ -72,8 +70,7 @@ class ResponsePrinter {
 
 class PostFileApp {
  public:
-  PostFileApp(async::Loop* loop)
-      : loop_(loop), context_(sys::ComponentContext::Create()) {
+  PostFileApp(async::Loop* loop) : loop_(loop), context_(sys::ComponentContext::Create()) {
     http_service_ = context_->svc()->Connect<http::HttpService>();
   }
 
@@ -88,7 +85,7 @@ class PostFileApp {
 
     std::string boundary = "XXXX";  // TODO: make an option to change this
 
-    fxl::UniqueFD fd(open(upload_file.c_str(), O_RDONLY));
+    fbl::unique_fd fd(open(upload_file.c_str(), O_RDONLY));
     if (!fd.is_valid()) {
       printf("cannot open %s\n", upload_file.c_str());
       return false;
@@ -102,7 +99,7 @@ class PostFileApp {
     http::HttpHeader header;
     header.name = "Content-Type";
     header.value = "multipart/form-data; boundary=" + boundary;
-    request.headers.push_back(std::move(header));
+    request.headers.emplace({std::move(header)});
 
     zx::socket consumer;
     zx::socket producer;
@@ -117,7 +114,7 @@ class PostFileApp {
 
     async_dispatcher_t* dispatcher = async_get_default_dispatcher();
     fsl::CopyFromFileDescriptor(std::move(fd), std::move(producer), dispatcher,
-                                [this](bool result, fxl::UniqueFD fd) {
+                                [this](bool result, fbl::unique_fd fd) {
                                   if (!result) {
                                     printf("file read error\n");
                                     loop_->Quit();

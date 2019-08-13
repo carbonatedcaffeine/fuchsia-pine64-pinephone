@@ -283,6 +283,13 @@ mod cpp {
     );
 
     codegen_test!(
+        mock_pass_callback,
+        CppBackend,
+        ["../zx.banjo", "banjo/pass-callback.test.banjo"],
+        "cpp/mock-pass-callback.h",
+        CppSubtype::Mock
+    );
+    codegen_test!(
         mock_protocol_array,
         CppBackend,
         ["../zx.banjo", "banjo/protocol-array.test.banjo"],
@@ -441,4 +448,45 @@ mod syzkaller {
         "syzkaller/syzkaller-protocol-multiple-returns.txt"
     );
 
+    codegen_test!(
+        syzkaller_protocol_resource,
+        SyzkallerBackend,
+        ["../zx.banjo", "banjo/syzkaller-protocol-resource.test.banjo"],
+        "syzkaller/syzkaller-protocol-resource.txt"
+    );
+
+    codegen_test!(
+        syzkaller_struct,
+        SyzkallerBackend,
+        ["../zx.banjo", "banjo/syzkaller-struct.test.banjo"],
+        "syzkaller/syzkaller-struct.txt"
+    );
+
+    codegen_test!(
+        syzkaller_union,
+        SyzkallerBackend,
+        ["../zx.banjo", "banjo/syzkaller-union.test.banjo"],
+        "syzkaller/syzkaller-union.txt"
+    );
+
+    codegen_test!(
+        syzkaller_flag,
+        SyzkallerBackend,
+        ["../zx.banjo", "banjo/syzkaller-flag.test.banjo"],
+        "syzkaller/syzkaller-flag.txt"
+    );
+
+    codegen_test!(
+        syzkaller_syscalls,
+        SyzkallerBackend,
+        ["../zx.banjo", "banjo/syzkaller-syscalls.test.banjo"],
+        "syzkaller/syzkaller-syscalls.txt"
+    );
+
+    codegen_test!(
+        syzkaller_protocol_specialized_syscalls,
+        SyzkallerBackend,
+        ["../zx.banjo", "banjo/syzkaller-protocol-specialized-syscalls.test.banjo"],
+        "syzkaller/syzkaller-protocol-specialized-syscalls.txt"
+    );
 }

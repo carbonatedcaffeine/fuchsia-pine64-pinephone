@@ -7,10 +7,12 @@
             "isolated-persistent-storage"
         ],
         "services": [
+            "fuchsia.device.display.Manager",
             "fuchsia.logger.LogSink",
             "fuchsia.net.Connectivity",
             "fuchsia.netstack.Netstack",
-            "fuchsia.sys.Environment"
+            "fuchsia.sys.Environment",
+            "fuchsia.timezone.Timezone"
         ]
     }
 }

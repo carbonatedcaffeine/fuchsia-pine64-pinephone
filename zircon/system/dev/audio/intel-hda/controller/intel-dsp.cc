@@ -4,12 +4,17 @@
 
 #include "intel-dsp.h"
 
-#include <fbl/alloc_checker.h>
-#include <fbl/auto_call.h>
-#include <fbl/auto_lock.h>
 #include <string.h>
+#include <zircon/errors.h>
 
 #include <utility>
+
+#include <fbl/alloc_checker.h>
+#include <fbl/array.h>
+#include <fbl/auto_call.h>
+#include <fbl/auto_lock.h>
+#include <fbl/string_printf.h>
+#include <intel-hda/utils/nhlt.h>
 
 #include "intel-dsp-code-loader.h"
 #include "intel-hda-controller.h"
@@ -68,33 +73,72 @@ IntelDsp::~IntelDsp() {
   }
 }
 
-zx_status_t IntelDsp::Init(zx_device_t* dsp_dev) {
-  zx_status_t res = Bind(dsp_dev, "intel-sst-dsp");
+Status IntelDsp::ParseNhlt() {
+  // Get NHLT size.
+  const uint32_t signature = *reinterpret_cast<const uint32_t*>(ACPI_NHLT_SIGNATURE);
+  size_t size;
+  zx_status_t res = device_get_metadata_size(codec_device(), signature, &size);
   if (res != ZX_OK) {
-    return res;
+    return Status(res, fbl::StringPrintf("Failed to fetch NHLT size."));
   }
 
-  res = SetupDspDevice();
+  // Allocate buffer.
+  fbl::AllocChecker ac;
+  auto* buff = new (&ac) uint8_t[size];
+  if (!ac.check()) {
+    return Status(ZX_ERR_NO_MEMORY);
+  }
+  fbl::Array<uint8_t> buffer = fbl::Array<uint8_t>(buff, size);
+
+  // Fetch actual NHLT data.
+  size_t actual_size;
+  res = device_get_metadata(codec_device(), signature, buffer.begin(), buffer.size(), &actual_size);
   if (res != ZX_OK) {
-    return res;
+    return Status(res, "Failed to fetch NHLT");
+  }
+  if (actual_size != buffer.size()) {
+    return Status(ZX_ERR_INTERNAL, "NHLT size different than reported.");
   }
 
-  res = ParseNhlt();
-  if (res != ZX_OK) {
-    return res;
+  // Parse NHLT.
+  StatusOr<std::unique_ptr<Nhlt>> nhlt =
+      Nhlt::FromBuffer(fbl::Span<const uint8_t>(buffer.begin(), buffer.end()));
+  if (!nhlt.ok()) {
+    return nhlt.status();
   }
+
+  nhlt_ = nhlt.ConsumeValueOrDie();
+  return OkStatus();
+}
+
+Status IntelDsp::Init(zx_device_t* dsp_dev) {
+  Status result = Bind(dsp_dev, "intel-sst-dsp");
+  if (!result.ok()) {
+    return PrependMessage("Error binding DSP device", result);
+  }
+
+  result = SetupDspDevice();
+  if (!result.ok()) {
+    return PrependMessage("Error setting up DSP", result);
+  }
+
+  result = ParseNhlt();
+  if (!result.ok()) {
+    return PrependMessage("Error parsing NHLT", result);
+  }
+  LOG(TRACE, "parse success, found %zu formats\n", nhlt_->i2s_configs().size());
 
   // Perform hardware initialization in a thread.
   state_ = State::INITIALIZING;
   int c11_res = thrd_create(
       &init_thread_, [](void* ctx) { return static_cast<IntelDsp*>(ctx)->InitThread(); }, this);
   if (c11_res < 0) {
-    LOG(ERROR, "Failed to create init thread (res = %d)\n", c11_res);
     state_ = State::ERROR;
-    return ZX_ERR_INTERNAL;
+    return Status(ZX_ERR_INTERNAL,
+                  fbl::StringPrintf("Failed to create init thread (res = %d)\n", c11_res));
   }
 
-  return ZX_OK;
+  return OkStatus();
 }
 
 adsp_registers_t* IntelDsp::regs() const {
@@ -352,7 +396,7 @@ zx_status_t IntelDsp::ProcessSetStreamFmt(dispatcher::Channel* channel,
   return res;
 }
 
-zx_status_t IntelDsp::SetupDspDevice() {
+Status IntelDsp::SetupDspDevice() {
   const zx_pcie_device_info_t& hda_dev_info = controller_->dev_info();
   snprintf(log_prefix_, sizeof(log_prefix_), "IHDA DSP %02x:%02x.%01x", hda_dev_info.bus_id,
            hda_dev_info.dev_id, hda_dev_info.func_id);
@@ -364,13 +408,13 @@ zx_status_t IntelDsp::SetupDspDevice() {
   zx_status_t res = GetMmio(bar_vmo.reset_and_get_address(), &bar_size);
   if (res != ZX_OK) {
     LOG(ERROR, "Failed to fetch DSP register VMO (err %u)\n", res);
-    return res;
+    return Status(res);
   }
 
   if (bar_size != sizeof(adsp_registers_t)) {
     LOG(ERROR, "Bad register window size (expected 0x%zx got 0x%zx)\n", sizeof(adsp_registers_t),
         bar_size);
-    return res;
+    return Status(res);
   }
 
   // Since this VMO provides access to our registers, make sure to set the
@@ -378,7 +422,7 @@ zx_status_t IntelDsp::SetupDspDevice() {
   res = bar_vmo.set_cache_policy(ZX_CACHE_POLICY_UNCACHED_DEVICE);
   if (res != ZX_OK) {
     LOG(ERROR, "Error attempting to set cache policy for PCI registers (res %d)\n", res);
-    return res;
+    return Status(res);
   }
 
   // Map the VMO in, make sure to put it in the same VMAR as the rest of our
@@ -387,7 +431,7 @@ zx_status_t IntelDsp::SetupDspDevice() {
   res = mapped_regs_.Map(bar_vmo, 0, bar_size, CPU_MAP_FLAGS);
   if (res != ZX_OK) {
     LOG(ERROR, "Error attempting to map registers (res %d)\n", res);
-    return res;
+    return Status(res);
   }
 
   // Initialize mailboxes
@@ -399,107 +443,8 @@ zx_status_t IntelDsp::SetupDspDevice() {
 
   // Enable HDA interrupt. Interrupts are still masked at the DSP level.
   IrqEnable();
-  return ZX_OK;
-}
 
-zx_status_t IntelDsp::ParseNhlt() {
-  size_t size = 0;
-  zx_status_t res =
-      device_get_metadata(codec_device(), *reinterpret_cast<const uint32_t*>(ACPI_NHLT_SIGNATURE),
-                          nhlt_buf_, sizeof(nhlt_buf_), &size);
-  if (res != ZX_OK) {
-    LOG(ERROR, "Failed to fetch NHLT (res %d)\n", res);
-    return res;
-  }
-
-  nhlt_table_t* nhlt = reinterpret_cast<nhlt_table_t*>(nhlt_buf_);
-
-  // Sanity check
-  if (size < sizeof(*nhlt)) {
-    LOG(ERROR, "NHLT too small (%zu bytes)\n", size);
-    return ZX_ERR_INTERNAL;
-  }
-
-  static_assert(sizeof(nhlt->header.signature) >= ACPI_NAME_SIZE, "");
-  static_assert(sizeof(ACPI_NHLT_SIGNATURE) >= ACPI_NAME_SIZE, "");
-
-  if (memcmp(nhlt->header.signature, ACPI_NHLT_SIGNATURE, ACPI_NAME_SIZE) != 0) {
-    LOG(ERROR, "Invalid NHLT signature\n");
-    return ZX_ERR_INTERNAL;
-  }
-
-  uint8_t count = nhlt->endpoint_desc_count;
-  if (count > I2S_CONFIG_MAX) {
-    LOG(INFO,
-        "Too many NHLT endpoints (max %zu, got %u), "
-        "only the first %zu will be processed\n",
-        I2S_CONFIG_MAX, count, I2S_CONFIG_MAX);
-    count = I2S_CONFIG_MAX;
-  }
-
-  // Extract the PCM formats and I2S config blob
-  size_t i = 0;
-  size_t desc_offset = reinterpret_cast<uint8_t*>(nhlt->endpoints) - nhlt_buf_;
-  while (count--) {
-    auto desc = reinterpret_cast<nhlt_descriptor_t*>(nhlt_buf_ + desc_offset);
-
-    // Sanity check
-    if ((desc_offset + desc->length) > size) {
-      LOG(ERROR, "NHLT endpoint descriptor out of bounds\n");
-      return ZX_ERR_INTERNAL;
-    }
-
-    size_t length = static_cast<size_t>(desc->length);
-    if (length < sizeof(*desc)) {
-      LOG(ERROR, "Short NHLT descriptor\n");
-      return ZX_ERR_INTERNAL;
-    }
-    length -= sizeof(*desc);
-
-    // Only care about SSP endpoints
-    if (desc->link_type != NHLT_LINK_TYPE_SSP) {
-      continue;
-    }
-
-    // Make sure there is enough room for formats_configs
-    if (length < desc->config.capabilities_size + sizeof(formats_config_t)) {
-      LOG(ERROR, "NHLT endpoint descriptor too short (specific_config too long)\n");
-      return ZX_ERR_INTERNAL;
-    }
-    length -= desc->config.capabilities_size + sizeof(formats_config_t);
-
-    // Must have at least one format
-    auto formats = reinterpret_cast<const formats_config_t*>(
-        nhlt_buf_ + desc_offset + sizeof(*desc) + desc->config.capabilities_size);
-    if (formats->format_config_count == 0) {
-      continue;
-    }
-
-    // Iterate the formats and check lengths
-    const format_config_t* format = formats->format_configs;
-    for (uint8_t j = 0; j < formats->format_config_count; j++) {
-      size_t format_length = sizeof(*format) + format->config.capabilities_size;
-      if (length < format_length) {
-        LOG(ERROR, "Invalid NHLT endpoint desciptor format too short\n");
-        return ZX_ERR_INTERNAL;
-      }
-      length -= format_length;
-      format = reinterpret_cast<const format_config_t*>(reinterpret_cast<const uint8_t*>(format) +
-                                                        format_length);
-    }
-    if (length != 0) {
-      LOG(ERROR, "Invalid NHLT endpoint descriptor length\n");
-      return ZX_ERR_INTERNAL;
-    }
-
-    i2s_configs_[i++] = {desc->virtual_bus_id, desc->direction, formats};
-
-    desc_offset += desc->length;
-  }
-
-  LOG(TRACE, "parse success, found %zu formats\n", i);
-
-  return ZX_OK;
+  return OkStatus();
 }
 
 void IntelDsp::DeviceShutdown() {

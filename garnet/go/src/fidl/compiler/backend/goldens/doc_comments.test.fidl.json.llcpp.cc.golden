@@ -51,24 +51,57 @@ int32_t& ::llcpp::test::name::Union::mutable_Field() {
 }
 
 
+::llcpp::test::name::Table::Builder Table::Build() {
+  return Table::Builder();
+}
+
+auto ::llcpp::test::name::Table::Builder::set_Field(int32_t* elem) -> Builder&& {
+  ZX_ASSERT(elem);
+  envelopes_[1 - 1].data = static_cast<void*>(elem);
+  if (max_ordinal_ < 1) {
+    max_ordinal_ = 1;
+  }
+  return std::move(*this);
+}
+
 namespace {
 
 [[maybe_unused]]
-constexpr uint64_t kInterface_Method_Ordinal = 1061382220lu << 32;
+constexpr uint64_t kInterface_Method_GenOrdinal = 0x3f43684c00000000lu;
 [[maybe_unused]]
-constexpr uint64_t kInterface_OnEvent_Ordinal = 325918733lu << 32;
+constexpr uint64_t kInterface_OnEvent_GenOrdinal = 0x136d200d00000000lu;
 
 }  // namespace
 
-zx_status_t Interface::SyncClient::Method() {
-  return Interface::Call::Method(zx::unowned_channel(this->channel_));
+Interface::ResultOf::Method_Impl::Method_Impl(zx::unowned_channel _client_end) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<MethodRequest, ::fidl::MessageDirection::kSending>();
+  ::fidl::internal::AlignedBuffer<_kWriteAllocSize> _write_bytes_inlined;
+  auto& _write_bytes_array = _write_bytes_inlined;
+  uint8_t* _write_bytes = _write_bytes_array.view().data();
+  memset(_write_bytes, 0, MethodRequest::PrimarySize);
+  ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(MethodRequest));
+  ::fidl::DecodedMessage<MethodRequest> _decoded_request(std::move(_request_bytes));
+  Super::operator=(
+      Interface::InPlace::Method(std::move(_client_end)));
 }
 
-zx_status_t Interface::Call::Method(zx::unowned_channel _client_end) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<MethodRequest>();
+Interface::ResultOf::Method Interface::SyncClient::Method() {
+  return ResultOf::Method(zx::unowned_channel(this->channel_));
+}
+
+Interface::ResultOf::Method Interface::Call::Method(zx::unowned_channel _client_end) {
+  return ResultOf::Method(std::move(_client_end));
+}
+
+zx_status_t Interface::SyncClient::Method_Deprecated() {
+  return Interface::Call::Method_Deprecated(zx::unowned_channel(this->channel_));
+}
+
+zx_status_t Interface::Call::Method_Deprecated(zx::unowned_channel _client_end) {
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<MethodRequest, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _request = *reinterpret_cast<MethodRequest*>(_write_bytes);
-  _request._hdr.ordinal = kInterface_Method_Ordinal;
+  _request._hdr.ordinal = kInterface_Method_GenOrdinal;
   ::fidl::BytePart _request_bytes(_write_bytes, _kWriteAllocSize, sizeof(MethodRequest));
   ::fidl::DecodedMessage<MethodRequest> _decoded_request(std::move(_request_bytes));
   auto _encode_request_result = ::fidl::Encode(std::move(_decoded_request));
@@ -76,6 +109,28 @@ zx_status_t Interface::Call::Method(zx::unowned_channel _client_end) {
     return _encode_request_result.status;
   }
   return ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
+}
+
+::fidl::internal::StatusAndError Interface::InPlace::Method(zx::unowned_channel _client_end) {
+  constexpr uint32_t _write_num_bytes = sizeof(MethodRequest);
+  ::fidl::internal::AlignedBuffer<_write_num_bytes> _write_bytes;
+  ::fidl::BytePart _request_buffer = _write_bytes.view();
+  _request_buffer.set_actual(_write_num_bytes);
+  ::fidl::DecodedMessage<MethodRequest> params(std::move(_request_buffer));
+  params.message()->_hdr = {};
+  params.message()->_hdr.ordinal = kInterface_Method_GenOrdinal;
+  auto _encode_request_result = ::fidl::Encode(std::move(params));
+  if (_encode_request_result.status != ZX_OK) {
+    return ::fidl::internal::StatusAndError::FromFailure(
+        std::move(_encode_request_result));
+  }
+  zx_status_t _write_status =
+      ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
+  if (_write_status != ZX_OK) {
+    return ::fidl::internal::StatusAndError(_write_status, ::fidl::internal::kErrorWriteFailed);
+  } else {
+    return ::fidl::internal::StatusAndError(ZX_OK, nullptr);
+  }
 }
 
 zx_status_t Interface::SyncClient::HandleEvents(Interface::EventHandlers handlers) {
@@ -92,8 +147,8 @@ zx_status_t Interface::Call::HandleEvents(zx::unowned_channel client_end,
   }
   constexpr uint32_t kReadAllocSize = ([]() constexpr {
     uint32_t x = 0;
-    if (::fidl::internal::ClampedMessageSize<OnEventResponse>() >= x) {
-      x = ::fidl::internal::ClampedMessageSize<OnEventResponse>();
+    if (::fidl::internal::ClampedMessageSize<OnEventResponse, ::fidl::MessageDirection::kReceiving>() >= x) {
+      x = ::fidl::internal::ClampedMessageSize<OnEventResponse, ::fidl::MessageDirection::kReceiving>();
     }
     return x;
   })();
@@ -136,7 +191,8 @@ zx_status_t Interface::Call::HandleEvents(zx::unowned_channel client_end,
   };
   fidl_message_header_t* hdr = reinterpret_cast<fidl_message_header_t*>(msg.bytes);
   switch (hdr->ordinal) {
-    case kInterface_OnEvent_Ordinal: {
+    case kInterface_OnEvent_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<OnEventResponse>(&msg);
       if (result.status != ZX_OK) {
         return result.status;
@@ -157,7 +213,8 @@ bool Interface::TryDispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transactio
   }
   fidl_message_header_t* hdr = reinterpret_cast<fidl_message_header_t*>(msg->bytes);
   switch (hdr->ordinal) {
-    case kInterface_Method_Ordinal: {
+    case kInterface_Method_GenOrdinal:
+    {
       auto result = ::fidl::DecodeAs<MethodRequest>(msg);
       if (result.status != ZX_OK) {
         txn->Close(ZX_ERR_INVALID_ARGS);
@@ -184,11 +241,11 @@ bool Interface::Dispatch(Interface* impl, fidl_msg_t* msg, ::fidl::Transaction* 
 
 
 zx_status_t Interface::SendOnEventEvent(::zx::unowned_channel _chan) {
-  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<OnEventResponse>();
+  constexpr uint32_t _kWriteAllocSize = ::fidl::internal::ClampedMessageSize<OnEventResponse, ::fidl::MessageDirection::kSending>();
   FIDL_ALIGNDECL uint8_t _write_bytes[_kWriteAllocSize] = {};
   auto& _response = *reinterpret_cast<OnEventResponse*>(_write_bytes);
   _response._hdr = {};
-  _response._hdr.ordinal = kInterface_OnEvent_Ordinal;
+  _response._hdr.ordinal = kInterface_OnEvent_GenOrdinal;
   ::fidl::BytePart _response_bytes(_write_bytes, _kWriteAllocSize, sizeof(OnEventResponse));
   return ::fidl::Write(zx::unowned_channel(_chan), ::fidl::DecodedMessage<OnEventResponse>(std::move(_response_bytes)));
 }

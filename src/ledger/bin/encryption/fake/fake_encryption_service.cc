@@ -8,6 +8,8 @@
 #include <lib/fit/function.h>
 #include <lib/fsl/vmo/strings.h>
 
+#include <string>
+
 #include "src/ledger/bin/storage/public/constants.h"
 #include "src/lib/fxl/strings/concatenate.h"
 
@@ -19,10 +21,15 @@ std::string Encode(fxl::StringView content) { return "_" + content.ToString() + 
 std::string Decode(fxl::StringView encrypted_content) {
   return encrypted_content.substr(1, encrypted_content.size() - 2).ToString();
 }
+
+// Entry id size in bytes.
+constexpr size_t kEntryIdSize = 32u;
+
 }  // namespace
 
-storage::ObjectIdentifier MakeDefaultObjectIdentifier(storage::ObjectDigest digest) {
-  return {1u, 1u, std::move(digest)};
+storage::ObjectIdentifier MakeDefaultObjectIdentifier(storage::ObjectIdentifierFactory* factory,
+                                                      storage::ObjectDigest digest) {
+  return factory->MakeObjectIdentifier(1u, 1u, std::move(digest));
 }
 
 uint64_t DefaultPermutation(uint64_t chunk_window_hash) { return 1 + chunk_window_hash; }
@@ -33,8 +40,8 @@ FakeEncryptionService::FakeEncryptionService(async_dispatcher_t* dispatcher)
 FakeEncryptionService::~FakeEncryptionService() {}
 
 storage::ObjectIdentifier FakeEncryptionService::MakeObjectIdentifier(
-    storage::ObjectDigest digest) {
-  return MakeDefaultObjectIdentifier(std::move(digest));
+    storage::ObjectIdentifierFactory* factory, storage::ObjectDigest digest) {
+  return MakeDefaultObjectIdentifier(factory, std::move(digest));
 }
 
 void FakeEncryptionService::EncryptCommit(std::string commit_storage,
@@ -88,6 +95,19 @@ void FakeEncryptionService::GetChunkingPermutation(
     fit::function<void(Status, fit::function<uint64_t(uint64_t)>)> callback) {
   auto chunking_permutation = [](uint64_t chunk_window_hash) { return chunk_window_hash + 1; };
   callback(Status::OK, std::move(chunking_permutation));
+}
+
+std::string FakeEncryptionService::GetEntryId() {
+  std::string entry_id(kEntryIdSize, '0');
+  return entry_id;
+}
+
+std::string FakeEncryptionService::GetEntryIdForMerge(fxl::StringView entry_name,
+                                                      storage::CommitId left_parent_id,
+                                                      storage::CommitId right_parent_id,
+                                                      fxl::StringView operation_list) {
+  std::string entry_id(kEntryIdSize, '0');
+  return entry_id;
 }
 
 std::string FakeEncryptionService::EncryptCommitSynchronous(

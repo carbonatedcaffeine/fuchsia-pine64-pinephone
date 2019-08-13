@@ -16,6 +16,8 @@ group("sdk") {
   public_deps = [
     ":core",
     ":ddk",
+    ":e2e_testing",
+    ":modular_testing",
     ":zircon_sysroot",
   ]
 }
@@ -165,6 +167,7 @@ sdk("core") {
     "//garnet/go/src/fidl:fidlgen_sdk($host_toolchain)",
     "//garnet/go/src/pm:pm_bin_sdk($host_toolchain)",
     "//garnet/lib/vulkan:vulkan_layers",
+    "//sdk/fidl/fuchsia.accessibility.semantics:fuchsia.accessibility.semantics_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.auth.oldtokens:fuchsia.auth.oldtokens_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.bluetooth.gatt:fuchsia.bluetooth.gatt_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.bluetooth.le:fuchsia.bluetooth.le_sdk($fidl_toolchain)",
@@ -183,11 +186,13 @@ sdk("core") {
     "//sdk/fidl/fuchsia.media.drm:fuchsia.media.drm_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.media.playback:fuchsia.media.playback_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.media.sessions:fuchsia.media.sessions_sdk($fidl_toolchain)",
+    "//sdk/fidl/fuchsia.media.sessions2:fuchsia.media.sessions2_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.mediacodec:fuchsia.mediacodec_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.net.http:fuchsia.net.http_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.net.mdns:fuchsia.net.mdns_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.net.oldhttp:fuchsia.net.oldhttp_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.netstack:fuchsia.netstack_sdk($fidl_toolchain)",
+    "//sdk/fidl/fuchsia.settings:fuchsia.settings_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.simplecamera:fuchsia.simplecamera_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.sys:fuchsia.sys_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.sys.test:fuchsia.sys.test_sdk($fidl_toolchain)",
@@ -197,9 +202,8 @@ sdk("core") {
     "//sdk/fidl/fuchsia.ui.input2:fuchsia.ui.input2_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.ui.policy:fuchsia.ui.policy_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.ui.scenic:fuchsia.ui.scenic_sdk($fidl_toolchain)",
+    "//sdk/fidl/fuchsia.ui.types:fuchsia.ui.types_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.ui.views:fuchsia.ui.views_sdk($fidl_toolchain)",
-    "//sdk/fidl/fuchsia.ui.viewsv1:fuchsia.ui.viewsv1_sdk($fidl_toolchain)",
-    "//sdk/fidl/fuchsia.ui.viewsv1token:fuchsia.ui.viewsv1token_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.web:fuchsia.web_sdk($fidl_toolchain)",
     "//sdk/fidl/fuchsia.wlan.service:fuchsia.wlan.service_sdk($fidl_toolchain)",
     "//sdk/lib/fidl/cpp:cpp_sdk",
@@ -208,10 +212,11 @@ sdk("core") {
     "//sdk/lib/sys/cpp/testing:unit_sdk",
     "//sdk/lib/ui/scenic/cpp:cpp_sdk",
     "//sdk/lib/vfs/cpp:cpp_sdk",
-    "//src/developer/bugreport:client_sdk($host_toolchain)",
     "//src/developer/debug/zxdb:zxdb_sdk($host_toolchain)",
+    "//src/developer/feedback/bugreport:client_sdk($host_toolchain)",
     "//src/sys/cmc:cmc_sdk($host_toolchain)",
     "//third_party/vulkan_loader_and_validation_layers/loader:loader_sdk",
+    "//tools/fidlcat:fidlcat_sdk($host_toolchain)",
     "//zircon/public/fidl/fuchsia-cobalt:fuchsia-cobalt_sdk($fidl_toolchain)",
     "//zircon/public/fidl/fuchsia-crash:fuchsia-crash_sdk($fidl_toolchain)",
     "//zircon/public/fidl/fuchsia-hardware-goldfish-address-space:fuchsia-hardware-goldfish-address-space_sdk($fidl_toolchain)",
@@ -219,9 +224,10 @@ sdk("core") {
     "//zircon/public/fidl/fuchsia-hardware-goldfish-pipe:fuchsia-hardware-goldfish-pipe_sdk($fidl_toolchain)",
     "//zircon/public/fidl/fuchsia-logger:fuchsia-logger_sdk($fidl_toolchain)",
     "//zircon/public/fidl/fuchsia-mem:fuchsia-mem_sdk($fidl_toolchain)",
+    "//zircon/public/fidl/fuchsia-posix-socket:fuchsia-posix-socket_sdk($fidl_toolchain)",
     "//zircon/public/fidl/fuchsia-process:fuchsia-process_sdk($fidl_toolchain)",
-    "//zircon/public/fidl/fuchsia-tracing-provider:fuchsia-tracing-provider_sdk($fidl_toolchain)",
     "//zircon/public/fidl/fuchsia-sysinfo:fuchsia-sysinfo_sdk($fidl_toolchain)",
+    "//zircon/public/fidl/fuchsia-tracing-provider:fuchsia-tracing-provider_sdk($fidl_toolchain)",
     "//zircon/public/lib/async:async_sdk",
     "//zircon/public/lib/async-cpp:async-cpp_sdk",
     "//zircon/public/lib/async-default:async-default_sdk",
@@ -247,7 +253,7 @@ sdk("core") {
   ]
 }
 
-# This SDK provides FIDL protocols and C++ libraries for writing hermetic
+# The `modular_testing` SDK provides FIDL protocols and C++ libraries for writing hermetic
 # integration tests which use modular.
 #
 # This SDK has runtime dependencies on the following fuchsia packages:
@@ -264,5 +270,6 @@ sdk("modular_testing") {
 
   deps = [
     "//sdk/fidl/fuchsia.modular.testing:fuchsia.modular.testing_sdk($fidl_toolchain)",
+    "//sdk/lib/modular/testing/cpp:cpp_sdk",
   ]
 }

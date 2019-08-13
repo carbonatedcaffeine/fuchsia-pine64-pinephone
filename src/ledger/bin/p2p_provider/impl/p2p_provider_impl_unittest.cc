@@ -90,6 +90,14 @@ class P2PProviderImplTest : public gtest::TestLoopFixture {
   FXL_DISALLOW_COPY_AND_ASSIGN(P2PProviderImplTest);
 };
 
+TEST_F(P2PProviderImplTest, NoSelfPeerNoCrash) {
+  std::unique_ptr<P2PProvider> provider1 = GetProvider(1, "user1");
+  RecordingClient client1;
+  provider1->Start(&client1);
+  RunLoopUntilIdle();
+  EXPECT_TRUE(client1.device_changes.empty());
+}
+
 TEST_F(P2PProviderImplTest, ThreeHosts_SameUser) {
   std::unique_ptr<P2PProvider> provider1 = GetProvider(1, "user1");
   RecordingClient client1;
@@ -239,7 +247,7 @@ TEST_F(P2PProviderImplTest, HostConnectionOrdering) {
 
   RunLoopUntilIdle();
 
-  EXPECT_EQ(1U, overnet_impl_0.device_names_callbacks.size());
+  EXPECT_EQ(overnet_impl_0.device_names_callbacks.size(), 1U);
 
   auto request1 = std::move(overnet_impl_0.device_names_callbacks[0]);
   fuchsia::overnet::protocol::NodeId node_0;
@@ -270,7 +278,7 @@ TEST_F(P2PProviderImplTest, HostConnectionOrdering) {
 
   RunLoopUntilIdle();
 
-  EXPECT_EQ(1U, overnet_impl_1.device_names_callbacks.size());
+  EXPECT_EQ(overnet_impl_1.device_names_callbacks.size(), 1U);
 
   auto request2 = std::move(overnet_impl_1.device_names_callbacks[0]);
   fuchsia::overnet::Peer peer_1_0;
@@ -288,7 +296,7 @@ TEST_F(P2PProviderImplTest, HostConnectionOrdering) {
 
   // Only one device should initiate the connection. We don't really care which
   // one, as long as it is reliably correct.
-  EXPECT_EQ(1U, overnet_impl_0.device_requests.size() + overnet_impl_1.device_requests.size());
+  EXPECT_EQ(overnet_impl_0.device_requests.size() + overnet_impl_1.device_requests.size(), 1U);
 }
 
 }  // namespace

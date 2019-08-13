@@ -5,7 +5,7 @@
 #include <fuchsia/media/cpp/fidl.h>
 #include <lib/zx/vmo.h>
 
-#include "src/media/audio/lib/test/audio_core_test_base.h"
+#include "src/media/audio/lib/test/hermetic_audio_test.h"
 
 namespace media::audio::test {
 
@@ -26,7 +26,7 @@ constexpr size_t kDefaultPayloadBufferSize = PAGE_SIZE;
 // AudioRendererTest
 //
 // This set of tests verifies asynchronous usage of AudioRenderer.
-class AudioRendererTest : public AudioCoreTestBase {
+class AudioRendererTest : public HermeticAudioCoreTest {
  protected:
   void SetUp() override;
   void TearDown() override;
@@ -56,7 +56,7 @@ class AudioRendererTest : public AudioCoreTestBase {
 // AudioRendererTest implementation
 //
 void AudioRendererTest::SetUp() {
-  AudioCoreTestBase::SetUp();
+  HermeticAudioCoreTest::SetUp();
 
   audio_core_->CreateAudioRenderer(audio_renderer_.NewRequest());
   audio_renderer_.set_error_handler(ErrorHandler());
@@ -68,11 +68,11 @@ void AudioRendererTest::TearDown() {
   EXPECT_EQ(bound_renderer_expected_, audio_renderer_.is_bound());
   audio_renderer_.Unbind();
 
-  AudioCoreTestBase::TearDown();
+  HermeticAudioCoreTest::TearDown();
 }
 
 void AudioRendererTest::SetNegativeExpectations() {
-  AudioCoreTestBase::SetNegativeExpectations();
+  HermeticAudioCoreTest::SetNegativeExpectations();
   bound_renderer_expected_ = false;
 }
 

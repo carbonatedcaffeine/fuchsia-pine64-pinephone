@@ -14,6 +14,8 @@ namespace gfx {
 namespace test {
 
 void FrameSchedulerTest::SetUp() {
+  ErrorReportingTest::SetUp();
+
   fake_display_ = std::make_unique<FakeDisplay>();
   mock_updater_ = std::make_unique<MockSessionUpdater>();
   mock_renderer_ = std::make_unique<MockFrameRenderer>();
@@ -24,6 +26,8 @@ void FrameSchedulerTest::TearDown() {
   fake_display_.reset();
   mock_updater_.reset();
   mock_renderer_.reset();
+
+  ErrorReportingTest::TearDown();
 }
 
 std::unique_ptr<DefaultFrameScheduler> FrameSchedulerTest::CreateDefaultFrameScheduler() {
@@ -40,9 +44,9 @@ std::unique_ptr<DefaultFrameScheduler> FrameSchedulerTest::CreateDefaultFrameSch
 void FrameSchedulerTest::SetupDefaultVsyncValues() {
   // Needs to be big enough so that FrameScheduler can always fit a latch point
   // in the frame.
-  const auto vsync_interval = zx::msec(100).get();
+  const auto vsync_interval = zx::msec(100);
   fake_display_->SetVsyncInterval(vsync_interval);
-  fake_display_->SetLastVsyncTime(0);
+  fake_display_->SetLastVsyncTime(zx::time(0));
 }
 
 }  // namespace test

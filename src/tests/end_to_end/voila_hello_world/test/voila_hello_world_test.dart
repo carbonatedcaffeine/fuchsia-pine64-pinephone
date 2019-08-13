@@ -35,15 +35,15 @@ void main() {
   });
 
   tearDown(() async {
-    await sl4fDriver.ssh('tiles_ctl quit');
+    await sl4fDriver.ssh.run('tiles_ctl quit');
     await sl4fDriver.stopServer();
     sl4fDriver.close();
   });
 
   test('test shell is displayed', () async {
-    await sl4fDriver.ssh('tiles_ctl start');
+    await sl4fDriver.ssh.run('tiles_ctl start');
     await Future.delayed(_delay);
-    await sl4fDriver.ssh(_runVoilaCommand.join(' '));
+    await sl4fDriver.ssh.run(_runVoilaCommand.join(' '));
     await Future.delayed(_delay);
     final screen = await scenicDriver.takeScreenshot(dumpName: 'screen');
     if (!_isCenterGreen(screen)) {

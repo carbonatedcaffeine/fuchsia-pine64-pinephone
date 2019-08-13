@@ -37,9 +37,6 @@ zx_status_t SuspendHook(const zx::channel& c, const fuchsia_device_mock_HookInvo
 zx_status_t ResumeHook(const zx::channel& c, const fuchsia_device_mock_HookInvocation& record,
                        uint32_t flags, fbl::Array<const fuchsia_device_mock_Action>* actions_out);
 
-zx_status_t IoctlHook(const zx::channel& c, const fuchsia_device_mock_HookInvocation& record,
-                      uint32_t op, const uint8_t* in_data, size_t in_count, uint64_t out_count,
-                      fbl::Array<const fuchsia_device_mock_Action>* actions_out);
 zx_status_t MessageHook(const zx::channel& c, const fuchsia_device_mock_HookInvocation& record,
                         fbl::Array<const fuchsia_device_mock_Action>* actions_out);
 zx_status_t RxrpcHook(const zx::channel& c, const fuchsia_device_mock_HookInvocation& record,
@@ -56,5 +53,4 @@ zx_status_t SendRemoveDeviceDoneFromThread(const zx::channel& c, uint64_t action
 zx_status_t WaitForPerformActions(const zx::channel& c,
                                   fbl::Array<const fuchsia_device_mock_Action>* actions_out);
 
-} // namespace mock_device
-
+}  // namespace mock_device

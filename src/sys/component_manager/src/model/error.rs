@@ -3,12 +3,13 @@
 // found in the LICENSE file.
 
 use {
+    crate::clonable_error::ClonableError,
     crate::model::*,
     failure::{Error, Fail},
 };
 
 /// Errors produced by `Model`.
-#[derive(Debug, Fail)]
+#[derive(Debug, Clone, Fail)]
 pub enum ModelError {
     #[fail(display = "component instance not found with moniker {}", moniker)]
     InstanceNotFound { moniker: AbsoluteMoniker },
@@ -24,12 +25,12 @@ pub enum ModelError {
     ManifestInvalid {
         url: String,
         #[fail(cause)]
-        err: Error,
+        err: ClonableError,
     },
     #[fail(display = "namespace creation failed: {}", err)]
     NamespaceCreationFailed {
         #[fail(cause)]
-        err: Error,
+        err: ClonableError,
     },
     #[fail(display = "resolver error")]
     ResolverError {
@@ -49,10 +50,17 @@ pub enum ModelError {
     #[fail(display = "capability discovery error")]
     CapabilityDiscoveryError {
         #[fail(cause)]
-        err: Error,
+        err: ClonableError,
     },
     #[fail(display = "add entry error")]
     AddEntryError { moniker: AbsoluteMoniker, entry_name: String },
+    #[fail(display = "open directory error")]
+    OpenDirectoryError { moniker: AbsoluteMoniker, relative_path: String },
+    #[fail(display = "Unsupported hook")]
+    UnsupportedHookError {
+        #[fail(cause)]
+        err: ClonableError,
+    },
 }
 
 impl ModelError {
@@ -73,19 +81,30 @@ impl ModelError {
     }
 
     pub fn namespace_creation_failed(err: impl Into<Error>) -> ModelError {
-        ModelError::NamespaceCreationFailed { err: err.into() }
+        ModelError::NamespaceCreationFailed { err: err.into().into() }
     }
 
     pub fn manifest_invalid(url: impl Into<String>, err: impl Into<Error>) -> ModelError {
-        ModelError::ManifestInvalid { url: url.into(), err: err.into() }
+        ModelError::ManifestInvalid { url: url.into(), err: err.into().into() }
     }
 
     pub fn capability_discovery_error(err: impl Into<Error>) -> ModelError {
-        ModelError::CapabilityDiscoveryError { err: err.into() }
+        ModelError::CapabilityDiscoveryError { err: err.into().into() }
     }
 
     pub fn add_entry_error(moniker: AbsoluteMoniker, entry_name: impl Into<String>) -> ModelError {
         ModelError::AddEntryError { moniker, entry_name: entry_name.into() }
+    }
+
+    pub fn open_directory_error(
+        moniker: AbsoluteMoniker,
+        relative_path: impl Into<String>,
+    ) -> ModelError {
+        ModelError::OpenDirectoryError { moniker, relative_path: relative_path.into() }
+    }
+
+    pub fn unsupported_hook_error(err: impl Into<Error>) -> ModelError {
+        ModelError::UnsupportedHookError { err: err.into().into() }
     }
 }
 

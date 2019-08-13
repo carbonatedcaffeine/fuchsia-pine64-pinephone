@@ -20,7 +20,7 @@ class ResponsePrinter {
   void Run(async::Loop* loop, http::URLResponse response) const {
     if (response.error) {
       printf("Got error: %d (%s)\n", response.error->code,
-             response.error->description.get().c_str());
+             response.error->description.value_or("").c_str());
       exit(1);
     } else {
       PrintResponse(response);
@@ -32,7 +32,7 @@ class ResponsePrinter {
 
   void PrintResponse(const http::URLResponse& response) const {
     printf(">>> Headers <<< \n");
-    printf("  %s\n", response.status_line.get().c_str());
+    printf("  %s\n", response.status_line.value_or("").c_str());
     if (response.headers) {
       for (size_t i = 0; i < response.headers->size(); ++i)
         printf("  %s=%s\n", response.headers->at(i).name.c_str(),
@@ -50,8 +50,7 @@ class ResponsePrinter {
       zx_status_t result = body.read(0u, buf, num_bytes, &num_bytes);
 
       if (result == ZX_ERR_SHOULD_WAIT) {
-        body.wait_one(ZX_SOCKET_READABLE | ZX_SOCKET_PEER_CLOSED,
-                      zx::time::infinite(), nullptr);
+        body.wait_one(ZX_SOCKET_READABLE | ZX_SOCKET_PEER_CLOSED, zx::time::infinite(), nullptr);
       } else if (result == ZX_ERR_PEER_CLOSED) {
         // not an error
         break;
@@ -72,8 +71,7 @@ class ResponsePrinter {
 
 class WGetApp {
  public:
-  WGetApp(async::Loop* loop)
-      : loop_(loop), context_(sys::ComponentContext::Create()) {
+  WGetApp(async::Loop* loop) : loop_(loop), context_(sys::ComponentContext::Create()) {
     http_service_ = context_->svc()->Connect<http::HttpService>();
     FXL_DCHECK(http_service_);
   }

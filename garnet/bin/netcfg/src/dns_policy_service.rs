@@ -6,7 +6,7 @@ use {
     fidl_fuchsia_net_dns::{DnsConfig, DnsPolicyRequest, DnsPolicyRequestStream, NetError, Status},
     fuchsia_async as fasync,
     fuchsia_syslog::fx_log_err,
-    futures::{prelude::*, TryFutureExt},
+    futures::prelude::*,
 };
 
 pub fn spawn_net_dns_fidl_server(
@@ -22,7 +22,7 @@ async fn serve_fidl_requests(
     resolver_admin: fidl_fuchsia_netstack::ResolverAdminProxy,
     stream: DnsPolicyRequestStream,
 ) -> Result<(), fidl::Error> {
-    await!(stream.try_for_each(|req| handle_request(&resolver_admin, req)))
+    stream.try_for_each(|req| handle_request(&resolver_admin, req)).await
 }
 
 async fn handle_request(

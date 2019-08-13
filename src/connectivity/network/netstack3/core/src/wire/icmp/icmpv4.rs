@@ -6,11 +6,11 @@
 
 use std::fmt;
 
+use net_types::ip::{Ipv4, Ipv4Addr};
 use packet::{BufferView, ParsablePacket, ParseMetadata};
 use zerocopy::{AsBytes, ByteSlice, FromBytes, Unaligned};
 
 use crate::error::{ParseError, ParseResult};
-use crate::ip::{Ipv4, Ipv4Addr};
 use crate::wire::U32;
 
 use super::common::{IcmpDestUnreachable, IcmpEchoReply, IcmpEchoRequest, IcmpTimeExceeded};
@@ -176,6 +176,7 @@ create_net_enum! {
 impl_icmp_message!(Ipv4, IcmpTimeExceeded, TimeExceeded, Icmpv4TimeExceededCode, OriginalPacket<B>);
 
 #[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned)]
+#[cfg_attr(test, derive(Eq, PartialEq))]
 #[repr(C)]
 struct IcmpTimestampData {
     origin_timestamp: U32,
@@ -184,6 +185,7 @@ struct IcmpTimestampData {
 }
 
 #[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned)]
+#[cfg_attr(test, derive(Eq, PartialEq))]
 #[repr(C)]
 struct Timestamp {
     id_seq: IdAndSeq,
@@ -195,8 +197,46 @@ struct Timestamp {
 #[repr(transparent)]
 pub(crate) struct Icmpv4TimestampRequest(Timestamp);
 
+impl Icmpv4TimestampRequest {
+    /// Creates an `Icmpv4TimestampRequest`.
+    ///
+    /// `new` constructs a new `Icmpv4TimestampRequest` with the given
+    /// parameters, and sets the Receive Timestamp and Transmit Timestamp values
+    /// to zero.
+    pub(crate) fn new(origin_timestamp: u32, id: u16, seq: u16) -> Icmpv4TimestampRequest {
+        Icmpv4TimestampRequest(Timestamp {
+            id_seq: IdAndSeq::new(id, seq),
+            timestamps: IcmpTimestampData {
+                origin_timestamp: U32::new(origin_timestamp),
+                recv_timestamp: U32::ZERO,
+                tx_timestamp: U32::ZERO,
+            },
+        })
+    }
+
+    /// Reply to a Timestamp Request message.
+    ///
+    /// `reply` takes the `Icmpv4TimestampRequest` from a Timestamp Request
+    /// message, and produces the appropriate `Icmpv4TimestampReply` value for a
+    /// Timestamp Reply message. The original Originate Timestamp, ICMP ID, and
+    /// ICMP Sequence Number are retained, while the Receive Timestamp and
+    /// Transmit Timestamp are overwritten with the given values.
+    ///
+    /// The Receive Timestamp (`recv_timestamp`) indicates the time at which the
+    /// Timestamp Request was first received, while the Transmit Timestamp
+    /// (`tx_timestamp`) indicates the time at which the Timestamp Reply was
+    /// last processed before being sent.
+    pub(crate) fn reply(&self, recv_timestamp: u32, tx_timestamp: u32) -> Icmpv4TimestampReply {
+        let mut ret = self.0.clone();
+        ret.timestamps.recv_timestamp = U32::new(recv_timestamp);
+        ret.timestamps.tx_timestamp = U32::new(tx_timestamp);
+        Icmpv4TimestampReply(ret)
+    }
+}
+
 /// An ICMPv4 Timestamp Reply message.
 #[derive(Copy, Clone, Debug, FromBytes, AsBytes, Unaligned)]
+#[cfg_attr(test, derive(Eq, PartialEq))]
 #[repr(transparent)]
 pub(crate) struct Icmpv4TimestampReply(Timestamp);
 
@@ -236,12 +276,12 @@ impl_icmp_message!(
 
 #[cfg(test)]
 mod tests {
-    use packet::{ParseBuffer, Serializer};
+    use packet::{InnerPacketBuilder, ParseBuffer, Serializer};
     use std::fmt::Debug;
 
     use super::*;
     use crate::wire::icmp::{IcmpMessage, MessageBody};
-    use crate::wire::ipv4::{Ipv4Packet, Ipv4PacketBuilder};
+    use crate::wire::ipv4::{Ipv4Header, Ipv4Packet, Ipv4PacketBuilder};
 
     fn serialize_to_bytes<B: ByteSlice + Debug, M: IcmpMessage<Ipv4, B> + Debug>(
         src_ip: Ipv4Addr,
@@ -251,9 +291,10 @@ mod tests {
     ) -> Vec<u8> {
         icmp.message_body
             .bytes()
+            .into_serializer()
             .encapsulate(icmp.builder(src_ip, dst_ip))
             .encapsulate(builder)
-            .serialize_outer()
+            .serialize_vec_outer()
             .unwrap()
             .as_ref()
             .to_vec()

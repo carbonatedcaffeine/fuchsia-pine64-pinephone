@@ -98,7 +98,6 @@ source_set("source_set") {
   ]
 
   public_deps = [
-    "//garnet/lib/inet",
     "//garnet/public/lib/fostr",
     "//garnet/public/lib/fsl",
     "//garnet/public/lib/json",
@@ -108,7 +107,9 @@ source_set("source_set") {
     "//sdk/fidl/fuchsia.sys",
     "//sdk/lib/sys/cpp",
     "//src/lib/fxl",
+    "//src/lib/inet",
     "//third_party/rapidjson",
+    "//zircon/public/fidl/fuchsia-device",
     "//zircon/public/fidl/fuchsia-net",
     "//zircon/public/lib/fit",
   ]
@@ -195,8 +196,8 @@ fuzzer("packet_reader_fuzzer") {
     "packet_reader_fuzzer.cc",
   ]
   deps = [
-    "//garnet/lib/inet",
     "//src/lib/fxl",
+    "//src/lib/inet",
   ]
 }
 
@@ -227,6 +228,7 @@ test_package("mdns_netemul_tests") {
   deps = [
     ":mdns_netemul_test_agent",
     ":netemul_empty_binaries",
+    "//src/connectivity/network/tests:device_name_provider",
   ]
 
   meta = [

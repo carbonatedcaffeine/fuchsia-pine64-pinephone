@@ -4,10 +4,11 @@
 
 #include "src/ledger/bin/testing/ledger_memory_usage.h"
 
+#include <stdlib.h>
+
 #include <lib/async-loop/cpp/loop.h>
 #include <lib/fit/function.h>
 #include <lib/sys/cpp/component_context.h>
-#include <stdlib.h>
 
 #include "gtest/gtest.h"
 #include "peridot/lib/scoped_tmpfs/scoped_tmpfs.h"
@@ -23,10 +24,9 @@ int64_t LaunchTestBenchmark(async::Loop* loop) {
 
   fuchsia::sys::LaunchInfo launch_info;
   launch_info.url = "fuchsia-pkg://fuchsia.com/trace#meta/trace.cmx";
-  launch_info.arguments.push_back("record");
-  launch_info.arguments.push_back(
+  launch_info.arguments.emplace({"record",
       "--spec-file="
-      "/pkgfs/packages/ledger_tests/0/data/memory_usage_test_benchmark.tspec");
+      "/pkgfs/packages/ledger_tests/0/data/memory_usage_test_benchmark.tspec"});
 
   fuchsia::sys::LauncherPtr launcher;
   component_context->svc()->Connect(launcher.NewRequest());
@@ -54,7 +54,7 @@ int64_t LaunchTestBenchmark(async::Loop* loop) {
 
 TEST(LedgerMemoryUsage, Simple) {
   async::Loop loop(&kAsyncLoopConfigAttachToThread);
-  EXPECT_EQ(EXIT_SUCCESS, LaunchTestBenchmark(&loop));
+  EXPECT_EQ(LaunchTestBenchmark(&loop), EXIT_SUCCESS);
 }
 
 TEST(LedgerMemoryUsage, LaunchTwoLedgers) {
@@ -69,11 +69,11 @@ TEST(LedgerMemoryUsage, LaunchTwoLedgers) {
   Status status = GetLedger(component_context.get(), component_controller.NewRequest(), nullptr, "",
                             "top_level_ledger", DetachedPath(tmp_dir.root_fd()),
                             std::move(error_handler), &top_level_ledger);
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
 
   // The test benchmark will start another Ledger instance and try to get the
   // memory usage from that one. Ensure this operation succeeds.
-  EXPECT_EQ(EXIT_SUCCESS, LaunchTestBenchmark(&loop));
+  EXPECT_EQ(LaunchTestBenchmark(&loop), EXIT_SUCCESS);
 }
 
 }  // namespace

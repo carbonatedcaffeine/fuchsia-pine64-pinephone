@@ -7,6 +7,7 @@
 #include <lib/fidl/cpp/string_view.h>
 #include <lib/fidl/llcpp/array.h>
 #include <lib/fidl/llcpp/coding.h>
+#include <lib/fidl/llcpp/sync_call.h>
 #include <lib/fidl/llcpp/traits.h>
 #include <lib/fidl/llcpp/transaction.h>
 #include <lib/fit/function.h>
@@ -29,6 +30,7 @@ extern "C" const fidl_type_t fuchsia_hardware_spi_DeviceExchangeRequestTable;
 extern "C" const fidl_type_t fuchsia_hardware_spi_DeviceExchangeResponseTable;
 
 class Device final {
+  Device() = delete;
  public:
 
   struct TransmitResponse final {
@@ -40,6 +42,9 @@ class Device final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   struct TransmitRequest final {
     FIDL_ALIGNDECL
@@ -50,6 +55,9 @@ class Device final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 32;
     static constexpr uint32_t MaxOutOfLine = 8200;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
     using ResponseType = TransmitResponse;
   };
 
@@ -63,6 +71,9 @@ class Device final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 40;
     static constexpr uint32_t MaxOutOfLine = 8200;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   struct ReceiveRequest final {
     FIDL_ALIGNDECL
@@ -73,6 +84,9 @@ class Device final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 24;
     static constexpr uint32_t MaxOutOfLine = 0;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
     using ResponseType = ReceiveResponse;
   };
 
@@ -86,6 +100,9 @@ class Device final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 40;
     static constexpr uint32_t MaxOutOfLine = 8200;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kResponse;
   };
   struct ExchangeRequest final {
     FIDL_ALIGNDECL
@@ -96,57 +113,189 @@ class Device final {
     static constexpr uint32_t MaxNumHandles = 0;
     static constexpr uint32_t PrimarySize = 32;
     static constexpr uint32_t MaxOutOfLine = 8200;
+    static constexpr bool HasFlexibleEnvelope = false;
+    static constexpr ::fidl::internal::TransactionalMessageKind MessageKind =
+        ::fidl::internal::TransactionalMessageKind::kRequest;
     using ResponseType = ExchangeResponse;
   };
 
 
+  // Collection of return types of FIDL calls in this interface.
+  class ResultOf final {
+    ResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class Transmit_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      Transmit_Impl(zx::unowned_channel _client_end, ::fidl::VectorView<uint8_t> data);
+      ~Transmit_Impl() = default;
+      Transmit_Impl(Transmit_Impl&& other) = default;
+      Transmit_Impl& operator=(Transmit_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class Receive_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      Receive_Impl(zx::unowned_channel _client_end, uint32_t size);
+      ~Receive_Impl() = default;
+      Receive_Impl(Receive_Impl&& other) = default;
+      Receive_Impl& operator=(Receive_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class Exchange_Impl final : private ::fidl::internal::OwnedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::OwnedSyncCallBase<ResponseType>;
+     public:
+      Exchange_Impl(zx::unowned_channel _client_end, ::fidl::VectorView<uint8_t> txdata);
+      ~Exchange_Impl() = default;
+      Exchange_Impl(Exchange_Impl&& other) = default;
+      Exchange_Impl& operator=(Exchange_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using Transmit = Transmit_Impl<TransmitResponse>;
+    using Receive = Receive_Impl<ReceiveResponse>;
+    using Exchange = Exchange_Impl<ExchangeResponse>;
+  };
+
+  // Collection of return types of FIDL calls in this interface,
+  // when the caller-allocate flavor or in-place call is used.
+  class UnownedResultOf final {
+    UnownedResultOf() = delete;
+   private:
+    template <typename ResponseType>
+    class Transmit_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      Transmit_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> data, ::fidl::BytePart _response_buffer);
+      ~Transmit_Impl() = default;
+      Transmit_Impl(Transmit_Impl&& other) = default;
+      Transmit_Impl& operator=(Transmit_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class Receive_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      Receive_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t size, ::fidl::BytePart _response_buffer);
+      ~Receive_Impl() = default;
+      Receive_Impl(Receive_Impl&& other) = default;
+      Receive_Impl& operator=(Receive_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+    template <typename ResponseType>
+    class Exchange_Impl final : private ::fidl::internal::UnownedSyncCallBase<ResponseType> {
+      using Super = ::fidl::internal::UnownedSyncCallBase<ResponseType>;
+     public:
+      Exchange_Impl(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> txdata, ::fidl::BytePart _response_buffer);
+      ~Exchange_Impl() = default;
+      Exchange_Impl(Exchange_Impl&& other) = default;
+      Exchange_Impl& operator=(Exchange_Impl&& other) = default;
+      using Super::status;
+      using Super::error;
+      using Super::ok;
+      using Super::Unwrap;
+      using Super::value;
+      using Super::operator->;
+      using Super::operator*;
+    };
+
+   public:
+    using Transmit = Transmit_Impl<TransmitResponse>;
+    using Receive = Receive_Impl<ReceiveResponse>;
+    using Exchange = Exchange_Impl<ExchangeResponse>;
+  };
+
   class SyncClient final {
    public:
-    SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
-
+    explicit SyncClient(::zx::channel channel) : channel_(std::move(channel)) {}
+    ~SyncClient() = default;
     SyncClient(SyncClient&&) = default;
-
     SyncClient& operator=(SyncClient&&) = default;
-
-    ~SyncClient() {}
 
     const ::zx::channel& channel() const { return channel_; }
 
     ::zx::channel* mutable_channel() { return &channel_; }
 
     // Half-duplex transmit data to a SPI device; always transmits the entire buffer on success.
-    zx_status_t Transmit(::fidl::VectorView<uint8_t> data, int32_t* out_status);
+    // Allocates 24 bytes of response buffer on the stack. Request is heap-allocated.
+    ResultOf::Transmit Transmit(::fidl::VectorView<uint8_t> data);
+
+    // Half-duplex transmit data to a SPI device; always transmits the entire buffer on success.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::Transmit Transmit(::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> data, ::fidl::BytePart _response_buffer);
+
+    // Half-duplex transmit data to a SPI device; always transmits the entire buffer on success.
+    zx_status_t Transmit_Deprecated(::fidl::VectorView<uint8_t> data, int32_t* out_status);
 
     // Half-duplex transmit data to a SPI device; always transmits the entire buffer on success.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<TransmitResponse> Transmit(::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> data, ::fidl::BytePart _response_buffer, int32_t* out_status);
+    ::fidl::DecodeResult<TransmitResponse> Transmit_Deprecated(::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> data, ::fidl::BytePart _response_buffer, int32_t* out_status);
 
-    // Half-duplex transmit data to a SPI device; always transmits the entire buffer on success.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<TransmitResponse> Transmit(::fidl::DecodedMessage<TransmitRequest> params, ::fidl::BytePart response_buffer);
+    // Half-duplex receive data from a SPI device; always reads the full size requested.
+    // Allocates 24 bytes of request buffer on the stack. Response is heap-allocated.
+    ResultOf::Receive Receive(uint32_t size);
+
+    // Half-duplex receive data from a SPI device; always reads the full size requested.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::Receive Receive(::fidl::BytePart _request_buffer, uint32_t size, ::fidl::BytePart _response_buffer);
 
 
     // Half-duplex receive data from a SPI device; always reads the full size requested.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<ReceiveResponse> Receive(::fidl::BytePart _request_buffer, uint32_t size, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::VectorView<uint8_t>* out_data);
+    ::fidl::DecodeResult<ReceiveResponse> Receive_Deprecated(::fidl::BytePart _request_buffer, uint32_t size, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::VectorView<uint8_t>* out_data);
 
-    // Half-duplex receive data from a SPI device; always reads the full size requested.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<ReceiveResponse> Receive(::fidl::DecodedMessage<ReceiveRequest> params, ::fidl::BytePart response_buffer);
+    // Full-duplex SPI transaction. Received data will exactly equal the length of the transmit
+    // buffer.
+    // Request is heap-allocated. Response is heap-allocated.
+    ResultOf::Exchange Exchange(::fidl::VectorView<uint8_t> txdata);
+
+    // Full-duplex SPI transaction. Received data will exactly equal the length of the transmit
+    // buffer.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    UnownedResultOf::Exchange Exchange(::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> txdata, ::fidl::BytePart _response_buffer);
 
 
     // Full-duplex SPI transaction. Received data will exactly equal the length of the transmit
     // buffer.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    ::fidl::DecodeResult<ExchangeResponse> Exchange(::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> txdata, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::VectorView<uint8_t>* out_rxdata);
-
-    // Full-duplex SPI transaction. Received data will exactly equal the length of the transmit
-    // buffer.
-    // Messages are encoded and decoded in-place.
-    ::fidl::DecodeResult<ExchangeResponse> Exchange(::fidl::DecodedMessage<ExchangeRequest> params, ::fidl::BytePart response_buffer);
+    ::fidl::DecodeResult<ExchangeResponse> Exchange_Deprecated(::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> txdata, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::VectorView<uint8_t>* out_rxdata);
 
    private:
     ::zx::channel channel_;
@@ -154,40 +303,72 @@ class Device final {
 
   // Methods to make a sync FIDL call directly on an unowned channel, avoiding setting up a client.
   class Call final {
+    Call() = delete;
    public:
 
     // Half-duplex transmit data to a SPI device; always transmits the entire buffer on success.
-    static zx_status_t Transmit(zx::unowned_channel _client_end, ::fidl::VectorView<uint8_t> data, int32_t* out_status);
+    // Allocates 24 bytes of response buffer on the stack. Request is heap-allocated.
+    static ResultOf::Transmit Transmit(zx::unowned_channel _client_end, ::fidl::VectorView<uint8_t> data);
+
+    // Half-duplex transmit data to a SPI device; always transmits the entire buffer on success.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::Transmit Transmit(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> data, ::fidl::BytePart _response_buffer);
+
+    // Half-duplex transmit data to a SPI device; always transmits the entire buffer on success.
+    static zx_status_t Transmit_Deprecated(zx::unowned_channel _client_end, ::fidl::VectorView<uint8_t> data, int32_t* out_status);
 
     // Half-duplex transmit data to a SPI device; always transmits the entire buffer on success.
     // Caller provides the backing storage for FIDL message via request and response buffers.
     // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<TransmitResponse> Transmit(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> data, ::fidl::BytePart _response_buffer, int32_t* out_status);
+    static ::fidl::DecodeResult<TransmitResponse> Transmit_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> data, ::fidl::BytePart _response_buffer, int32_t* out_status);
+
+    // Half-duplex receive data from a SPI device; always reads the full size requested.
+    // Allocates 24 bytes of request buffer on the stack. Response is heap-allocated.
+    static ResultOf::Receive Receive(zx::unowned_channel _client_end, uint32_t size);
+
+    // Half-duplex receive data from a SPI device; always reads the full size requested.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::Receive Receive(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t size, ::fidl::BytePart _response_buffer);
+
+
+    // Half-duplex receive data from a SPI device; always reads the full size requested.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<ReceiveResponse> Receive_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t size, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::VectorView<uint8_t>* out_data);
+
+    // Full-duplex SPI transaction. Received data will exactly equal the length of the transmit
+    // buffer.
+    // Request is heap-allocated. Response is heap-allocated.
+    static ResultOf::Exchange Exchange(zx::unowned_channel _client_end, ::fidl::VectorView<uint8_t> txdata);
+
+    // Full-duplex SPI transaction. Received data will exactly equal the length of the transmit
+    // buffer.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    static UnownedResultOf::Exchange Exchange(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> txdata, ::fidl::BytePart _response_buffer);
+
+
+    // Full-duplex SPI transaction. Received data will exactly equal the length of the transmit
+    // buffer.
+    // Caller provides the backing storage for FIDL message via request and response buffers.
+    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
+    static ::fidl::DecodeResult<ExchangeResponse> Exchange_Deprecated(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> txdata, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::VectorView<uint8_t>* out_rxdata);
+
+  };
+
+  // Messages are encoded and decoded in-place when these methods are used.
+  // Additionally, requests must be already laid-out according to the FIDL wire-format.
+  class InPlace final {
+    InPlace() = delete;
+   public:
 
     // Half-duplex transmit data to a SPI device; always transmits the entire buffer on success.
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<TransmitResponse> Transmit(zx::unowned_channel _client_end, ::fidl::DecodedMessage<TransmitRequest> params, ::fidl::BytePart response_buffer);
 
-
     // Half-duplex receive data from a SPI device; always reads the full size requested.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<ReceiveResponse> Receive(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, uint32_t size, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::VectorView<uint8_t>* out_data);
-
-    // Half-duplex receive data from a SPI device; always reads the full size requested.
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<ReceiveResponse> Receive(zx::unowned_channel _client_end, ::fidl::DecodedMessage<ReceiveRequest> params, ::fidl::BytePart response_buffer);
 
-
     // Full-duplex SPI transaction. Received data will exactly equal the length of the transmit
     // buffer.
-    // Caller provides the backing storage for FIDL message via request and response buffers.
-    // The lifetime of handles in the response, unless moved, is tied to the returned RAII object.
-    static ::fidl::DecodeResult<ExchangeResponse> Exchange(zx::unowned_channel _client_end, ::fidl::BytePart _request_buffer, ::fidl::VectorView<uint8_t> txdata, ::fidl::BytePart _response_buffer, int32_t* out_status, ::fidl::VectorView<uint8_t>* out_rxdata);
-
-    // Full-duplex SPI transaction. Received data will exactly equal the length of the transmit
-    // buffer.
-    // Messages are encoded and decoded in-place.
     static ::fidl::DecodeResult<ExchangeResponse> Exchange(zx::unowned_channel _client_end, ::fidl::DecodedMessage<ExchangeRequest> params, ::fidl::BytePart response_buffer);
 
   };

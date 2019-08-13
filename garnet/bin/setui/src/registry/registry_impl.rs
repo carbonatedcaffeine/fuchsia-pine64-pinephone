@@ -58,7 +58,7 @@ impl RegistryImpl {
             let registry_clone = registry.clone();
             fasync::spawn(
                 async move {
-                    while let Some(action) = await!(receiver.next()) {
+                    while let Some(action) = receiver.next().await {
                         registry_clone.write().unwrap().process_action(action);
                     }
                     Ok(())
@@ -73,7 +73,7 @@ impl RegistryImpl {
             let registry_clone = registry.clone();
             fasync::spawn(
                 async move {
-                    while let Some(setting_type) = await!(notification_rx.next()) {
+                    while let Some(setting_type) = notification_rx.next().await {
                         registry_clone.write().unwrap().notify(setting_type);
                     }
                     Ok(())
@@ -112,7 +112,12 @@ impl RegistryImpl {
         let listening = self.active_listeners.contains(&setting_type);
 
         if size == 0 && listening {
-            self.active_listeners.remove_item(&setting_type);
+            // FIXME: use `Vec::remove_item` upon stabilization
+            let listener_to_remove =
+                self.active_listeners.iter().enumerate().find(|(_i, elem)| **elem == setting_type);
+            if let Some((i, _elem)) = listener_to_remove {
+                self.active_listeners.remove(i);
+            }
             sender.unbounded_send(Command::ChangeState(State::EndListen)).ok();
         } else if size > 0 && !listening {
             self.active_listeners.push(setting_type);
@@ -154,7 +159,7 @@ impl RegistryImpl {
                 let error_sender_clone = self.event_sender.clone();
                 fasync::spawn(
                     async move {
-                        let response = await!(receiver).unwrap();
+                        let response = receiver.await.unwrap();
                         sender_clone.unbounded_send(SettingEvent::Response(id, response)).ok();
 
                         Ok(())
@@ -214,13 +219,13 @@ mod tests {
                 })
                 .is_ok());
 
-            let command = await!(handler_rx.next()).unwrap();
+            let command = handler_rx.next().await.unwrap();
 
             match command {
                 Command::ChangeState(State::Listen(notifier)) => {
                     // Send back notification and make sure it is received.
                     assert!(notifier.unbounded_send(setting_type).is_ok());
-                    match await!(event_rx.next()).unwrap() {
+                    match event_rx.next().await.unwrap() {
                         SettingEvent::Changed(changed_type) => {
                             assert_eq!(changed_type, setting_type);
                         }
@@ -245,7 +250,7 @@ mod tests {
                 })
                 .is_ok());
 
-            match await!(handler_rx.next()).unwrap() {
+            match handler_rx.next().await.unwrap() {
                 Command::ChangeState(State::EndListen) => {
                     // Success case - ignore.
                 }
@@ -277,7 +282,7 @@ mod tests {
             })
             .is_ok());
 
-        let command = await!(handler_rx.next()).unwrap();
+        let command = handler_rx.next().await.unwrap();
 
         match command {
             Command::HandleRequest(request, responder) => {
@@ -286,7 +291,7 @@ mod tests {
                 assert!(responder.send(Ok(None)).is_ok());
 
                 // verify response matches
-                match await!(event_rx.next()).unwrap() {
+                match event_rx.next().await.unwrap() {
                     SettingEvent::Response(response_id, response) => {
                         assert_eq!(request_id, response_id);
                         assert!(response.is_ok());

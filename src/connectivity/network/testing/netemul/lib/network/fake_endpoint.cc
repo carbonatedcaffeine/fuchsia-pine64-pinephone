@@ -6,10 +6,9 @@
 
 namespace netemul {
 
-FakeEndpoint::FakeEndpoint(
-    data::BusConsumer::Ptr sink,
-    fidl::InterfaceRequest<FakeEndpoint::FFakeEndpoint> request,
-    async_dispatcher_t* dispatcher)
+FakeEndpoint::FakeEndpoint(data::BusConsumer::Ptr sink,
+                           fidl::InterfaceRequest<FakeEndpoint::FFakeEndpoint> request,
+                           async_dispatcher_t* dispatcher)
     : sink_(std::move(sink)),
       binding_(this, std::move(request), dispatcher),
       weak_ptr_factory_(this) {
@@ -23,14 +22,12 @@ FakeEndpoint::FakeEndpoint(
 void FakeEndpoint::SetOnDisconnected(OnDisconnectedCallback cl) {
   on_disconnected_ = std::move(cl);
 }
-fxl::WeakPtr<data::Consumer> FakeEndpoint::GetPointer() {
-  return weak_ptr_factory_.GetWeakPtr();
-}
+fxl::WeakPtr<data::Consumer> FakeEndpoint::GetPointer() { return weak_ptr_factory_.GetWeakPtr(); }
 
 void FakeEndpoint::Consume(const void* data, size_t len) {
   // copy data to fidl vec:
-  fidl::VectorPtr<uint8_t> vec(len);
-  memcpy(vec->data(), data, len);
+  std::vector<uint8_t> vec(len);
+  memcpy(vec.data(), data, len);
   binding_.events().OnData(std::move(vec));
 }
 

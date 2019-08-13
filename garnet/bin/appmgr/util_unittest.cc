@@ -10,10 +10,9 @@ namespace component {
 namespace {
 
 TEST(UtilTests, GetLabelFromURL) {
-  std::string values[][2] = {
-      {"", ""},        {"foo/bar", "bar"},  {"foo/bar/", "foo/bar/"},
-      {"/foo", "foo"}, {"/foo/bar", "bar"}, {"foo", "foo"},
-      {"foo/", "foo/"}};
+  std::string values[][2] = {{"", ""},        {"foo/bar", "bar"},  {"foo/bar/", "foo/bar/"},
+                             {"/foo", "foo"}, {"/foo/bar", "bar"}, {"foo", "foo"},
+                             {"foo/", "foo/"}};
   for (auto value : values) {
     auto& url = value[0];
     auto& expected = value[1];
@@ -28,7 +27,7 @@ TEST(UtilTests, GetArgsString) {
   ::fidl::VectorPtr<::std::string> empty_vec(3);
   EXPECT_EQ(Util::GetArgsString(empty_vec), "  ");
 
-  ::fidl::VectorPtr<::std::string> vec;
+  std::vector<::std::string> vec;
   vec.push_back("foo");
   EXPECT_EQ(Util::GetArgsString(vec), "foo");
   vec.push_back("bar");

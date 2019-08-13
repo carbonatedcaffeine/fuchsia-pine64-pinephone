@@ -5,11 +5,11 @@
 #ifndef SRC_CONNECTIVITY_NETWORK_TESTING_NETEMUL_RUNNER_MANAGED_ENVIRONMENT_H_
 #define SRC_CONNECTIVITY_NETWORK_TESTING_NETEMUL_RUNNER_MANAGED_ENVIRONMENT_H_
 
+#include <memory>
+
 #include <fuchsia/netemul/environment/cpp/fidl.h>
 #include <lib/sys/cpp/testing/enclosing_environment.h>
 #include <src/lib/fxl/macros.h>
-
-#include <memory>
 
 #include "log_listener.h"
 #include "managed_launcher.h"
@@ -20,8 +20,7 @@
 
 namespace netemul {
 
-class ManagedEnvironment
-    : public fuchsia::netemul::environment::ManagedEnvironment {
+class ManagedEnvironment : public fuchsia::netemul::environment::ManagedEnvironment {
  public:
   using EnvironmentRunningCallback = fit::closure;
   using Options = fuchsia::netemul::environment::EnvironmentOptions;
@@ -33,8 +32,7 @@ class ManagedEnvironment
 
   const SandboxEnv::Ptr& sandbox_env() const { return sandbox_env_; }
 
-  void GetLauncher(
-      ::fidl::InterfaceRequest<::fuchsia::sys::Launcher> launcher) override;
+  void GetLauncher(::fidl::InterfaceRequest<::fuchsia::sys::Launcher> launcher) override;
 
   void CreateChildEnvironment(fidl::InterfaceRequest<FManagedEnvironment> me,
                               Options options) override;
@@ -46,9 +44,7 @@ class ManagedEnvironment
 
   ManagedLauncher& launcher() { return *launcher_; }
 
-  void SetRunningCallback(EnvironmentRunningCallback cb) {
-    running_callback_ = std::move(cb);
-  }
+  void SetRunningCallback(EnvironmentRunningCallback cb) { running_callback_ = std::move(cb); }
 
   void Bind(fidl::InterfaceRequest<FManagedEnvironment> req);
 

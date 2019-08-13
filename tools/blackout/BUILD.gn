@@ -1,0 +1,17 @@
+# Copyright 2019 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+group("all") {
+  testonly = true
+  public_deps = [
+    "//tools/blackout/blobfs-fsck-soft",
+  ]
+}
+
+group("tests") {
+  testonly = true
+  public_deps = [
+    "blobfs-fsck-soft:tests",
+  ]
+}

@@ -9,9 +9,9 @@
 
 // TODO(ES-153): possibly delete.  See comment below about NUM_CLIP_PLANES.
 #include "src/ui/lib/escher/debug/debug_font.h"
+#include "src/ui/lib/escher/debug/debug_rects.h"
 #include "src/ui/lib/escher/escher.h"
-#include "src/ui/lib/escher/geometry/tessellation.h"
-#include "src/ui/lib/escher/paper/paper_legacy_drawable.h"
+#include "src/ui/lib/escher/mesh/tessellation.h"
 #include "src/ui/lib/escher/paper/paper_render_queue_context.h"
 #include "src/ui/lib/escher/paper/paper_scene.h"
 #include "src/ui/lib/escher/paper/paper_shader_structs.h"
@@ -26,6 +26,9 @@
 #include "src/ui/lib/escher/vk/texture.h"
 
 namespace escher {
+
+// Used to calculate the area of the debug graph that bars will be drawn in.
+constexpr int32_t kWidthPadding = 150;
 
 PaperRendererPtr PaperRenderer::New(EscherWeakPtr escher, const PaperRendererConfig& config) {
   return fxl::AdoptRef(new PaperRenderer(std::move(escher), config));
@@ -248,6 +251,9 @@ void PaperRenderer::EndFrame() {
 
   // We may need to lazily instantiate |debug_font|, or delete it. If the former, this needs to be
   // done before we submit the GPU uploader's tasks.
+
+  // TODO(ES-224): Clean up lazy instantiation. Right now, DebugFont and DebugRects are
+  // created/destroyed from frame-to-frame.
   if (config_.debug_frame_number) {
     DrawDebugText(std::to_string(frame_data_->frame->frame_number()), {10, 10}, 4);
   }
@@ -257,6 +263,15 @@ void PaperRenderer::EndFrame() {
     }
   } else {
     debug_font_.reset();
+  }
+
+  // TODO(ES-247): Move graphing out of escher.
+  if (!frame_data_->lines.empty() || !debug_times_.empty()) {
+    if (!debug_lines_) {
+      debug_lines_ = DebugRects::New(frame_data_->gpu_uploader.get(), escher()->image_cache());
+    }
+  } else {
+    debug_lines_.reset();
   }
 
   // TODO(ES-206): obtain a semaphore here that will be signalled by the
@@ -291,8 +306,59 @@ void PaperRenderer::EndFrame() {
 
 void PaperRenderer::DrawDebugText(std::string text, vk::Offset2D offset, int32_t scale) {
   FXL_DCHECK(frame_data_);
+  // TODO(ES-245): Add error checking to make sure math will not cause negative
+  // values or the bars to go off screen.
   frame_data_->texts.push_back({text, offset, scale});
 }
+
+void PaperRenderer::DrawVLine(escher::DebugRects::Color kColor, uint32_t x_coord, int32_t y_start,
+                              uint32_t y_end, uint32_t thickness) {
+  // TODO(ES-245): Add error checking to make sure math will not cause negative
+  // values or the bars to go off screen.
+  vk::Rect2D rect;
+  vk::Offset2D offset = {static_cast<int32_t>(x_coord), y_start};
+  vk::Extent2D extent = {static_cast<uint32_t>(x_coord + thickness), y_end};
+
+  rect.offset = offset;
+  rect.extent = extent;
+
+  frame_data_->lines.push_back({kColor, rect});
+}
+
+void PaperRenderer::DrawHLine(escher::DebugRects::Color kColor, int32_t y_coord, int32_t x_start,
+                              uint32_t x_end, int32_t thickness) {
+  // TODO(ES-245): Add error checking to make sure math will not cause negative
+  // values or the bars to go off screen.
+  vk::Rect2D rect;
+  vk::Offset2D offset = {x_start, static_cast<int32_t>(y_coord)};
+  vk::Extent2D extent = {x_end, static_cast<uint32_t>(y_coord + thickness)};
+
+  rect.offset = offset;
+  rect.extent = extent;
+
+  frame_data_->lines.push_back({kColor, rect});
+}
+
+void PaperRenderer::DrawDebugGraph(std::string x_label, std::string y_label,
+                                   DebugRects::Color lineColor) {
+  const int32_t frame_width = frame_data_->output_image->width();
+  const int32_t frame_height = frame_data_->output_image->height();
+
+  const uint16_t x_axis = frame_width - kWidthPadding;
+  const uint16_t y_axis = frame_height - kHeightPadding;
+  const uint16_t h_interval = (y_axis - kHeightPadding) / 35;
+
+  DrawVLine(lineColor, kWidthPadding, kHeightPadding, y_axis, 10);  // Vertical Line (x-axis).
+  DrawHLine(lineColor, y_axis, kWidthPadding, x_axis, 10);          // Horizontal line (y_axis).
+
+  DrawDebugText(x_label, {5, frame_height / 2}, 5);
+  DrawDebugText(y_label, {frame_width / 2, frame_height - (kHeightPadding - 25)}, 5);
+
+  // Colored bar used to show acceptable vs concerning values (acceptable below bar).
+  DrawHLine(escher::DebugRects::kGreen, y_axis - (h_interval * 16), kWidthPadding + 10, x_axis, 5);
+}
+
+void PaperRenderer::AddDebugTimeStamp(TimeStamp ts) { debug_times_.push_back(ts); }
 
 void PaperRenderer::BindSceneAndCameraUniforms(uint32_t camera_index) {
   auto* cmd_buf = frame_data_->frame->cmds();
@@ -302,78 +368,79 @@ void PaperRenderer::BindSceneAndCameraUniforms(uint32_t camera_index) {
   frame_data_->cameras[camera_index].binding.Bind(cmd_buf);
 }
 
-void PaperRenderer::Draw(PaperDrawable* drawable, PaperDrawableFlags flags, mat4* matrix) {
+void PaperRenderer::Draw(PaperDrawable* drawable, PaperDrawableFlags flags) {
   TRACE_DURATION("gfx", "PaperRenderer::Draw");
 
   // For restoring state afterward.
   size_t transform_stack_size = transform_stack_.size();
   size_t num_clip_planes = transform_stack_.num_clip_planes();
-
-  if (matrix) {
-    transform_stack_.PushTransform(*matrix);
-  }
-
   drawable->DrawInScene(frame_data_->scene.get(), &draw_call_factory_, &transform_stack_,
                         frame_data_->frame.get(), flags);
-
   transform_stack_.Clear({transform_stack_size, num_clip_planes});
 }
 
 void PaperRenderer::DrawCircle(float radius, const PaperMaterialPtr& material,
-                               PaperDrawableFlags flags, mat4* matrix) {
+                               PaperDrawableFlags flags) {
   TRACE_DURATION("gfx", "PaperRenderer::DrawCircle");
 
   if (!material)
     return;
-
-  if (!matrix) {
-    draw_call_factory_.DrawCircle(radius, *material.get(), flags);
-  } else {
-    // Roll the radius into the transform to avoid an extra push onto the stack;
-    // see PaperDrawCallFactory::DrawCircle() for details.
-    transform_stack_.PushTransform(glm::scale(*matrix, vec3(radius, radius, radius)));
-    draw_call_factory_.DrawCircle(1.f, *material.get(), flags);
-    transform_stack_.Pop();
-  }
+  draw_call_factory_.DrawCircle(radius, *material.get(), flags);
 }
 
 void PaperRenderer::DrawRect(vec2 min, vec2 max, const PaperMaterialPtr& material,
-                             PaperDrawableFlags flags, mat4* matrix) {
+                             PaperDrawableFlags flags) {
   TRACE_DURATION("gfx", "PaperRenderer::DrawRect");
 
   if (!material)
     return;
+  draw_call_factory_.DrawRect(min, max, *material.get(), flags);
+}
 
-  if (!matrix) {
-    draw_call_factory_.DrawRect(min, max, *material.get(), flags);
-  } else {
-    transform_stack_.PushTransform(*matrix);
-    draw_call_factory_.DrawRect(min, max, *material.get(), flags);
-    transform_stack_.Pop();
-  }
+// Convenience wrapper around the standard DrawRect function.
+void PaperRenderer::DrawRect(float width, float height, const PaperMaterialPtr& material,
+                             PaperDrawableFlags flags) {
+  const vec2 extent(width, height);
+  DrawRect(-0.5f * extent, 0.5f * extent, material, flags);
 }
 
 void PaperRenderer::DrawRoundedRect(const RoundedRectSpec& spec, const PaperMaterialPtr& material,
-                                    PaperDrawableFlags flags, mat4* matrix) {
+                                    PaperDrawableFlags flags) {
   TRACE_DURATION("gfx", "PaperRenderer::DrawRoundedRect");
 
   if (!material)
     return;
-
-  if (!matrix) {
-    draw_call_factory_.DrawRoundedRect(spec, *material.get(), flags);
-  } else {
-    transform_stack_.PushTransform(*matrix);
-    draw_call_factory_.DrawRoundedRect(spec, *material.get(), flags);
-    transform_stack_.Pop();
-  }
+  draw_call_factory_.DrawRoundedRect(spec, *material.get(), flags);
 }
 
-void PaperRenderer::DrawLegacyObject(const Object& obj, PaperDrawableFlags flags) {
-  FXL_DCHECK(frame_data_);
+void PaperRenderer::DrawBoundingBox(const BoundingBox& box, const PaperMaterialPtr& material,
+                                    PaperDrawableFlags flags) {
+  TRACE_DURATION("gfx", "PaperRenderer::DrawBoundingBox");
 
-  PaperLegacyDrawable drawable(obj);
-  Draw(&drawable, flags);
+  if (!material) {
+    return;
+  }
+
+  if (material->texture()) {
+    FXL_LOG(ERROR) << "TODO(ES-218): Box meshes do not currently support textures.";
+    return;
+  }
+
+  mat4 matrix = box.CreateTransform();
+  transform_stack_.PushTransform(matrix);
+  draw_call_factory_.DrawBoundingBox(*material.get(), flags);
+  transform_stack_.Pop();
+}
+
+void PaperRenderer::DrawMesh(const MeshPtr& mesh, const PaperMaterialPtr& material,
+                             PaperDrawableFlags flags) {
+  TRACE_DURATION("gfx", "PaperRenderer::DrawMesh");
+
+  if (!material) {
+    return;
+  }
+
+  draw_call_factory_.DrawMesh(mesh, *material.get(), flags);
 }
 
 void PaperRenderer::InitRenderPassInfo(RenderPassInfo* rp, ResourceRecycler* recycler,
@@ -462,18 +529,24 @@ void PaperRenderer::GenerateCommandsForNoShadows(uint32_t camera_index) {
     PaperRenderQueueContext context;
     context.set_draw_mode(PaperRendererDrawMode::kAmbient);
 
+    // Render wireframe.
+    context.set_shader_program(no_lighting_program_);
+    cmd_buf->SetToDefaultState(CommandBuffer::DefaultState::kWireframe);
+    render_queue_.GenerateCommands(cmd_buf, &context, PaperRenderQueueFlagBits::kWireframe);
+
+    // Render opaque.
     context.set_shader_program(ambient_light_program_);
+    cmd_buf->SetWireframe(false);
     cmd_buf->SetToDefaultState(CommandBuffer::DefaultState::kOpaque);
     render_queue_.GenerateCommands(cmd_buf, &context, PaperRenderQueueFlagBits::kOpaque);
 
+    // Render translucent.
     context.set_shader_program(no_lighting_program_);
     cmd_buf->SetToDefaultState(CommandBuffer::DefaultState::kTranslucent);
     render_queue_.GenerateCommands(cmd_buf, &context, PaperRenderQueueFlagBits::kTranslucent);
   }
   cmd_buf->EndRenderPass();
   frame->AddTimestamp("finished no-shadows render pass");
-
-  GenerateDebugCommands(frame_data_->frame->cmds());
 }
 
 void PaperRenderer::GenerateCommandsForShadowVolumes(uint32_t camera_index) {
@@ -507,8 +580,16 @@ void PaperRenderer::GenerateCommandsForShadowVolumes(uint32_t camera_index) {
         .eye_index = cam_data.eye_index,
     });
 
+    context.set_shader_program(no_lighting_program_);
     context.set_draw_mode(PaperRendererDrawMode::kAmbient);
+
+    // Render wireframe.
+    cmd_buf->SetToDefaultState(CommandBuffer::DefaultState::kWireframe);
+    render_queue_.GenerateCommands(cmd_buf, &context, PaperRenderQueueFlagBits::kWireframe);
+
+    // Render opaque.
     context.set_shader_program(ambient_light_program_);
+    cmd_buf->SetWireframe(false);
     cmd_buf->SetToDefaultState(CommandBuffer::DefaultState::kOpaque);
 
     render_queue_.GenerateCommands(cmd_buf, &context, PaperRenderQueueFlagBits::kOpaque);
@@ -615,14 +696,45 @@ void PaperRenderer::GenerateCommandsForShadowVolumes(uint32_t camera_index) {
   frame->AddTimestamp("finished shadow_volume render pass");
 }
 
-void PaperRenderer::GenerateDebugCommands(CommandBuffer* cmd_buf) {
-  if (frame_data_->texts.empty()) {
-    return;
+void PaperRenderer::GraphDebugData() {
+  const int16_t x_start = kWidthPadding + 10;
+  const int16_t y_axis = frame_data_->output_image->height() - kHeightPadding;
+  const int16_t x_axis = frame_data_->output_image->width() - kWidthPadding;
+  const int16_t h_interval = (y_axis - kHeightPadding) / 35;
+  const int16_t w_interval = frame_data_->output_image->width() / 100;
+
+  const int16_t middle_bar = y_axis - (h_interval * 16) + 2;
+
+  for (std::size_t i = 0; i < debug_times_.size(); i++) {
+    auto t = debug_times_[i];
+
+    int16_t render_time = t.render_done - t.render_start;
+    int16_t presentation_time = t.actual_present - t.target_present;
+
+    if (static_cast<int16_t>(x_start + (i * w_interval)) <= x_axis) {
+      if (render_time != 0)
+        DrawVLine(escher::DebugRects::kRed, x_start + (i * w_interval), y_axis,
+                  y_axis - (h_interval * render_time), w_interval);
+      if (t.latch_point != 0)
+        DrawVLine(escher::DebugRects::kYellow, x_start + (i * w_interval), y_axis,
+                  y_axis - (h_interval * t.latch_point), w_interval);
+      if (t.update_done != 0)
+        DrawVLine(escher::DebugRects::kBlue, x_start + (i * w_interval), y_axis,
+                  y_axis - (h_interval * t.update_done), w_interval);
+      // if (presentation_time != 0)
+      //   DrawVLine(escher::DebugRects::kPurple, x_start + (i * w_interval), middle_bar,
+      //             middle_bar - (h_interval * presentation_time), w_interval);
+    } else {
+      // TODO(ES-246): Delete and replace values in array
+    }
   }
+}
+
+void PaperRenderer::GenerateDebugCommands(CommandBuffer* cmd_buf) {
   TRACE_DURATION("gfx", "PaperRenderer::GenerateDebugCommands");
 
   const FramePtr& frame = frame_data_->frame;
-  frame->AddTimestamp("started text render pass");
+  frame->AddTimestamp("started debug render pass");
 
   auto& output_image = frame_data_->output_image;
   auto layout = output_image->swapchain_layout();
@@ -638,9 +750,16 @@ void PaperRenderer::GenerateDebugCommands(CommandBuffer* cmd_buf) {
       vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eTransferWrite,
       vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite);
 
+  GraphDebugData();
+
   for (std::size_t i = 0; i < frame_data_->texts.size(); i++) {
     const TextData& td = frame_data_->texts[i];
     debug_font_->Blit(cmd_buf, td.text, output_image, td.offset, td.scale);
+  }
+
+  for (std::size_t i = 0; i < frame_data_->lines.size(); i++) {
+    const LineData& ld = frame_data_->lines[i];
+    debug_lines_->Blit(cmd_buf, ld.kColor, output_image, ld.rect);
   }
 
   cmd_buf->ImageBarrier(
@@ -649,7 +768,7 @@ void PaperRenderer::GenerateDebugCommands(CommandBuffer* cmd_buf) {
       vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eTransfer,
       vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eTransferWrite);
 
-  frame->AddTimestamp("finished text render pass");
+  frame->AddTimestamp("finished debug render pass");
 }
 
 std::pair<TexturePtr, TexturePtr> PaperRenderer::ObtainDepthAndMsaaTextures(const FramePtr& frame,

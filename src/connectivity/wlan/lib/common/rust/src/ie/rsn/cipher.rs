@@ -41,14 +41,19 @@ pub struct Cipher {
 impl Cipher {
     /// Creates a new AKM instance for 802.11 specified AKMs.
     /// See IEEE Std 802.11-2016, 9.4.2.25.2, Table 9-131
-    pub fn new_dot11(suite_type: u8) -> Self {
+    pub const fn new_dot11(suite_type: u8) -> Self {
         Cipher { oui: OUI, suite_type }
     }
 
     /// Reserved and vendor specific cipher suites have no known usage and require special
     /// treatments.
     pub fn has_known_usage(&self) -> bool {
-        !self.is_reserved() && !self.is_vendor_specific()
+        if self.is_vendor_specific() {
+            // Support MSFT TKIP/CCMP for WPA1
+            self.oui == Oui::MSFT && (self.suite_type == TKIP || self.suite_type == CCMP_128)
+        } else {
+            !self.is_reserved()
+        }
     }
 
     pub fn is_vendor_specific(&self) -> bool {
@@ -80,8 +85,8 @@ impl Cipher {
 
         // IEEE 802.11-2016, 9.4.2.25.2, Table 9-132
         match self.suite_type {
-            1...5 | 8...10 => Some(true),
-            0 | 6 | 11...13 => Some(false),
+            1..=5 | 8..=10 => Some(true),
+            0 | 6 | 11..=13 => Some(false),
             _ => None,
         }
     }
@@ -91,8 +96,8 @@ impl Cipher {
 
         // IEEE 802.11-2016, 9.4.2.25.2, Table 9-132
         match self.suite_type {
-            0 | 2...4 | 8...10 => Some(true),
-            1 | 5 | 6 | 11...13 => Some(false),
+            0 | 2..=4 | 8..=10 => Some(true),
+            1 | 5 | 6 | 11..=13 => Some(false),
             _ => None,
         }
     }
@@ -102,8 +107,8 @@ impl Cipher {
 
         // IEEE 802.11-2016, 9.4.2.25.2, Table 9-132
         match self.suite_type {
-            6 | 11...13 => Some(true),
-            0 | 1...5 | 8...10 => Some(false),
+            6 | 11..=13 => Some(true),
+            0 | 1..=5 | 8..=10 => Some(false),
             _ => None,
         }
     }

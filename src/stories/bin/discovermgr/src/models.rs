@@ -7,7 +7,7 @@ use {
     crate::story_context_store::ContextEntity,
     fidl_fuchsia_app_discover::Suggestion as FidlSuggestion,
     fidl_fuchsia_modular::{
-        AddMod as FidlAddMod, DisplayInfo as FidlDisplayInfo, Intent as FidlIntent,
+        AddMod as FidlAddModInfo, DisplayInfo as FidlDisplayInfo, Intent as FidlIntent,
         IntentParameter as FidlIntentParameter, IntentParameterData as FidlIntentParameterData,
         SurfaceArrangement, SurfaceDependency, SurfaceRelation,
     },
@@ -62,15 +62,42 @@ pub struct WebFulfillment {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RestoreStoryInfo {
+    pub story_name: String,
+}
+
+impl RestoreStoryInfo {
+    pub fn new(story_name: impl Into<String>) -> Self {
+        RestoreStoryInfo { story_name: story_name.into() }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum SuggestedAction {
+    RestoreStory(RestoreStoryInfo),
+    AddMod(AddModInfo),
+}
+
+impl SuggestedAction {
+    fn restore_story(story_name: String) -> SuggestedAction {
+        SuggestedAction::RestoreStory(RestoreStoryInfo::new(story_name))
+    }
+
+    fn add_mod(action: AddModInfo) -> SuggestedAction {
+        SuggestedAction::AddMod(action)
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 // TODO: Suggestions at this point should contain ActionDisplayInfo
 pub struct Suggestion {
     id: String,
     display_info: DisplayInfo,
-    action: AddMod,
+    action: SuggestedAction,
 }
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
-pub struct AddMod {
+pub struct AddModInfo {
     pub mod_name: String,
     story_name: String,
     pub intent: Intent,
@@ -90,11 +117,23 @@ pub struct IntentParameter {
 }
 
 impl Suggestion {
-    pub fn new(action: AddMod, display_info: DisplayInfo) -> Self {
-        Suggestion { id: Uuid::new_v4().to_string(), action, display_info }
+    pub fn new(action: AddModInfo, display_info: DisplayInfo) -> Self {
+        Suggestion {
+            id: Uuid::new_v4().to_string(),
+            display_info,
+            action: SuggestedAction::add_mod(action),
+        }
     }
 
-    pub fn action(&self) -> &AddMod {
+    pub fn new_story_suggestion(story_name: String, display_info: DisplayInfo) -> Self {
+        Suggestion {
+            id: Uuid::new_v4().to_string(),
+            display_info,
+            action: SuggestedAction::restore_story(story_name),
+        }
+    }
+
+    pub fn action(&self) -> &SuggestedAction {
         &self.action
     }
 
@@ -120,7 +159,7 @@ impl Action {
     ) -> Option<DisplayInfo> {
         match self.action_display {
             None => None,
-            Some(ref action_display) => await!(action_display.load_display_info(parameters)),
+            Some(ref action_display) => action_display.load_display_info(parameters).await,
         }
     }
 }
@@ -133,9 +172,9 @@ impl ActionDisplayInfo {
         match self.display_info {
             None => None,
             Some(ref display_info) => Some(DisplayInfo {
-                title: await!(self.interpolate(&display_info.title, &parameters)),
-                subtitle: await!(self.interpolate(&display_info.subtitle, &parameters)),
-                icon: await!(self.interpolate(&display_info.icon, &parameters)),
+                title: self.interpolate(&display_info.title, &parameters).await,
+                subtitle: self.interpolate(&display_info.subtitle, &parameters).await,
+                icon: self.interpolate(&display_info.icon, &parameters).await,
             }),
         }
     }
@@ -161,7 +200,7 @@ impl ActionDisplayInfo {
                     let intent_param = parts.next().unwrap();
                     let subfield_path = parts.collect::<Vec<&str>>();
                     if let Some(matching) = parameters.get(intent_param) {
-                        if let Some(data) = await!(matching.get_data(subfield_path)) {
+                        if let Some(data) = matching.get_data(subfield_path).await {
                             result = result.replace(&template_part, &data);
                         }
                     }
@@ -177,7 +216,6 @@ impl DisplayInfo {
         DisplayInfo { title: None, icon: None, subtitle: None }
     }
 
-    #[cfg(test)]
     pub fn with_title(mut self, title: &str) -> Self {
         self.title = Some(title.to_string());
         self
@@ -204,17 +242,17 @@ pub struct EntityMatching<'a> {
 
 impl<'a> EntityMatching<'a> {
     async fn get_data(&'a self, path: Vec<&'a str>) -> Option<String> {
-        await!(self.context_entity.get_string_data(path, &self.matching_type))
+        self.context_entity.get_string_data(path, &self.matching_type).await
     }
 }
 
-impl AddMod {
+impl AddModInfo {
     pub fn new_raw(
         component_url: &str,
         story_name: Option<String>,
         mod_name: Option<String>,
     ) -> Self {
-        AddMod {
+        AddModInfo {
             story_name: story_name.unwrap_or(Uuid::new_v4().to_string()),
             mod_name: mod_name.unwrap_or(Uuid::new_v4().to_string()),
             intent: Intent::new().with_handler(component_url),
@@ -222,7 +260,7 @@ impl AddMod {
     }
 
     pub fn new(intent: Intent, story_name: Option<String>, mod_name: Option<String>) -> Self {
-        AddMod {
+        AddModInfo {
             story_name: story_name.unwrap_or(Uuid::new_v4().to_string()),
             mod_name: mod_name.unwrap_or(Uuid::new_v4().to_string()),
             intent: intent,
@@ -238,7 +276,7 @@ impl AddMod {
     }
 
     pub fn replace_reference_in_parameters(self, old: &str, new: &str) -> Self {
-        AddMod {
+        AddModInfo {
             story_name: self.story_name,
             mod_name: self.mod_name,
             intent: Intent {
@@ -327,9 +365,9 @@ impl Into<FidlIntentParameter> for IntentParameter {
     }
 }
 
-impl Into<FidlAddMod> for AddMod {
-    fn into(self) -> FidlAddMod {
-        FidlAddMod {
+impl Into<FidlAddModInfo> for AddModInfo {
+    fn into(self) -> FidlAddModInfo {
+        FidlAddModInfo {
             mod_name: vec![],
             mod_name_transitional: Some(self.mod_name),
             intent: self.intent.into(),
@@ -359,11 +397,12 @@ mod tests {
     fn test_from_assets() {
         let data: Vec<Action> =
             serde_json::from_str(include_str!("../test_data/test_actions.json")).unwrap();
-        assert_eq!(data.len(), 4);
+        assert_eq!(data.len(), 5);
         assert_eq!(data[0].name, "PLAY_MUSIC");
         assert_eq!(data[1].name, "SHOW_WEATHER");
         assert_eq!(data[2].name, "SHOW_DIRECTIONS");
         assert_eq!(data[3].name, "VIEW_COLLECTION");
+        assert_eq!(data[4].name, "ACTION_MAIN");
 
         let fulfillment = data[3].fuchsia_fulfillment.as_ref().unwrap();
         assert_eq!(
@@ -394,11 +433,11 @@ mod tests {
                 icon: None,
                 subtitle: Some("suggestion subtitle".to_string()),
             },
-            action: AddMod {
+            action: SuggestedAction::AddMod(AddModInfo {
                 mod_name: "mod_name".to_string(),
                 intent: Intent { handler: None, action: None, parameters: btreeset!() },
                 story_name: "story_name".to_string(),
-            },
+            }),
         };
 
         let suggestion_fidl: FidlSuggestion = suggestion.clone().into();
@@ -419,12 +458,12 @@ mod tests {
                 entity_reference: "ref".to_string(),
             }),
         };
-        let add_mod = AddMod {
+        let add_mod = AddModInfo {
             story_name: "story_name".to_string(),
             mod_name: "mod_name".to_string(),
             intent: intent,
         };
-        let add_mod_fidl: FidlAddMod = add_mod.clone().into();
+        let add_mod_fidl: FidlAddModInfo = add_mod.clone().into();
 
         assert_eq!(add_mod_fidl.mod_name_transitional, Some(add_mod.mod_name));
         assert_eq!(add_mod_fidl.intent.handler, add_mod.intent.handler);
@@ -460,7 +499,7 @@ mod tests {
             action: Some("action".to_string()),
             parameters: BTreeSet::from_iter(params.clone().into_iter()),
         };
-        let add_mod = AddMod {
+        let add_mod = AddModInfo {
             story_name: "story_name".to_string(),
             mod_name: "mod_name".to_string(),
             intent: intent.clone(),
@@ -500,7 +539,7 @@ mod tests {
             ContextEntity::from_entity(entity_proxy, hashset!())
         });
         let entities =
-            await!(join_all(futs)).into_iter().map(|e| e.unwrap()).collect::<Vec<ContextEntity>>();
+            join_all(futs).await.into_iter().map(|e| e.unwrap()).collect::<Vec<ContextEntity>>();
         let parameters = hashmap!(
             "param1".to_string() => EntityMatching {
                 context_entity: &entities[0],
@@ -536,7 +575,7 @@ mod tests {
             parameter_mapping: parameter_mapping.clone(),
         };
         assert_eq!(
-            await!(action_display.load_display_info(parameters.clone())),
+            action_display.load_display_info(parameters.clone()).await,
             Some(
                 DisplayInfo::new()
                     .with_title("Hello 1")
@@ -548,7 +587,7 @@ mod tests {
         // Without display info, nothing is returned.
         let action_display =
             ActionDisplayInfo { display_info: None, parameter_mapping: parameter_mapping.clone() };
-        assert_eq!(await!(action_display.load_display_info(parameters.clone())), None);
+        assert_eq!(action_display.load_display_info(parameters.clone()).await, None);
 
         // Without parameter mapping, the same display info is returned
         let action_display = ActionDisplayInfo {
@@ -556,7 +595,7 @@ mod tests {
             parameter_mapping: vec![],
         };
         assert_eq!(
-            await!(action_display.load_display_info(parameters.clone())),
+            action_display.load_display_info(parameters.clone()).await,
             Some(display_info.clone())
         );
 
@@ -576,7 +615,7 @@ mod tests {
             parameter_mapping: parameter_mapping.clone(),
         };
         assert_eq!(
-            await!(action_display.load_display_info(parameters)),
+            action_display.load_display_info(parameters).await,
             Some(
                 DisplayInfo::new()
                     .with_title("Hello 1")

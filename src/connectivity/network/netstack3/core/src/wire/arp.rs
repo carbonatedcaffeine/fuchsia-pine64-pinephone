@@ -8,15 +8,17 @@
 
 #[cfg(test)]
 use std::fmt::{self, Debug, Formatter};
+use std::hash::Hash;
 use std::mem;
 
+use net_types::ethernet::Mac;
+use net_types::ip::Ipv4Addr;
 use packet::{BufferView, BufferViewMut, InnerPacketBuilder, ParsablePacket, ParseMetadata};
 use zerocopy::{AsBytes, ByteSlice, FromBytes, LayoutVerified, Unaligned};
 
 use crate::device::arp::{ArpHardwareType, ArpOp};
-use crate::device::ethernet::{EtherType, Mac};
+use crate::device::ethernet::EtherType;
 use crate::error::{ParseError, ParseResult};
-use crate::ip::Ipv4Addr;
 use crate::wire::U16;
 
 #[cfg(test)]
@@ -149,7 +151,9 @@ impl<HwAddr: Copy, ProtoAddr: Copy> Body<HwAddr, ProtoAddr> {
 }
 
 /// A trait to represent a ARP hardware type.
-pub(crate) trait HType: FromBytes + AsBytes + Unaligned + Copy + Clone {
+pub(crate) trait HType: FromBytes + AsBytes + Unaligned + Copy + Clone + Hash + Eq {
+    const BROADCAST: Self;
+
     /// The hardware type.
     fn htype() -> ArpHardwareType;
     /// The in-memory size of an instance of the type.
@@ -157,7 +161,7 @@ pub(crate) trait HType: FromBytes + AsBytes + Unaligned + Copy + Clone {
 }
 
 /// A trait to represent a ARP protocol type.
-pub(crate) trait PType: FromBytes + AsBytes + Unaligned + Copy + Clone {
+pub(crate) trait PType: FromBytes + AsBytes + Unaligned + Copy + Clone + Hash + Eq {
     /// The protocol type.
     fn ptype() -> EtherType;
     /// The in-memory size of an instance of the type.
@@ -171,6 +175,8 @@ pub(crate) trait PType: FromBytes + AsBytes + Unaligned + Copy + Clone {
 }
 
 impl HType for Mac {
+    const BROADCAST: Mac = Mac::BROADCAST;
+
     fn htype() -> ArpHardwareType {
         ArpHardwareType::Ethernet
     }
@@ -332,7 +338,7 @@ where
         mem::size_of::<Header>() + mem::size_of::<Body<HwAddr, ProtoAddr>>()
     }
 
-    fn serialize(self, mut buffer: &mut [u8]) {
+    fn serialize(&self, mut buffer: &mut [u8]) {
         // implements BufferViewMut, giving us take_obj_xxx_zero methods
         let mut buffer = &mut buffer;
 
@@ -360,10 +366,10 @@ impl<B, HwAddr, ProtoAddr> Debug for ArpPacket<B, HwAddr, ProtoAddr> {
 
 #[cfg(test)]
 mod tests {
-    use packet::{FnSerializer, ParseBuffer, Serializer};
+    use packet::{InnerPacketBuilder, ParseBuffer, Serializer};
 
     use super::*;
-    use crate::ip::Ipv4Addr;
+    use crate::testutil::*;
     use crate::wire::ethernet::EthernetFrame;
 
     const TEST_SENDER_IPV4: Ipv4Addr = Ipv4Addr::new([1, 2, 3, 4]);
@@ -373,22 +379,28 @@ mod tests {
 
     #[test]
     fn test_parse_serialize_full() {
-        use crate::wire::testdata::*;
+        use crate::wire::testdata::arp_request::*;
 
-        let mut req = &ARP_REQUEST[..];
-        let frame = req.parse::<EthernetFrame<_>>().unwrap();
-        assert_eq!(frame.ethertype(), Some(EtherType::Arp));
+        let mut buf = ETHERNET_FRAME.bytes;
+        let frame = buf.parse::<EthernetFrame<_>>().unwrap();
+        verify_ethernet_frame(&frame, ETHERNET_FRAME);
 
         let (hw, proto) = peek_arp_types(frame.body()).unwrap();
         assert_eq!(hw, ArpHardwareType::Ethernet);
         assert_eq!(proto, EtherType::Ipv4);
+
         let mut body = frame.body();
         let arp = body.parse::<ArpPacket<_, Mac, Ipv4Addr>>().unwrap();
-        assert_eq!(arp.operation(), ArpOp::Request);
+        assert_eq!(arp.operation(), ARP_OPERATION);
         assert_eq!(frame.src_mac(), arp.sender_hardware_address());
 
-        let frame_bytes = arp.builder().encapsulate(frame.builder()).serialize_outer().unwrap();
-        assert_eq!(frame_bytes.as_ref(), ARP_REQUEST);
+        let frame_bytes = arp
+            .builder()
+            .into_serializer()
+            .encapsulate(frame.builder())
+            .serialize_vec_outer()
+            .unwrap();
+        assert_eq!(frame_bytes.as_ref(), ETHERNET_FRAME.bytes);
     }
 
     fn header_to_bytes(header: Header) -> [u8; ARP_HDR_LEN] {
@@ -447,14 +459,15 @@ mod tests {
 
     #[test]
     fn test_serialize() {
-        let mut buf = FnSerializer::new_vec(ArpPacketBuilder::new(
+        let mut buf = ArpPacketBuilder::new(
             ArpOp::Request,
             TEST_SENDER_MAC,
             TEST_SENDER_IPV4,
             TEST_TARGET_MAC,
             TEST_TARGET_IPV4,
-        ))
-        .serialize_outer()
+        )
+        .into_serializer()
+        .serialize_vec_outer()
         .unwrap();
         assert_eq!(
             AsRef::<[u8]>::as_ref(&buf),
@@ -553,27 +566,23 @@ mod tests {
         // Test that ArpPacket::serialize properly zeroes memory before
         // serializing the packet.
         let mut buf_0 = [0; ARP_ETHERNET_IPV4_PACKET_LEN];
-        InnerPacketBuilder::serialize(
-            ArpPacketBuilder::new(
-                ArpOp::Request,
-                TEST_SENDER_MAC,
-                TEST_SENDER_IPV4,
-                TEST_TARGET_MAC,
-                TEST_TARGET_IPV4,
-            ),
-            &mut buf_0[..],
-        );
+        ArpPacketBuilder::new(
+            ArpOp::Request,
+            TEST_SENDER_MAC,
+            TEST_SENDER_IPV4,
+            TEST_TARGET_MAC,
+            TEST_TARGET_IPV4,
+        )
+        .serialize(&mut buf_0[..]);
         let mut buf_1 = [0xFF; ARP_ETHERNET_IPV4_PACKET_LEN];
-        InnerPacketBuilder::serialize(
-            ArpPacketBuilder::new(
-                ArpOp::Request,
-                TEST_SENDER_MAC,
-                TEST_SENDER_IPV4,
-                TEST_TARGET_MAC,
-                TEST_TARGET_IPV4,
-            ),
-            &mut buf_1[..],
-        );
+        ArpPacketBuilder::new(
+            ArpOp::Request,
+            TEST_SENDER_MAC,
+            TEST_SENDER_IPV4,
+            TEST_TARGET_MAC,
+            TEST_TARGET_IPV4,
+        )
+        .serialize(&mut buf_1[..]);
         assert_eq!(buf_0, buf_1);
     }
 
@@ -582,15 +591,13 @@ mod tests {
     fn test_serialize_panic_insufficient_packet_space() {
         // Test that a buffer which doesn't leave enough room for the packet is
         // rejected.
-        InnerPacketBuilder::serialize(
-            ArpPacketBuilder::new(
-                ArpOp::Request,
-                TEST_SENDER_MAC,
-                TEST_SENDER_IPV4,
-                TEST_TARGET_MAC,
-                TEST_TARGET_IPV4,
-            ),
-            &mut [0; ARP_ETHERNET_IPV4_PACKET_LEN - 1],
-        );
+        ArpPacketBuilder::new(
+            ArpOp::Request,
+            TEST_SENDER_MAC,
+            TEST_SENDER_IPV4,
+            TEST_TARGET_MAC,
+            TEST_TARGET_IPV4,
+        )
+        .serialize(&mut [0; ARP_ETHERNET_IPV4_PACKET_LEN - 1]);
     }
 }

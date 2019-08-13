@@ -32,8 +32,15 @@ std::string FormatName(const flat::Name& name, std::string_view library_separato
     compiled_name += LibraryName(name.library(), library_separator);
     compiled_name += name_separator;
   }
-  compiled_name += name.name_part();
+  compiled_name += name.name_full();
   return compiled_name;
+}
+
+std::string LengthPrefixedString(std::string_view str) {
+  std::ostringstream out;
+  out << str.length();
+  out << str;
+  return out.str();
 }
 
 }  // namespace
@@ -109,45 +116,57 @@ std::string NamePrimitiveIntegerCConstantMacro(types::PrimitiveSubtype subtype) 
 std::string NameHandleSubtype(types::HandleSubtype subtype) {
   switch (subtype) {
     case types::HandleSubtype::kHandle:
-        return "handle";
-    case types::HandleSubtype::kException:
-        return "exception";
-    case types::HandleSubtype::kProcess:
-      return "process";
-    case types::HandleSubtype::kThread:
-      return "thread";
-    case types::HandleSubtype::kVmo:
-      return "vmo";
+      return "handle";
+    case types::HandleSubtype::kBti:
+      return "bti";
     case types::HandleSubtype::kChannel:
       return "channel";
     case types::HandleSubtype::kEvent:
       return "event";
-    case types::HandleSubtype::kPort:
-      return "port";
-    case types::HandleSubtype::kInterrupt:
-      return "interrupt";
-    case types::HandleSubtype::kLog:
-      return "debuglog";
-    case types::HandleSubtype::kSocket:
-      return "socket";
-    case types::HandleSubtype::kResource:
-      return "resource";
     case types::HandleSubtype::kEventpair:
       return "eventpair";
-    case types::HandleSubtype::kJob:
-      return "job";
-    case types::HandleSubtype::kVmar:
-      return "vmar";
+    case types::HandleSubtype::kException:
+      return "exception";
     case types::HandleSubtype::kFifo:
       return "fifo";
     case types::HandleSubtype::kGuest:
       return "guest";
-    case types::HandleSubtype::kTimer:
-      return "timer";
-    case types::HandleSubtype::kBti:
-      return "bti";
+    case types::HandleSubtype::kInterrupt:
+      return "interrupt";
+    case types::HandleSubtype::kIommu:
+      return "iommu";
+    case types::HandleSubtype::kJob:
+      return "job";
+    case types::HandleSubtype::kLog:
+      return "debuglog";
+    case types::HandleSubtype::kPager:
+      return "pager";
+    case types::HandleSubtype::kPciDevice:
+      return "pcidevice";
+    case types::HandleSubtype::kPmt:
+      return "pmt";
+    case types::HandleSubtype::kPort:
+      return "port";
+    case types::HandleSubtype::kProcess:
+      return "process";
     case types::HandleSubtype::kProfile:
       return "profile";
+    case types::HandleSubtype::kResource:
+      return "resource";
+    case types::HandleSubtype::kSocket:
+      return "socket";
+    case types::HandleSubtype::kSuspendToken:
+      return "suspendtoken";
+    case types::HandleSubtype::kThread:
+      return "thread";
+    case types::HandleSubtype::kTimer:
+      return "timer";
+    case types::HandleSubtype::kVcpu:
+      return "vcpu";
+    case types::HandleSubtype::kVmar:
+      return "vmar";
+    case types::HandleSubtype::kVmo:
+      return "vmo";
   }
 }
 
@@ -225,45 +244,57 @@ std::string NameFlatConstantKind(flat::Constant::Kind kind) {
 std::string NameHandleZXObjType(types::HandleSubtype subtype) {
   switch (subtype) {
     case types::HandleSubtype::kHandle:
-        return "ZX_OBJ_TYPE_NONE";
-    case types::HandleSubtype::kException:
-        return "ZX_OBJ_TYPE_EXCEPTION";
-    case types::HandleSubtype::kProcess:
-      return "ZX_OBJ_TYPE_PROCESS";
-    case types::HandleSubtype::kThread:
-      return "ZX_OBJ_TYPE_THREAD";
-    case types::HandleSubtype::kVmo:
-      return "ZX_OBJ_TYPE_VMO";
+      return "ZX_OBJ_TYPE_NONE";
+    case types::HandleSubtype::kBti:
+      return "ZX_OBJ_TYPE_BTI";
     case types::HandleSubtype::kChannel:
       return "ZX_OBJ_TYPE_CHANNEL";
     case types::HandleSubtype::kEvent:
       return "ZX_OBJ_TYPE_EVENT";
-    case types::HandleSubtype::kPort:
-      return "ZX_OBJ_TYPE_PORT";
-    case types::HandleSubtype::kInterrupt:
-      return "ZX_OBJ_TYPE_INTERRUPT";
-    case types::HandleSubtype::kLog:
-      return "ZX_OBJ_TYPE_LOG";
-    case types::HandleSubtype::kSocket:
-      return "ZX_OBJ_TYPE_SOCKET";
-    case types::HandleSubtype::kResource:
-      return "ZX_OBJ_TYPE_RESOURCE";
     case types::HandleSubtype::kEventpair:
       return "ZX_OBJ_TYPE_EVENTPAIR";
-    case types::HandleSubtype::kJob:
-      return "ZX_OBJ_TYPE_JOB";
-    case types::HandleSubtype::kVmar:
-      return "ZX_OBJ_TYPE_VMAR";
+    case types::HandleSubtype::kException:
+      return "ZX_OBJ_TYPE_EXCEPTION";
     case types::HandleSubtype::kFifo:
       return "ZX_OBJ_TYPE_FIFO";
     case types::HandleSubtype::kGuest:
       return "ZX_OBJ_TYPE_GUEST";
-    case types::HandleSubtype::kTimer:
-      return "ZX_OBJ_TYPE_TIMER";
-    case types::HandleSubtype::kBti:
-      return "ZX_OBJ_TYPE_BTI";
+    case types::HandleSubtype::kInterrupt:
+      return "ZX_OBJ_TYPE_INTERRUPT";
+    case types::HandleSubtype::kIommu:
+      return "ZX_OBJ_TYPE_IOMMU";
+    case types::HandleSubtype::kJob:
+      return "ZX_OBJ_TYPE_JOB";
+    case types::HandleSubtype::kLog:
+      return "ZX_OBJ_TYPE_LOG";
+    case types::HandleSubtype::kPager:
+      return "ZX_OBJ_TYPE_PAGER";
+    case types::HandleSubtype::kPciDevice:
+      return "ZX_OBJ_TYPE_PCI_DEVICE";
+    case types::HandleSubtype::kPmt:
+      return "ZX_OBJ_TYPE_PMT";
+    case types::HandleSubtype::kPort:
+      return "ZX_OBJ_TYPE_PORT";
+    case types::HandleSubtype::kProcess:
+      return "ZX_OBJ_TYPE_PROCESS";
     case types::HandleSubtype::kProfile:
       return "ZX_OBJ_TYPE_PROFILE";
+    case types::HandleSubtype::kResource:
+      return "ZX_OBJ_TYPE_RESOURCE";
+    case types::HandleSubtype::kSocket:
+      return "ZX_OBJ_TYPE_SOCKET";
+    case types::HandleSubtype::kSuspendToken:
+      return "ZX_OBJ_TYPE_SUSPEND_TOKEN";
+    case types::HandleSubtype::kThread:
+      return "ZX_OBJ_TYPE_THREAD";
+    case types::HandleSubtype::kTimer:
+      return "ZX_OBJ_TYPE_TIMER";
+    case types::HandleSubtype::kVcpu:
+      return "ZX_OBJ_TYPE_VCPU";
+    case types::HandleSubtype::kVmar:
+      return "ZX_OBJ_TYPE_VMAR";
+    case types::HandleSubtype::kVmo:
+      return "ZX_OBJ_TYPE_VMO";
   }
 }
 
@@ -398,8 +429,9 @@ std::string NameFlatCType(const flat::Type* type, flat::Decl::Kind decl_kind) {
             return "fidl_xunion_t";
           case flat::Decl::Kind::kProtocol:
             return "zx_handle_t";
+          case flat::Decl::Kind::kService:
           case flat::Decl::Kind::kTypeAlias:
-            assert(false && "no C name for template or type alias");
+            assert(false && "no C name for service or type alias");
             break;
         }
       }
@@ -407,10 +439,7 @@ std::string NameFlatCType(const flat::Type* type, flat::Decl::Kind decl_kind) {
   }
 }
 
-std::string NameIdentifier(SourceLocation name) {
-  // TODO(TO-704) C name escaping and ergonomics.
-  return std::string(name.data());
-}
+std::string NameIdentifier(SourceLocation name) { return std::string(name.data()); }
 
 std::string NameLibrary(const std::vector<std::unique_ptr<raw::Identifier>>& components) {
   std::string id;
@@ -471,20 +500,20 @@ std::string NameMessage(std::string_view method_name, types::MessageKind kind) {
 std::string NameTable(std::string_view type_name) { return std::string(type_name) + "Table"; }
 
 std::string NamePointer(std::string_view name) {
-  std::string pointer_name(name);
-  pointer_name += "Pointer";
+  std::string pointer_name("Pointer");
+  pointer_name += LengthPrefixedString(name);
   return pointer_name;
 }
 
 std::string NameMembers(std::string_view name) {
-  std::string members_name(name);
-  members_name += "Members";
+  std::string members_name("Members");
+  members_name += LengthPrefixedString(name);
   return members_name;
 }
 
 std::string NameFields(std::string_view name) {
-  std::string fields_name(name);
-  fields_name += "Fields";
+  std::string fields_name("Fields");
+  fields_name += LengthPrefixedString(name);
   return fields_name;
 }
 
@@ -499,32 +528,33 @@ std::string NameCodedHandle(types::HandleSubtype subtype, types::Nullability nul
 
 std::string NameCodedProtocolHandle(std::string_view protocol_name,
                                     types::Nullability nullability) {
-  std::string name(protocol_name);
-  name += "Protocol";
+  std::string name("Protocol");
+  name += LengthPrefixedString(protocol_name);
   name += NameNullability(nullability);
   return name;
 }
 
 std::string NameCodedRequestHandle(std::string_view protocol_name, types::Nullability nullability) {
-  std::string name(protocol_name);
-  name += "Request";
+  std::string name("Request");
+  name += LengthPrefixedString(protocol_name);
   name += NameNullability(nullability);
   return name;
 }
 
 std::string NameCodedArray(std::string_view element_name, uint64_t size) {
   std::string name("Array");
-  name += element_name;
   name += NameSize(size);
+  name += "_";
+  name += LengthPrefixedString(element_name);
   return name;
 }
 
 std::string NameCodedVector(std::string_view element_name, uint64_t max_size,
                             types::Nullability nullability) {
   std::string name("Vector");
-  name += element_name;
   name += NameSize(max_size);
   name += NameNullability(nullability);
+  name += LengthPrefixedString(element_name);
   return name;
 }
 

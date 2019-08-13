@@ -29,6 +29,7 @@ namespace bthost {
 
 using bt::PeerId;
 using bt::sm::IOCapability;
+using fidl_helpers::AddressBytesFromString;
 using fidl_helpers::NewFidlError;
 using fidl_helpers::PeerIdFromString;
 using fidl_helpers::StatusToFidl;
@@ -295,7 +296,9 @@ void HostServer::AddBondedDevices(::std::vector<BondingData> bonds,
     std::optional<bt::sm::LTK> bredr_link_key;
     if (bond.bredr) {
       // Dual-mode peers will have a BR/EDR-typed address.
-      address = bt::DeviceAddress(bt::DeviceAddress::Type::kBREDR, bond.bredr->address);
+      auto addr = AddressBytesFromString(bond.bredr->address);
+      ZX_DEBUG_ASSERT(addr);
+      address = bt::DeviceAddress(bt::DeviceAddress::Type::kBREDR, *addr);
       bredr_link_key = fidl_helpers::BrEdrKeyFromFidl(*bond.bredr);
     }
 
@@ -679,7 +682,7 @@ void HostServer::ConfirmPairing(PeerId id, ConfirmCallback confirm) {
   ZX_DEBUG_ASSERT(pairing_delegate_);
   pairing_delegate_->OnPairingRequest(
       std::move(*device), fuchsia::bluetooth::control::PairingMethod::CONSENT, nullptr,
-      [confirm = std::move(confirm)](const bool success, const std::string passkey) {
+      [confirm = std::move(confirm)](const bool success, fidl::StringPtr passkey) {
         confirm(success);
       });
 }
@@ -697,7 +700,7 @@ void HostServer::DisplayPasskey(PeerId id, uint32_t passkey, ConfirmCallback con
   pairing_delegate_->OnPairingRequest(
       std::move(*device), fuchsia::bluetooth::control::PairingMethod::PASSKEY_DISPLAY,
       fxl::StringPrintf("%06u", passkey),
-      [confirm = std::move(confirm)](const bool success, const std::string passkey) {
+      [confirm = std::move(confirm)](const bool success, fidl::StringPtr passkey) {
         confirm(success);
       });
 }
@@ -711,13 +714,16 @@ void HostServer::RequestPasskey(PeerId id, PasskeyResponseCallback respond) {
   ZX_DEBUG_ASSERT(pairing_delegate_);
   pairing_delegate_->OnPairingRequest(
       std::move(*device), fuchsia::bluetooth::control::PairingMethod::PASSKEY_ENTRY, nullptr,
-      [respond = std::move(respond)](const bool success, const std::string passkey) {
+      [respond = std::move(respond)](const bool success, fidl::StringPtr passkey) {
         if (!success) {
           respond(-1);
         } else {
           uint32_t response;
-          if (!fxl::StringToNumberWithError<uint32_t>(passkey, &response)) {
-            bt_log(ERROR, "bt-host", "Unrecognized integer in string: %s", passkey.c_str());
+          if (!passkey.has_value()) {
+            bt_log(ERROR, "bt-host", "Passkey not supplied");
+            respond(-1);
+          } else if (!fxl::StringToNumberWithError<uint32_t>(passkey.value(), &response)) {
+            bt_log(ERROR, "bt-host", "Unrecognized integer in string: '%s'", passkey.value().c_str());
             respond(-1);
           } else {
             respond(response);

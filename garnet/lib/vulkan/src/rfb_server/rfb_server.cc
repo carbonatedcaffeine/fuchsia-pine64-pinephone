@@ -49,8 +49,7 @@ bool RFBServer::Initialize(uint32_t width, uint32_t height, uint32_t port) {
   }
 
   int enabled = 1;
-  if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &enabled,
-                 sizeof(enabled))) {
+  if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled))) {
     perror("so_reuseaddr failed\n");
     return false;
   }
@@ -59,8 +58,7 @@ bool RFBServer::Initialize(uint32_t width, uint32_t height, uint32_t port) {
   serveraddr.sin6_family = AF_INET6;
   serveraddr.sin6_port = htons(port);
   serveraddr.sin6_addr = in6addr_any;
-  int bind_result =
-      ::bind(listen_fd, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
+  int bind_result = ::bind(listen_fd, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
   if (bind_result < 0) {
     perror("bind failed\n");
     return false;
@@ -72,7 +70,7 @@ bool RFBServer::Initialize(uint32_t width, uint32_t height, uint32_t port) {
   }
 
   fprintf(stderr, "RFB layer waiting on port %u\n", port);
-  fd_ = fxl::UniqueFD(accept(listen_fd, nullptr, nullptr));
+  fd_ = fbl::unique_fd(accept(listen_fd, nullptr, nullptr));
   if (!fd_.is_valid()) {
     perror("accept failed\n");
     return false;

@@ -80,7 +80,7 @@ class DebuggedProcess : public debug_ipc::ZirconExceptionWatcher, public Process
   // will be populated with the koids of all threads paused by this operation.
   //
   // If |synchronous| is false, this call will send the suspend commands to the
-  // kernel and return immediatelly. It will block on all the suspend signals
+  // kernel and return immediately. It will block on all the suspend signals
   // otherwise.
   void SuspendAll(bool synchronous = false, std::vector<zx_koid_t>* suspended_koids = nullptr);
 
@@ -88,9 +88,9 @@ class DebuggedProcess : public debug_ipc::ZirconExceptionWatcher, public Process
   virtual DebuggedThread* GetThread(zx_koid_t thread_koid) const;
   virtual std::vector<DebuggedThread*> GetThreads() const;
 
-  // Populates the thread map with the current threads for this process, and
-  // sends the list to the client. Used after an attach where we will not get
-  // new thread notifications.
+  // Populates the thread map with the current threads for this process.
+  // This function does not notify the client of thread start, but rather updates the internal
+  // thread state according to the underlying zircon truth.
   void PopulateCurrentThreads();
 
   // Appends the information for all current threads. This writes minimal
@@ -103,8 +103,14 @@ class DebuggedProcess : public debug_ipc::ZirconExceptionWatcher, public Process
   // returns true would need to be followed up with a SendModuleNotification.
   bool RegisterDebugState();
 
-  // Sends the currently loaded modules to the client with the given list
-  // of paused threads.
+  // If the process can know its modules, suspend all thread and send the module list.
+  //
+  // This is used in the case where we attach to an existing process or a new forked process and the
+  // debug address is known. The client expects the threads to be suspended so it can resolve
+  // breakpoints and resume them.
+  void SuspendAndSendModulesIfKnown();
+
+  // Sends the currently loaded modules to the client with the given list of paused threads.
   void SendModuleNotification(std::vector<uint64_t> paused_thread_koids);
 
   // Looks for breakpoints at the given address. Null if no breakpoints are

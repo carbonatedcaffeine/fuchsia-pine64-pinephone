@@ -15,6 +15,13 @@
                         "inherit_services": false,
                         "name": "remote",
                         "services": {
+                            "fuchsia.device.NameProvider": {
+                                "arguments": [
+                                    "--nodename",
+                                    "mdns-test-device-remote"
+                                ],
+                                "url": "fuchsia-pkg://fuchsia.com/device_name_provider#meta/device_name_provider.cmx"
+                            },
                             "fuchsia.devicesettings.DeviceSettingsManager": {
                                 "arguments": [
                                     "-s",
@@ -42,6 +49,13 @@
                 ],
                 "name": "local",
                 "services": {
+                    "fuchsia.device.NameProvider": {
+                        "arguments": [
+                            "--nodename",
+                            "mdns-test-device-local"
+                        ],
+                        "url": "fuchsia-pkg://fuchsia.com/device_name_provider#meta/device_name_provider.cmx"
+                    },
                     "fuchsia.devicesettings.DeviceSettingsManager": {
                         "arguments": [
                             "-s",
@@ -64,6 +78,15 @@
                             "192.168.0.2/24"
                         ],
                         "url": "fuchsia-pkg://fuchsia.com/netemul_sandbox#meta/helper_netstack_cfg.cmx"
+                    },
+                    {
+                        "arguments": [
+                            "-e",
+                            "local-ep2",
+                            "-i",
+                            "192.168.0.3/24"
+                        ],
+                        "url": "fuchsia-pkg://fuchsia.com/netemul_sandbox#meta/helper_netstack_cfg.cmx"
                     }
                 ],
                 "test": [
@@ -82,6 +105,9 @@
                         },
                         {
                             "name": "local-ep"
+                        },
+                        {
+                            "name": "local-ep2"
                         }
                     ],
                     "name": "net"

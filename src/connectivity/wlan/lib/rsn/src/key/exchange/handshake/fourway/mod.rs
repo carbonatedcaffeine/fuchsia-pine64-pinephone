@@ -8,12 +8,12 @@ mod supplicant;
 use crate::crypto_utils::nonce::NonceReader;
 use crate::key::{exchange, gtk::GtkProvider};
 use crate::rsna::{Dot11VerifiedKeyFrame, NegotiatedProtection, Role, SecAssocUpdate, UpdateSink};
-use crate::state_machine::StateMachine;
 use crate::Error;
 use crate::ProtectionInfo;
 use eapol;
 use failure::{self, bail, ensure};
 use std::sync::{Arc, Mutex};
+use wlan_statemachine::StateMachine;
 use zerocopy::ByteSlice;
 
 #[derive(Debug, PartialEq)]
@@ -173,7 +173,7 @@ impl Fourway {
                 Ok(())
             }
             Fourway::Supplicant(state_machine) => {
-                let anonce = state_machine.state().anonce();
+                let anonce = state_machine.as_ref().anonce();
                 let frame = FourwayHandshakeFrame::from_verified(frame, Role::Supplicant, anonce)?;
                 state_machine.replace_state(|state| state.on_eapol_key_frame(update_sink, frame));
                 Ok(())
@@ -438,10 +438,10 @@ mod tests {
 
         env.send_msg3_to_supplicant_capture_updates(msg3.keyframe(), 13, &mut update_sink);
         let msg4 = test_util::expect_eapol_resp(&update_sink[..]);
+
         for update in update_sink {
-            match update {
-                SecAssocUpdate::Key(_) => panic!("reinstalled key"),
-                _ => (),
+            if let SecAssocUpdate::Key(_) = update {
+                panic!("reinstalled key");
             }
         }
 

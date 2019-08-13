@@ -38,10 +38,10 @@ struct workqueue_struct;
 // workqueue: The work queue currently queued or executing on.
 // item: If work is queued, item is the link to the work list.
 struct work_struct {
-    void (*handler)(struct work_struct *);
-    zx_handle_t signaler;
-    struct workqueue_struct* workqueue;
-    list_node_t item;
+  void (*handler)(struct work_struct*);
+  zx_handle_t signaler;
+  struct workqueue_struct* workqueue;
+  list_node_t item;
 };
 
 void workqueue_init_work(struct work_struct* work, void (*handler)(struct work_struct* work));
@@ -70,4 +70,4 @@ void workqueue_schedule_default(struct work_struct* work);
 // returns.
 void workqueue_cancel_work(struct work_struct* work);
 
-#endif // SRC_CONNECTIVITY_WLAN_DRIVERS_THIRD_PARTY_BROADCOM_BRCMFMAC_WORKQUEUE_H_
+#endif  // SRC_CONNECTIVITY_WLAN_DRIVERS_THIRD_PARTY_BROADCOM_BRCMFMAC_WORKQUEUE_H_

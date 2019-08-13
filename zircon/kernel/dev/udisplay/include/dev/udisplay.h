@@ -4,12 +4,14 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT
 
-#pragma once
+#ifndef ZIRCON_KERNEL_DEV_UDISPLAY_INCLUDE_DEV_UDISPLAY_H_
+#define ZIRCON_KERNEL_DEV_UDISPLAY_INCLUDE_DEV_UDISPLAY_H_
 
-#include <dev/display.h>
 #include <err.h>
 #include <zircon/compiler.h>
 #include <zircon/types.h>
+
+#include <dev/display.h>
 
 __BEGIN_CDECLS
 
@@ -28,3 +30,5 @@ zx_status_t udisplay_set_framebuffer(fbl::RefPtr<VmObject> vmo);
 void udisplay_clear_framebuffer_vmo(void);
 
 #endif
+
+#endif  // ZIRCON_KERNEL_DEV_UDISPLAY_INCLUDE_DEV_UDISPLAY_H_

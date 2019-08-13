@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![deny(warnings)]
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 use {
     failure::{Error, ResultExt},
@@ -73,7 +72,7 @@ async fn http_get(url: String) -> Result<(), Error> {
     };
 
 	let loader_proxy = http::UrlLoaderProxy::new(proxy);
-    let resp = await!(loader_proxy.start(&mut req))?;
+    let resp = loader_proxy.start(&mut req).await?;
     if let Some(e) = resp.error {
         let code = e.code;
         println!("Got error: {} ({})",
@@ -83,7 +82,7 @@ async fn http_get(url: String) -> Result<(), Error> {
     }
     print_headers(&resp);
 
-    let mut socket = match resp.body.map(|x| *x) {
+    let socket = match resp.body.map(|x| *x) {
         Some(http::UrlBody::Stream(s)) => fasync::Socket::from_socket(s)?,
         _ => return Err(Error::from(zx::Status::BAD_STATE)),
     };
@@ -93,7 +92,7 @@ async fn http_get(url: String) -> Result<(), Error> {
 
     // Copy the bytes from the socket to stdout
     let mut stdio = AllowStdIo::new(std::io::stdout());
-    await!(socket.copy_into(&mut stdio))?;
+    socket.copy_into(&mut stdio).await?;
     println!("\n>>> EOF <<<");
 
     Ok(())

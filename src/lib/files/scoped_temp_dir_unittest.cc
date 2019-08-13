@@ -51,8 +51,7 @@ TEST(ScopedTempDir, CustomParent) {
     EXPECT_EQ(path.substr(0, parent.size()), parent);
 
     // Regression test - don't create temp_dir_XXXXXX dir next to the temp one.
-    EXPECT_FALSE(
-        files::IsDirectory(GetDirectoryName(path) + "/temp_dir_XXXXXX"));
+    EXPECT_FALSE(files::IsDirectory(GetDirectoryName(path) + "/temp_dir_XXXXXX"));
   }
 
   // Verify that the tmp directory itself was deleted, but not the parent.
@@ -62,7 +61,7 @@ TEST(ScopedTempDir, CustomParent) {
 
 TEST(ScopedTempDirAt, Creation) {
   ScopedTempDir named_dir;
-  fxl::UniqueFD root_fd(open(named_dir.path().c_str(), O_RDONLY));
+  fbl::unique_fd root_fd(open(named_dir.path().c_str(), O_RDONLY));
   ASSERT_TRUE(root_fd.is_valid());
 
   ScopedTempDirAt dir(root_fd.get());
@@ -73,7 +72,7 @@ TEST(ScopedTempDirAt, Creation) {
 
 TEST(ScopedTempDirAt, Deletion) {
   ScopedTempDir named_dir;
-  fxl::UniqueFD root_fd(open(named_dir.path().c_str(), O_RDONLY));
+  fbl::unique_fd root_fd(open(named_dir.path().c_str(), O_RDONLY));
   ASSERT_TRUE(root_fd.is_valid());
 
   std::string path;
@@ -87,7 +86,7 @@ TEST(ScopedTempDirAt, Deletion) {
 
 TEST(ScopedTempDirAt, NewTempFile) {
   ScopedTempDir named_dir;
-  fxl::UniqueFD root_fd(open(named_dir.path().c_str(), O_RDONLY));
+  fbl::unique_fd root_fd(open(named_dir.path().c_str(), O_RDONLY));
   ASSERT_TRUE(root_fd.is_valid());
 
   ScopedTempDirAt dir(root_fd.get());
@@ -99,7 +98,7 @@ TEST(ScopedTempDirAt, NewTempFile) {
 
 TEST(ScopedTempDirAt, CustomParent) {
   ScopedTempDir named_dir;
-  fxl::UniqueFD root_fd(open(named_dir.path().c_str(), O_RDONLY));
+  fbl::unique_fd root_fd(open(named_dir.path().c_str(), O_RDONLY));
   std::string parent = "a/b/c";
   std::string path;
   {

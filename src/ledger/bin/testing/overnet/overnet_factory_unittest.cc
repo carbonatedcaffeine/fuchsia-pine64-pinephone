@@ -11,6 +11,8 @@
 
 #include <memory>
 
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 #include "peridot/lib/convert/convert.h"
 #include "src/ledger/bin/fidl_helpers/message_relay.h"
 #include "src/lib/fxl/macros.h"
@@ -18,6 +20,7 @@
 namespace ledger {
 
 namespace {
+using ::testing::IsEmpty;
 
 class OvernetFactoryTest : public gtest::TestLoopFixture {
  public:
@@ -30,6 +33,32 @@ class OvernetFactoryTest : public gtest::TestLoopFixture {
  private:
   FXL_DISALLOW_COPY_AND_ASSIGN(OvernetFactoryTest);
 };
+
+// Verifies that the host list is correct for one host with the workaround.
+TEST_F(OvernetFactoryTest, HostList_OneHost_Workaround) {
+  OvernetFactory factory(true);
+  fuchsia::overnet::OvernetPtr overnet1;
+  factory.AddBinding(1u, overnet1.NewRequest());
+
+  bool called = false;
+  uint64_t version = 0;
+  std::vector<fuchsia::overnet::Peer> host_list;
+  overnet1->ListPeers(0u,
+                      callback::Capture(callback::SetWhenCalled(&called), &version, &host_list));
+
+  RunLoopUntilIdle();
+
+  EXPECT_TRUE(called);
+  EXPECT_NE(0u, version);
+  EXPECT_THAT(host_list, IsEmpty());
+
+  called = false;
+  overnet1->ListPeers(version,
+                      callback::Capture(callback::SetWhenCalled(&called), &version, &host_list));
+
+  RunLoopUntilIdle();
+  EXPECT_FALSE(called);
+}
 
 // Verifies that the host list is correct for one host.
 TEST_F(OvernetFactoryTest, HostList_OneHost) {
@@ -47,8 +76,8 @@ TEST_F(OvernetFactoryTest, HostList_OneHost) {
   EXPECT_TRUE(called);
   EXPECT_NE(0u, version);
   ASSERT_GE(1u, host_list.size());
-  EXPECT_EQ(1u, host_list.size());
-  EXPECT_EQ(1u, host_list.at(0).id.id);
+  EXPECT_EQ(host_list.size(), 1u);
+  EXPECT_EQ(host_list.at(0).id.id, 1u);
 
   called = false;
   overnet1->ListPeers(version,
@@ -87,9 +116,9 @@ TEST_F(OvernetFactoryTest, HostList_TwoHosts_Sequence) {
   EXPECT_TRUE(called);
   EXPECT_NE(new_version, version);
   ASSERT_GE(2u, host_list.size());
-  EXPECT_EQ(2u, host_list.size());
-  EXPECT_EQ(1u, host_list.at(0).id.id);
-  EXPECT_EQ(2u, host_list.at(1).id.id);
+  EXPECT_EQ(host_list.size(), 2u);
+  EXPECT_EQ(host_list.at(0).id.id, 1u);
+  EXPECT_EQ(host_list.at(1).id.id, 2u);
 
   called = false;
   overnet2->ListPeers(
@@ -98,9 +127,9 @@ TEST_F(OvernetFactoryTest, HostList_TwoHosts_Sequence) {
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
   ASSERT_GE(2u, host_list.size());
-  EXPECT_EQ(2u, host_list.size());
-  EXPECT_EQ(1u, host_list.at(0).id.id);
-  EXPECT_EQ(2u, host_list.at(1).id.id);
+  EXPECT_EQ(host_list.size(), 2u);
+  EXPECT_EQ(host_list.at(0).id.id, 1u);
+  EXPECT_EQ(host_list.at(1).id.id, 2u);
 
   overnet2.Unbind();
 
@@ -109,8 +138,8 @@ TEST_F(OvernetFactoryTest, HostList_TwoHosts_Sequence) {
   RunLoopUntilIdle();
   EXPECT_TRUE(called);
   ASSERT_GE(1u, host_list.size());
-  EXPECT_EQ(1u, host_list.size());
-  EXPECT_EQ(1u, host_list.at(0).id.id);
+  EXPECT_EQ(host_list.size(), 1u);
+  EXPECT_EQ(host_list.at(0).id.id, 1u);
 }
 
 // Verifies that the host list is correct for two hosts when calls are chained,
@@ -144,9 +173,9 @@ TEST_F(OvernetFactoryTest, HostList_TwoHosts_Chained) {
   EXPECT_TRUE(called);
   EXPECT_NE(new_version, version);
   ASSERT_GE(2u, host_list.size());
-  EXPECT_EQ(2u, host_list.size());
-  EXPECT_EQ(1u, host_list.at(0).id.id);
-  EXPECT_EQ(2u, host_list.at(1).id.id);
+  EXPECT_EQ(host_list.size(), 2u);
+  EXPECT_EQ(host_list.at(0).id.id, 1u);
+  EXPECT_EQ(host_list.at(1).id.id, 2u);
 
   overnet1->ListPeers(
       new_version, callback::Capture(callback::SetWhenCalled(&called), &new_version, &host_list));
@@ -159,8 +188,8 @@ TEST_F(OvernetFactoryTest, HostList_TwoHosts_Chained) {
   EXPECT_TRUE(called);
 
   ASSERT_GE(1u, host_list.size());
-  EXPECT_EQ(1u, host_list.size());
-  EXPECT_EQ(1u, host_list.at(0).id.id);
+  EXPECT_EQ(host_list.size(), 1u);
+  EXPECT_EQ(host_list.at(0).id.id, 1u);
 }
 
 TEST_F(OvernetFactoryTest, HostList_TwoHosts_Callback) {
@@ -191,9 +220,9 @@ TEST_F(OvernetFactoryTest, HostList_TwoHosts_Callback) {
   EXPECT_TRUE(called);
   EXPECT_NE(new_version, version);
   ASSERT_GE(2u, host_list.size());
-  EXPECT_EQ(2u, host_list.size());
-  EXPECT_EQ(1u, host_list.at(0).id.id);
-  EXPECT_EQ(2u, host_list.at(1).id.id);
+  EXPECT_EQ(host_list.size(), 2u);
+  EXPECT_EQ(host_list.at(0).id.id, 1u);
+  EXPECT_EQ(host_list.at(1).id.id, 2u);
 
   bool called2;
   overnet1->ListPeers(
@@ -211,8 +240,8 @@ TEST_F(OvernetFactoryTest, HostList_TwoHosts_Callback) {
   EXPECT_FALSE(called2);
 
   ASSERT_GE(1u, host_list.size());
-  EXPECT_EQ(1u, host_list.size());
-  EXPECT_EQ(1u, host_list.at(0).id.id);
+  EXPECT_EQ(host_list.size(), 1u);
+  EXPECT_EQ(host_list.at(0).id.id, 1u);
 }
 
 class OvernetServiceProvider : public fuchsia::overnet::ServiceProvider {
@@ -260,7 +289,7 @@ TEST_F(OvernetFactoryTest, ServiceProvider) {
 
   // Verifies that we have received the connection from host2 to host1.
   ASSERT_GE(1u, relays_host1.size());
-  EXPECT_EQ(1u, relays_host1.size());
+  EXPECT_EQ(relays_host1.size(), 1u);
 
   // Sets up MessageRelays to abstract sending messages through channels.
   bool called_host1 = false;
@@ -281,7 +310,7 @@ TEST_F(OvernetFactoryTest, ServiceProvider) {
 
   EXPECT_TRUE(called_host1);
   EXPECT_FALSE(called_host2);
-  EXPECT_EQ(std::vector<uint8_t>({0u, 1u}), message_host1);
+  EXPECT_EQ(message_host1, std::vector<uint8_t>({0u, 1u}));
 
   // Sends a message from host1 to host2.
   called_host1 = false;
@@ -290,7 +319,7 @@ TEST_F(OvernetFactoryTest, ServiceProvider) {
 
   EXPECT_FALSE(called_host1);
   EXPECT_TRUE(called_host2);
-  EXPECT_EQ(std::vector<uint8_t>({2u, 3u}), message_host2);
+  EXPECT_EQ(message_host2, std::vector<uint8_t>({2u, 3u}));
 
   // Verifies that disconnection works.
   bool relay2_disconnected = false;

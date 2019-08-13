@@ -51,7 +51,7 @@ impl ModuleOutputWriterService {
     pub fn spawn(self, mut stream: ModuleOutputWriterRequestStream) {
         fasync::spawn_local(
             async move {
-                while let Some(request) = await!(stream.try_next()).context(format!(
+                while let Some(request) = stream.try_next().await.context(format!(
                     "Error running module output for {:?} {:?}",
                     self.story_id, self.module_id,
                 ))? {
@@ -61,7 +61,7 @@ impl ModuleOutputWriterService {
                             entity_reference,
                             responder,
                         } => {
-                            await!(self.handle_write(output_name, entity_reference))?;
+                            self.handle_write(output_name, entity_reference).await?;
                             responder.send(&mut Ok(()))?;
                         }
                     }
@@ -96,14 +96,14 @@ impl ModuleOutputWriterService {
                     context_store_lock.get_reference(&self.story_id, &self.module_id, &output_name)
                 {
                     let mut issuer_lock = self.mod_manager.lock();
-                    await!(issuer_lock.replace(old_reference, &reference));
+                    issuer_lock.replace(old_reference, &reference).await;
                 }
-                await!(context_store_lock.contribute(
+                context_store_lock.contribute(
                     &self.story_id,
                     &self.module_id,
                     &output_name,
                     &reference,
-                ))?;
+                ).await?;
             }
             None => context_store_lock.withdraw(&self.story_id, &self.module_id, &output_name),
         }
@@ -116,8 +116,9 @@ mod tests {
     use {
         super::*,
         crate::{
-            models::{AddMod, Intent},
+            models::{AddModInfo, Intent},
             story_context_store::{ContextEntity, Contributor},
+            story_manager::StoryManager,
             testing::{FakeEntityData, FakeEntityResolver, PuppetMasterFake},
         },
         fidl_fuchsia_app_discover::ModuleOutputWriterMarker,
@@ -132,7 +133,9 @@ mod tests {
     async fn test_write() {
         let (puppet_master_client, _) =
             fidl::endpoints::create_proxy_and_stream::<PuppetMasterMarker>().unwrap();
-        let mod_manager = Arc::new(Mutex::new(ModManager::new(puppet_master_client)));
+        let story_manager = Arc::new(Mutex::new(StoryManager::new()));
+        let mod_manager =
+            Arc::new(Mutex::new(ModManager::new(puppet_master_client, story_manager)));
 
         let (entity_resolver, request_stream) =
             fidl::endpoints::create_proxy_and_stream::<EntityResolverMarker>().unwrap();
@@ -154,7 +157,7 @@ mod tests {
             .spawn(request_stream);
 
         // Write a module output.
-        assert!(await!(client.write("param-foo", Some("foo"))).is_ok());
+        assert!(client.write("param-foo", Some("foo")).await.is_ok());
 
         // Verify we have one entity with the right contributor.
         {
@@ -170,7 +173,7 @@ mod tests {
         }
 
         // Write no entity to the same output. This should withdraw the entity.
-        assert!(await!(client.write("param-foo", None)).is_ok());
+        assert!(client.write("param-foo", None).await.is_ok());
 
         // Verify we have no values.
         let context_store = state.lock();
@@ -217,13 +220,14 @@ mod tests {
 
         // Set initial state of connected mods. The actions here will be executed with the new
         // entity reference in the parameter.
-        let mut mod_manager = ModManager::new(puppet_master_client);
+        let story_manager = Arc::new(Mutex::new(StoryManager::new()));
+        let mut mod_manager = ModManager::new(puppet_master_client, story_manager);
         let intent = Intent::new().with_action("PLAY_MUSIC").add_parameter("artist", "peridot-ref");
-        let action = AddMod::new(intent, Some("story1".to_string()), Some("mod-a".to_string()));
+        let action = AddModInfo::new(intent, Some("story1".to_string()), Some("mod-a".to_string()));
         mod_manager.actions = hashmap!("peridot-ref".to_string() => hashset!(action));
 
         let mut context_store = StoryContextStore::new(entity_resolver);
-        await!(context_store.contribute("story1", "mod-a", "artist", "peridot-ref"))?;
+        context_store.contribute("story1", "mod-a", "artist", "peridot-ref").await?;
         let context_store_ref = Arc::new(Mutex::new(context_store));
 
         // Initialize service client and server.
@@ -239,7 +243,7 @@ mod tests {
             .spawn(request_stream);
 
         // Write a module output.
-        assert!(await!(client.write("artist", Some("garnet-ref"))).is_ok());
+        assert!(client.write("artist", Some("garnet-ref")).await.is_ok());
 
         Ok(())
     }

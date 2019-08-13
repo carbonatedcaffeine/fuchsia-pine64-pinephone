@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 # Copyright 2017 The Fuchsia Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -45,12 +45,7 @@ class variant(
         return assume
 
     def soname_target(self, soname):
-        excluded = [self.runtime] + ([] if self.has_libcxx else LIBCXX_SONAMES)
-        target = 'lib/'
-        if soname not in excluded:
-            target += self.libprefix
-        target += soname
-        return target
+        return 'lib/' + self.libprefix + soname
 
 
 def make_variant(name, info):

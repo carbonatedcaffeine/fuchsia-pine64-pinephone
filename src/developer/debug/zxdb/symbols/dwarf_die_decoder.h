@@ -5,10 +5,10 @@
 #ifndef SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DWARF_DIE_DECODER_H_
 #define SRC_DEVELOPER_DEBUG_ZXDB_SYMBOLS_DWARF_DIE_DECODER_H_
 
-#include <functional>
 #include <string>
 #include <utility>
 
+#include "lib/fit/function.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/DebugInfo/DWARF/DWARFDataExtractor.h"
@@ -98,7 +98,7 @@ class DwarfDieDecoder {
   // A special handler to get the parent of the most deep abstract origin.
   //
   // Most DIEs can have an "abstract origin" which is another DIE that
-  // underlays values. Theroretically abstract origins can be linked into
+  // underlays values. Theoretically abstract origins can be linked into
   // arbitrarily long chains. In the current Clang this mostly happens for
   // inlined functions, where the inlined instance references the actual
   // function definition as its abstract origin. But abstract origins can
@@ -124,7 +124,7 @@ class DwarfDieDecoder {
   // to cover attributes that could be encoded using multiple different
   // encodings.
   void AddCustom(llvm::dwarf::Attribute attribute,
-                 std::function<void(const llvm::DWARFFormValue&)> callback);
+                 fit::function<void(const llvm::DWARFFormValue&)> callback);
 
   // Decode one info entry. Returns true on success, false means the DIE
   // was corrupt. The outputs for each encountered attribute will be set.
@@ -133,7 +133,7 @@ class DwarfDieDecoder {
 
  public:
   using Dispatch =
-      std::pair<llvm::dwarf::Attribute, std::function<void(const llvm::DWARFFormValue&)>>;
+      std::pair<llvm::dwarf::Attribute, fit::function<void(const llvm::DWARFFormValue&)>>;
 
   // Backend for Decode() above.
   //

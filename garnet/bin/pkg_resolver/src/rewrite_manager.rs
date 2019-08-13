@@ -114,11 +114,6 @@ impl RewriteManager {
         }
     }
 
-    /// Finds the first rule, if any, that remaps all of `fuchsia.com`.
-    pub fn amber_source_name(&self) -> Option<String> {
-        self.list().filter_map(|rule| rule.fuchsia_replacement()).next()
-    }
-
     /// Return an iterator through all rewrite rules in the order they should be applied to
     /// incoming `fuchsia-pkg://` URLs.
     pub fn list<'a>(&'a self) -> impl Iterator<Item = &'a Rule> {
@@ -330,7 +325,7 @@ pub(crate) mod tests {
 
     pub(crate) fn make_temp_file<CB, E>(writer: CB) -> tempfile::TempPath
     where
-        CB: FnOnce(&mut io::Write) -> Result<(), E>,
+        CB: FnOnce(&mut dyn io::Write) -> Result<(), E>,
         E: Into<Error>,
     {
         let mut f = tempfile::NamedTempFile::new().unwrap();

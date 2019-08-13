@@ -25,8 +25,7 @@ driver_module("wlan_driver") {
   ]
 
   deps = [
-    "//garnet/public/lib/component/cpp:environment_services",
-    "//garnet/public/lib/svc/cpp",
+    "//sdk/fidl/fuchsia.wlan.mlme:fuchsia.wlan.mlme_c_server",
     "//src/connectivity/wlan/lib/mlme/cpp:mlme",
     "//zircon/public/banjo/ddk.hw.wlan.wlaninfo",
     "//zircon/public/banjo/ddk.protocol.ethernet",
@@ -34,6 +33,7 @@ driver_module("wlan_driver") {
     "//zircon/public/lib/ddktl",
     "//zircon/public/lib/driver",
     "//zircon/public/lib/fbl",
+    "//zircon/public/lib/operation",
     "//zircon/public/lib/zx",
   ]
 

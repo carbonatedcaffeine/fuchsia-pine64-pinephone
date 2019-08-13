@@ -9,6 +9,7 @@ mod macros;
 mod common;
 mod icmpv4;
 mod icmpv6;
+pub(crate) mod mld;
 pub(crate) mod ndp;
 
 #[cfg(test)]
@@ -27,12 +28,15 @@ use std::ops::Deref;
 
 use byteorder::{ByteOrder, NetworkEndian};
 use internet_checksum::Checksum;
+use net_types::ip::{Ip, IpAddress, Ipv4, Ipv6};
 use never::Never;
-use packet::{BufferView, PacketBuilder, ParsablePacket, ParseMetadata, SerializeBuffer};
+use packet::{
+    BufferView, PacketBuilder, PacketConstraints, ParsablePacket, ParseMetadata, SerializeBuffer,
+};
 use zerocopy::{AsBytes, ByteSlice, FromBytes, LayoutVerified, Unaligned};
 
 use crate::error::{ParseError, ParseResult};
-use crate::ip::{Ip, IpAddress, IpProto, Ipv4, Ipv6};
+use crate::ip::IpProto;
 use crate::wire::ipv4;
 use crate::wire::records::options::{Options, OptionsImpl};
 use crate::wire::U16;
@@ -42,7 +46,7 @@ use crate::wire::U16;
 struct Header {
     msg_type: u8,
     code: u8,
-    checksum: U16,
+    checksum: [u8; 2],
     /* NOTE: The "Rest of Header" field is stored in message types rather than
      * in the Header. This helps consolidate how callers access data about the
      * packet, and is consistent with ICMPv6, which treats the field as part of
@@ -83,7 +87,7 @@ pub(crate) fn peek_message_type<MessageType: TryFrom<u8>>(
 
 /// An extension trait adding ICMP-related associated types to `Ipv4` and `Ipv6`.
 ///
-/// This trait is kept seperate from `IcmpIpExt` to not require a type parameter
+/// This trait is kept separate from `IcmpIpExt` to not require a type parameter
 /// that implements `ByteSlice`.
 pub(crate) trait IcmpIpTypes: Ip {
     /// The type of an ICMP parameter problem code.
@@ -119,18 +123,12 @@ impl IcmpIpTypes for Ipv6 {
 }
 
 /// An extension trait adding ICMP-related functionality to `Ipv4` and `Ipv6`.
-pub(crate) trait IcmpIpExt<B: ByteSlice>: Ip {
+pub(crate) trait IcmpIpExt: Ip {
     /// The type of ICMP messages.
     ///
     /// For `Ipv4`, this is `Icmpv4MessageType`, and for `Ipv6`, this is
     /// `Icmpv6MessageType`.
     type IcmpMessageType: IcmpMessageType;
-
-    /// The type of ICMP Packet.
-    ///
-    /// For `Ipv4`, this is `Icmpv4Packet`, and for `Ipv6`, this is
-    /// `Icmpv6Packet`.
-    type Packet: IcmpPacketType<B, Self>;
 
     const IP_PROTO: IpProto;
 
@@ -143,31 +141,8 @@ pub(crate) trait IcmpIpExt<B: ByteSlice>: Ip {
     fn header_len(bytes: &[u8]) -> usize;
 }
 
-// A default implementation for any I: Ip. This is to convince the Rust compiler
-// that, given an I: Ip, it's guaranteed to implement IcmpIpExt. We humans know
-// that Ipv4 and Ipv6 are the only types implementing Ip and so, since we
-// implement IcmpIpExt for both of these types, this is fine. The compiler isn't
-// so smart. This implementation should never actually be used.
-impl<B: ByteSlice, I: Ip> IcmpIpExt<B> for I {
-    default type IcmpMessageType = Never;
-    default type Packet = Never;
-
-    // divide by 0 will only happen during constant evaluation, which will only
-    // happen if this implementation is monomorphized, which should never happen
-    default const IP_PROTO: IpProto = {
-        #[allow(const_err, clippy::eq_op, clippy::erasing_op)]
-        let _ = 0 / 0;
-        IpProto::Other(255)
-    };
-
-    default fn header_len(bytes: &[u8]) -> usize {
-        unreachable!()
-    }
-}
-
-impl<B: ByteSlice> IcmpIpExt<B> for Ipv4 {
+impl IcmpIpExt for Ipv4 {
     type IcmpMessageType = Icmpv4MessageType;
-    type Packet = Icmpv4Packet<B>;
 
     const IP_PROTO: IpProto = IpProto::Icmp;
 
@@ -181,9 +156,8 @@ impl<B: ByteSlice> IcmpIpExt<B> for Ipv4 {
     }
 }
 
-impl<B: ByteSlice> IcmpIpExt<B> for Ipv6 {
+impl IcmpIpExt for Ipv6 {
     type IcmpMessageType = Icmpv6MessageType;
-    type Packet = Icmpv6Packet<B>;
 
     const IP_PROTO: IpProto = IpProto::Icmpv6;
 
@@ -266,7 +240,7 @@ impl<B> MessageBody<B> for () {
 pub(crate) struct OriginalPacket<B>(B);
 
 impl<B: ByteSlice + Deref<Target = [u8]>> OriginalPacket<B> {
-    pub(crate) fn body<I: IcmpIpExt<B>>(&self) -> &[u8] {
+    pub(crate) fn body<I: IcmpIpExt>(&self) -> &[u8] {
         // TODO(joshlf): Can these debug_asserts be triggered by external input?
         let header_len = I::header_len(&self.0);
         debug_assert!(header_len <= self.0.len());
@@ -319,14 +293,14 @@ impl<B, O: for<'a> OptionsImpl<'a>> MessageBody<B> for Options<B, O> {
 }
 
 /// An ICMP message.
-pub(crate) trait IcmpMessage<I: IcmpIpExt<B>, B: ByteSlice>:
+pub(crate) trait IcmpMessage<I: IcmpIpExt, B: ByteSlice>:
     Sized + Copy + FromBytes + AsBytes + Unaligned
 {
     /// The type of codes used with this message.
     ///
     /// The ICMP header includes an 8-bit "code" field. For a given message
     /// type, different values of this field carry different meanings. Not all
-    /// code values are used - some may be invalid. This type representents a
+    /// code values are used - some may be invalid. This type represents a
     /// parsed code. For example, for TODO, it is the TODO type.
     type Code: Into<u8> + Copy + Debug;
 
@@ -350,7 +324,7 @@ pub(crate) trait IcmpMessage<I: IcmpIpExt<B>, B: ByteSlice>:
 ///
 /// `IcmpMessageType` is implemented by `Icmpv4MessageType` and
 /// `Icmpv6MessageType`.
-pub trait IcmpMessageType: Into<u8> + Copy {
+pub trait IcmpMessageType: TryFrom<u8> + Into<u8> + Copy {
     /// Is this an error message?
     ///
     /// For ICMP, this is true for the Destination Unreachable, Redirect, Source
@@ -364,7 +338,7 @@ pub trait IcmpMessageType: Into<u8> + Copy {
 ///
 /// An `IcmpPacket` shares its underlying memory with the byte slice it was
 /// parsed from, meaning that no copying or extra allocation is necessary.
-pub(crate) struct IcmpPacket<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> {
+pub(crate) struct IcmpPacket<I: IcmpIpExt, B: ByteSlice, M: IcmpMessage<I, B>> {
     header: LayoutVerified<B, Header>,
     message: LayoutVerified<B, M>,
     message_body: M::Body,
@@ -372,7 +346,7 @@ pub(crate) struct IcmpPacket<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>
 }
 
 impl<
-        I: IcmpIpExt<B>,
+        I: IcmpIpExt,
         B: ByteSlice,
         MB: fmt::Debug + MessageBody<B>,
         M: IcmpMessage<I, B, Body = MB> + fmt::Debug,
@@ -400,7 +374,7 @@ impl<A: IpAddress> IcmpParseArgs<A> {
     }
 }
 
-impl<B: ByteSlice, I: IcmpIpExt<B>, M: IcmpMessage<I, B>> ParsablePacket<B, IcmpParseArgs<I::Addr>>
+impl<B: ByteSlice, I: IcmpIpExt, M: IcmpMessage<I, B>> ParsablePacket<B, IcmpParseArgs<I::Addr>>
     for IcmpPacket<I, B, M>
 {
     type Error = ParseError;
@@ -430,16 +404,15 @@ impl<B: ByteSlice, I: IcmpIpExt<B>, M: IcmpMessage<I, B>> ParsablePacket<B, Icmp
             "unrecognized code: {}",
             header.code
         ))?;
-        if header.checksum.get()
-            != Self::compute_checksum(
-                &header,
-                message.bytes(),
-                &message_body,
-                args.src_ip,
-                args.dst_ip,
-            )
-            .ok_or_else(debug_err_fn!(ParseError::Format, "packet too large"))?
-        {
+        let checksum = Self::compute_checksum(
+            &header,
+            message.bytes(),
+            &message_body,
+            args.src_ip,
+            args.dst_ip,
+        )
+        .ok_or_else(debug_err_fn!(ParseError::Format, "packet too large"))?;
+        if checksum != [0, 0] {
             return debug_err!(Err(ParseError::Checksum), "invalid checksum");
         }
         let message_body = M::Body::parse(message_body)?;
@@ -447,7 +420,7 @@ impl<B: ByteSlice, I: IcmpIpExt<B>, M: IcmpMessage<I, B>> ParsablePacket<B, Icmp
     }
 }
 
-impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> IcmpPacket<I, B, M> {
+impl<I: IcmpIpExt, B: ByteSlice, M: IcmpMessage<I, B>> IcmpPacket<I, B, M> {
     /// Get the ICMP message.
     pub(crate) fn message(&self) -> &M {
         &self.message
@@ -473,8 +446,8 @@ impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> IcmpPacket<I, B, M> {
     }
 }
 
-impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> IcmpPacket<I, B, M> {
-    /// Compute the checksum, skipping the checksum field itself.
+impl<I: IcmpIpExt, B: ByteSlice, M: IcmpMessage<I, B>> IcmpPacket<I, B, M> {
+    /// Compute the checksum, including the checksum field itself.
     ///
     /// `compute_checksum` returns `None` if the version is IPv6 and the total
     /// ICMP packet length overflows a u32.
@@ -484,7 +457,7 @@ impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> IcmpPacket<I, B, M> {
         message_body: &[u8],
         src_ip: I::Addr,
         dst_ip: I::Addr,
-    ) -> Option<u16> {
+    ) -> Option<[u8; 2]> {
         let mut c = Checksum::new();
         if I::VERSION.is_v6() {
             c.add_bytes(src_ip.bytes());
@@ -497,13 +470,14 @@ impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> IcmpPacket<I, B, M> {
             c.add_bytes(&[IpProto::Icmpv6.into()]);
         }
         c.add_bytes(&[header.msg_type, header.code]);
+        c.add_bytes(&header.checksum);
         c.add_bytes(message);
         c.add_bytes(message_body);
         Some(c.checksum())
     }
 }
 
-impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B, Body = OriginalPacket<B>>>
+impl<I: IcmpIpExt, B: ByteSlice, M: IcmpMessage<I, B, Body = OriginalPacket<B>>>
     IcmpPacket<I, B, M>
 {
     /// Get the body of the packet that caused this ICMP message.
@@ -522,9 +496,7 @@ impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B, Body = OriginalPacket<B
     }
 }
 
-impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B, Body = ndp::Options<B>>>
-    IcmpPacket<I, B, M>
-{
+impl<I: IcmpIpExt, B: ByteSlice, M: IcmpMessage<I, B, Body = ndp::Options<B>>> IcmpPacket<I, B, M> {
     /// Get the pared list of NDP options from the ICMP message.
     pub(crate) fn ndp_options(&self) -> &ndp::Options<B> {
         &self.message_body
@@ -533,14 +505,14 @@ impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B, Body = ndp::Options<B>>
 
 /// A builder for ICMP packets.
 #[derive(Debug)]
-pub(crate) struct IcmpPacketBuilder<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> {
+pub(crate) struct IcmpPacketBuilder<I: IcmpIpExt, B: ByteSlice, M: IcmpMessage<I, B>> {
     src_ip: I::Addr,
     dst_ip: I::Addr,
     code: M::Code,
     msg: M,
 }
 
-impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> IcmpPacketBuilder<I, B, M> {
+impl<I: IcmpIpExt, B: ByteSlice, M: IcmpMessage<I, B>> IcmpPacketBuilder<I, B, M> {
     /// Construct a new `IcmpPacketBuilder`.
     pub(crate) fn new(
         src_ip: I::Addr,
@@ -555,20 +527,13 @@ impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> IcmpPacketBuilder<I, B
 // TODO(joshlf): Figure out a way to split body and non-body message types by
 // trait and implement PacketBuilder for some and InnerPacketBuilder for others.
 
-impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> PacketBuilder
+impl<I: IcmpIpExt, B: ByteSlice, M: IcmpMessage<I, B>> PacketBuilder
     for IcmpPacketBuilder<I, B, M>
 {
-    fn header_len(&self) -> usize {
-        mem::size_of::<Header>() + mem::size_of::<M>()
-    }
-
-    fn min_body_len(&self) -> usize {
-        0
-    }
-
-    fn max_body_len(&self) -> usize {
-        // This is to make sure the body length doesn't overflow the 32-bit
-        // length field in the pseudo-header used for calculating the checksum.
+    fn constraints(&self) -> PacketConstraints {
+        // The maximum body length constraint to make sure the body length
+        // doesn't overflow the 32-bit length field in the pseudo-header used
+        // for calculating the checksum.
         //
         // Note that, for messages that don't take bodies, it's important that
         // we don't just set this to 0. Trying to serialize a body in a message
@@ -578,14 +543,15 @@ impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> PacketBuilder
         // Instead, we assert in serialize. Eventually, we will hopefully figure
         // out a way to implement InnerPacketBuilder (rather than PacketBuilder)
         // for these message types, and this won't be an issue anymore.
-        std::u32::MAX as usize
+        PacketConstraints::new(
+            mem::size_of::<Header>() + mem::size_of::<M>(),
+            0,
+            0,
+            core::u32::MAX as usize,
+        )
     }
 
-    fn footer_len(&self) -> usize {
-        0
-    }
-
-    fn serialize(self, mut buffer: SerializeBuffer) {
+    fn serialize(&self, buffer: &mut SerializeBuffer) {
         use packet::BufferViewMut;
 
         let (mut prefix, message_body, _) = buffer.parts();
@@ -618,7 +584,7 @@ impl<I: IcmpIpExt<B>, B: ByteSlice, M: IcmpMessage<I, B>> PacketBuilder
                 header.bytes().len() + message.bytes().len() + message_body.len(),
             )
         });
-        header.checksum = U16::new(checksum);
+        header.checksum = checksum;
     }
 }
 

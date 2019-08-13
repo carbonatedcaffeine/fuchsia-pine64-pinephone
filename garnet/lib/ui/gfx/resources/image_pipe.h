@@ -38,10 +38,12 @@ class ImagePipe : public ImageBase {
  public:
   static const ResourceTypeInfo kTypeInfo;
 
-  ImagePipe(Session* session, ResourceId id, FrameScheduler* frame_scheduler);
+  ImagePipe(Session* session, ResourceId id, std::shared_ptr<ImagePipeUpdater> image_pipe_updater,
+            std::shared_ptr<ErrorReporter> error_reporter);
   ImagePipe(Session* session, ResourceId id,
             ::fidl::InterfaceRequest<fuchsia::images::ImagePipe> request,
-            FrameScheduler* frame_scheduler);
+            std::shared_ptr<ImagePipeUpdater> image_pipe_updater,
+            std::shared_ptr<ErrorReporter> error_reporter);
 
   // Called by |ImagePipeHandler|, part of |ImagePipe| interface.
   void AddImage(uint32_t image_id, fuchsia::images::ImageInfo image_info, zx::vmo memory,
@@ -49,7 +51,7 @@ class ImagePipe : public ImageBase {
                 fuchsia::images::MemoryType memory_type);
   void RemoveImage(uint32_t image_id);
 
-  void PresentImage(uint32_t image_id, uint64_t presentation_time,
+  void PresentImage(uint32_t image_id, zx::time presentation_time,
                     ::std::vector<zx::event> acquire_fences,
                     ::std::vector<zx::event> release_fences,
                     fuchsia::images::ImagePipe::PresentImageCallback callback);
@@ -65,8 +67,12 @@ class ImagePipe : public ImageBase {
   // |release_fence_signaller| is a dependency required for signalling
   // release fences correctly, since it has knowledge of when command buffers
   // are released. Cannot be null.
+  //
+  // This method is idempotent when called multiple times for the same |presentation_time|,
+  // assuming that there are no intervening calls to PresentImage() with an earlier target
+  // time.
   ImagePipeUpdateResults Update(escher::ReleaseFenceSignaller* release_fence_signaller,
-                                uint64_t presentation_time);
+                                zx::time presentation_time);
 
   // Updates the Escher image to the current frame. This should be called after
   // Update() indicates the current Image changed, and before calling
@@ -80,6 +86,8 @@ class ImagePipe : public ImageBase {
   // Returns true if the connection to the ImagePipe has not closed.
   bool is_valid() { return is_valid_; };
 
+  fxl::WeakPtr<ImagePipe> GetWeakPtr() { return weak_ptr_factory_.GetWeakPtr(); }
+
  private:
   friend class ImagePipeHandler;
 
@@ -92,14 +100,14 @@ class ImagePipe : public ImageBase {
 
   // Virtual so that test subclasses can override.
   virtual ImagePtr CreateImage(Session* session, ResourceId id, MemoryPtr memory,
-                               const fuchsia::images::ImageInfo& image_info, uint64_t memory_offset,
-                               ErrorReporter* error_reporter);
+                               const fuchsia::images::ImageInfo& image_info,
+                               uint64_t memory_offset);
 
   // A |Frame| stores the arguments passed to a particular invocation of
   // Present().
   struct Frame {
     ImagePtr image;
-    uint64_t presentation_time;
+    zx::time presentation_time;
     std::unique_ptr<escher::FenceSetListener> acquire_fences;
     ::fidl::VectorPtr<zx::event> release_fences;
 
@@ -117,7 +125,8 @@ class ImagePipe : public ImageBase {
   std::unordered_map<ResourceId, ImagePtr> images_;
   bool is_valid_ = true;
 
-  FrameScheduler* frame_scheduler_;
+  const std::shared_ptr<ImagePipeUpdater> image_pipe_updater_;
+  const std::shared_ptr<ErrorReporter> error_reporter_;
 
   fxl::WeakPtrFactory<ImagePipe> weak_ptr_factory_;  // must be last
 

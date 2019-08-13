@@ -74,6 +74,12 @@ struct {
   // The handle used by miscsvc to serve incoming requests.
   zx::channel miscsvc_server;
 
+  // The handle used to transmit messages to device_name_provider.
+  zx::channel device_name_provider_client;
+
+  // The handle used by device_name_provider to serve incoming requests.
+  zx::channel device_name_provider_server;
+
   zx::job svc_job;
   zx::job fuchsia_job;
   zx::channel svchost_outgoing;
@@ -277,7 +283,7 @@ int console_starter(void* arg) {
 
   const char* device = boot_args.Get("console.path");
   if (device == nullptr) {
-    device = "/dev/misc/console";
+    device = "/bootsvc/fuchsia.hardware.pty.Device";
   }
 
   const char* envp[] = {
@@ -289,19 +295,20 @@ int console_starter(void* arg) {
   for (;;) {
     zx_status_t status = wait_for_file(device, zx::time::infinite());
     if (status != ZX_OK) {
-        printf("devcoordinator: failed to wait for console '%s' (%s)\n", device, zx_status_get_string(status));
-        return 1;
+      printf("devcoordinator: failed to wait for console '%s' (%s)\n", device,
+             zx_status_get_string(status));
+      return 1;
     }
     fbl::unique_fd fd(open(device, O_RDWR));
     if (!fd.is_valid()) {
-        printf("devcoordinator: failed to open console '%s'\n", device);
-        return 1;
+      printf("devcoordinator: failed to open console '%s'\n", device);
+      return 1;
     }
 
     const char* argv_sh[] = {"/boot/bin/sh", nullptr};
     zx::process proc;
-    status = devmgr::devmgr_launch(g_handles.svc_job, "sh:console", argv_sh, envp, fd.release(), nullptr,
-                              nullptr, 0, &proc, FS_ALL);
+    status = devmgr::devmgr_launch(g_handles.svc_job, "sh:console", argv_sh, envp, fd.release(),
+                                   nullptr, nullptr, 0, &proc, FS_ALL);
     if (status != ZX_OK) {
       printf("devcoordinator: failed to launch console shell (%s)\n", zx_status_get_string(status));
       return 1;
@@ -521,6 +528,21 @@ zx_status_t StartSvchost(const zx::job& root_job, bool require_system,
     }
   }
 
+  zx::channel device_name_provider_svc;
+  {
+    zx::channel device_name_provider_svc_req;
+    status = zx::channel::create(0, &device_name_provider_svc_req, &device_name_provider_svc);
+    if (status != ZX_OK) {
+      return status;
+    }
+
+    status = fdio_service_connect_at(g_handles.device_name_provider_client.get(), "svc",
+                                     device_name_provider_svc_req.release());
+    if (status != ZX_OK) {
+      return status;
+    }
+  }
+
   zx::channel bootsvc_svc;
   {
     zx::channel bootsvc_svc_req;
@@ -590,6 +612,9 @@ zx_status_t StartSvchost(const zx::job& root_job, bool require_system,
 
   // Add handle to channel to allow svchost to talk to bootsvc.
   launchpad_add_handle(lp, bootsvc_svc.release(), PA_HND(PA_USER0, 7));
+
+  // Add handle to channel to allow svchost to talk to device_name_provider.
+  launchpad_add_handle(lp, device_name_provider_svc.release(), PA_HND(PA_USER0, 8));
 
   // Give svchost access to /dev/class/sysmem, to enable svchost to forward sysmem service
   // requests to the sysmem driver.  Create a namespace containing /dev/class/sysmem.
@@ -744,9 +769,10 @@ int service_starter(void* arg) {
   bool netboot = false;
   bool vruncmd = false;
   fbl::String vcmd;
+  const char* interface = coordinator->boot_args().Get("netsvc.interface");
   if (!(coordinator->boot_args().GetBool("netsvc.disable", false) ||
         coordinator->disable_netsvc())) {
-    const char* args[] = {"/boot/bin/netsvc", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    const char* args[] = {"/boot/bin/netsvc", nullptr, nullptr, nullptr, nullptr, nullptr};
     int argc = 1;
 
     if (coordinator->boot_args().GetBool("netsvc.netboot", false)) {
@@ -759,15 +785,9 @@ int service_starter(void* arg) {
       args[argc++] = "--advertise";
     }
 
-    const char* interface = coordinator->boot_args().Get("netsvc.interface");
     if (interface != nullptr) {
       args[argc++] = "--interface";
       args[argc++] = interface;
-    }
-
-    const char* nodename = coordinator->boot_args().Get("zircon.nodename");
-    if (nodename) {
-      args[argc++] = nodename;
     }
 
     zx::process proc;
@@ -784,6 +804,29 @@ int service_starter(void* arg) {
       vruncmd = false;
     }
     __UNUSED auto leaked_handle = proc.release();
+  }
+
+  {
+    // Launch device-name-provider with access to /dev, to discover network interfaces.
+    const zx_handle_t handles[] = {g_handles.device_name_provider_server.release()};
+    const uint32_t types[] = {PA_DIRECTORY_REQUEST};
+    const char* nodename = coordinator->boot_args().Get("zircon.nodename");
+    const char* args[] = {
+        "/boot/bin/device-name-provider", nullptr, nullptr, nullptr, nullptr, nullptr};
+    int argc = 1;
+
+    if (interface != nullptr) {
+      args[argc++] = "--interface";
+      args[argc++] = interface;
+    }
+
+    if (nodename != nullptr) {
+      args[argc++] = "--nodename";
+      args[argc++] = nodename;
+    }
+
+    devmgr::devmgr_launch(g_handles.svc_job, "device-name-provider", args, nullptr, -1, handles,
+                          types, countof(handles), nullptr, FS_DEV);
   }
 
   if (!coordinator->boot_args().GetBool("virtcon.disable", false)) {
@@ -820,9 +863,10 @@ int service_starter(void* arg) {
                           handle_count, nullptr, FS_ALL);
   }
 
-  const char* epoch = coordinator->boot_args().Get("devmgr.epoch");
-  if (epoch) {
-    zx_time_t offset = ZX_SEC(atoi(epoch));
+  const char* backstop = coordinator->boot_args().Get("clock.backstop");
+  if (backstop) {
+    zx_time_t offset = ZX_SEC(atoi(backstop));
+    printf("devcoordinator: setting UTC backstop: %ld\n", offset);
     zx_clock_adjust(coordinator->root_resource().get(), ZX_CLOCK_UTC, offset);
   }
 
@@ -940,7 +984,11 @@ zx::channel fs_clone(const char* path) {
     return zx::channel();
   }
   if (!strcmp(path, "boot")) {
-    fdio_open("/boot", ZX_FS_RIGHT_READABLE, h1.release());
+    zx_status_t status = fdio_open("/boot", ZX_FS_RIGHT_READABLE, h1.release());
+    if (status != ZX_OK) {
+      log(ERROR, "devcoordinator: fdio_open(\"/boot\") failed: %s\n", zx_status_get_string(status));
+      return zx::channel();
+    }
     return h0;
   }
   zx::unowned_channel fs(g_handles.fs_root);
@@ -955,7 +1003,12 @@ zx::channel fs_clone(const char* path) {
     fs = devfs_root_borrow();
     path += 4;
   }
-  fdio_open_at(fs->get(), path, flags, h1.release());
+  zx_status_t status = fdio_open_at(fs->get(), path, flags, h1.release());
+  if (status != ZX_OK) {
+    log(ERROR, "devcoordinator: fdio_open_at failed for path %s: %s\n", path,
+        zx_status_get_string(status));
+    return zx::channel();
+  }
   return h0;
 }
 
@@ -1002,7 +1055,6 @@ int main(int argc, char** argv) {
   config.require_system = require_system;
   config.asan_drivers = boot_args.GetBool("devmgr.devhost.asan", false);
   config.suspend_fallback = boot_args.GetBool("devmgr.suspend-timeout-fallback", false);
-  config.suspend_debug = boot_args.GetBool("devmgr.suspend-timeout-debug", false);
   config.disable_netsvc = devmgr_args.disable_netsvc;
 
   // TODO(ZX-4178): Remove all uses of the root resource.
@@ -1075,6 +1127,8 @@ int main(int argc, char** argv) {
   zx::channel::create(0, &fshost_client, &fshost_server);
   zx::channel::create(0, &g_handles.appmgr_client, &g_handles.appmgr_server);
   zx::channel::create(0, &g_handles.miscsvc_client, &g_handles.miscsvc_server);
+  zx::channel::create(0, &g_handles.device_name_provider_client,
+                      &g_handles.device_name_provider_server);
 
   if (devmgr_args.use_system_svchost) {
     zx::channel dir_request;
@@ -1091,7 +1145,8 @@ int main(int argc, char** argv) {
   } else {
     status = StartSvchost(root_job, require_system, &coordinator, std::move(fshost_client));
     if (status != ZX_OK) {
-      fprintf(stderr, "devcoordinator: failed to start svchost: %d", status);
+      fprintf(stderr, "devcoordinator: failed to start svchost: %s\n",
+              zx_status_get_string(status));
       return 1;
     }
   }

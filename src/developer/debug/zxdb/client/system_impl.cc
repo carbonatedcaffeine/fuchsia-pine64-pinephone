@@ -59,7 +59,7 @@ class Download {
 
   // Notify this Download object that one of the servers has the symbols
   // available.
-  void Found(std::shared_ptr<Download> self, std::function<void(SymbolServer::FetchCallback)>);
+  void Found(std::shared_ptr<Download> self, fit::callback<void(SymbolServer::FetchCallback)>);
 
   // Notify this Download object that a transaction failed.
   void Error(std::shared_ptr<Download> self, const Err& err);
@@ -68,14 +68,14 @@ class Download {
   void AddServer(std::shared_ptr<Download> self, SymbolServer* server);
 
  private:
-  void RunCB(std::shared_ptr<Download> self, std::function<void(SymbolServer::FetchCallback)>& cb);
+  void RunCB(std::shared_ptr<Download> self, fit::callback<void(SymbolServer::FetchCallback)>& cb);
 
   std::string build_id_;
   DebugSymbolFileType file_type_;
   Err err_;
   std::string path_;
   SymbolServer::FetchCallback result_cb_;
-  std::vector<std::function<void(SymbolServer::FetchCallback)>> server_cbs_;
+  std::vector<fit::callback<void(SymbolServer::FetchCallback)>> server_cbs_;
   bool trying_ = false;
 };
 
@@ -85,7 +85,7 @@ void Download::Finish() {
 
   debug_ipc::MessageLoop::Current()->PostTask(
       FROM_HERE, [result_cb = std::move(result_cb_), err = std::move(err_),
-                  path = std::move(path_)]() { result_cb(err, path); });
+                  path = std::move(path_)]() mutable { result_cb(err, path); });
 
   result_cb_ = nullptr;
 }
@@ -97,7 +97,7 @@ void Download::AddServer(std::shared_ptr<Download> self, SymbolServer* server) {
     return;
 
   server->CheckFetch(build_id_, file_type_,
-                     [self](const Err& err, std::function<void(SymbolServer::FetchCallback)> cb) {
+                     [self](const Err& err, fit::callback<void(SymbolServer::FetchCallback)> cb) {
                        if (!cb)
                          self->Error(self, err);
                        else
@@ -106,7 +106,7 @@ void Download::AddServer(std::shared_ptr<Download> self, SymbolServer* server) {
 }
 
 void Download::Found(std::shared_ptr<Download> self,
-                     std::function<void(SymbolServer::FetchCallback)> cb) {
+                     fit::callback<void(SymbolServer::FetchCallback)> cb) {
   FXL_DCHECK(self.get() == this);
 
   if (!result_cb_)
@@ -139,7 +139,7 @@ void Download::Error(std::shared_ptr<Download> self, const Err& err) {
 }
 
 void Download::RunCB(std::shared_ptr<Download> self,
-                     std::function<void(SymbolServer::FetchCallback)>& cb) {
+                     fit::callback<void(SymbolServer::FetchCallback)>& cb) {
   FXL_DCHECK(!trying_);
   trying_ = true;
 
@@ -286,6 +286,8 @@ std::shared_ptr<Download> SystemImpl::GetDownload(std::string build_id,
     return existing;
   }
 
+  DownloadStarted();
+
   auto download = std::make_shared<Download>(
       build_id, file_type,
       [build_id, file_type, weak_this = weak_factory_.GetWeakPtr(), quiet](
@@ -294,28 +296,59 @@ std::shared_ptr<Download> SystemImpl::GetDownload(std::string build_id,
           return;
         }
 
-        auto& symbols = weak_this->symbols_;
-
         if (!path.empty()) {
+          weak_this->download_success_count_++;
           if (err.has_error()) {
             // If we got a path but still had an error, something went wrong
             // with the cache repo. Add the path manually.
-            symbols.build_id_index().AddBuildIDMapping(build_id, path, file_type);
+            weak_this->symbols_.build_id_index().AddOneFile(path);
           }
 
           for (const auto& target : weak_this->targets_) {
             if (auto process = target->process()) {
-              process->GetSymbols()->RetryLoadBuildID(build_id);
+              process->GetSymbols()->RetryLoadBuildID(build_id, file_type);
             }
           }
-        } else if (!quiet) {
-          weak_this->NotifyFailedToFindDebugSymbols(err, build_id, file_type);
+        } else {
+          weak_this->download_fail_count_++;
+
+          if (!quiet) {
+            weak_this->NotifyFailedToFindDebugSymbols(err, build_id, file_type);
+          }
         }
+
+        weak_this->DownloadFinished();
       });
 
   downloads_[{build_id, file_type}] = download;
 
+  if (servers_initializing_) {
+    suspended_downloads_.push_back(download);
+  }
+
   return download;
+}
+
+void SystemImpl::DownloadStarted() {
+  if (download_count_ == 0) {
+    for (auto& observer : session()->download_observers()) {
+      observer.OnDownloadsStarted();
+    }
+  }
+
+  download_count_++;
+}
+
+void SystemImpl::DownloadFinished() {
+  download_count_--;
+
+  if (download_count_ == 0) {
+    for (auto& observer : session()->download_observers()) {
+      observer.OnDownloadsStopped(download_success_count_, download_fail_count_);
+    }
+
+    download_success_count_ = download_fail_count_ = 0;
+  }
 }
 
 void SystemImpl::RequestDownload(const std::string& build_id, DebugSymbolFileType file_type,
@@ -341,8 +374,9 @@ void SystemImpl::NotifyFailedToFindDebugSymbols(const Err& err, const std::strin
       continue;
 
     for (const auto& status : process->GetSymbols()->GetStatus()) {
-      if (status.build_id != build_id)
+      if (status.build_id != build_id) {
         continue;
+      }
 
       if (!err.has_error()) {
         if (file_type == DebugSymbolFileType::kDebugInfo) {
@@ -473,13 +507,13 @@ void SystemImpl::DeleteFilter(Filter* filter) {
   filters_.erase(found);
 }
 
-void SystemImpl::Pause(std::function<void()> on_paused) {
+void SystemImpl::Pause(fit::callback<void()> on_paused) {
   debug_ipc::PauseRequest request;
   request.process_koid = 0;  // 0 means all processes.
   request.thread_koid = 0;   // 0 means all threads.
   session()->remote_api()->Pause(
       request, [weak_system = weak_factory_.GetWeakPtr(), on_paused = std::move(on_paused)](
-                   const Err&, debug_ipc::PauseReply reply) {
+                   const Err&, debug_ipc::PauseReply reply) mutable {
         if (weak_system) {
           // Save the newly paused thread metadata. This may need to be
           // generalized if we add other messages that update thread metadata.
@@ -627,16 +661,44 @@ void SystemImpl::InjectSymbolServerForTesting(std::unique_ptr<SymbolServer> serv
   AddSymbolServer(symbol_servers_.back().get());
 }
 
+void SystemImpl::ServerStartedInitializing() { servers_initializing_++; }
+
+void SystemImpl::ServerFinishedInitializing() {
+  FXL_DCHECK(servers_initializing_ > 0);
+
+  if (!--servers_initializing_) {
+    suspended_downloads_.clear();
+  }
+}
+
 void SystemImpl::AddSymbolServer(SymbolServer* server) {
   for (auto& observer : observers()) {
     observer.DidCreateSymbolServer(server);
   }
 
-  server->set_state_change_callback(
-      [weak_this = weak_factory_.GetWeakPtr()](SymbolServer* server, SymbolServer::State state) {
-        if (weak_this && state == SymbolServer::State::kReady)
-          weak_this->OnSymbolServerBecomesReady(server);
-      });
+  bool initializing = false;
+
+  if (server->state() == SymbolServer::State::kInitializing ||
+      server->state() == SymbolServer::State::kBusy) {
+    initializing = true;
+    ServerStartedInitializing();
+  }
+
+  server->set_state_change_callback([weak_this = weak_factory_.GetWeakPtr(), initializing](
+                                        SymbolServer* server, SymbolServer::State state) mutable {
+    if (!weak_this) {
+      return;
+    }
+
+    if (state == SymbolServer::State::kReady)
+      weak_this->OnSymbolServerBecomesReady(server);
+
+    if (initializing && state != SymbolServer::State::kBusy &&
+        state != SymbolServer::State::kInitializing) {
+      initializing = false;
+      weak_this->ServerFinishedInitializing();
+    }
+  });
 
   if (server->state() == SymbolServer::State::kReady) {
     OnSymbolServerBecomesReady(server);

@@ -8,7 +8,7 @@
 // TODO(SCN-453): Don't support GetDisplayInfo in scenic fidl API.
 #include <fuchsia/ui/scenic/cpp/fidl.h>
 #include <lib/fit/function.h>
-#include <lib/inspect/inspect.h>
+#include <lib/inspect_deprecated/inspect.h>
 
 #include "garnet/lib/ui/scenic/command_dispatcher.h"
 #include "src/lib/fxl/macros.h"
@@ -27,12 +27,12 @@ class Session;
 // exposing the system's host (typically a Scenic, except for testing).
 class SystemContext final {
  public:
-  explicit SystemContext(sys::ComponentContext* app_context, inspect::Node inspect_object,
-                         fit::closure quit_callback);
+  explicit SystemContext(sys::ComponentContext* app_context,
+                         inspect_deprecated::Node inspect_object, fit::closure quit_callback);
   SystemContext(SystemContext&& context);
 
   sys::ComponentContext* app_context() const { return app_context_; }
-  inspect::Node* inspect_node() { return &inspect_node_; }
+  inspect_deprecated::Node* inspect_node() { return &inspect_node_; }
 
   // Calls quit on the associated message loop.
   void Quit() { quit_callback_(); }
@@ -40,7 +40,7 @@ class SystemContext final {
  private:
   sys::ComponentContext* const app_context_;
   fit::closure quit_callback_;
-  inspect::Node inspect_node_;
+  inspect_deprecated::Node inspect_node_;
 };
 
 // Systems are a composable way to add functionality to Scenic. A System creates
@@ -64,47 +64,17 @@ class System {
     kInvalid = kMaxSystems,
   };
 
-  using OnInitializedCallback = fit::function<void(System* system)>;
-
-  // If |initialized_after_construction| is false, the System must call
-  // SetToInitialized() after initialization is complete.
-  explicit System(SystemContext context, bool initialized_after_construction = true);
+  explicit System(SystemContext context);
   virtual ~System();
 
   virtual CommandDispatcherUniquePtr CreateCommandDispatcher(CommandDispatcherContext context) = 0;
 
   SystemContext* context() { return &context_; }
 
-  bool initialized() { return initialized_; };
-
-  void set_on_initialized_callback(OnInitializedCallback callback) {
-    FXL_DCHECK(!on_initialized_callback_);
-    on_initialized_callback_ = std::move(callback);
-  }
-
-  // Marks this system as initialized and invokes callback if it's set (for tests).
-  void SetToInitialized();
-
- protected:
-  // TODO(SCN-906): Remove/refactor this under-used deferred-init logic.
-  bool initialized_ = true;
-
  private:
-  OnInitializedCallback on_initialized_callback_;
-
   SystemContext context_;
 
   FXL_DISALLOW_COPY_AND_ASSIGN(System);
-};
-
-// TODO(SCN-452): Remove when we get rid of Scenic.GetDisplayInfo().
-class TempSystemDelegate : public System {
- public:
-  explicit TempSystemDelegate(SystemContext context, bool initialized_after_construction);
-  virtual void GetDisplayInfo(fuchsia::ui::scenic::Scenic::GetDisplayInfoCallback callback) = 0;
-  virtual void TakeScreenshot(fuchsia::ui::scenic::Scenic::TakeScreenshotCallback callback) = 0;
-  virtual void GetDisplayOwnershipEvent(
-      fuchsia::ui::scenic::Scenic::GetDisplayOwnershipEventCallback callback) = 0;
 };
 
 // Return the system type that knows how to handle the specified command.

@@ -5,6 +5,7 @@
 #include "src/ledger/bin/storage/impl/file_index.h"
 
 #include "gtest/gtest.h"
+#include "src/ledger/bin/storage/fake/fake_object_identifier_factory.h"
 #include "src/ledger/bin/storage/impl/object_identifier_encoding.h"
 #include "src/ledger/bin/storage/impl/storage_test_utils.h"
 #include "src/ledger/bin/testing/test_with_environment.h"
@@ -22,14 +23,15 @@ TEST_F(FileIndexSerializationTest, CheckInvalid) {
 }
 
 TEST_F(FileIndexSerializationTest, SerializationDeserialization) {
+  fake::FakeObjectIdentifierFactory factory;
   const std::vector<FileIndexSerialization::ObjectIdentifierAndSize> elements = {
-      {RandomObjectIdentifier(environment_.random()), 1},
-      {RandomObjectIdentifier(environment_.random()), 2},
-      {RandomObjectIdentifier(environment_.random()), 3},
-      {RandomObjectIdentifier(environment_.random()), 4},
-      {RandomObjectIdentifier(environment_.random()), 3},
-      {RandomObjectIdentifier(environment_.random()), 2},
-      {RandomObjectIdentifier(environment_.random()), 1},
+      {RandomObjectIdentifier(environment_.random(), &factory), 1},
+      {RandomObjectIdentifier(environment_.random(), &factory), 2},
+      {RandomObjectIdentifier(environment_.random(), &factory), 3},
+      {RandomObjectIdentifier(environment_.random(), &factory), 4},
+      {RandomObjectIdentifier(environment_.random(), &factory), 3},
+      {RandomObjectIdentifier(environment_.random(), &factory), 2},
+      {RandomObjectIdentifier(environment_.random(), &factory), 1},
   };
 
   constexpr size_t expected_total_size = 16;
@@ -38,18 +40,19 @@ TEST_F(FileIndexSerializationTest, SerializationDeserialization) {
   size_t total_size;
   FileIndexSerialization::BuildFileIndex(elements, &chunk, &total_size);
 
-  EXPECT_EQ(expected_total_size, total_size);
+  EXPECT_EQ(total_size, expected_total_size);
 
   const FileIndex* file_index;
   Status status = FileIndexSerialization::ParseFileIndex(chunk->Get(), &file_index);
-  ASSERT_EQ(Status::OK, status);
+  ASSERT_EQ(status, Status::OK);
 
-  EXPECT_EQ(expected_total_size, file_index->size());
-  ASSERT_EQ(elements.size(), file_index->children()->size());
+  EXPECT_EQ(file_index->size(), expected_total_size);
+  ASSERT_EQ(file_index->children()->size(), elements.size());
   const auto& children = *(file_index->children());
   for (size_t i = 0; i < elements.size(); ++i) {
-    EXPECT_EQ(elements[i].size, children[i]->size());
-    EXPECT_EQ(elements[i].identifier, ToObjectIdentifier(children[i]->object_identifier()));
+    EXPECT_EQ(children[i]->size(), elements[i].size);
+    EXPECT_EQ(ToObjectIdentifier(children[i]->object_identifier(), &factory),
+              elements[i].identifier);
   }
 }
 

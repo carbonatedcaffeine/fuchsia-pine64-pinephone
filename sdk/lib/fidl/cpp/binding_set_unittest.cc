@@ -222,5 +222,80 @@ TEST(BindingSet, BindingDestroyedAfterCloseAll) {
   EXPECT_TRUE(binding_set.bindings().empty());
 }
 
+TEST(BindingSet, RemoveBindingDeletesTheBinding) {
+  fidl::test::AsyncLoopForTest loop;
+
+  BindingSet<fidl::test::frobinator::Frobinator, test::FrobinatorImpl*> binding_set;
+  auto check_binding_set_empty_on_destroy = [&binding_set] {
+    EXPECT_TRUE(binding_set.bindings().empty());
+  };
+
+  test::FrobinatorImpl frobinator(check_binding_set_empty_on_destroy);
+  fidl::test::frobinator::FrobinatorPtr ptr;
+
+  // Add the binding.
+  binding_set.AddBinding(&frobinator, ptr.NewRequest());
+  EXPECT_EQ(1u, binding_set.size());
+
+  // Remove the binding.
+  EXPECT_TRUE(binding_set.RemoveBinding(&frobinator));
+  EXPECT_TRUE(binding_set.bindings().empty());
+
+  // Try to remove the binding again.
+  EXPECT_FALSE(binding_set.RemoveBinding(&frobinator));
+}
+
+TEST(BindingSet, ErrorHandlerCalledAfterError) {
+  fidl::test::AsyncLoopForTest loop;
+
+  BindingSet<fidl::test::frobinator::Frobinator, std::unique_ptr<test::FrobinatorImpl>> binding_set;
+  auto check_binding_set_empty_on_destroy = [&binding_set] {
+    EXPECT_TRUE(binding_set.bindings().empty());
+  };
+
+  fidl::test::frobinator::FrobinatorPtr ptr;
+  bool handler_called = false;
+
+  // Add the binding.
+  binding_set.AddBinding(std::make_unique<test::FrobinatorImpl>(check_binding_set_empty_on_destroy),
+                         ptr.NewRequest(), nullptr,
+                         [&handler_called](zx_status_t) { handler_called = true; });
+  EXPECT_FALSE(handler_called);
+
+  // Trigger error.
+  ptr.Unbind();
+  loop.RunUntilIdle();
+
+  EXPECT_TRUE(handler_called);
+}
+
+TEST(BindingSet, ErrorHandlerDestroysBindingSetAndBindings) {
+  fidl::test::AsyncLoopForTest loop;
+
+  BindingSet<fidl::test::frobinator::Frobinator, test::FrobinatorImpl*> binding_set;
+  auto check_binding_set_empty_on_destroy = [&binding_set] {
+    EXPECT_TRUE(binding_set.bindings().empty());
+  };
+
+  test::FrobinatorImpl frobinator(check_binding_set_empty_on_destroy);
+  fidl::test::frobinator::FrobinatorPtr ptr;
+  bool handler_called = false;
+
+  // Add the binding.
+  binding_set.AddBinding(&frobinator, ptr.NewRequest(), nullptr,
+                         [&handler_called, &binding_set, &frobinator](zx_status_t) {
+                           binding_set.RemoveBinding(&frobinator);
+                           binding_set.CloseAll();
+                           handler_called = true;
+                         });
+  EXPECT_FALSE(handler_called);
+
+  // Trigger error.
+  ptr.Unbind();
+  loop.RunUntilIdle();
+
+  EXPECT_TRUE(handler_called);
+}
+
 }  // namespace
 }  // namespace fidl

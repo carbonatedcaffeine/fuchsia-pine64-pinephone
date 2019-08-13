@@ -76,7 +76,7 @@ fxl::RefPtr<fsl::SharedVmo> CreateVmoWithGradientPixels(size_t w, size_t h) {
 class ImagePipeThatCreatesDummyImages : public ImagePipe {
  public:
   ImagePipeThatCreatesDummyImages(Session* session, escher::ResourceManager* dummy_resource_manager)
-      : ImagePipe(session, 0u, session->session_context().frame_scheduler),
+      : ImagePipe(session, 0u, session->image_pipe_updater(), session->shared_error_reporter()),
         dummy_resource_manager_(dummy_resource_manager) {
     FXL_CHECK(session->session_context().frame_scheduler);
   }
@@ -86,8 +86,8 @@ class ImagePipeThatCreatesDummyImages : public ImagePipe {
  private:
   // Override to create an Image without a backing escher::Image.
   ImagePtr CreateImage(Session* session, ResourceId id, MemoryPtr memory,
-                       const fuchsia::images::ImageInfo& image_info, uint64_t memory_offset,
-                       ErrorReporter* error_reporter) override {
+                       const fuchsia::images::ImageInfo& image_info,
+                       uint64_t memory_offset) override {
     escher::ImageInfo escher_info;
     escher_info.width = image_info.width;
     escher_info.height = image_info.height;
@@ -105,8 +105,7 @@ class ImagePipeThatCreatesDummyImages : public ImagePipe {
 
 // Present an image with an Id of zero, and expect an error.
 TEST_F(ImagePipeTest, ImagePipeImageIdMustNotBeZero) {
-  ImagePipePtr image_pipe =
-      fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session_handler()->session(), this);
+  ImagePipePtr image_pipe = fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session(), this);
   uint32_t image1_id = 0;
   // Create a checkerboard image and copy it into a vmo.
   {
@@ -124,8 +123,7 @@ TEST_F(ImagePipeTest, ImagePipeImageIdMustNotBeZero) {
 
 // Call Present with out-of-order presentation times, and expect an error.
 TEST_F(ImagePipeTest, PresentImagesOutOfOrder) {
-  ImagePipePtr image_pipe =
-      fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session_handler()->session(), this);
+  ImagePipePtr image_pipe = fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session(), this);
 
   uint32_t image1_id = 1;
   // Create a checkerboard image and copy it into a vmo.
@@ -140,20 +138,19 @@ TEST_F(ImagePipeTest, PresentImagesOutOfOrder) {
   }
   fuchsia::images::ImagePipe::PresentImageCallback callback = [](auto) {};
 
-  image_pipe->PresentImage(image1_id, 1, CopyEventIntoFidlArray(CreateEvent()),
+  image_pipe->PresentImage(image1_id, zx::time(1), CopyEventIntoFidlArray(CreateEvent()),
                            CopyEventIntoFidlArray(CreateEvent()), std::move(callback));
-  image_pipe->PresentImage(image1_id, 0, CopyEventIntoFidlArray(CreateEvent()),
+  image_pipe->PresentImage(image1_id, zx::time(0), CopyEventIntoFidlArray(CreateEvent()),
                            CopyEventIntoFidlArray(CreateEvent()), std::move(callback));
 
   ExpectLastReportedError(
       "ImagePipe: Present called with out-of-order presentation "
-      "time.presentation_time=0, last scheduled presentation time=1");
+      "time. presentation_time=0, last scheduled presentation time=1");
 }
 
 // Call Present with in-order presentation times, and expect no error.
 TEST_F(ImagePipeTest, PresentImagesInOrder) {
-  ImagePipePtr image_pipe =
-      fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session_handler()->session(), this);
+  ImagePipePtr image_pipe = fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session(), this);
 
   uint32_t image1_id = 1;
   // Create a checkerboard image and copy it into a vmo.
@@ -168,9 +165,9 @@ TEST_F(ImagePipeTest, PresentImagesInOrder) {
   }
   fuchsia::images::ImagePipe::PresentImageCallback callback = [](auto) {};
 
-  image_pipe->PresentImage(image1_id, 1, CopyEventIntoFidlArray(CreateEvent()),
+  image_pipe->PresentImage(image1_id, zx::time(1), CopyEventIntoFidlArray(CreateEvent()),
                            CopyEventIntoFidlArray(CreateEvent()), std::move(callback));
-  image_pipe->PresentImage(image1_id, 1, CopyEventIntoFidlArray(CreateEvent()),
+  image_pipe->PresentImage(image1_id, zx::time(1), CopyEventIntoFidlArray(CreateEvent()),
                            CopyEventIntoFidlArray(CreateEvent()), std::move(callback));
 
   EXPECT_ERROR_COUNT(0);
@@ -179,8 +176,7 @@ TEST_F(ImagePipeTest, PresentImagesInOrder) {
 // Call Present with an image with an offset into its memory, and expect no
 // error.
 TEST_F(ImagePipeTest, PresentImagesWithOffset) {
-  ImagePipePtr image_pipe =
-      fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session_handler()->session(), this);
+  ImagePipePtr image_pipe = fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session(), this);
 
   uint32_t image1_id = 1;
   // Create a checkerboard image and copy it into a vmo.
@@ -201,9 +197,9 @@ TEST_F(ImagePipeTest, PresentImagesWithOffset) {
   }
   fuchsia::images::ImagePipe::PresentImageCallback callback = [](auto) {};
 
-  image_pipe->PresentImage(image1_id, 1, CopyEventIntoFidlArray(CreateEvent()),
+  image_pipe->PresentImage(image1_id, zx::time(1), CopyEventIntoFidlArray(CreateEvent()),
                            CopyEventIntoFidlArray(CreateEvent()), std::move(callback));
-  image_pipe->PresentImage(image1_id, 1, CopyEventIntoFidlArray(CreateEvent()),
+  image_pipe->PresentImage(image1_id, zx::time(1), CopyEventIntoFidlArray(CreateEvent()),
                            CopyEventIntoFidlArray(CreateEvent()), std::move(callback));
 
   EXPECT_ERROR_COUNT(0);
@@ -212,8 +208,7 @@ TEST_F(ImagePipeTest, PresentImagesWithOffset) {
 // Present two frames on the ImagePipe, making sure that acquire fence is
 // being listened to and release fences are signalled.
 TEST_F(ImagePipeTest, ImagePipePresentTwoFrames) {
-  ImagePipePtr image_pipe =
-      fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session_handler()->session(), this);
+  ImagePipePtr image_pipe = fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session(), this);
 
   uint32_t image1_id = 1;
 
@@ -232,7 +227,7 @@ TEST_F(ImagePipeTest, ImagePipePresentTwoFrames) {
   zx::event acquire_fence1 = CreateEvent();
   zx::event release_fence1 = CreateEvent();
 
-  image_pipe->PresentImage(image1_id, 0, CopyEventIntoFidlArray(acquire_fence1),
+  image_pipe->PresentImage(image1_id, zx::time(0), CopyEventIntoFidlArray(acquire_fence1),
                            CopyEventIntoFidlArray(release_fence1), nullptr);
 
   // Current presented image should be null, since we haven't signalled
@@ -271,7 +266,7 @@ TEST_F(ImagePipeTest, ImagePipePresentTwoFrames) {
   zx::event acquire_fence2 = CreateEvent();
   zx::event release_fence2 = CreateEvent();
 
-  image_pipe->PresentImage(image2_id, 0, CopyEventIntoFidlArray(acquire_fence2),
+  image_pipe->PresentImage(image2_id, zx::time(0), CopyEventIntoFidlArray(acquire_fence2),
                            CopyEventIntoFidlArray(release_fence2), nullptr);
 
   // Verify that the currently display image hasn't changed yet, since we
@@ -296,8 +291,7 @@ TEST_F(ImagePipeTest, ImagePipePresentTwoFrames) {
 // Present two frames on the ImagePipe, making sure that UpdatePixels is only
 // called on images that are acquired and used.
 TEST_F(ImagePipeTest, ImagePipeUpdateTwoFrames) {
-  auto image_pipe =
-      fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session_handler()->session(), this);
+  auto image_pipe = fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session(), this);
 
   // Image A is a 2x2 image with id=2.
   // Image B is a 4x4 image with id=4.
@@ -312,10 +306,10 @@ TEST_F(ImagePipeTest, ImagePipeUpdateTwoFrames) {
   image_pipe->AddImage(imageIdB, std::move(image_info_b), CopyVmo(gradient_b->vmo()), 0,
                        GetVmoSize(gradient_b->vmo()), fuchsia::images::MemoryType::HOST_MEMORY);
 
-  image_pipe->PresentImage(imageIdA, 0, std::vector<zx::event>(), std::vector<zx::event>(),
-                           nullptr);
-  image_pipe->PresentImage(imageIdB, 0, std::vector<zx::event>(), std::vector<zx::event>(),
-                           nullptr);
+  image_pipe->PresentImage(imageIdA, zx::time(0), std::vector<zx::event>(),
+                           std::vector<zx::event>(), nullptr);
+  image_pipe->PresentImage(imageIdB, zx::time(0), std::vector<zx::event>(),
+                           std::vector<zx::event>(), nullptr);
 
   // Let all updates get scheduled and finished
   ASSERT_TRUE(RunLoopFor(zx::sec(1)));
@@ -335,11 +329,11 @@ TEST_F(ImagePipeTest, ImagePipeUpdateTwoFrames) {
   // In this case, we need to run to idle after presenting image A, so that
   // image B is returned by the pool, marked dirty, and is free to be acquired
   // again.
-  image_pipe->PresentImage(imageIdA, 0, std::vector<zx::event>(), std::vector<zx::event>(),
-                           nullptr);
+  image_pipe->PresentImage(imageIdA, zx::time(0), std::vector<zx::event>(),
+                           std::vector<zx::event>(), nullptr);
   ASSERT_TRUE(RunLoopFor(zx::sec(1)));
-  image_pipe->PresentImage(imageIdB, 0, std::vector<zx::event>(), std::vector<zx::event>(),
-                           nullptr);
+  image_pipe->PresentImage(imageIdB, zx::time(0), std::vector<zx::event>(),
+                           std::vector<zx::event>(), nullptr);
   ASSERT_TRUE(RunLoopFor(zx::sec(1)));
 
   image_out = image_pipe->GetEscherImage();
@@ -354,8 +348,7 @@ TEST_F(ImagePipeTest, ImagePipeUpdateTwoFrames) {
 // before signaling its acquire fence, remove it. Verify that this doesn't
 // cause any errors.
 TEST_F(ImagePipeTest, ImagePipeRemoveImageThatIsPendingPresent) {
-  ImagePipePtr image_pipe =
-      fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session_handler()->session(), this);
+  ImagePipePtr image_pipe = fxl::MakeRefCounted<ImagePipeThatCreatesDummyImages>(session(), this);
 
   uint32_t image1_id = 1;
 
@@ -374,7 +367,7 @@ TEST_F(ImagePipeTest, ImagePipeRemoveImageThatIsPendingPresent) {
   zx::event acquire_fence1 = CreateEvent();
   zx::event release_fence1 = CreateEvent();
 
-  image_pipe->PresentImage(image1_id, 0, CopyEventIntoFidlArray(acquire_fence1),
+  image_pipe->PresentImage(image1_id, zx::time(0), CopyEventIntoFidlArray(acquire_fence1),
                            CopyEventIntoFidlArray(release_fence1), nullptr);
 
   // Current presented image should be null, since we haven't signalled
@@ -417,7 +410,7 @@ TEST_F(ImagePipeTest, ImagePipeRemoveImageThatIsPendingPresent) {
   zx::event acquire_fence2 = CreateEvent();
   zx::event release_fence2 = CreateEvent();
 
-  image_pipe->PresentImage(image2_id, 0, CopyEventIntoFidlArray(acquire_fence2),
+  image_pipe->PresentImage(image2_id, zx::time(0), CopyEventIntoFidlArray(acquire_fence2),
                            CopyEventIntoFidlArray(release_fence2), nullptr);
 
   // Verify that the currently display image hasn't changed yet, since we

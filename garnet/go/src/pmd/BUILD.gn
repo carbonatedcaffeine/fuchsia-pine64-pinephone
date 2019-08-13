@@ -18,7 +18,6 @@ go_library("pmd") {
     "//garnet/go/src/pm:pm_lib",
     "//garnet/go/src/thinfs:thinfs_lib",
     "//garnet/public/lib/component/go/src/app",
-    "//sdk/fidl/fuchsia.amber($go_toolchain)",
     "//sdk/fidl/fuchsia.sys($go_toolchain)",
   ]
 }
@@ -29,7 +28,7 @@ test_packages = [
 ]
 foreach(testpkg, test_packages) {
   go_test("pmd_${testpkg}_test") {
-    gopackage = "fuchsia.googlesource.com/pmd/${testpkg}"
+    gopackages = ["fuchsia.googlesource.com/pmd/${testpkg}"]
     deps = [
       ":pmd",
     ]

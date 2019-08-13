@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <fidl/examples/echo/cpp/fidl.h>
 #include <fuchsia/sys/cpp/fidl.h>
 #include <lib/sys/cpp/testing/test_with_environment.h>
+
+#include <fidl/examples/echo/cpp/fidl.h>
 
 #include "fake_echo.h"
 
@@ -29,7 +30,7 @@ const char kFakeEchoUrl[] =
 class TestWithEnvironmentExampleTest : public TestWithEnvironment {
  protected:
   std::unique_ptr<EnclosingEnvironment> enclosing_environment_;
-  fidl::StringPtr answer_ = "Goodbye World!";
+  std::string answer_ = "Goodbye World!";
 };
 
 // Demonstrates use adding fake service to EnclosingEnvironment.
@@ -38,8 +39,7 @@ TEST_F(TestWithEnvironmentExampleTest, AddFakeEchoAsService) {
   std::unique_ptr<EnvironmentServices> services = CreateServices();
   FakeEcho fake_echo;
   services->AddService(fake_echo.GetHandler());
-  enclosing_environment_ =
-      CreateNewEnclosingEnvironment(kEnvironment, std::move(services));
+  enclosing_environment_ = CreateNewEnclosingEnvironment(kEnvironment, std::move(services));
 
   fidl::StringPtr message = "bogus";
   fake_echo.SetAnswer(answer_);
@@ -47,10 +47,8 @@ TEST_F(TestWithEnvironmentExampleTest, AddFakeEchoAsService) {
   // You can also launch your component which connects to echo service using
   // enclosing_environment_.CreateComponent(..).
   enclosing_environment_->ConnectToService(echo_ptr.NewRequest());
-  echo_ptr->EchoString("Hello World!",
-                       [&](::fidl::StringPtr retval) { message = retval; });
-  EXPECT_TRUE(
-      RunLoopWithTimeoutOrUntil([&] { return message == answer_; }, kTimeout));
+  echo_ptr->EchoString("Hello World!", [&](::fidl::StringPtr retval) { message = retval; });
+  EXPECT_TRUE(RunLoopWithTimeoutOrUntil([&] { return message == answer_; }, kTimeout));
 }
 
 // Demonstrates use adding fake service as component to EnclosingEnvironment.
@@ -62,20 +60,17 @@ TEST_F(TestWithEnvironmentExampleTest, AddFakeEchoAsServiceComponent) {
   std::unique_ptr<EnvironmentServices> services = CreateServices();
   LaunchInfo launch_info;
   launch_info.url = kFakeEchoUrl;
-  launch_info.arguments.push_back(answer_);
+  launch_info.arguments.emplace({answer_});
   services->AddServiceWithLaunchInfo(std::move(launch_info), Echo::Name_);
-  enclosing_environment_ =
-      CreateNewEnclosingEnvironment(kEnvironment, std::move(services));
+  enclosing_environment_ = CreateNewEnclosingEnvironment(kEnvironment, std::move(services));
 
   fidl::StringPtr message = "bogus";
   EchoPtr echo_ptr;
   // You can also launch your component which connects to echo service using
   // enclosing_environment_.CreateComponent(..).
   enclosing_environment_->ConnectToService(echo_ptr.NewRequest());
-  echo_ptr->EchoString("Hello World!",
-                       [&](::fidl::StringPtr retval) { message = retval; });
-  EXPECT_TRUE(
-      RunLoopWithTimeoutOrUntil([&] { return message == answer_; }, kTimeout));
+  echo_ptr->EchoString("Hello World!", [&](::fidl::StringPtr retval) { message = retval; });
+  EXPECT_TRUE(RunLoopWithTimeoutOrUntil([&] { return message == answer_; }, kTimeout));
 }
 
 }  // namespace

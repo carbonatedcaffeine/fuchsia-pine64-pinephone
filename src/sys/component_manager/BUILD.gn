@@ -14,7 +14,10 @@ rustc_library("lib") {
   edition = "2018"
 
   # Only for internal use.
-  visibility = [ "//src/sys/component_manager/*" ]
+  visibility = [
+    "//src/sys/component_manager/*",
+    "//src/sys/component_manager_for_test/*",
+  ]
 
   deps = [
     "//garnet/lib/rust/cm_fidl_translator",
@@ -47,10 +50,18 @@ rustc_library("lib") {
     "//zircon/public/fidl/fuchsia-ldsvc:fuchsia-ldsvc-rustc",
     "//zircon/public/fidl/fuchsia-process:fuchsia-process-rustc",
 
-    # Test-only deps
+    # This is a 'logical' test-only dep, in that it's only used in the
+    # model::testing helpers, but that module is currently included in the main
+    # library (rather than being guarded with '#[cfg(test)]') to allow use in
+    # separate integration test targets.
     "//garnet/examples/fidl/services:echo-rustc",
-    "//src/lib/process_builder:test-util-fidl-rustc",
   ]
+
+  # Test-only deps. Prefer adding deps used only in tests here instead of
+  # above, which has the benefit of keeping unneeded deps out of the production
+  # binary and allows depending on 'testonly' targets.
+  test_deps = [ "//src/lib/process_builder:test-util-fidl-rustc" ]
+
   non_rust_deps = [
     "//zircon/public/lib/async",
     "//zircon/public/lib/async-default",
@@ -163,5 +174,14 @@ test_package("component_manager_tests") {
     {
       name = "root_job_test_runner"
     },
+  ]
+}
+
+group("tests") {
+  testonly = true
+
+  deps = [
+    ":component_manager_tests",
+    "tests",
   ]
 }

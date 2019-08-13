@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 use {
     failure::{Error, ResultExt},
     fidl::endpoints::create_endpoints,
     fidl_fuchsia_bluetooth_avrcp::{
-        ControllerEvent, ControllerEventStream, ControllerMarker, ControllerProxy,
+        ControllerEvent, ControllerEventStream, ControllerMarker, ControllerProxy, Notifications,
         PeerManagerMarker,
     },
     fidl_fuchsia_bluetooth_avrcp_test::{
@@ -60,8 +60,8 @@ async fn send_passthrough<'a>(
         return Ok(String::from("invalid avc command"));
     }
 
-    // `args[0]` is the identifier of the remote device to connect to
-    match await!(controller.send_command(cmd.unwrap()))? {
+    // `args[0]` is the identifier of the peer to connect to
+    match controller.send_command(cmd.unwrap()).await? {
         Ok(_) => Ok(String::from("")),
         Err(e) => Ok(format!("Error sending AVC Command: {:?}", e)),
     }
@@ -71,7 +71,7 @@ async fn get_media<'a>(
     _args: &'a [&'a str],
     controller: &'a ControllerProxy,
 ) -> Result<String, Error> {
-    match await!(controller.get_media_attributes())? {
+    match controller.get_media_attributes().await? {
         Ok(media) => Ok(format!("Media attributes: {:#?}", media)),
         Err(e) => Ok(format!("Error fetching media attributes: {:?}", e)),
     }
@@ -81,7 +81,7 @@ async fn get_events_supported<'a>(
     _args: &'a [&'a str],
     controller: &'a ControllerExtProxy,
 ) -> Result<String, Error> {
-    match await!(controller.get_events_supported())? {
+    match controller.get_events_supported().await? {
         Ok(events) => Ok(format!("Supported events: {:#?}", events)),
         Err(e) => Ok(format!("Error fetching supported events: {:?}", e)),
     }
@@ -99,7 +99,7 @@ async fn send_raw_vendor<'a>(
         Ok((pdu_id, buf)) => {
             eprintln!("Sending {:#?}", buf);
 
-            match await!(controller.send_raw_vendor_dependent_command(pdu_id, &mut buf.into_iter()))?
+            match controller.send_raw_vendor_dependent_command(pdu_id, &mut buf.into_iter()).await?
             {
                 Ok(response) => Ok(format!("response: {:#?}", response)),
                 Err(e) => Ok(format!("Error sending raw dependent command: {:?}", e)),
@@ -160,7 +160,7 @@ async fn is_connected<'a>(
     _args: &'a [&'a str],
     controller: &'a ControllerExtProxy,
 ) -> Result<String, Error> {
-    match await!(controller.is_connected()) {
+    match controller.is_connected().await {
         Ok(status) => Ok(format!("Is Connected: {}", status)),
         Err(e) => Ok(format!("Error fetching supported events: {:?}", e)),
     }
@@ -177,11 +177,11 @@ async fn handle_cmd<'a>(
     if let Some((raw_cmd, args)) = components.split_first() {
         let cmd = raw_cmd.parse();
         let res = match cmd {
-            Ok(Cmd::AvcCommand) => await!(send_passthrough(args, &controller)),
-            Ok(Cmd::GetMediaAttributes) => await!(get_media(args, &controller)),
-            Ok(Cmd::SendRawVendorCommand) => await!(send_raw_vendor(args, &test_controller)),
-            Ok(Cmd::SupportedEvents) => await!(get_events_supported(args, &test_controller)),
-            Ok(Cmd::IsConnected) => await!(is_connected(args, &test_controller)),
+            Ok(Cmd::AvcCommand) => send_passthrough(args, &controller).await,
+            Ok(Cmd::GetMediaAttributes) => get_media(args, &controller).await,
+            Ok(Cmd::SendRawVendorCommand) => send_raw_vendor(args, &test_controller).await,
+            Ok(Cmd::SupportedEvents) => get_events_supported(args, &test_controller).await,
+            Ok(Cmd::IsConnected) => is_connected(args, &test_controller).await,
             Ok(Cmd::Help) => Ok(Cmd::help_msg().to_string()),
             Ok(Cmd::Exit) | Ok(Cmd::Quit) => return Ok(ReplControl::Break),
             Err(_) => Ok(format!("\"{}\" is not a valid command", raw_cmd)),
@@ -203,7 +203,7 @@ async fn handle_cmd<'a>(
 /// Because rustyline shares control over output to the screen with other parts of the system, a
 /// `Sink` is passed to the caller to send acknowledgements that a command has been processed and
 /// that rustyline should handle the next line of input.
-fn cmd_stream() -> (impl Stream<Item = String>, impl Sink<(), SinkError = SendError>) {
+fn cmd_stream() -> (impl Stream<Item = String>, impl Sink<(), Error = SendError>) {
     // Editor thread and command processing thread must be synchronized so that output
     // is printed in the correct order.
     let (mut cmd_sender, cmd_receiver) = channel(512);
@@ -237,7 +237,7 @@ fn cmd_stream() -> (impl Stream<Item = String>, impl Sink<(), SinkError = SendEr
                 }
                 // wait until processing thread is finished evaluating the last command
                 // before running the next loop in the repl
-                await!(ack_receiver.next());
+                ack_receiver.next().await;
             }
         };
         exec.run_singlethreaded(fut)
@@ -245,23 +245,24 @@ fn cmd_stream() -> (impl Stream<Item = String>, impl Sink<(), SinkError = SendEr
     (cmd_receiver, ack_sender)
 }
 
-async fn controller_listener(mut stream: ControllerEventStream) -> Result<(), Error> {
-    while let Some(evt) = await!(stream.try_next())? {
+async fn controller_listener(
+    controller: &ControllerProxy,
+    mut stream: ControllerEventStream,
+) -> Result<(), Error> {
+    while let Some(evt) = stream.try_next().await? {
         print!("{}", CLEAR_LINE);
         match evt {
             ControllerEvent::OnNotification { timestamp, notification } => {
-                if let Some(value) = notification.volume {
-                    println!("Volume event: {:?} {:?}", timestamp, value);
-                }
                 if let Some(value) = notification.pos {
                     println!("Pos event: {:?} {:?}", timestamp, value);
-                }
-                if let Some(value) = notification.status {
+                } else if let Some(value) = notification.status {
                     println!("Status event: {:?} {:?}", timestamp, value);
-                }
-                if let Some(value) = notification.track_id {
+                } else if let Some(value) = notification.track_id {
                     println!("Track event: {:?} {:?}", timestamp, value);
+                } else {
+                    println!("Other event: {:?} {:?}", timestamp, notification);
                 }
+                controller.notify_notification_handled()?;
             }
         }
     }
@@ -269,16 +270,16 @@ async fn controller_listener(mut stream: ControllerEventStream) -> Result<(), Er
 }
 
 /// REPL execution
-async fn run_repl(
-    controller: ControllerProxy,
-    test_controller: ControllerExtProxy,
+async fn run_repl<'a>(
+    controller: &'a ControllerProxy,
+    test_controller: &'a ControllerExtProxy,
 ) -> Result<(), Error> {
     // `cmd_stream` blocks on input in a separate thread and passes commands and acks back to
     // the main thread via async channels.
     let (mut commands, mut acks) = cmd_stream();
     loop {
-        if let Some(cmd) = await!(commands.next()) {
-            match await!(handle_cmd(&controller, &test_controller, cmd)) {
+        if let Some(cmd) = commands.next().await {
+            match handle_cmd(controller, test_controller, cmd).await {
                 Ok(ReplControl::Continue) => {}
                 Ok(ReplControl::Break) => {
                     println!("\n");
@@ -291,7 +292,7 @@ async fn run_repl(
         } else {
             break;
         }
-        await!(acks.send(()))?;
+        acks.send(()).await?;
     }
     Ok(())
 }
@@ -311,13 +312,13 @@ async fn main() -> Result<(), Error> {
     let (t_client, t_server) =
         create_endpoints::<ControllerExtMarker>().expect("Error creating Test Controller endpoint");
 
-    let _status = await!(test_avrcp_svc.get_controller_for_target(&device_id.as_str(), t_server))?;
+    let _status = test_avrcp_svc.get_controller_for_target(&device_id.as_str(), t_server).await?;
     eprintln!(
         "Test controller obtained to device \"{device}\" AVRCP remote target service",
         device = &device_id,
     );
 
-    // Connect to avrcp controller service
+    // Connect to avrcp controller service.
 
     let avrcp_svc = connect_to_service::<PeerManagerMarker>()
         .context("Failed to connect to Bluetooth AVRCP interface")?;
@@ -326,7 +327,7 @@ async fn main() -> Result<(), Error> {
     let (c_client, c_server) =
         create_endpoints::<ControllerMarker>().expect("Error creating Controller endpoint");
 
-    let _status = await!(avrcp_svc.get_controller_for_target(&device_id.as_str(), c_server))?;
+    let _status = avrcp_svc.get_controller_for_target(&device_id.as_str(), c_server).await?;
     eprintln!(
         "Controller obtained to device \"{device}\" AVRCP remote target service",
         device = &device_id,
@@ -340,8 +341,14 @@ async fn main() -> Result<(), Error> {
 
     let evt_stream = controller.clone().take_event_stream();
 
-    let event_fut = controller_listener(evt_stream).fuse();
-    let repl_fut = run_repl(controller, test_controller).fuse();
+    // set controller event filter to ones we support.
+    let _ = controller.set_notification_filter(
+        Notifications::PlaybackStatus | Notifications::Track | Notifications::TrackPos,
+        1,
+    )?;
+
+    let event_fut = controller_listener(&controller, evt_stream).fuse();
+    let repl_fut = run_repl(&controller, &test_controller).fuse();
     pin_mut!(event_fut);
     pin_mut!(repl_fut);
 

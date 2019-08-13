@@ -3,10 +3,6 @@
 // found in the LICENSE file.
 
 //! Common utilities used by pseudo-file related tests.
-//!
-//! Most assertions are macros as they need to call async functions themselves.  As a typical test
-//! will have multiple assertions, it save a bit of typing to write `assert_something!(arg)`
-//! instead of `await!(assert_something(arg))`.
 
 use crate::{directory::entry::DirectoryEntry, execution_scope::ExecutionScope, path::Path};
 
@@ -27,7 +23,7 @@ use {
 /// [`run_client()`], and [`run_client_with_executor()`].
 pub fn run_server_client<GetClientRes>(
     flags: u32,
-    server: Arc<DirectoryEntry>,
+    server: Arc<dyn DirectoryEntry>,
     get_client: impl FnOnce(FileProxy) -> GetClientRes,
 ) where
     GetClientRes: Future<Output = ()>,
@@ -57,7 +53,7 @@ where
 pub fn run_server_client_with_mode<GetClientRes>(
     flags: u32,
     mode: u32,
-    server: Arc<DirectoryEntry>,
+    server: Arc<dyn DirectoryEntry>,
     get_client: impl FnOnce(FileProxy) -> GetClientRes,
 ) where
     GetClientRes: Future<Output = ()>,
@@ -81,9 +77,9 @@ pub fn run_server_client_with_mode<GetClientRes>(
 pub fn run_server_client_with_executor<GetClientRes>(
     flags: u32,
     exec: Executor,
-    server: Arc<DirectoryEntry>,
+    server: Arc<dyn DirectoryEntry>,
     get_client: impl FnOnce(FileProxy) -> GetClientRes,
-    coordinator: impl FnOnce(&mut FnMut(bool) -> ()),
+    coordinator: impl FnOnce(&mut dyn FnMut(bool) -> ()),
 ) where
     GetClientRes: Future<Output = ()>,
 {
@@ -96,9 +92,9 @@ pub fn run_server_client_with_mode_and_executor<'a, GetClientRes>(
     flags: u32,
     mode: u32,
     exec: Executor,
-    server: Arc<DirectoryEntry>,
+    server: Arc<dyn DirectoryEntry>,
     get_client: impl FnOnce(FileProxy) -> GetClientRes + 'a,
-    coordinator: impl FnOnce(&mut FnMut(bool) -> ()) + 'a,
+    coordinator: impl FnOnce(&mut dyn FnMut(bool) -> ()) + 'a,
 ) where
     GetClientRes: Future<Output = ()> + 'a,
 {
@@ -118,9 +114,9 @@ pub fn run_server_client_with_mode_and_executor_dyn<'a>(
     flags: u32,
     mode: u32,
     mut exec: Executor,
-    server: Arc<DirectoryEntry>,
+    server: Arc<dyn DirectoryEntry>,
     get_client: Box<dyn FnOnce(FileProxy) -> Pin<Box<dyn Future<Output = ()> + 'a>> + 'a>,
-    coordinator: Box<dyn FnOnce(&mut FnMut(bool) -> ()) + 'a>,
+    coordinator: Box<dyn FnOnce(&mut dyn FnMut(bool) -> ()) + 'a>,
 ) {
     let (client_proxy, server_end) =
         create_proxy::<FileMarker>().expect("Failed to create connection endpoints");
@@ -158,7 +154,7 @@ pub fn run_server_client_with_mode_and_executor_dyn<'a>(
 pub fn run_client_with_executor<'a, GetClientRes>(
     exec: Executor,
     get_client: impl FnOnce() -> GetClientRes + 'a,
-    coordinator: impl FnOnce(&mut FnMut(bool) -> ()) + 'a,
+    coordinator: impl FnOnce(&mut dyn FnMut(bool) -> ()) + 'a,
 ) where
     GetClientRes: Future<Output = ()> + 'a,
 {
@@ -168,7 +164,7 @@ pub fn run_client_with_executor<'a, GetClientRes>(
 pub fn run_client_with_executor_dyn<'a>(
     mut exec: Executor,
     get_client: Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + 'a>> + 'a>,
-    coordinator: Box<dyn FnOnce(&mut FnMut(bool) -> ()) + 'a>,
+    coordinator: Box<dyn FnOnce(&mut dyn FnMut(bool) -> ()) + 'a>,
 ) {
     let mut client = get_client();
 

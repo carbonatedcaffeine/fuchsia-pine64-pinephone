@@ -5,6 +5,21 @@
 import("//build/dart/test.gni")
 import("//build/testing/environments.gni")
 
+copy("acts") {
+  _data_dir = "$target_gen_dir/acts"
+
+  sources = [
+    "//prebuilt/test_data/connectivity/acts/acts.zip",
+  ]
+  outputs = [
+    "$_data_dir/{{source_file_part}}",
+  ]
+
+  metadata = {
+    test_runtime_deps = [ "$_data_dir/acts.zip" ]
+  }
+}
+
 specs = [
   {
     name = "acts_bt1_test"
@@ -17,6 +32,13 @@ specs = [
     name = "acts_wifi_test"
     tags = [ "acts-connectivity-wifi" ]
     testbed = "wifi_rf_chamber_nuc"
+    tests = "WlanScanTest WlanPhyComplianceABGTest WlanSecurityComplianceABGTest WlanPhyCompliance11NTest"
+    timeout_minutes = 1070  # 18 hours less 10 minutes for output processing in Dart script
+  },
+  {
+    name = "acts_astro_wifi_test"
+    tags = [ "acts-astro-connectivity-wifi" ]
+    testbed = "wifi_rf_chamber_astro"
     tests = "WlanScanTest WlanPhyComplianceABGTest WlanSecurityComplianceABGTest WlanPhyCompliance11NTest"
     timeout_minutes = 1070  # 18 hours less 10 minutes for output processing in Dart script
   },
@@ -34,6 +56,8 @@ foreach(spec, specs) {
       "//third_party/dart-pkg/pub/archive",
       "//third_party/dart-pkg/pub/test",
     ]
+
+    non_dart_deps = [ ":acts" ]
 
     environments = [
       {

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#![feature(await_macro, async_await)]
+#![feature(async_await)]
 
 use {
     futures::{
@@ -18,12 +18,12 @@ use {
 #[derive(Clone)]
 pub struct SequentialSender {
     /// The sender which is used to send futures for execution.
-    sender: UnboundedSender<Pin<Box<Future<Output = ()>>>>,
+    sender: UnboundedSender<Pin<Box<dyn Future<Output = ()>>>>,
 }
 
 /// The result type for a call to `SequentialSender.send`. The `TrySendError` will contain the
 /// future which failed to be sent on error.
-pub type SendResult = Result<(), TrySendError<Pin<Box<Future<Output = ()>>>>>;
+pub type SendResult = Result<(), TrySendError<Pin<Box<dyn Future<Output = ()>>>>>;
 
 impl SequentialSender {
     /// Creates a new `SequentialSender` and a `Future` which drives the execution of sent futures.
@@ -48,8 +48,8 @@ impl SequentialSender {
         (
             SequentialSender { sender: sender },
             async move {
-                while let Some(next_future) = await!(receiver.next()) {
-                    await!(next_future);
+                while let Some(next_future) = receiver.next().await {
+                    next_future.await;
                 }
             },
         )
@@ -90,7 +90,7 @@ mod tests {
         let (sequential_sender, sender_future) = SequentialSender::new();
 
         // The channel which is used to verify the execution order of the futures.
-        let (result_sender, result_receiver) = channel::<&str>(0);
+        let (result_sender, result_receiver) = channel::<&str>(1);
 
         // The first future will send `first_expected_message` via `first_sender`.
         let mut first_sender = result_sender.clone();
@@ -105,7 +105,7 @@ mod tests {
         sequential_sender
             .send(
                 async move {
-                    await!(first_sender.send(first_expected_message))
+                    first_sender.send(first_expected_message).await
                         .expect("Could not send first completion.");
                 },
             )
@@ -114,15 +114,15 @@ mod tests {
         sequential_sender
             .send(
                 async move {
-                    await!(second_sender.send(second_expected_message))
+                    second_sender.send(second_expected_message).await
                         .expect("Could not send second completion.");
                 },
             )
             .expect("Could not send second future.");
 
         // Await the completion of the sent futures.
-        let (first_message, stream_tail) = await!(result_receiver.into_future());
-        let (second_message, _) = await!(stream_tail.into_future());
+        let (first_message, stream_tail) = result_receiver.into_future().await;
+        let (second_message, _) = stream_tail.into_future().await;
 
         // Assert the messages were received in the correct order.
         assert_eq!(first_message, Some(first_expected_message));
@@ -143,7 +143,7 @@ mod tests {
         let (delay_sender, delay_receiver) = oneshot::channel();
 
         // The channel which is used to verify the execution order of the futures.
-        let (result_sender, result_receiver) = channel::<&str>(0);
+        let (result_sender, result_receiver) = channel::<&str>(1);
 
         // The first future will send `first_future_started_message` when it begins executing, and
         // `first_future_completed_message` when it completes, via `first_sender`.
@@ -162,10 +162,10 @@ mod tests {
         sequential_sender
             .send(
                 async move {
-                    await!(first_sender.send(first_future_started_message))
+                    first_sender.send(first_future_started_message).await
                         .expect("Could not send first started.");
-                    await!(delay_receiver).unwrap();
-                    await!(first_sender.send(first_future_completed_message))
+                    delay_receiver.await.unwrap();
+                    first_sender.send(first_future_completed_message).await
                         .expect("Could not send first completion.");
                 },
             )
@@ -174,7 +174,7 @@ mod tests {
         sequential_sender
             .send(
                 async move {
-                    await!(second_sender.send(second_future_completed_message))
+                    second_sender.send(second_future_completed_message).await
                         .expect("Could not send second completion.");
                 },
             )
@@ -217,7 +217,7 @@ mod tests {
         let (delay_sender, delay_receiver) = oneshot::channel();
 
         // The channel which is used to verify the execution order of the futures.
-        let (result_sender, result_receiver) = channel::<&str>(0);
+        let (result_sender, result_receiver) = channel::<&str>(1);
 
         // The first future will send `first_expected_message` via `first_sender`.
         let mut first_sender = result_sender.clone();
@@ -234,10 +234,10 @@ mod tests {
         sequential_sender
             .send(
                 async move {
-                    await!(first_sender.send(first_future_started_message))
+                    first_sender.send(first_future_started_message).await
                         .expect("Could not send first started.");
-                    await!(delay_receiver).unwrap();
-                    await!(first_sender.send(first_future_completed_message))
+                    delay_receiver.await.unwrap();
+                    first_sender.send(first_future_completed_message).await
                         .expect("Could not send first completion.");
                 },
             )
@@ -246,7 +246,7 @@ mod tests {
         second_sequential_sender
             .send(
                 async move {
-                    await!(second_sender.send(second_future_completed_message))
+                    second_sender.send(second_future_completed_message).await
                         .expect("Could not send second completion.");
                 },
             )

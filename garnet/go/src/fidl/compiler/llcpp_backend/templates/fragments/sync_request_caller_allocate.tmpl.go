@@ -15,18 +15,26 @@ const SyncRequestCallerAllocate = `
 
 {{- define "SyncRequestCallerAllocateMethodSignature" -}}
   {{- if .Response -}}
-{{ .Name }}({{ template "CallerBufferParams" .Request }}{{ if .Request }}, {{ end }}::fidl::BytePart _response_buffer, {{ template "OutParams" .Response }})
+{{ .Name }}_Deprecated({{ template "CallerBufferParams" .Request }}{{ if .Request }}, {{ end }}::fidl::BytePart _response_buffer, {{ template "OutParams" .Response }})
   {{- else -}}
-{{ .Name }}({{ template "CallerBufferParams" .Request }})
+{{ .Name }}_Deprecated({{ template "CallerBufferParams" .Request }})
   {{- end -}}
 {{- end }}
 
 {{- define "StaticCallSyncRequestCallerAllocateMethodSignature" -}}
   {{- if .Response -}}
-{{ .Name }}(zx::unowned_channel _client_end, {{ template "CallerBufferParams" .Request }}{{ if .Request }}, {{ end }}::fidl::BytePart _response_buffer, {{ template "OutParams" .Response }})
+{{ .Name }}_Deprecated(zx::unowned_channel _client_end, {{ template "CallerBufferParams" .Request }}{{ if .Request }}, {{ end }}::fidl::BytePart _response_buffer, {{ template "OutParams" .Response }})
   {{- else -}}
-{{ .Name }}(zx::unowned_channel _client_end, {{ template "CallerBufferParams" .Request }})
+{{ .Name }}_Deprecated(zx::unowned_channel _client_end, {{ template "CallerBufferParams" .Request }})
   {{- end -}}
+{{- end }}
+
+{{- define "SyncRequestCallerAllocateMethodArgumentsNew" -}}
+{{ template "CallerBufferParams" .Request }}{{ if .HasResponse }}{{ if .Request }}, {{ end }}::fidl::BytePart _response_buffer{{ end }}
+{{- end }}
+
+{{- define "StaticCallSyncRequestCallerAllocateMethodArgumentsNew" -}}
+zx::unowned_channel _client_end{{ if .Request }}, {{ end }}{{ template "CallerBufferParams" .Request }}{{ if .HasResponse }}, ::fidl::BytePart _response_buffer{{ end }}
 {{- end }}
 
 {{- define "SyncRequestCallerAllocateMethodDefinition" }}
@@ -35,7 +43,7 @@ const SyncRequestCallerAllocate = `
 {{- else -}}
   zx_status_t
 {{- end }} {{ .LLProps.InterfaceName }}::SyncClient::{{ template "SyncRequestCallerAllocateMethodSignature" . }} {
-  return {{ .LLProps.InterfaceName }}::Call::{{ .Name }}(zx::unowned_channel(this->channel_)
+  return {{ .LLProps.InterfaceName }}::Call::{{ .Name }}_Deprecated(zx::unowned_channel(this->channel_)
     {{- if or .Request .Response }}, {{ end }}
     {{- if .Request -}}
       std::move(_request_buffer), {{ template "SyncClientMoveParams" .Request }}
@@ -73,7 +81,7 @@ const SyncRequestCallerAllocate = `
   {{- else }}
   auto& _request = *reinterpret_cast<{{ .Name }}Request*>(_request_buffer.data());
   {{- end }}
-  _request._hdr.ordinal = {{ .OrdinalName }};
+  _request._hdr.ordinal = {{ .Ordinals.Write.Name }};
   {{- template "FillRequestStructMembers" .Request -}}
 
   {{- if .LLProps.LinearizeRequest }}
@@ -100,7 +108,7 @@ const SyncRequestCallerAllocate = `
   }
   {{- if .HasResponse }}
     {{- if not .Response }}
-  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<{{ .Name }}Response>();
+  constexpr uint32_t _kReadAllocSize = ::fidl::internal::ClampedMessageSize<{{ .Name }}Response, ::fidl::MessageDirection::kReceiving>();
   FIDL_ALIGNDECL uint8_t _read_bytes[_kReadAllocSize];
   ::fidl::BytePart _response_buffer(_read_bytes, sizeof(_read_bytes));
     {{- end }}
@@ -121,6 +129,85 @@ const SyncRequestCallerAllocate = `
   {{- else }}
   return ::fidl::Write(std::move(_client_end), std::move(_encode_request_result.message));
   {{- end }}
+}
+{{- end }}
+
+{{- define "SyncRequestCallerAllocateMethodDefinitionNew" }}
+{{ if .HasResponse -}} template <> {{- end }}
+{{ .LLProps.InterfaceName }}::UnownedResultOf::{{ .Name }}_Impl {{- if .HasResponse -}} <{{ .LLProps.InterfaceName }}::{{ .Name }}Response> {{- end }}::{{ .Name }}_Impl(
+  {{- template "StaticCallSyncRequestCallerAllocateMethodArgumentsNew" . }}) {
+  {{- if not .Request }}
+  FIDL_ALIGNDECL uint8_t _write_bytes[sizeof({{ .Name }}Request)] = {};
+  ::fidl::BytePart _request_buffer(_write_bytes, sizeof(_write_bytes));
+  {{- else }}
+  if (_request_buffer.capacity() < {{ .Name }}Request::PrimarySize) {
+    {{- if .HasResponse }}
+    Super::SetFailure(::fidl::DecodeResult<{{ .Name }}Response>(ZX_ERR_BUFFER_TOO_SMALL, ::fidl::internal::kErrorRequestBufferTooSmall));
+    {{- else }}
+    Super::status_ = ZX_ERR_BUFFER_TOO_SMALL;
+    Super::error_ = ::fidl::internal::kErrorRequestBufferTooSmall;
+    {{- end }}
+    return;
+  }
+  {{- end }}
+  {{- if .LLProps.LinearizeRequest }}
+  {{ .Name }}Request _request = {};
+  {{- else }}
+  memset(_request_buffer.data(), 0, {{ .Name }}Request::PrimarySize);
+    {{- if .Request }}
+  auto& _request = *reinterpret_cast<{{ .Name }}Request*>(_request_buffer.data());
+    {{- end }}
+  {{- end }}
+  {{- template "FillRequestStructMembers" .Request -}}
+
+  {{- if .LLProps.LinearizeRequest }}
+  auto _linearize_result = ::fidl::Linearize(&_request, std::move(_request_buffer));
+  if (_linearize_result.status != ZX_OK) {
+    Super::SetFailure(std::move(_linearize_result));
+    return;
+  }
+  ::fidl::DecodedMessage<{{ .Name }}Request> _decoded_request = std::move(_linearize_result.message);
+  {{- else }}
+  _request_buffer.set_actual(sizeof({{ .Name }}Request));
+  ::fidl::DecodedMessage<{{ .Name }}Request> _decoded_request(std::move(_request_buffer));
+  {{- end }}
+
+  {{- if .HasResponse }}
+  Super::SetResult(
+      {{ .LLProps.InterfaceName }}::InPlace::{{ .Name }}(std::move(_client_end)
+      {{- if .Request }}, std::move(_decoded_request){{ end -}}
+      , std::move(_response_buffer)));
+  {{- else }}
+  Super::operator=(
+      {{ .LLProps.InterfaceName }}::InPlace::{{ .Name }}(std::move(_client_end)
+      {{- if .Request }}, std::move(_decoded_request){{ end -}}
+  ));
+  {{- end }}
+}
+
+{{ .LLProps.InterfaceName }}::UnownedResultOf::{{ .Name }} {{ .LLProps.InterfaceName }}::SyncClient::{{ .Name }}(
+  {{- template "SyncRequestCallerAllocateMethodArgumentsNew" . }}) {
+  return UnownedResultOf::{{ .Name }}(zx::unowned_channel(this->channel_)
+    {{- if .Request -}}
+      , std::move(_request_buffer), {{ template "SyncClientMoveParams" .Request }}
+    {{- end }}
+    {{- if .HasResponse -}}
+      , std::move(_response_buffer)
+    {{- end -}}
+  );
+}
+{{- end }}
+
+{{- define "StaticCallSyncRequestCallerAllocateMethodDefinitionNew" }}
+{{ .LLProps.InterfaceName }}::UnownedResultOf::{{ .Name }} {{ .LLProps.InterfaceName }}::Call::{{ .Name }}(
+  {{- template "StaticCallSyncRequestCallerAllocateMethodArgumentsNew" . }}) {
+  return UnownedResultOf::{{ .Name }}(std::move(_client_end)
+    {{- if .Request -}}
+      , std::move(_request_buffer), {{ template "SyncClientMoveParams" .Request }}
+    {{- end }}
+    {{- if .HasResponse -}}
+      , std::move(_response_buffer)
+    {{- end -}});
 }
 {{- end }}
 `

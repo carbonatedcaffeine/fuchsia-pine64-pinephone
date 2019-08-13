@@ -7,11 +7,12 @@
 
 #include <fuchsia/ui/gfx/cpp/fidl.h>
 #include <fuchsia/ui/scenic/cpp/fidl.h>
-#include <lib/inspect/inspect.h>
+#include <lib/inspect_deprecated/inspect.h>
 
 #include <vector>
 
 #include "garnet/lib/ui/gfx/engine/gfx_command_applier.h"
+#include "garnet/lib/ui/gfx/engine/image_pipe_updater.h"
 #include "garnet/lib/ui/gfx/engine/resource_map.h"
 #include "garnet/lib/ui/gfx/engine/session_context.h"
 #include "garnet/lib/ui/gfx/engine/session_manager.h"
@@ -26,13 +27,9 @@
 namespace scenic_impl {
 namespace gfx {
 
-class ImagePipe;
-using ImagePipePtr = fxl::RefPtr<ImagePipe>;
 using PresentCallback = fuchsia::ui::scenic::Session::PresentCallback;
-using PresentImageCallback = fuchsia::images::ImagePipe::PresentImageCallback;
 
 class CommandContext;
-class Engine;
 class Resource;
 
 // gfx::Session is the internal endpoint of the scenic::Session channel.
@@ -49,9 +46,9 @@ class Session {
   };
 
   Session(SessionId id, SessionContext context,
-          EventReporter* event_reporter = EventReporter::Default(),
-          ErrorReporter* error_reporter = ErrorReporter::Default(),
-          inspect::Node inspect_node = inspect::Node());
+          std::shared_ptr<EventReporter> event_reporter = EventReporter::Default(),
+          std::shared_ptr<ErrorReporter> error_reporter = ErrorReporter::Default(),
+          inspect_deprecated::Node inspect_node = inspect_deprecated::Node());
   virtual ~Session();
 
   // Apply the operation to the current session state.  Return true if
@@ -67,6 +64,10 @@ class Session {
   const SessionContext& session_context() const { return session_context_; }
   const ResourceContext& resource_context() const { return resource_context_; }
 
+  const std::shared_ptr<ImagePipeUpdater>& image_pipe_updater() const {
+    return image_pipe_updater_;
+  }
+
   // Return the total number of existing resources associated with this Session.
   size_t GetTotalResourceCount() const { return resource_count_; }
 
@@ -76,7 +77,8 @@ class Session {
   // exist if it is referenced by other resources.
   size_t GetMappedResourceCount() const { return resources_.size(); }
 
-  ErrorReporter* error_reporter() const;  // Never nullptr.
+  std::shared_ptr<ErrorReporter> shared_error_reporter() const { return error_reporter_; }
+  ErrorReporter* error_reporter() const { return error_reporter_.get(); }
   EventReporter* event_reporter() const;  // Never nullptr.
 
   ResourceMap* resources() { return &resources_; }
@@ -84,13 +86,9 @@ class Session {
 
   // Called by SessionHandler::Present().  Stashes the arguments without
   // applying them; they will later be applied by ApplyScheduledUpdates().
-  bool ScheduleUpdate(uint64_t presentation_time, std::vector<::fuchsia::ui::gfx::Command> commands,
+  bool ScheduleUpdate(zx::time presentation_time, std::vector<::fuchsia::ui::gfx::Command> commands,
                       std::vector<zx::event> acquire_fences, std::vector<zx::event> release_fences,
                       PresentCallback callback);
-
-  // Called by ImagePipe::PresentImage(). Stashes the arguments without
-  // applying them; they will later be applied by ApplyScheduledUpdates().
-  void ScheduleImagePipeUpdate(uint64_t presentation_time, ImagePipePtr image_pipe);
 
   // Called by Engine() when it is notified by the FrameScheduler that
   // a frame should be rendered for the specified |actual_presentation_time|.
@@ -103,7 +101,7 @@ class Session {
   // |presentation_interval| is the estimated time until next frame and is
   // returned to the client.
   ApplyUpdateResult ApplyScheduledUpdates(CommandContext* command_context,
-                                          uint64_t target_presentation_time);
+                                          zx::time target_presentation_time);
 
   // Convenience.  Forwards an event to the EventReporter.
   void EnqueueEvent(::fuchsia::ui::gfx::Event event);
@@ -120,7 +118,7 @@ class Session {
   bool SetRootView(fxl::WeakPtr<View> view);
 
   struct Update {
-    uint64_t presentation_time;
+    zx::time presentation_time;
 
     std::vector<::fuchsia::ui::gfx::Command> commands;
     std::unique_ptr<escher::FenceSetListener> acquire_fences;
@@ -135,25 +133,13 @@ class Session {
   std::queue<Update> scheduled_updates_;
   std::vector<zx::event> fences_to_release_on_next_update_;
 
-  uint64_t last_applied_update_presentation_time_ = 0;
-  uint64_t last_presentation_time_ = 0;
-
-  struct ImagePipeUpdate {
-    uint64_t presentation_time;
-    ImagePipePtr image_pipe;
-
-    bool operator>(const ImagePipeUpdate& rhs) const {
-      return presentation_time > rhs.presentation_time;
-    }
-  };
-  // The least element should be on top.
-  std::priority_queue<ImagePipeUpdate, std::vector<ImagePipeUpdate>, std::greater<ImagePipeUpdate>>
-      scheduled_image_pipe_updates_;
+  zx::time last_applied_update_presentation_time_ = zx::time(0);
 
   const SessionId id_;
   std::string debug_name_;
-  ErrorReporter* error_reporter_ = nullptr;
-  EventReporter* event_reporter_ = nullptr;
+
+  const std::shared_ptr<ErrorReporter> error_reporter_;
+  const std::shared_ptr<EventReporter> event_reporter_;
 
   // Context objects should be above ResourceMap so they are destroyed after
   // Resources; their lifecycle must exceed that of the Resources.
@@ -174,11 +160,13 @@ class Session {
   uint64_t scheduled_update_count_ = 0;
   uint64_t applied_update_count_ = 0;
 
-  inspect::Node inspect_node_;
-  inspect::UIntMetric inspect_resource_count_;
-  inspect::UIntMetric inspect_last_applied_target_presentation_time_;
-  inspect::UIntMetric inspect_last_applied_requested_presentation_time_;
-  inspect::UIntMetric inspect_last_requested_presentation_time_;
+  std::shared_ptr<ImagePipeUpdater> image_pipe_updater_;
+
+  inspect_deprecated::Node inspect_node_;
+  inspect_deprecated::UIntMetric inspect_resource_count_;
+  inspect_deprecated::UIntMetric inspect_last_applied_target_presentation_time_;
+  inspect_deprecated::UIntMetric inspect_last_applied_requested_presentation_time_;
+  inspect_deprecated::UIntMetric inspect_last_requested_presentation_time_;
 
   fxl::WeakPtrFactory<Session> weak_factory_;  // must be last
 };

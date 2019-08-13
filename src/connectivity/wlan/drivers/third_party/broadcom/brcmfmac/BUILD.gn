@@ -21,20 +21,18 @@ import("//build/package.gni")
 visibility = [ "./*" ]
 
 # The brcmfmac driver can be built with support for different system buses
-# (USB, SDIO, and simulated-firmware), and different configurations will require
+# (SDIO, and simulated-firmware), and different configurations will require
 # different support.  To facilitate consolidating all the potentially messy
 # conditional compilation in one place, "bus.cc" is conditionally compiled based
 # on the values of the preprocessor #defines:
 #
 # * CONFIG_BRCMFMAC_SDIO
-# * CONFIG_BRCMFMAC_USB
 # * CONFIG_BRCMFMAC_SIM
 #
 # These #defines are applied as public_configs entries on the targets,
 # respectively:
 #
 # * :sdio
-# * :usb
 # * :sim
 #
 # Thus a target that depends on one of the above targets, can include "bus.cc"
@@ -80,58 +78,60 @@ source_set("core") {
   sources = [
     # "bus.cc" is not included here; see top-of-file comment.
     "bcdc.cc",
-    "brcmu_d11.h",
+    "bits.cc",
     "btcoex.cc",
-    "btcoex.h",
     "cfg80211.cc",
-    "cfg80211.h",
     "chip.cc",
     "common.cc",
     "core.cc",
     "d11.cc",
     "device.cc",
     "feature.cc",
-    "feature.h",
     "fweh.cc",
     "fwil.cc",
-    "fwil.h",
     "fwsignal.cc",
-    "fwsignal.h",
     "of.cc",
-    "of.h",
     "p2p.cc",
-    "p2p.h",
     "pno.cc",
-    "pno.h",
     "proto.cc",
-    "proto.h",
     "utils.cc",
   ]
   public = [
     "bcdc.h",
+    "bits.h",
     "brcm_hw_ids.h",
+    "brcmu_d11.h",
     "brcmu_utils.h",
     "brcmu_wifi.h",
+    "btcoex.h",
     "bus.h",
+    "cfg80211.h",
     "chip.h",
     "common.h",
     "core.h",
     "device.h",
+    "feature.h",
     "fweh.h",
+    "fwil.h",
     "fwil_types.h",
+    "fwsignal.h",
+    "of.h",
+    "p2p.h",
+    "pno.h",
+    "proto.h",
     "soc.h",
   ]
   deps = [
     ":debug",
     "//src/connectivity/wlan/lib/common/cpp:common",
     "//zircon/public/banjo/ddk.hw.wlan.wlaninfo",
-    "//zircon/public/banjo/ddk.protocol.wlanphyimpl",
     "//zircon/public/lib/ddk",
   ]
   public_deps = [
     ":linuxisms",
     "//garnet/lib/wlan/protocol",
     "//zircon/public/banjo/ddk.protocol.ethernet",
+    "//zircon/public/banjo/ddk.protocol.wlanphyimpl",
     "//zircon/public/lib/async",
     "//zircon/public/lib/async-loop",
     "//zircon/public/lib/sync",
@@ -188,41 +188,15 @@ source_set("sdio") {
   public_configs = [ ":config_sdio" ]
 }
 
-config("config_usb") {
-  defines = [ "CONFIG_BRCMFMAC_USB=1" ]
-}
-
-source_set("usb") {
-  sources = [
-    "usb.cc",
-  ]
-  public = [
-    "usb.h",
-  ]
-  deps = [
-    ":debug",
-    ":firmware",
-    "//zircon/public/lib/ddk",
-    "//zircon/public/lib/ddktl",  # fxb/BLD-522
-    "//zircon/public/lib/sync",
-    "//zircon/public/lib/usb",
-  ]
-  public_deps = [
-    ":core",
-    ":linuxisms",
-    "//zircon/public/banjo/ddk.protocol.usb",
-    "//zircon/system/public",
-  ]
-  public_configs = [ ":config_usb" ]
-}
-
 config("config_sim") {
   defines = [ "CONFIG_BRCMFMAC_SIM=1" ]
 }
 
 source_set("sim") {
   sources = [
-    "sim-fw/chip_info.cc",
+    "sim-fw/sim_fw.cc",
+    "sim-fw/sim_hw.cc",
+    "sim-fw/sim_hw.h",
     "sim.cc",
   ]
   public = [
@@ -230,8 +204,8 @@ source_set("sim") {
     "sim.h",
   ]
   deps = [
-    ":core",
     ":debug",
+    "//src/connectivity/wlan/drivers/testing/lib/sim-device",
     "//zircon/public/lib/ddk",
     "//zircon/system/public",
   ]
@@ -252,7 +226,6 @@ driver_module("driver_module") {
     ":core",
     ":debug",
     ":sdio",
-    ":usb",
     "//zircon/public/lib/driver",
   ]
   configs -= [ "//build/config/fuchsia:no_cpp_standard_library" ]

@@ -49,9 +49,9 @@ void TileView::ConnectViews() {
     launch_info.directory_request = services.NewRequest();
 
     if (split_url.size() > 1) {
-      launch_info.arguments = fidl::VectorPtr<std::string>::New(0);
+      launch_info.arguments.emplace();
       for (auto it = split_url.begin() + 1; it != split_url.end(); it++) {
-        launch_info.arguments.push_back(*it);
+        launch_info.arguments->push_back(*it);
       }
     }
 
@@ -137,7 +137,7 @@ void TileView::AddChildView(std::string label,
 
   container_node_.AddChild(view_data->host_node);
 
-  view_data->host_node.AddPart(view_data->clip_shape_node);
+  view_data->host_node.AddChild(view_data->clip_shape_node);
   view_data->host_node.SetClip(0, true);
   view_data->host_node.Attach(view_data->view_holder);
 

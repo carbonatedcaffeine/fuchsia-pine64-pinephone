@@ -6,12 +6,11 @@ pub mod kde;
 
 use crate::Error;
 use failure::{self, ensure};
-use nom::IResult::{Done, Incomplete};
-use nom::{call, error_position, many0, named, take, try_parse};
-use nom::{IResult, Needed};
+use nom::IResult;
+use nom::{call, complete, many0, named, take, try_parse, Needed};
 use wlan_common::ie::rsn::rsne;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Element {
     Gtk(kde::Header, kde::Gtk),
     Rsne(rsne::Rsne),
@@ -22,9 +21,9 @@ pub enum Element {
 
 fn peek_u8_at(input: &[u8], index: usize) -> IResult<&[u8], u8> {
     if input.len() <= index {
-        Incomplete(Needed::Size(index))
+        Err(nom::Err::Incomplete(Needed::Size(index + 1)))
     } else {
-        Done(input, input[index])
+        Ok((input, input[index]))
     }
 }
 
@@ -35,9 +34,9 @@ fn parse_ie(i0: &[u8]) -> IResult<&[u8], Element> {
     match id {
         rsne::ID => {
             let (_, rsne) = try_parse!(bytes, rsne::from_bytes);
-            Done(out, Element::Rsne(rsne))
+            Ok((out, Element::Rsne(rsne)))
         }
-        _ => Done(out, Element::UnsupportedIe(id, len)),
+        _ => Ok((out, Element::UnsupportedIe(id, len))),
     }
 }
 
@@ -49,7 +48,7 @@ fn parse_element(input: &[u8]) -> IResult<&[u8], Element> {
     }
 }
 
-named!(parse_elements<&[u8], Vec<Element>>, many0!(parse_element));
+named!(parse_elements<&[u8], Vec<Element>>, many0!(complete!(parse_element)));
 
 pub fn extract_elements(key_data: &[u8]) -> Result<Vec<Element>, failure::Error> {
     // Key Data field must be at least 16 bytes long and its length a multiple of 8.
@@ -58,13 +57,18 @@ pub fn extract_elements(key_data: &[u8]) -> Result<Vec<Element>, failure::Error>
         Error::InvaidKeyDataLength(key_data.len())
     );
 
-    parse_elements(key_data).to_full_result().map_err(|e| Error::InvalidKeyData(e).into())
+    match parse_elements(key_data) {
+        Ok((_, elements)) => Ok(elements),
+        Err(nom::Err::Error((_, kind))) => Err(Error::InvalidKeyData(kind).into()),
+        Err(nom::Err::Failure((_, kind))) => Err(Error::InvalidKeyData(kind).into()),
+        Err(nom::Err::Incomplete(_)) => Ok(vec![]),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wlan_common::organization::Oui;
+    use wlan_common::{assert_variant, organization::Oui};
 
     #[test]
     fn test_complex_key_data() {
@@ -124,7 +128,7 @@ mod tests {
                         assert_eq!(id, 200);
                         assert_eq!(len, 2);
                     }
-                    _ => assert!(false),
+                    other => panic!("unexpected IE position: {}", other),
                 },
                 Element::Rsne(rsne) => match pos {
                     2 => {
@@ -144,7 +148,7 @@ mod tests {
                         assert_eq!(cipher.suite_type, 1);
                         assert_eq!(cipher.oui, Oui::DOT11);
                     }
-                    _ => assert!(false),
+                    other => panic!("unexpected IE position: {}", other),
                 },
                 Element::UnsupportedKde(hdr) => {
                     assert_eq!(pos, 3);
@@ -192,16 +196,7 @@ mod tests {
 
         let elements = result.unwrap();
         assert_eq!(elements.len(), 1);
-
-        for e in elements {
-            match e {
-                Element::UnsupportedIe(id, len) => {
-                    assert_eq!(id, 10);
-                    assert_eq!(len, 14);
-                }
-                _ => assert!(false, "Unexpected element found: {:?}", e),
-            }
-        }
+        assert_eq!(elements.into_iter().next(), Some(Element::UnsupportedIe(10, 14)));
     }
 
     #[test]
@@ -218,14 +213,7 @@ mod tests {
         assert_eq!(elements.len(), 2);
 
         for e in elements {
-            match e {
-                Element::UnsupportedIe(id, len) => {
-                    assert_eq!(id, 10);
-                    assert_eq!(len, 13);
-                }
-                Element::Padding => (),
-                _ => assert!(false, "Unexpected element found: {:?}", e),
-            }
+            assert_variant!(e, Element::UnsupportedIe(10, 13) | Element::Padding);
         }
     }
 
@@ -243,14 +231,7 @@ mod tests {
         assert_eq!(elements.len(), 2);
 
         for e in elements {
-            match e {
-                Element::UnsupportedIe(id, len) => {
-                    assert_eq!(id, 20);
-                    assert_eq!(len, 6);
-                }
-                Element::Padding => (),
-                _ => assert!(false, "Unexpected element found: {:?}", e),
-            }
+            assert_variant!(e, Element::UnsupportedIe(20, 6) | Element::Padding);
         }
     }
 
@@ -274,17 +255,14 @@ mod tests {
         assert_eq!(elements.len(), 1);
 
         for e in elements {
-            match e {
-                Element::Gtk(hdr, kde) => {
-                    assert_eq!(hdr.type_, 0xDD);
-                    assert_eq!(hdr.len, 14);
-                    assert_eq!(hdr.oui, Oui::DOT11);
-                    assert_eq!(hdr.data_type, 1);
-                    assert_eq!(kde.info.value(), 5);
-                    assert_eq!(kde.gtk, vec![1, 2, 3, 4, 5, 6, 7, 8]);
-                }
-                _ => assert!(false, "Unexpected element found: {:?}", e),
-            }
+            assert_variant!(e, Element::Gtk(hdr, kde) => {
+                assert_eq!(
+                    hdr,
+                    kde::Header { type_: 0xDD, len: 14, oui: Oui::DOT11, data_type: 1 }
+                );
+                assert_eq!(kde.info.value(), 5);
+                assert_eq!(kde.gtk, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+            });
         }
     }
 
@@ -308,20 +286,17 @@ mod tests {
         assert_eq!(elements.len(), 1);
 
         for e in elements {
-            match e {
-                Element::Gtk(hdr, kde) => {
-                    assert_eq!(hdr.type_, 0xDD);
-                    assert_eq!(hdr.len, 22);
-                    assert_eq!(hdr.oui, Oui::DOT11);
-                    assert_eq!(hdr.data_type, 1);
-                    assert_eq!(kde.info.value(), 200);
-                    assert_eq!(
-                        kde.gtk,
-                        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-                    );
-                }
-                _ => assert!(false, "Unexpected element found: {:?}", e),
-            }
+            assert_variant!(e, Element::Gtk(hdr, kde) => {
+                assert_eq!(
+                    hdr,
+                    kde::Header { type_: 0xDD, len: 22, oui: Oui::DOT11, data_type: 1 }
+                );
+                assert_eq!(kde.info.value(), 200);
+                assert_eq!(
+                    kde.gtk,
+                    vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+                );
+            });
         }
     }
 }
