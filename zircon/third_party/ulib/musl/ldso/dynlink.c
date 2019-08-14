@@ -1467,8 +1467,10 @@ static void do_init_fini(struct dso* p) {
     if (dyn[0] & (1 << DT_INIT_ARRAY)) {
       size_t n = dyn[DT_INIT_ARRAYSZ] / sizeof(size_t);
       size_t* fn = laddr(p, dyn[DT_INIT_ARRAY]);
-      while (n--)
-        ((void (*)(void)) * fn++)();
+      while (n--) {
+        void (*func)(void) = (void (*)(void)) * fn++;
+        if (func != NULL) func();
+      }
     }
   }
   pthread_mutex_unlock(&init_fini_lock);
