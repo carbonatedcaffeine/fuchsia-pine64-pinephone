@@ -219,8 +219,15 @@ static zx_status_t load_segment(zx_handle_t vmar, size_t vmar_offset, zx_handle_
 
   // For a writable segment, we need a writable VMO.
   zx_handle_t writable_vmo;
+  zx_info_vmo_t vmo_info;
   zx_status_t status =
-      zx_vmo_create_child(vmo, ZX_VMO_CHILD_COPY_ON_WRITE, file_start, data_size, &writable_vmo);
+      zx_object_get_info(vmo, ZX_INFO_VMO, &vmo_info, sizeof(vmo_info), NULL, NULL);
+  if (status != ZX_OK)
+    return status;
+  int child_type = ZX_VMO_CHILD_COPY_ON_WRITE;
+  if (vmo_info.flags & ZX_INFO_VMO_PAGER_BACKED)
+    child_type = ZX_VMO_CHILD_PRIVATE_PAGER_COPY;
+  status = zx_vmo_create_child(vmo, child_type, file_start, data_size, &writable_vmo);
   if (status == ZX_OK) {
     char name[ZX_MAX_NAME_LEN] = VMO_NAME_PREFIX_DATA;
     memcpy(&name[sizeof(VMO_NAME_PREFIX_DATA) - 1], vmo_name,

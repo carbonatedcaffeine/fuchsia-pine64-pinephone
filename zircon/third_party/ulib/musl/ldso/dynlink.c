@@ -978,7 +978,12 @@ __NO_SAFESTACK NO_ASAN static zx_status_t map_library(zx_handle_t vmo, struct ds
         }
       } else {
         // Get a writable (lazy) copy of the portion of the file VMO.
-        status = _zx_vmo_create_child(vmo, ZX_VMO_CHILD_COPY_ON_WRITE | ZX_VMO_CHILD_RESIZABLE,
+        int child_type = ZX_VMO_CHILD_COPY_ON_WRITE;
+        zx_info_vmo_t vmo_info;
+        status = _zx_object_get_info(vmo, ZX_INFO_VMO, &vmo_info, sizeof(vmo_info), NULL, NULL);
+        if (status == ZX_OK && vmo_info.flags & ZX_INFO_VMO_PAGER_BACKED)
+          child_type = ZX_VMO_CHILD_PRIVATE_PAGER_COPY;
+        status = _zx_vmo_create_child(vmo, child_type | ZX_VMO_CHILD_RESIZABLE,
                                       off_start, data_size, &map_vmo);
         if (status == ZX_OK && map_size > data_size) {
           // Extend the writable VMO to cover the .bss pages too.
