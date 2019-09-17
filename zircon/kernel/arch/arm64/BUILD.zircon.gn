@@ -101,6 +101,7 @@ if (current_toolchain == default_toolchain) {
       "asm.S",
       "cache-ops.S",
       "coresight.cc",
+      "dap.cc",
       "debugger.cc",
       "exceptions.S",
       "exceptions_c.cc",
