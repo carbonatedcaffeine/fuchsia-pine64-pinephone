@@ -789,11 +789,9 @@ class ClowncopterizeVmoEnumerator : public VmEnumerator {
   struct ClonedVmo : public fbl::SinglyLinkedListable<ktl::unique_ptr<ClonedVmo>> {
     ClonedVmo(VmObject* oldvmo, fbl::RefPtr<VmObject> newvmo)
         : old_vmo(oldvmo), new_vmo(std::move(newvmo)) {
-      fbl::RefPtr<Dispatcher> disp;
       zx_status_t status =
-          VmObjectDispatcher::Create(new_vmo, &disp, &new_vmo_rights);
+          VmObjectDispatcher::Create(new_vmo, &new_vmo_dispatcher, &new_vmo_rights);
       ASSERT(status == ZX_OK);
-      new_vmo_dispatcher.reset(DownCastDispatcher<VmObjectDispatcher>(&disp));
     }
     VmObject* old_vmo;
     fbl::RefPtr<VmObject> new_vmo;

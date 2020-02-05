@@ -11,6 +11,7 @@ group("tools") {
     "//src/developer/feedback/bugreport",
     "//src/developer/feedback/bugreport:host_tool",
     "//src/developer/kcounter_inspect",
+    "//src/developer/sample",
     "//tools/fidlcat:fidlcat_host",
     "//tools/kazoo:kazoo_host",
   ]

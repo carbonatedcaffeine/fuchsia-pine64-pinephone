@@ -24,6 +24,10 @@ int main(int argc, char** argv) {
   if (!fxl::SetLogSettingsFromCommandLine(command_line))
     return 1;
 
+  fxl::LogSettings settings = fxl::GetLogSettings();
+  settings.min_log_level = -10;
+  fxl::SetLogSettings(settings);
+
   auto config_file = command_line.GetOptionValueWithDefault("config", kDefaultConfigFile);
 
   Config config;
