@@ -35,7 +35,7 @@ enum SdmmcTiming : uint8 {
 
 /// The number of VMOs that may be registered at one time. This is an arbitrary limit set to
 /// simplify VMO management by implementers of the protocol.
-const uint64 MAX_REGISTERED_VMOS = 16;
+const uint64 SDMMC_MAX_REGISTERED_VMOS = 16;
 
 union SdmmcBuffer {
     /// The ID of a VMO that was previously registered.
@@ -112,6 +112,7 @@ enum SdmmcHostCap : uint64 {
     DDR50 = 0x40;
     /// The host does not require tuning for SDR50.
     NO_TUNING_SDR50 = 0x80;
+    REQUEST_NEW = 0x100;
 };
 
 enum SdmmcHostPrefs : uint64 {
@@ -125,8 +126,6 @@ struct SdmmcHostInfo {
     /// Maximum data request size
     uint64 max_transfer_size;
     uint64 max_transfer_size_non_dma;
-    /// The number of buffer regions that may be used in a single request.
-    uint64 max_buffer_regions;
     /// Host specific preferences
     uint64 prefs;
 };
