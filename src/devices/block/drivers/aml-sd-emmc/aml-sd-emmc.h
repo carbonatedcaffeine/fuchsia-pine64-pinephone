@@ -5,6 +5,7 @@
 #ifndef SRC_STORAGE_BLOCK_DRIVERS_AML_SD_EMMC_AML_SD_EMMC_H_
 #define SRC_STORAGE_BLOCK_DRIVERS_AML_SD_EMMC_AML_SD_EMMC_H_
 
+#include <lib/fzl/vmo-mapper.h>
 #include <lib/mmio/mmio.h>
 #include <lib/sync/completion.h>
 #include <lib/zircon-internal/thread_annotations.h>
@@ -16,6 +17,7 @@
 #include <ddktl/protocol/gpio.h>
 #include <ddktl/protocol/platform/device.h>
 #include <ddktl/protocol/sdmmc.h>
+#include <fbl/algorithm.h>
 #include <fbl/auto_lock.h>
 #include <fbl/span.h>
 #include <soc/aml-common/aml-sd-emmc.h>
@@ -76,6 +78,9 @@ class AmlSdEmmc : public AmlSdEmmcType, public ddk::SdmmcProtocol<AmlSdEmmc, ddk
   sdmmc_req_t* cur_req_ TA_GUARDED(mtx_) = nullptr;
 
  private:
+  // Limit maximum number of descriptors to 512 for now
+  static constexpr size_t kMaxDescriptorCount = 512;
+
   enum {
     FRAGMENT_PDEV,
     FRAGMENT_GPIO_RESET,
@@ -87,6 +92,41 @@ class AmlSdEmmc : public AmlSdEmmcType, public ddk::SdmmcProtocol<AmlSdEmmc, ddk
     uint32_t size = 0;
 
     uint32_t middle() const { return start + (size / 2); }
+  };
+
+  struct RegisteredVmo {
+    RegisteredVmo() = default;
+    ~RegisteredVmo() { Reset(); }
+
+    uint32_t id = 0;
+    zx::vmo vmo = {};
+    uint64_t offset = 0;
+    uint64_t size = 0;
+    fzl::VmoMapper vmar = {};
+    zx::pmt pmt = {};
+    zx_paddr_t paddrs[kMaxDescriptorCount] = {};
+
+    zx_status_t Pin(const zx::bti& bti);
+
+    bool IsValid() const { return size > 0; }
+
+    void Reset() {
+      id = 0;
+      vmo.reset();
+      offset = 0;
+      size = 0;
+      vmar.Unmap();
+      pmt.reset();
+    }
+
+    void Reset(uint32_t i, zx::vmo v, uint64_t ofs, uint64_t sz) {
+      id = i;
+      vmo = std::move(v);
+      offset = ofs;
+      size = sz;
+      vmar.Unmap();
+      pmt.reset();
+    }
   };
 
   void DumpRegs();
@@ -119,6 +159,33 @@ class AmlSdEmmc : public AmlSdEmmcType, public ddk::SdmmcProtocol<AmlSdEmmc, ddk
   zx_status_t FinishReq(sdmmc_req_t* req);
   int IrqThread();
 
+  aml_sd_emmc_desc_t* SetupCmdDescNew(const sdmmc_req_new_t* req, bool use_dma);
+  zx_status_t WriteBufferDescsDma(uint64_t offset, uint64_t size, zx_paddr_t* paddrs,
+                                  size_t paddr_count) TA_REQ(mtx_);
+
+  zx_status_t SetupDataDescsDmaNew(const sdmmc_req_new_t* req, aml_sd_emmc_desc_t* desc,
+                                   zx::pmt* pmts) TA_REQ(mtx_);
+  zx_status_t SetupDataDescsPioNew(const sdmmc_req_new_t* req, aml_sd_emmc_desc_t* desc,
+                                   fzl::VmoMapper* vmars) TA_REQ(mtx_);
+
+  RegisteredVmo* GetVmo(uint32_t id) TA_REQ(mtx_) {
+    for (RegisteredVmo& vmo : vmos_) {
+      if (vmo.IsValid() && vmo.id == id) {
+        return &vmo;
+      }
+    }
+    return nullptr;
+  }
+
+  RegisteredVmo* NextFreeVmo() TA_REQ(mtx_) {
+    for (RegisteredVmo& vmo : vmos_) {
+      if (!vmo.IsValid()) {
+        return &vmo;
+      }
+    }
+    return nullptr;
+  }
+
   zx::bti bti_;
 
   ddk::MmioPinnedBuffer pinned_mmio_;
@@ -131,6 +198,7 @@ class AmlSdEmmc : public AmlSdEmmcType, public ddk::SdmmcProtocol<AmlSdEmmc, ddk
   ddk::IoBuffer descs_buffer_;
   sync_completion_t req_completion_;
   uint32_t max_freq_, min_freq_;
+  RegisteredVmo vmos_[SDMMC_MAX_REGISTERED_VMOS] TA_GUARDED(mtx_) = {};
 };
 
 }  // namespace sdmmc

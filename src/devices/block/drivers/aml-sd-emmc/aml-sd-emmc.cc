@@ -36,24 +36,22 @@
 
 #include "aml-sd-emmc-regs.h"
 
-// Limit maximum number of descriptors to 512 for now
-#define AML_DMA_DESC_MAX_COUNT 512
 #define AML_SD_EMMC_TRACE(fmt, ...) zxlogf(TRACE, "%s: " fmt, __func__, ##__VA_ARGS__)
 #define AML_SD_EMMC_INFO(fmt, ...) zxlogf(INFO, "%s: " fmt, __func__, ##__VA_ARGS__)
 #define AML_SD_EMMC_ERROR(fmt, ...) zxlogf(ERROR, "%s: " fmt, __func__, ##__VA_ARGS__)
 #define AML_SD_EMMC_COMMAND(c) ((0x80) | (c))
-#define PAGE_MASK (PAGE_SIZE - 1ull)
+#define PAGE_MASK (ZX_PAGE_SIZE - 1ull)
 
 #define GET_REG_FROM_MMIO(NAME) NAME::Get().ReadFrom(&mmio_).reg_value()
 
-uint32_t log2_ceil(uint16_t blk_sz) {
+namespace sdmmc {
+
+uint32_t log2_ceil(uint32_t blk_sz) {
   if (blk_sz == 1) {
     return 0;
   }
   return 32 - (__builtin_clz(blk_sz - 1));
 }
-
-namespace sdmmc {
 
 void AmlSdEmmc::DumpRegs() {
   uint32_t clk = GET_REG_FROM_MMIO(AmlSdEmmcClock);
@@ -455,7 +453,7 @@ zx_status_t AmlSdEmmc::SetupDataDescsDma(sdmmc_req_t* req, aml_sd_emmc_desc_t* c
                                          aml_sd_emmc_desc_t** last_desc) {
   uint64_t req_len = req->blockcount * req->blocksize;
   bool is_read = req->cmd_flags & SDMMC_CMD_READ;
-  uint64_t pagecount = ((req->buf_offset & PAGE_MASK) + req_len + PAGE_MASK) / PAGE_SIZE;
+  uint64_t pagecount = ((req->buf_offset & PAGE_MASK) + req_len + PAGE_MASK) / ZX_PAGE_SIZE;
   if (pagecount > SDMMC_PAGES_COUNT) {
     zxlogf(ERROR, "AmlSdEmmc::SetupDataDescsDma: too many pages %lu vs %lu\n", pagecount,
            SDMMC_PAGES_COUNT);
@@ -468,7 +466,7 @@ zx_status_t AmlSdEmmc::SetupDataDescsDma(sdmmc_req_t* req, aml_sd_emmc_desc_t* c
   uint32_t options = is_read ? ZX_BTI_PERM_WRITE : ZX_BTI_PERM_READ;
 
   zx_status_t st = zx_bti_pin(bti_.get(), options, req->dma_vmo, req->buf_offset & ~PAGE_MASK,
-                              pagecount * PAGE_SIZE, phys, pagecount, &req->pmt);
+                              pagecount * ZX_PAGE_SIZE, phys, pagecount, &req->pmt);
   if (st != ZX_OK) {
     zxlogf(ERROR, "AmlSdEmmc::SetupDataDescsDma: bti-pin failed with error %d\n", st);
     return st;
@@ -493,9 +491,9 @@ zx_status_t AmlSdEmmc::SetupDataDescsDma(sdmmc_req_t* req, aml_sd_emmc_desc_t* c
   buf.vmo_offset = req->buf_offset;
 
   phys_iter_t iter;
-  phys_iter_init(&iter, &buf, PAGE_SIZE);
+  phys_iter_init(&iter, &buf, ZX_PAGE_SIZE);
 
-  int count = 0;
+  size_t count = 0;
   size_t length;
   zx_paddr_t paddr;
   uint16_t blockcount;
@@ -511,14 +509,13 @@ zx_status_t AmlSdEmmc::SetupDataDescsDma(sdmmc_req_t* req, aml_sd_emmc_desc_t* c
         zxlogf(TRACE, "AmlSdEmmc::SetupDataDescsDma: empty descriptor list!\n");
         return ZX_ERR_NOT_SUPPORTED;
       }
-    } else if (length > PAGE_SIZE) {
+    } else if (length > ZX_PAGE_SIZE) {
       zxlogf(TRACE, "AmlSdEmmc::SetupDataDescsDma: chunk size > %zu is unsupported\n", length);
       return ZX_ERR_NOT_SUPPORTED;
-    } else if ((++count) > AML_DMA_DESC_MAX_COUNT) {
+    } else if ((++count) > kMaxDescriptorCount) {
       zxlogf(TRACE,
-             "AmlSdEmmc::SetupDataDescsDma: request with more than %d chunks "
-             "is unsupported\n",
-             AML_DMA_DESC_MAX_COUNT);
+             "AmlSdEmmc::SetupDataDescsDma: request with more than %zu chunks is unsupported\n",
+             kMaxDescriptorCount);
       return ZX_ERR_NOT_SUPPORTED;
     }
     auto cmd = AmlSdEmmcCmdCfg::Get().FromValue(desc->cmd_info);
@@ -919,30 +916,269 @@ zx_status_t AmlSdEmmc::SdmmcPerformTuning(uint32_t tuning_cmd_idx) {
 
 zx_status_t AmlSdEmmc::SdmmcRegisterVmo(uint32_t vmo_id, zx::vmo vmo, uint64_t offset,
                                         uint64_t size) {
-  return ZX_ERR_NOT_SUPPORTED;
+  if (size == 0) {
+    return ZX_ERR_INVALID_ARGS;
+  }
+
+  const uint64_t first_page_offset = offset % ZX_PAGE_SIZE;
+  const uint64_t page_count = fbl::round_up(size + first_page_offset, ZX_PAGE_SIZE) / ZX_PAGE_SIZE;
+  // Verify the assumption that the DMA max transfer size is greater than the PIO max transfer size.
+  // That is, if a VMO can't be mapped due to size, PIO also cannot be used and the registration
+  // should fail.
+  static_assert(ZX_PAGE_SIZE * kMaxDescriptorCount > AML_SD_EMMC_MAX_PIO_DATA_SIZE);
+  if (page_count >= kMaxDescriptorCount) {
+    return ZX_ERR_OUT_OF_RANGE;
+  }
+
+  fbl::AutoLock mutex_al(&mtx_);
+  if (GetVmo(vmo_id) != nullptr) {
+    return ZX_ERR_ALREADY_EXISTS;
+  }
+
+  RegisteredVmo* const free_vmo = NextFreeVmo();
+  if (free_vmo == nullptr) {
+    return ZX_ERR_NO_RESOURCES;
+  }
+
+  free_vmo->Reset(vmo_id, std::move(vmo), offset, size);
+  return ZX_OK;
 }
 
 zx_status_t AmlSdEmmc::SdmmcUnregisterVmo(uint32_t vmo_id, zx::vmo* out_vmo) {
-  return ZX_ERR_NOT_SUPPORTED;
+  fbl::AutoLock mutex_al(&mtx_);
+  RegisteredVmo* const vmo = GetVmo(vmo_id);
+  if (vmo == nullptr) {
+    return ZX_ERR_NOT_FOUND;
+  }
+  out_vmo->reset(vmo->vmo.release());
+  vmo->Reset();
+  return ZX_OK;
+}
+
+aml_sd_emmc_desc_t* AmlSdEmmc::SetupCmdDescNew(const sdmmc_req_new_t* req, bool use_dma) {
+  aml_sd_emmc_desc_t* desc;
+  if (use_dma) {
+    desc = reinterpret_cast<aml_sd_emmc_desc_t*>(descs_buffer_.virt());
+    memset(desc, 0, descs_buffer_.size());
+  } else {
+    desc = reinterpret_cast<aml_sd_emmc_desc_t*>(reinterpret_cast<uintptr_t>(mmio_.get()) +
+                                                 AML_SD_EMMC_SRAM_MEMORY_BASE);
+  }
+  auto cmd_cfg = AmlSdEmmcCmdCfg::Get().FromValue(0);
+  if (req->cmd_flags == 0) {
+    cmd_cfg.set_no_resp(1);
+  } else {
+    if (req->cmd_flags & SDMMC_RESP_LEN_136) {
+      cmd_cfg.set_resp_128(1);
+    }
+
+    if (!(req->cmd_flags & SDMMC_RESP_CRC_CHECK)) {
+      cmd_cfg.set_resp_no_crc(1);
+    }
+
+    if (req->cmd_flags & SDMMC_RESP_LEN_48B) {
+      cmd_cfg.set_r1b(1);
+    }
+
+    cmd_cfg.set_resp_num(1);
+  }
+  cmd_cfg.set_cmd_idx(req->cmd_idx)
+      .set_timeout(AmlSdEmmcCmdCfg::kDefaultCmdTimeout)
+      .set_error(0)
+      .set_owner(1)
+      .set_end_of_chain(0);
+
+  desc->cmd_info = cmd_cfg.reg_value();
+  desc->cmd_arg = req->arg;
+  desc->data_addr = 0;
+  desc->resp_addr = 0;
+  return desc;
+}
+
+zx_status_t AmlSdEmmc::WriteBufferDescsDma(uint64_t offset, uint64_t size, zx_paddr_t* paddrs,
+                                           size_t paddr_count) {
+  // uint64_t pagecount = ((req->buf_offset & PAGE_MASK) + req_len + PAGE_MASK) / ZX_PAGE_SIZE;
+  // TODO(bradenkell): Fill this out.
+  return ZX_OK;
+}
+
+zx_status_t AmlSdEmmc::SetupDataDescsDmaNew(const sdmmc_req_new_t* req, aml_sd_emmc_desc_t* desc,
+                                            zx::pmt* pmts) {
+  size_t pmt_index = 0;
+
+  // TODO(bradenkell): Keep track of the number of pages to make sure it doesn't exceed
+  // kMaxDescriptorCount.
+  // size_t pages = 0;
+  for (size_t i = 0; i < req->buffers_count; i++) {
+    const auto& buffer = req->buffers_list[i];
+    if (buffer.type == SDMMC_BUFFER_TYPE_VMO_ID) {
+      RegisteredVmo* const vmo = GetVmo(buffer.buffer.vmo_id);
+      if (vmo == nullptr) {
+        return ZX_ERR_NOT_FOUND;
+      }
+      if (buffer.offset + buffer.size > vmo->size) {
+        return ZX_ERR_OUT_OF_RANGE;
+      }
+
+      zx_status_t status = vmo->Pin(bti_);
+      if (status != ZX_OK) {
+        return status;
+      }
+    } else if (buffer.type == SDMMC_BUFFER_TYPE_VMO_HANDLE) {
+      zx::unowned_vmo vmo(buffer.buffer.vmo);
+      zx_paddr_t paddrs[kMaxDescriptorCount];
+      zx_status_t status = bti_.pin(ZX_BTI_PERM_READ | ZX_BTI_PERM_WRITE, *vmo, buffer.offset,
+                                    buffer.size, paddrs, fbl::count_of(paddrs), &pmts[pmt_index++]);
+      if (status != ZX_OK) {
+        return status;
+      }
+    } else {
+      return ZX_ERR_INVALID_ARGS;
+    }
+
+    // TODO(bradenkell): Call WriteBufferDescsDma to write the descriptors for this buffer.
+  }
+
+  return ZX_OK;
+}
+
+zx_status_t AmlSdEmmc::SetupDataDescsPioNew(const sdmmc_req_new_t* req, aml_sd_emmc_desc_t* desc,
+                                            fzl::VmoMapper* vmars) {
+  zx_status_t status = ZX_OK;
+  uint32_t length = req->blockcount * req->blocksize;
+
+  if (length > AML_SD_EMMC_MAX_PIO_DATA_SIZE) {
+    zxlogf(ERROR,
+           "AmlSdEmmc::SetupDataDescsPio: Request transfer size is greater than "
+           "max transfer size\n");
+    return ZX_ERR_NOT_SUPPORTED;
+  }
+
+  if (length == 0 || ((length % 4) != 0)) {
+    // From Amlogic documentation, Ping and Pong buffers in sram can be accessed only 4 bytes
+    // at a time.
+    zxlogf(ERROR,
+           "AmlSdEmmc::SetupDataDescsPio: Request sizes that are not multiple of "
+           "4 are not supported in PIO mode\n");
+    return ZX_ERR_NOT_SUPPORTED;
+  }
+
+  // TODO(bradenkell): Loop over every buffer and map..
+
+  auto cmd = AmlSdEmmcCmdCfg::Get().FromValue(desc->cmd_info);
+  cmd.set_data_io(1);
+  if (!(req->cmd_flags & SDMMC_CMD_READ)) {
+    cmd.set_data_wr(1);
+    // TODO(bradenkell): Copy from each buffer into SRAM.
+    // uint32_t data_copied = 0;
+    // uint32_t data_remaining = length;
+    // uint32_t* src = reinterpret_cast<uint32_t*>(req->virt_buffer);
+    // volatile uint32_t* dest = reinterpret_cast<volatile uint32_t*>(
+    //     reinterpret_cast<uintptr_t>(mmio_.get()) + kAmlSdEmmcPingOffset);
+    // while (data_remaining) {
+    //   *dest++ = *src++;
+    //   data_remaining -= 4;
+    //   data_copied += 4;
+    // }
+  }
+
+  if (req->blockcount > 1) {
+    cmd.set_block_mode(1).set_length(req->blockcount);
+  } else {
+    cmd.set_length(req->blocksize);
+  }
+
+  // data_addr[0] = 0 for DDR. data_addr[0] = 1 if address is from SRAM
+
+  desc->cmd_info = cmd.reg_value();
+  zx_paddr_t buffer_phys = pinned_mmio_.get_paddr() + kAmlSdEmmcPingOffset;
+  desc->data_addr = static_cast<uint32_t>(buffer_phys | 1);
+  return status;
 }
 
 zx_status_t AmlSdEmmc::SdmmcRequestNew(const sdmmc_req_new_t* req, uint32_t out_response[4]) {
-  return ZX_ERR_NOT_SUPPORTED;
+  // Wait for the bus to become idle before issuing the next request. This could be necessary if the
+  // card is driving CMD low after a voltage switch.
+  while (!AmlSdEmmcStatus::Get().ReadFrom(&mmio_).cmd_i()) {
+    zx::nanosleep(zx::deadline_after(zx::usec(10)));
+  }
+
+  fbl::AutoLock mutex_al(&mtx_);
+
+  // stop executing
+  AmlSdEmmcStart::Get().ReadFrom(&mmio_).set_desc_busy(0).WriteTo(&mmio_);
+
+  aml_sd_emmc_desc_t* const cmd_desc = SetupCmdDescNew(req, board_config_.supports_dma);
+
+  zx::pmt pmts[kMaxDescriptorCount] = {};
+  fzl::VmoMapper vmars[kMaxDescriptorCount] = {};
+
+  if (req->cmd_flags & SDMMC_RESP_DATA_PRESENT) {
+    if (req->blockcount == 0 || req->blocksize == 0) {
+      return ZX_ERR_INVALID_ARGS;
+    }
+    if (req->blocksize > AmlSdEmmcCmdCfg::kMaxBlockSize) {
+      return ZX_ERR_NOT_SUPPORTED;
+    }
+
+    const uint32_t blocksize_log2 = log2_ceil(req->blocksize);
+    if (blocksize_log2 > UINT8_MAX) {
+      return ZX_ERR_INVALID_ARGS;
+    }
+
+    zx_status_t status;
+    if (board_config_.supports_dma) {
+      status = SetupDataDescsDmaNew(req, cmd_desc, pmts);
+    } else {
+      status = SetupDataDescsPioNew(req, cmd_desc, vmars);
+    }
+    if (status != ZX_OK) {
+      return status;
+    }
+
+    AmlSdEmmcCfg::Get()
+        .ReadFrom(&mmio_)
+        .set_blk_len(static_cast<uint8_t>(blocksize_log2))
+        .WriteTo(&mmio_);
+  }
+
+  // TODO(bradenkell): Initialize any context.
+  // cur_req_ = req;
+
+  auto start_reg = AmlSdEmmcStart::Get().ReadFrom(&mmio_);
+  descs_buffer_.CacheFlush(0, descs_buffer_.size());
+  // Read desc from external DDR
+  start_reg.set_desc_int(0);
+
+  start_reg.set_desc_busy(1)
+      .set_desc_addr((static_cast<uint32_t>(descs_buffer_.phys())) >> 2)
+      .WriteTo(&mmio_);
+
+  // TODO(bradenkell): Release mtx here.
+
+  sync_completion_wait(&req_completion_, ZX_TIME_INFINITE);
+  // TODO(bradenkell): Implement FinishReqNew to copy from SRAM.
+  // FinishReq(req);
+  sync_completion_reset(&req_completion_);
+
+  // TODO(bradenkell): Get the status from somewhere.
+
+  return ZX_OK;
 }
 
 zx_status_t AmlSdEmmc::Init() {
   dev_info_.caps = SDMMC_HOST_CAP_BUS_WIDTH_8 | SDMMC_HOST_CAP_VOLTAGE_330 | SDMMC_HOST_CAP_SDR104 |
-                   SDMMC_HOST_CAP_SDR50 | SDMMC_HOST_CAP_DDR50;
+                   SDMMC_HOST_CAP_SDR50 | SDMMC_HOST_CAP_DDR50 | SDMMC_HOST_CAP_REQUEST_NEW;
   if (board_config_.supports_dma) {
     dev_info_.caps |= SDMMC_HOST_CAP_DMA;
     zx_status_t status =
-        descs_buffer_.Init(bti_.get(), AML_DMA_DESC_MAX_COUNT * sizeof(aml_sd_emmc_desc_t),
+        descs_buffer_.Init(bti_.get(), kMaxDescriptorCount * sizeof(aml_sd_emmc_desc_t),
                            IO_BUFFER_RW | IO_BUFFER_CONTIG);
     if (status != ZX_OK) {
       zxlogf(ERROR, "AmlSdEmmc::Init: Failed to allocate dma descriptors\n");
       return status;
     }
-    dev_info_.max_transfer_size = AML_DMA_DESC_MAX_COUNT * PAGE_SIZE;
+    dev_info_.max_transfer_size = kMaxDescriptorCount * ZX_PAGE_SIZE;
   } else {
     dev_info_.max_transfer_size = AML_SD_EMMC_MAX_PIO_DATA_SIZE;
   }
@@ -1081,6 +1317,19 @@ static constexpr zx_driver_ops_t aml_sd_emmc_driver_ops = []() {
   driver_ops.bind = AmlSdEmmc::Create;
   return driver_ops;
 }();
+
+zx_status_t AmlSdEmmc::RegisteredVmo::Pin(const zx::bti& bti) {
+  if (pmt.is_valid()) {
+    return ZX_OK;
+  }
+
+  const uint64_t first_page_offset = offset % ZX_PAGE_SIZE;
+  const uint64_t pin_offset = offset - first_page_offset;
+  const uint64_t pin_size = fbl::round_up(size + first_page_offset, ZX_PAGE_SIZE);
+
+  return bti.pin(ZX_BTI_PERM_READ | ZX_BTI_PERM_WRITE, vmo, pin_offset, pin_size, paddrs,
+                 fbl::count_of(paddrs), &pmt);
+}
 
 }  // namespace sdmmc
 
