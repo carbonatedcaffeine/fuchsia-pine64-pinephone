@@ -2,27 +2,37 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-zx_driver("vim3-tdm-output") {
+import("//build/config/fuchsia/rules.gni")
+import("//build/unification/images/migrated_manifest.gni")
+
+driver_module("vim3-tdm-output") {
+  defines = [ "_ALL_SOURCE" ]
+  configs += [ "//build/config/fuchsia:enable_zircon_asserts" ]
+  configs -= [ "//build/config/fuchsia:no_cpp_standard_library" ]
+  configs += [ "//build/config/fuchsia:static_cpp_standard_library" ]
+  configs += [ "//build/unification/config:zircon-migrated" ]
   sources = [
     "audio-stream-out.cc",
   ]
 
-  # TODO(32708): This driver violates the allowed shlib deps policy.
-  deprecated_inhibit_driver_shlib_allowlist = true
   deps = [
-    "$zx/system/banjo/ddk.protocol.platform.device",
-    "$zx/system/dev/audio/lib/simple-audio-stream",
-    "$zx/system/dev/lib/amlogic",
-    "$zx/system/dev/lib/device-protocol-pdev",
-    "$zx/system/dev/lib/mmio",
-    "$zx/system/ulib/audio-driver-proto",
-    "$zx/system/ulib/audio-proto-utils",
-    "$zx/system/ulib/ddk",
-    "$zx/system/ulib/ddktl",
-    "$zx/system/ulib/fbl",
-    "$zx/system/ulib/fzl",
-    "$zx/system/ulib/sync",
-    "$zx/system/ulib/zircon",
-    "$zx/system/ulib/zx",
+    "//src/devices/lib/driver",
+    "//zircon/public/lib/amlogic",
+    "//zircon/public/lib/ddk",
+    "//zircon/public/lib/ddktl",
+    "//zircon/public/lib/fbl",
+    "//zircon/public/lib/fzl",
+    "//zircon/public/lib/mmio",
+    "//zircon/public/lib/zx",
+    "//zircon/system/banjo/ddk.protocol.gpio",
+    "//zircon/system/banjo/ddk.protocol.platform.device",
+    "//zircon/system/dev/audio/lib/simple-audio-stream",
+    "//zircon/system/dev/lib/device-protocol-pdev",
+    "//zircon/system/ulib/audio-driver-proto",
+    "//zircon/system/ulib/audio-proto-utils",
   ]
+}
+
+migrated_manifest("vim3-tdm-output-manifest") {
+  deps = [ ":vim3-tdm-output" ]
 }

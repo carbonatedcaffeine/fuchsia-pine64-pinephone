@@ -104,7 +104,7 @@ int Vim3AudioStreamOut::Thread() {
   // Setup TDM.
 
   // 3 bitoffset, 4 slots, 32 bits/slot, 16 bits/sample, no mixing.
-  aml_audio_->ConfigTdmOutSlot(3, 3, 31, 15, 0);
+  aml_audio_->ConfigTdmOutSlot(3, 1, 31, 15, 0);
 
   // Lane0 right channel.
   aml_audio_->ConfigTdmOutSwaps(0x00000010);
@@ -115,12 +115,12 @@ int Vim3AudioStreamOut::Thread() {
 //       verilog required a minimum sclk of 10MHz, so clock rates here deviate from
 //       other audio driver implementations in zircon.
   // Setup appropriate tdm clock signals. mclk = 1536MHz/62 = 24.774MHz.
-  aml_audio_->SetMclkDiv(61);
+  aml_audio_->SetMclkDiv(124);
 
   // No need to set mclk pad via SetMClkPad (TAS2770 features "MCLK Free Operation").
 
   // sclk = 24.774MHz/2 = 12.387MHz, 1 every 128 sclks is frame sync.
-  aml_audio_->SetSclkDiv(1, 0, 127);
+  aml_audio_->SetSclkDiv(1, 0, 63, false);
 
   aml_audio_->Sync();
   aml_audio_->Start();

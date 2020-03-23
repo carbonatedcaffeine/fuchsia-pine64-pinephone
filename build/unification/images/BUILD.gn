@@ -1189,6 +1189,7 @@ aggregate_manifest("migrated-image") {
     "//src/graphics/display/drivers/amlogic-display:amlogic-display-manifest",
     "//src/media/audio/drivers/astro-pdm-input:astro-pdm-input-manifest",
     "//src/media/audio/drivers/astro-tdm-output:astro-tdm-output-manifest",
+    "//src/media/audio/drivers/vim3-tdm-output:vim3-tdm-output-manifest",
     "//src/devices/block/drivers/core:core-manifest",
     "//src/ui/input/drivers/bma253:bma253-manifest",
     "//src/devices/block/drivers/bootpart:bootpart-manifest",
