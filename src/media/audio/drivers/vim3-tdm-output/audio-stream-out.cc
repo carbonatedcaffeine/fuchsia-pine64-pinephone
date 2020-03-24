@@ -102,7 +102,9 @@ int Vim3AudioStreamOut::Thread() {
                         pinned_ring_buffer_.region(0).size);
 
   // Setup TDM.
+  aml_audio_->Shutdown();
 
+  aml_audio_->Initialize();
   // 3 bitoffset, 4 slots, 32 bits/slot, 16 bits/sample, no mixing.
   aml_audio_->ConfigTdmOutSlot(3, 1, 31, 15, 0);
 
@@ -120,11 +122,11 @@ int Vim3AudioStreamOut::Thread() {
   // No need to set mclk pad via SetMClkPad (TAS2770 features "MCLK Free Operation").
 
   // sclk = 24.774MHz/2 = 12.387MHz, 1 every 128 sclks is frame sync.
-  aml_audio_->SetSclkDiv(1, 0, 63, false);
+  aml_audio_->SetSclkDiv(3, 0, 63, false);
 
   aml_audio_->Sync();
   aml_audio_->Start();
-
+  zxlogf(ERROR, "STarted the tdm thingymabob....\n");
   init_txn_->Reply(ZX_OK);
   return ZX_OK;
 }

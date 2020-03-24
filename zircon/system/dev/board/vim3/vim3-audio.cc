@@ -43,7 +43,7 @@ static pbus_dev_t tdm_dev = []() {
 
 zx_status_t Vim3::AudioInit() {
   zx_status_t status;
-#if 1
+
   status = clk_impl_.Disable(g12b_clk::CLK_HIFI_PLL);
   if (status != ZX_OK) {
     zxlogf(ERROR, "%s: Disable(CLK_HIFI_PLL) failed, st = %d\n",
@@ -64,16 +64,17 @@ zx_status_t Vim3::AudioInit() {
            __func__, status);
     return status;
   }
-#endif
+
   // TDM pin assignments
+  zxlogf(INFO, "Setting GPIO assignments... %d  %d  %d\n",A311D_GPIOA(1),A311D_GPIOA(2),A311D_GPIOA(3));
   gpio_impl_.SetAltFunction(A311D_GPIOA(1), A311D_GPIOA_1_TDMB_SCLK_FN);
-  gpio_impl_.SetDriveStrength(A311D_GPIOA(1), 3);
+  gpio_impl_.SetDriveStrength(A311D_GPIOA(1), 2);
 
   gpio_impl_.SetAltFunction(A311D_GPIOA(2), A311D_GPIOA_2_TDMB_FS_FN);
-  gpio_impl_.SetDriveStrength(A311D_GPIOA(2), 3);
+  gpio_impl_.SetDriveStrength(A311D_GPIOA(2), 2);
 
   gpio_impl_.SetAltFunction(A311D_GPIOA(3), A311D_GPIOA_3_TDMB_D0_FN);
-  gpio_impl_.SetDriveStrength(A311D_GPIOA(3), 3);
+  gpio_impl_.SetDriveStrength(A311D_GPIOA(3), 2);
 
   gpio_impl_.SetAltFunction(A311D_GPIOA(6), A311D_GPIOA_6_TDMB_DIN3_FN);
 
