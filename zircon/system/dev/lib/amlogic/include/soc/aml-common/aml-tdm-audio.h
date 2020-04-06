@@ -47,6 +47,7 @@ class AmlTdmDevice {
   // Sets the buffer/length pointers for dma engine
   // must resize in lower 32-bits of address space.
   zx_status_t SetBuffer(zx_paddr_t buf, size_t len);
+  zx_status_t SetInBuffer(zx_paddr_t buf, size_t len);
 
   // Returns offset of dma pointer in the ring buffer.
   uint32_t GetRingPosition();
@@ -81,7 +82,10 @@ class AmlTdmDevice {
         frddr_base_(GetFrddrBase(frddr)),
         tdm_base_(GetTdmBase(tdm)),
         mmio_(std::move(mmio)),
-        version_(version) {}
+        version_(version) {
+          tdm_in_base_ = GetTdmInBase(tdm);
+          toddr_base_ = GetToddrBase(tdm);
+        }
   virtual ~AmlTdmDevice() = default;  // protected for unit test.
 
  private:
@@ -94,6 +98,10 @@ class AmlTdmDevice {
   const zx_off_t tdm_base_;    // base offset of our tdmout block
   const ddk::MmioBuffer mmio_;
   const AmlVersion version_;
+
+  zx_off_t tdm_in_base_; // base offset of tdm input block used
+  zx_off_t toddr_base_;
+
   friend class std::default_delete<AmlTdmDevice>;
 
   /* Get the register block offset for our ddr block */
@@ -110,6 +118,22 @@ class AmlTdmDevice {
     assert(0);
     return 0;
   }
+  /* Get the register block offset for our toddr block */
+  /*  if we are using frddr A, we also use toddr A */
+  static zx_off_t GetToddrBase(aml_frddr_t ch) {
+    switch (ch) {
+      case FRDDR_A:
+        return EE_AUDIO_TODDR_A_CTRL0;
+      case FRDDR_B:
+        return EE_AUDIO_TODDR_B_CTRL0;
+      case FRDDR_C:
+        return EE_AUDIO_TODDR_C_CTRL0;
+    }
+    // We should never get here, but if we do, make it hard to ignore
+    ZX_PANIC("Invalid frddr channel specified!\n");
+    return 0;
+  }
+
   /* Get the register block offset for our tdm block */
   static zx_off_t GetTdmBase(aml_tdm_out_t ch) {
     switch (ch) {
@@ -124,7 +148,20 @@ class AmlTdmDevice {
     assert(0);
     return 0;
   }
-
+  /* Get the register block offset for our tdm block */
+  static zx_off_t GetTdmInBase(aml_tdm_out_t ch) {
+    switch (ch) {
+      case TDM_OUT_A:
+        return EE_AUDIO_TDMIN_A_CTRL;
+      case TDM_OUT_B:
+        return EE_AUDIO_TDMIN_B_CTRL;
+      case TDM_OUT_C:
+        return EE_AUDIO_TDMIN_C_CTRL;
+    }
+    // We should never get here, but if we do, make it obvious
+    assert(0);
+    return 0;
+  }
   void AudioClkEna(uint32_t audio_blk_mask);
   void AudioClkDis(uint32_t audio_blk_mask);
   void FRDDREnable();
@@ -134,8 +171,11 @@ class AmlTdmDevice {
 
   /* Get the register block offset for our ddr block */
   zx_off_t GetFrddrOffset(zx_off_t off) { return frddr_base_ + off; }
+  zx_off_t GetToddrOffset(zx_off_t off) { return toddr_base_ + off; }
+
   /* Get the register block offset for our tdm block */
   zx_off_t GetTdmOffset(zx_off_t off) { return tdm_base_ + off; }
+  zx_off_t GetTdmInOffset(zx_off_t off) { return tdm_in_base_ + off; }
 };
 
 #endif  // ZIRCON_SYSTEM_DEV_LIB_AMLOGIC_INCLUDE_SOC_AML_COMMON_AML_TDM_AUDIO_H_

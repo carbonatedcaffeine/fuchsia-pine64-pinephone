@@ -1,4 +1,4 @@
-// Copyright 2018 The Fuchsia Authors. All rights reserved.
+// Copyright 2020 The Fuchsia Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,21 +8,21 @@
 
 #include <ddk/debug.h>
 #include <fbl/alloc_checker.h>
-#include <soc/aml-common/aml-tdm-audio.h>
+#include <soc/aml-common/aml-tdmin-audio.h>
 
 // static
-std::unique_ptr<AmlTdmDevice> AmlTdmDevice::Create(ddk::MmioBuffer mmio, ee_audio_mclk_src_t src,
-                                                   aml_tdm_out_t tdm_dev, aml_frddr_t frddr_dev,
+std::unique_ptr<AmlTdmInDevice> AmlTdmInDevice::Create(ddk::MmioBuffer mmio, ee_audio_mclk_src_t src,
+                                                   aml_tdm_in_t tdm_dev, aml_toddr_t toddr_dev,
                                                    aml_tdm_mclk_t mclk, AmlVersion version) {
-  // FRDDR A has 256 64-bit lines in the FIFO, B and C have 128.
+  // TODDR A has 256 64-bit lines in the FIFO, B and C have 128.
   uint32_t fifo_depth = 128 * 8;  // in bytes.
-  if (frddr_dev == FRDDR_A) {
+  if (toddr_dev == TODDR_A) {
     fifo_depth = 256 * 8;
   }
 
   fbl::AllocChecker ac;
-  auto tdm = std::unique_ptr<AmlTdmDevice>(
-      new (&ac) AmlTdmDevice(std::move(mmio), src, tdm_dev, frddr_dev, mclk, fifo_depth, version));
+  auto tdm = std::unique_ptr<AmlTdmInDevice>(
+      new (&ac) AmlTdmInDevice(std::move(mmio), src, tdm_dev, toddr_dev, mclk, fifo_depth, version));
   if (!ac.check()) {
     return nullptr;
   }
@@ -30,11 +30,10 @@ std::unique_ptr<AmlTdmDevice> AmlTdmDevice::Create(ddk::MmioBuffer mmio, ee_audi
   return tdm;
 }
 
-void AmlTdmDevice::Initialize() {
+void AmlTdmInDevice::Initialize() {
   // Enable the audio domain clocks used by this instance.
-  AudioClkEna((EE_AUDIO_CLK_GATE_TDMOUTA << tdm_ch_) | (EE_AUDIO_CLK_GATE_FRDDRA << frddr_ch_) |
-              (EE_AUDIO_CLK_GATE_TDMINA << tdm_ch_) | (EE_AUDIO_CLK_GATE_TODDRA << frddr_ch_) |
-               EE_AUDIO_CLK_GATE_ARB);
+  AudioClkEna((EE_AUDIO_CLK_GATE_TDMINA << tdm_ch_) | (EE_AUDIO_CLK_GATE_TODDRA << toddr_ch_) |
+              EE_AUDIO_CLK_GATE_ARB);
 
   zx_off_t mclk_a = {};
   switch (version_) {
@@ -53,17 +52,11 @@ void AmlTdmDevice::Initialize() {
   mmio_.Write32((clk_src_ << 24) | 0xffff, ptr);
 
   // Set the sclk and lrclk sources to the chosen mclk channel
-  ptr = EE_AUDIO_CLK_TDMOUT_A_CTL + tdm_ch_ * sizeof(uint32_t);
-  mmio_.Write32((0x03 << 30) | (mclk_ch_ << 24) | (mclk_ch_ << 20), ptr);
-  // Set TDMIN block clock sources (mirror settings of TDMOUT)
   ptr = EE_AUDIO_CLK_TDMIN_A_CTL + tdm_ch_ * sizeof(uint32_t);
   mmio_.Write32((0x03 << 30) | (mclk_ch_ << 24) | (mclk_ch_ << 20), ptr);
 
   // Enable DDR ARB, and enable this ddr channels bit.
-  //  (enabling both toddr and frddr channels)
-  mmio_.SetBits32((1 << 31) |
-                  (1 << frddr_ch_) |
-                  (1 << (4 + frddr_ch_)), EE_AUDIO_ARB_CTRL);
+  mmio_.SetBits32((1 << 31) | (1 << (4 + frddr_ch_)), EE_AUDIO_ARB_CTRL);
 
   // Disable the FRDDR Channel
   // Only use one buffer
@@ -73,16 +66,6 @@ void AmlTdmDevice::Initialize() {
   switch (version_) {
     case AmlVersion::kS905D2G:
       mmio_.Write32(tdm_ch_ | (1 << 3), GetFrddrOffset(FRDDR_CTRL0_OFFS));
-
-      mmio_.Write32((0x02 << 13) |    // Right justified 16-bit
-                              (31 << 8) |   // msb position of data out of tdm
-                              (16 << 3) |   // lsb position of data out of tdm
-                              (tdm_ch_ << 0),  // select tdm channel as data source
-                          GetToddrOffset(TODDR_CTRL0_OFFS));
-
-      mmio_.Write32(((fifo_depth_ / 8 / 2) << 16) |  // trigger ddr when fifo half full
-                              (0x02 << 8),                 // STATUS2 source is ddr position
-                          GetToddrOffset(TODDR_CTRL1_OFFS));
       break;
     case AmlVersion::kS905D3G:
       mmio_.Write32(tdm_ch_ | (1 << 4), GetFrddrOffset(FRDDR_CTRL2_OFFS_D3G));
@@ -104,13 +87,6 @@ void AmlTdmDevice::Initialize() {
   mmio_.Write32(0x00000000, GetTdmOffset(TDMOUT_MUTE1_OFFS));  // Disable lane 1 muting.
   mmio_.Write32(0x00000000, GetTdmOffset(TDMOUT_MUTE2_OFFS));  // Disable lane 2 muting.
   mmio_.Write32(0x00000000, GetTdmOffset(TDMOUT_MUTE3_OFFS));  // Disable lane 3 muting.
-
-  mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MUTE_VAL_OFFS));
-  mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MASK0_OFFS));
-  mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MUTE0_OFFS));
-  mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MUTE1_OFFS));
-  mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MUTE2_OFFS));
-  mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MUTE3_OFFS));
 
   // Datasheets state that PAD_CTRL1 controls sclk and lrclk source selection (which mclk),
   // it does this per pad (0, 1, 2).  These pads are tied to the TDM channel in use
@@ -233,20 +209,6 @@ void AmlTdmDevice::AudioClkDis(uint32_t audio_blk_mask) {
   mmio_.ClearBits32(audio_blk_mask, EE_AUDIO_CLK_GATE_EN);
 }
 
-zx_status_t AmlTdmDevice::SetInBuffer(zx_paddr_t buf, size_t len) {
-  // Ensure ring buffer resides in lower memory (dma pointers are 32-bit)
-  //    and len is at least 8 (size of each dma operation)
-  if (((buf + len - 1) > std::numeric_limits<uint32_t>::max()) || (len < 8)) {
-    return ZX_ERR_INVALID_ARGS;
-  }
-
-  // Write32 the start and end pointers.  Each fetch is 64-bits, so end pointer
-  //    is pointer to the last 64-bit fetch (inclusive)
-  mmio_.Write32(static_cast<uint32_t>(buf), GetToddrOffset(TODDR_START_ADDR_OFFS));
-  mmio_.Write32(static_cast<uint32_t>(buf + len - 8), GetToddrOffset(TODDR_FINISH_ADDR_OFFS));
-  return ZX_OK;
-}
-
 zx_status_t AmlTdmDevice::SetBuffer(zx_paddr_t buf, size_t len) {
   // Ensure ring buffer resides in lower memory (dma pointers are 32-bit)
   //    and len is at least 8 (size of each dma operation)
@@ -298,14 +260,6 @@ void AmlTdmDevice::ConfigTdmOutSlot(uint8_t bit_offset, uint8_t num_slots, uint8
   }
   mmio_.Write32(reg, GetTdmOffset(TDMOUT_CTRL1_OFFS));
 }
-
-void AmlTdmDevice::ConfigTdmInSlot(uint8_t bit_offset, uint8_t num_slots, uint8_t bits_per_slot,
-                                    uint8_t bits_per_sample, uint8_t mix_mask) {
-
-
-}
-
-
 
 zx_status_t AmlTdmDevice::ConfigTdmOutLane(size_t lane, uint32_t mask) {
   switch (lane) {
