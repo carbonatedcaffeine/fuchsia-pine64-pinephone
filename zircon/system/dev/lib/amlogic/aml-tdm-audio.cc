@@ -81,7 +81,7 @@ void AmlTdmDevice::Initialize() {
                           GetToddrOffset(TODDR_CTRL0_OFFS));
 
       mmio_.Write32(((fifo_depth_ / 8 / 2) << 16) |  // trigger ddr when fifo half full
-                              (0x02 << 8),                 // STATUS2 source is ddr position
+                              (0x00 << 8),                 // STATUS2 source is ddr position
                           GetToddrOffset(TODDR_CTRL1_OFFS));
       break;
     case AmlVersion::kS905D3G:
@@ -107,10 +107,16 @@ void AmlTdmDevice::Initialize() {
 
   mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MUTE_VAL_OFFS));
   mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MASK0_OFFS));
+  mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MASK1_OFFS));
+  mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MASK2_OFFS));
+  mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MASK3_OFFS));
+
   mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MUTE0_OFFS));
   mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MUTE1_OFFS));
   mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MUTE2_OFFS));
   mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MUTE3_OFFS));
+  mmio_.Write32(0x00000000, GetTdmInOffset(TDMIN_MUTE_VAL_OFFS));
+
 
   // Datasheets state that PAD_CTRL1 controls sclk and lrclk source selection (which mclk),
   // it does this per pad (0, 1, 2).  These pads are tied to the TDM channel in use
@@ -243,6 +249,8 @@ zx_status_t AmlTdmDevice::SetInBuffer(zx_paddr_t buf, size_t len) {
   // Write32 the start and end pointers.  Each fetch is 64-bits, so end pointer
   //    is pointer to the last 64-bit fetch (inclusive)
   mmio_.Write32(static_cast<uint32_t>(buf), GetToddrOffset(TODDR_START_ADDR_OFFS));
+  mmio_.Write32(static_cast<uint32_t>(buf), GetToddrOffset(TODDR_INIT_ADDR_OFFS));
+
   mmio_.Write32(static_cast<uint32_t>(buf + len - 8), GetToddrOffset(TODDR_FINISH_ADDR_OFFS));
   return ZX_OK;
 }
@@ -299,10 +307,14 @@ void AmlTdmDevice::ConfigTdmOutSlot(uint8_t bit_offset, uint8_t num_slots, uint8
   mmio_.Write32(reg, GetTdmOffset(TDMOUT_CTRL1_OFFS));
 }
 
-void AmlTdmDevice::ConfigTdmInSlot(uint8_t bit_offset, uint8_t num_slots, uint8_t bits_per_slot,
-                                    uint8_t bits_per_sample, uint8_t mix_mask) {
+void AmlTdmDevice::ConfigTdmInSlot(uint8_t bit_offset, uint8_t bits_per_slot) {
+  uint32_t reg = (4 << 20) | //PAD_TDMINB
+                 (bit_offset << 16) |
+                 (bits_per_slot << 0); // 16 bit slots
+  mmio_.Write32(reg, GetTdmInOffset(TDMIN_CTRL_OFFS));
 
-
+  mmio_.Write32(0x00000005, GetTdmInOffset(TDMIN_MASK1_OFFS));  //hardcode for lane1 (vim3)
+  mmio_.Write32(0x00000023, GetTdmInOffset(TDMIN_SWAP_OFFS));
 }
 
 
@@ -336,6 +348,11 @@ void AmlTdmDevice::TdmOutDisable() { mmio_.ClearBits32(1 << 31, GetTdmOffset(TDM
 // Enables the tdm to clock data out of fifo onto bus
 void AmlTdmDevice::TdmOutEnable() { mmio_.SetBits32(1 << 31, GetTdmOffset(TDMOUT_CTRL0_OFFS)); }
 
+// Stops the tdm from clocking data out of fifo onto bus
+void AmlTdmDevice::TdmInDisable() { mmio_.ClearBits32(1 << 31, GetTdmInOffset(TDMIN_CTRL_OFFS)); }
+// Enables the tdm to clock data out of fifo onto bus
+void AmlTdmDevice::TdmInEnable() { mmio_.SetBits32(1 << 31, GetTdmInOffset(TDMIN_CTRL_OFFS)); }
+
 void AmlTdmDevice::FRDDREnable() {
   // Set the load bit, will make sure things start from beginning of buffer
   mmio_.SetBits32(1 << 12, GetFrddrOffset(FRDDR_CTRL1_OFFS));
@@ -350,10 +367,32 @@ void AmlTdmDevice::FRDDRDisable() {
   mmio_.ClearBits32(1 << 31, GetFrddrOffset(FRDDR_CTRL0_OFFS));
 }
 
+void AmlTdmDevice::TODDREnable() {
+  // Set the load bit, will make sure things start from beginning of buffer
+  //mmio_.SetBits32(1 << 25, GetToddrOffset(TODDR_CTRL1_OFFS));
+  mmio_.SetBits32(1 << 31, GetToddrOffset(TODDR_CTRL0_OFFS));
+}
+
+void AmlTdmDevice::TODDRDisable() {
+  // Clear the load bit (this is the bit that forces the initial fetch of
+  //    start address into current ptr)
+  mmio_.ClearBits32(1 << 25, GetToddrOffset(TODDR_CTRL1_OFFS));
+  // Disable the frddr channel
+  mmio_.ClearBits32(1 << 31, GetToddrOffset(TODDR_CTRL0_OFFS));
+}
+
+
+
+
+
 void AmlTdmDevice::Sync() {
   mmio_.ClearBits32(3 << 28, GetTdmOffset(TDMOUT_CTRL0_OFFS));
   mmio_.SetBits32(1 << 29, GetTdmOffset(TDMOUT_CTRL0_OFFS));
   mmio_.SetBits32(1 << 28, GetTdmOffset(TDMOUT_CTRL0_OFFS));
+
+  mmio_.ClearBits32(3 << 28, GetTdmInOffset(TDMIN_CTRL_OFFS));
+  mmio_.SetBits32(1 << 29, GetTdmInOffset(TDMIN_CTRL_OFFS));
+  mmio_.SetBits32(1 << 28, GetTdmInOffset(TDMIN_CTRL_OFFS));
 }
 
 // Resets frddr mechanisms to start at beginning of buffer
@@ -365,8 +404,10 @@ uint64_t AmlTdmDevice::Start() {
 
   Sync();
   FRDDREnable();
+  TODDREnable();
   a = zx_clock_get_monotonic();
   TdmOutEnable();
+  TdmInEnable();
   b = zx_clock_get_monotonic();
   return ((b - a) >> 1) + a;
 }
@@ -374,6 +415,8 @@ uint64_t AmlTdmDevice::Start() {
 void AmlTdmDevice::Stop() {
   TdmOutDisable();
   FRDDRDisable();
+  TdmInDisable();
+  TODDRDisable();
 }
 
 void AmlTdmDevice::Shutdown() {
@@ -382,9 +425,11 @@ void AmlTdmDevice::Shutdown() {
   // Disable the output signals
   zx_off_t ptr = EE_AUDIO_CLK_TDMOUT_A_CTL + tdm_ch_ * sizeof(uint32_t);
   mmio_.ClearBits32(0x03 << 30, ptr);
-
+  ptr = EE_AUDIO_CLK_TDMIN_A_CTL + tdm_ch_ * sizeof(uint32_t);
+  mmio_.ClearBits32(0x03 << 30, ptr);
   // Disable the audio domain clocks used by this instance.
   AudioClkDis((EE_AUDIO_CLK_GATE_TDMOUTA << tdm_ch_) | (EE_AUDIO_CLK_GATE_FRDDRA << frddr_ch_));
+  AudioClkDis((EE_AUDIO_CLK_GATE_TDMINA << tdm_ch_) | (EE_AUDIO_CLK_GATE_TODDRA << frddr_ch_));
 
   // Note: We are leaving the ARB unit clocked as well as MCLK and
   //  SCLK generation units since it is possible they are used by

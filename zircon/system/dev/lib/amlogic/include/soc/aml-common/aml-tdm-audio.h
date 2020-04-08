@@ -37,7 +37,7 @@ class AmlTdmDevice {
   // Configures placement of data on the tdm bus
   void ConfigTdmOutSlot(uint8_t bit_offset, uint8_t num_slots, uint8_t bits_per_slot,
                         uint8_t bits_per_sample, uint8_t mix_mask);
-
+  void ConfigTdmInSlot(uint8_t bit_offset, uint8_t bits_per_slot);
   // Configures Lanes.
   zx_status_t ConfigTdmOutLane(size_t lane, uint32_t mask);
 
@@ -69,6 +69,7 @@ class AmlTdmDevice {
   virtual void Shutdown();  // virtual for unit test.
 
   uint32_t fifo_depth() const { return fifo_depth_; }
+  uint32_t Reg(uint32_t offs) { return mmio_.Read32(offs);}
 
  protected:
   // Protected for unit test.
@@ -84,7 +85,7 @@ class AmlTdmDevice {
         mmio_(std::move(mmio)),
         version_(version) {
           tdm_in_base_ = GetTdmInBase(tdm);
-          toddr_base_ = GetToddrBase(tdm);
+          toddr_base_ = GetToddrBase(frddr);
         }
   virtual ~AmlTdmDevice() = default;  // protected for unit test.
 
@@ -168,6 +169,11 @@ class AmlTdmDevice {
   void FRDDRDisable();
   void TdmOutDisable();
   void TdmOutEnable();
+
+  void TODDREnable();
+  void TODDRDisable();
+  void TdmInDisable();
+  void TdmInEnable();
 
   /* Get the register block offset for our ddr block */
   zx_off_t GetFrddrOffset(zx_off_t off) { return frddr_base_ + off; }

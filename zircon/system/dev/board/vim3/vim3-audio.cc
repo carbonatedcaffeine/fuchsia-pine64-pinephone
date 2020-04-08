@@ -25,6 +25,10 @@ static const pbus_bti_t tdm_btis[] = {
         .iommu_index = 0,
         .bti_id = BTI_AUDIO_OUT,
     },
+    {
+        .iommu_index = 0,
+        .bti_id = BTI_AUDIO_IN,
+    },
 };
 
 static pbus_dev_t tdm_dev = []() {
@@ -51,7 +55,7 @@ zx_status_t Vim3::AudioInit() {
     return status;
   }
 
-  status = clk_impl_.SetRate(g12b_clk::CLK_HIFI_PLL, 1536000000);
+  status = clk_impl_.SetRate(g12b_clk::CLK_HIFI_PLL, 3072000000);
   if (status != ZX_OK) {
     zxlogf(ERROR, "%s: SetRate(CLK_HIFI_PLL) failed, st = %d\n",
            __func__, status);
@@ -76,7 +80,7 @@ zx_status_t Vim3::AudioInit() {
   gpio_impl_.SetAltFunction(A311D_GPIOA(3), A311D_GPIOA_3_TDMB_D0_FN);
   gpio_impl_.SetDriveStrength(A311D_GPIOA(3), 2);
 
-  gpio_impl_.SetAltFunction(A311D_GPIOA(6), A311D_GPIOA_6_TDMB_DIN3_FN);
+  gpio_impl_.SetAltFunction(A311D_GPIOA(4), A311D_GPIOA_4_TDMB_DIN1_FN);
 
   status = pbus_.DeviceAdd(&tdm_dev);
   if (status != ZX_OK) {

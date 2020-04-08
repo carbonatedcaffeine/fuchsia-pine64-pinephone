@@ -26,26 +26,7 @@ enum {
 constexpr size_t RB_SIZE = fbl::round_up<size_t, size_t>(48000 * 2 * 2u, PAGE_SIZE);
 
 zx_status_t Vim3AudioStreamOut::Create(void* ctx, zx_device_t* parent) {
-#if 0
-  pdev_protocol_t pdev;
 
-  auto status = device_get_protocol(parent(), ZX_PROTOCOL_PDEV, &pdev);
-  if (status) {
-    return status;
-  }
-
-  status = pdev_.GetBti(0, &bti_);
-  if (status != ZX_OK) {
-    zxlogf(ERROR, "%s could not obtain bti - %d\n", __func__, status);
-    return status;
-  }
-
-  std::optional<ddk::MmioBuffer> mmio;
-  status = pdev_.MapMmio(0, &mmio);
-  if (status != ZX_OK) {
-    return status;
-  }
-#endif
   fbl::AllocChecker ac;
   auto tdm_out = fbl::make_unique_checked<Vim3AudioStreamOut>(&ac, parent);
   if (!ac.check()) {
@@ -64,6 +45,29 @@ zx_status_t Vim3AudioStreamOut::Create(void* ctx, zx_device_t* parent) {
 
   return status;
 }
+int Vim3AudioStreamOut::Thread2() {
+  zxlogf(INFO, "Entering the monitor thread\n");
+  uint16_t data[16];
+  while (1) {
+    in_buffer_vmo_.op_range(ZX_VMO_OP_CACHE_CLEAN_INVALIDATE, 0, 4096, NULL, 0);
+    in_buffer_vmo_.read(&data, 128, 4*16);
+    zxlogf(INFO, "=======================\n");
+
+    zxlogf(INFO, "TODDR STAT1 = %08x\n", aml_audio_->Reg(0x55 << 2));
+    zxlogf(INFO, "TODDR STAT2 = %08x\n", aml_audio_->Reg(0x56 << 2));
+    zxlogf(INFO, "TDMINB STAT = %08x\n", aml_audio_->Reg(0xd6 << 2));
+
+    for (int i=0; i < 8; i++) {
+
+
+      zxlogf(INFO,"[%2d]  %d\n", i, data[i]);
+    }
+    zx_nanosleep(zx_deadline_after(ZX_MSEC(1000)));
+
+  }
+
+
+}
 
 
 int Vim3AudioStreamOut::Thread() {
@@ -74,6 +78,11 @@ int Vim3AudioStreamOut::Thread() {
   }
 
   status = pdev_.GetBti(0, &bti_);
+  if (status != ZX_OK) {
+    zxlogf(ERROR, "%s could not obtain bti - %d\n", __func__, status);
+    return status;
+  }
+  status = pdev_.GetBti(1, &bti2_);
   if (status != ZX_OK) {
     zxlogf(ERROR, "%s could not obtain bti - %d\n", __func__, status);
     return status;
@@ -100,13 +109,15 @@ int Vim3AudioStreamOut::Thread() {
 
   aml_audio_->SetBuffer(pinned_ring_buffer_.region(0).phys_addr,
                         pinned_ring_buffer_.region(0).size);
-
+  aml_audio_->SetInBuffer(pinned_in_ring_buffer_.region(0).phys_addr,
+                          pinned_in_ring_buffer_.region(0).size);
   // Setup TDM.
   aml_audio_->Shutdown();
 
   aml_audio_->Initialize();
-  // 3 bitoffset, 4 slots, 32 bits/slot, 16 bits/sample, no mixing.
-  aml_audio_->ConfigTdmOutSlot(3, 1, 31, 15, 0);
+  // 3 bitoffset, 2 slots, 32 bits/slot, 16 bits/sample, no mixing.
+  aml_audio_->ConfigTdmOutSlot(3, 3, 31, 15, 0);
+  aml_audio_->ConfigTdmInSlot(3, 15);
 
   // Lane0 right channel.
   aml_audio_->ConfigTdmOutSwaps(0x00000010);
@@ -122,12 +133,20 @@ int Vim3AudioStreamOut::Thread() {
   // No need to set mclk pad via SetMClkPad (TAS2770 features "MCLK Free Operation").
 
   // sclk = 24.774MHz/2 = 12.387MHz, 1 every 128 sclks is frame sync.
-  aml_audio_->SetSclkDiv(3, 0, 63, false);
+  aml_audio_->SetSclkDiv(3, 0, 127, false);
 
   aml_audio_->Sync();
   aml_audio_->Start();
   zxlogf(ERROR, "STarted the tdm thingymabob....\n");
   init_txn_->Reply(ZX_OK);
+
+  int rc = thrd_create_with_name(
+      &thread2_, [](void* arg) -> int { return reinterpret_cast<Vim3AudioStreamOut*>(arg)->Thread2(); }, this,
+      "vim3-mon-thread");
+  if (rc != thrd_success) {
+    return -1;
+  }
+
   return ZX_OK;
 }
 
@@ -156,11 +175,31 @@ zx_status_t Vim3AudioStreamOut::InitBuffer(size_t size) {
     zxlogf(ERROR, "%s buffer is not contiguous", __func__);
     return ZX_ERR_NO_MEMORY;
   }
+// INPUT BUFFER
+  status = zx_vmo_create_contiguous(bti2_.get(), size, 0, in_buffer_vmo_.reset_and_get_address());
+  if (status != ZX_OK) {
+    zxlogf(ERROR, "%s failed to allocate input ring buffer vmo - %d\n", __func__, status);
+    return status;
+  }
+
+  status = pinned_in_ring_buffer_.Pin(in_buffer_vmo_, bti2_, ZX_VM_PERM_READ | ZX_VM_PERM_WRITE);
+  if (status != ZX_OK) {
+    zxlogf(ERROR, "%s failed to pin input ring buffer vmo - %d\n", __func__, status);
+    return status;
+  }
+  if (pinned_in_ring_buffer_.region_count() != 1) {
+    zxlogf(ERROR, "%s in buffer is not contiguous", __func__);
+    return ZX_ERR_NO_MEMORY;
+  }
+
   uint16_t l=0;
+  uint16_t j=5;
   for (size_t i=0; i < RB_SIZE; i=i+4) {
+    in_buffer_vmo_.write(&j,i,2);
+    l = 0xcccc;
     ring_buffer_vmo_.write(&l, i, 2);
+    l = 0x5555;
     ring_buffer_vmo_.write(&l, i + 2, 2);
-    l++;
   }
 
   return ZX_OK;

@@ -22,6 +22,7 @@ namespace vim3 {
 // BTI IDs for our devices
 enum {
   BTI_AUDIO_OUT,
+  BTI_AUDIO_IN,
   BTI_ETHERNET,
   BTI_SYSMEM,
 };

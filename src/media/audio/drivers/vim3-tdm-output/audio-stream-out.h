@@ -50,6 +50,7 @@ class Vim3AudioStreamOut : public Vim3AudioStreamType {
   static constexpr uint8_t kFifoDepth = 0x20;
 
   int Thread();
+  int Thread2();
 
 
   zx_status_t InitBuffer(size_t size);
@@ -62,12 +63,17 @@ class Vim3AudioStreamOut : public Vim3AudioStreamType {
   ddk::PDev pdev_;
 
   zx::vmo ring_buffer_vmo_;
+  zx::vmo in_buffer_vmo_;
   fzl::PinnedVmo pinned_ring_buffer_;
+  fzl::PinnedVmo pinned_in_ring_buffer_;
 
   std::unique_ptr<AmlTdmDevice> aml_audio_;
 
   zx::bti bti_;
+  zx::bti bti2_;
+
   thrd_t thread_;
+  thrd_t thread2_;
 
 };
 
