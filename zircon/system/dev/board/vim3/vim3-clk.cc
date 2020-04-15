@@ -23,6 +23,11 @@ static const pbus_mmio_t clk_mmios[] = {
         .base = A311D_DOS_BASE,
         .length = A311D_DOS_LENGTH,
     },
+    // CLK MSR block
+    {
+        .base = A311D_MSR_CLK_BASE,
+        .length = A311D_MSR_CLK_LENGTH,
+    },
 };
 
 static const clock_id_t clock_ids[] = {
@@ -44,7 +49,7 @@ static pbus_dev_t clk_dev = []() {
   pbus_dev_t dev = {};
   dev.name = "vim3-clk";
   dev.vid = PDEV_VID_AMLOGIC;
-  dev.did = PDEV_DID_AMLOGIC_G12B_CLK;
+  dev.did = PDEV_DID_AMLOGIC_G12A_CLK;
   dev.mmio_list = clk_mmios;
   dev.mmio_count = countof(clk_mmios);
   dev.metadata_list = clock_metadata;

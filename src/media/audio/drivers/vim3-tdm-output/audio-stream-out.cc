@@ -48,9 +48,11 @@ zx_status_t Vim3AudioStreamOut::Create(void* ctx, zx_device_t* parent) {
 int Vim3AudioStreamOut::Thread2() {
   zxlogf(INFO, "Entering the monitor thread\n");
   uint16_t data[16];
+  zx_nanosleep(zx_deadline_after(ZX_MSEC(500)));
+
   while (1) {
     in_buffer_vmo_.op_range(ZX_VMO_OP_CACHE_CLEAN_INVALIDATE, 0, 4096, NULL, 0);
-    in_buffer_vmo_.read(&data, 128, 4*16);
+    in_buffer_vmo_.read(&data, 0, 2*16);
     zxlogf(INFO, "=======================\n");
 
     zxlogf(INFO, "TODDR STAT1 = %08x\n", aml_audio_->Reg(0x55 << 2));
@@ -60,12 +62,12 @@ int Vim3AudioStreamOut::Thread2() {
     for (int i=0; i < 8; i++) {
 
 
-      zxlogf(INFO,"[%2d]  %d\n", i, data[i]);
+      zxlogf(INFO,"[%2d]  %04x\n", i, data[i]);
     }
     zx_nanosleep(zx_deadline_after(ZX_MSEC(1000)));
 
   }
-
+  return 1;
 
 }
 
@@ -116,8 +118,8 @@ int Vim3AudioStreamOut::Thread() {
 
   aml_audio_->Initialize();
   // 3 bitoffset, 2 slots, 32 bits/slot, 16 bits/sample, no mixing.
-  aml_audio_->ConfigTdmOutSlot(3, 3, 31, 15, 0);
-  aml_audio_->ConfigTdmInSlot(3, 15);
+  aml_audio_->ConfigTdmOutSlot(3, 1, 31, 15, 0);
+  aml_audio_->ConfigTdmInSlot(3, 31);
 
   // Lane0 right channel.
   aml_audio_->ConfigTdmOutSwaps(0x00000010);
@@ -128,12 +130,12 @@ int Vim3AudioStreamOut::Thread() {
 //       verilog required a minimum sclk of 10MHz, so clock rates here deviate from
 //       other audio driver implementations in zircon.
   // Setup appropriate tdm clock signals. mclk = 1536MHz/62 = 24.774MHz.
-  aml_audio_->SetMclkDiv(124);
+  aml_audio_->SetMclkDiv(4);
 
   // No need to set mclk pad via SetMClkPad (TAS2770 features "MCLK Free Operation").
 
   // sclk = 24.774MHz/2 = 12.387MHz, 1 every 128 sclks is frame sync.
-  aml_audio_->SetSclkDiv(3, 0, 127, false);
+  aml_audio_->SetSclkDiv(24, 31, 63, true);
 
   aml_audio_->Sync();
   aml_audio_->Start();
@@ -196,11 +198,12 @@ zx_status_t Vim3AudioStreamOut::InitBuffer(size_t size) {
   uint16_t j=5;
   for (size_t i=0; i < RB_SIZE; i=i+4) {
     in_buffer_vmo_.write(&j,i,2);
-    l = 0xcccc;
+    l = 0xcc55;
     ring_buffer_vmo_.write(&l, i, 2);
-    l = 0x5555;
+    l = 0x1111;
     ring_buffer_vmo_.write(&l, i + 2, 2);
   }
+  ring_buffer_vmo_.op_range(ZX_VMO_OP_CACHE_CLEAN, 0, RB_SIZE, NULL, 0);
 
   return ZX_OK;
 }

@@ -252,7 +252,7 @@ zx_status_t AstroAudioStreamOut::ChangeFormat(const audio_proto::StreamSetFmtReq
     default:
       return ZX_ERR_INVALID_ARGS;
   }
-
+  zxlogf(INFO, "%s - rate=%d (was %d)\n", __func__, req.frames_per_second, frames_per_second_);
   if (req.frames_per_second != frames_per_second_) {
     auto last_rate = frames_per_second_;
     frames_per_second_ = req.frames_per_second;

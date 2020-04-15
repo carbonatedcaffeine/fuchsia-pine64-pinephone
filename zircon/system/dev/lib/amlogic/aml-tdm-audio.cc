@@ -57,7 +57,7 @@ void AmlTdmDevice::Initialize() {
   mmio_.Write32((0x03 << 30) | (mclk_ch_ << 24) | (mclk_ch_ << 20), ptr);
   // Set TDMIN block clock sources (mirror settings of TDMOUT)
   ptr = EE_AUDIO_CLK_TDMIN_A_CTL + tdm_ch_ * sizeof(uint32_t);
-  mmio_.Write32((0x03 << 30) | (mclk_ch_ << 24) | (mclk_ch_ << 20), ptr);
+  mmio_.Write32((0x03 << 30) | (1 << 29) | (mclk_ch_ << 24) | (mclk_ch_ << 20), ptr);
 
   // Enable DDR ARB, and enable this ddr channels bit.
   //  (enabling both toddr and frddr channels)
@@ -74,7 +74,7 @@ void AmlTdmDevice::Initialize() {
     case AmlVersion::kS905D2G:
       mmio_.Write32(tdm_ch_ | (1 << 3), GetFrddrOffset(FRDDR_CTRL0_OFFS));
 
-      mmio_.Write32((0x02 << 13) |    // Right justified 16-bit
+      mmio_.Write32((0x00 << 13) |    // Right justified 16-bit
                               (31 << 8) |   // msb position of data out of tdm
                               (16 << 3) |   // lsb position of data out of tdm
                               (tdm_ch_ << 0),  // select tdm channel as data source
@@ -308,13 +308,13 @@ void AmlTdmDevice::ConfigTdmOutSlot(uint8_t bit_offset, uint8_t num_slots, uint8
 }
 
 void AmlTdmDevice::ConfigTdmInSlot(uint8_t bit_offset, uint8_t bits_per_slot) {
-  uint32_t reg = (4 << 20) | //PAD_TDMINB
+  uint32_t reg = (1 << 30) | (1 << 20) | (3 << 26) | //PAD TDMINB D
                  (bit_offset << 16) |
                  (bits_per_slot << 0); // 16 bit slots
   mmio_.Write32(reg, GetTdmInOffset(TDMIN_CTRL_OFFS));
 
-  mmio_.Write32(0x00000005, GetTdmInOffset(TDMIN_MASK1_OFFS));  //hardcode for lane1 (vim3)
-  mmio_.Write32(0x00000023, GetTdmInOffset(TDMIN_SWAP_OFFS));
+  mmio_.Write32(0x00000003, GetTdmInOffset(TDMIN_MASK1_OFFS));  //hardcode for lane1 (vim3)
+  mmio_.Write32(0x00002300, GetTdmInOffset(TDMIN_SWAP_OFFS));
 }
 
 

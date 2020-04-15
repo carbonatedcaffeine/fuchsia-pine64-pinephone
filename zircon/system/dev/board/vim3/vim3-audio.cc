@@ -55,7 +55,7 @@ zx_status_t Vim3::AudioInit() {
     return status;
   }
 
-  status = clk_impl_.SetRate(g12b_clk::CLK_HIFI_PLL, 3072000000);
+  status = clk_impl_.SetRate(g12b_clk::CLK_HIFI_PLL, 768000000);
   if (status != ZX_OK) {
     zxlogf(ERROR, "%s: SetRate(CLK_HIFI_PLL) failed, st = %d\n",
            __func__, status);
