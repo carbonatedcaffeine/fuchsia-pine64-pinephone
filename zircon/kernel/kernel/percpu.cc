@@ -79,10 +79,10 @@ void percpu::InitializeSecondary(uint32_t /*init_level*/) {
 
       dprintf(INFO, "CPU performance scales:\n");
       for (cpu_num_t i = 0; i < processor_count_; i++) {
-        PerformanceScale scale =
+        SchedPerformanceScale scale =
             ffl::FromRatio(performance_class[i] + 1, max_performance_class + 1);
-        processor_index_[i]->performance_scale = scale;
-        processor_index_[i]->performance_scale_reciprocal = 1 / scale;
+        processor_index_[i]->scheduler.performance_scale_ = scale;
+        processor_index_[i]->scheduler.performance_scale_reciprocal_ = 1 / scale;
         dprintf(INFO, "CPU %2u: %s\n", i, Format(scale).c_str());
       }
     } else {

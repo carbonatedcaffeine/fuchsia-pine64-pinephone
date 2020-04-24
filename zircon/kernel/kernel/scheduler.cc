@@ -34,6 +34,7 @@
 #include <ktl/algorithm.h>
 #include <ktl/move.h>
 #include <ktl/pair.h>
+#include <lk/init.h>
 #include <object/thread_dispatcher.h>
 #include <vm/vm.h>
 
@@ -171,14 +172,25 @@ inline bool IsThreadAdjustable(const Thread* thread) {
   return !thread->IsIdle() && IsFairThread(thread) && thread->state_ == THREAD_READY;
 }
 
+// Returns a delta value to additively update a predictor. When the sample is
+// greater than or equal to the predictor, the delta returned is such that the
+// predictor is updated to match the sample. Otherwise, the delta is returned
+// such that the predictor decays exponentially toward the sample. The predictor
+// is not permitted to become negative.
+template <typename Value, typename Alpha>
+constexpr Value PeakEMADelta(Value value, Value sample, Alpha alpha) {
+  const Value delta = sample - value;
+  return ktl::max<Value>(delta >= 0 ? delta : alpha * delta, -value);
+}
+
 }  // anonymous namespace
 
 inline void Scheduler::UpdateTotalExpectedRuntime(SchedDuration delta) {
   total_expected_runtime_ns_ += delta;
   DEBUG_ASSERT(total_expected_runtime_ns_ >= 0);
-  exported_total_expected_runtime_ns_ = total_expected_runtime_ns_;
-  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Est Load", total_expected_runtime_ns_.raw_value(),
-                       this_cpu());
+  const SchedDuration scaled_ns = total_expected_runtime_ns_ * performance_scale_reciprocal_;
+  exported_total_expected_runtime_ns_ = scaled_ns;
+  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Est Load", scaled_ns.raw_value(), this_cpu());
 }
 
 inline void Scheduler::UpdateTotalDeadlineUtilization(SchedUtilization delta) {
@@ -189,10 +201,12 @@ inline void Scheduler::UpdateTotalDeadlineUtilization(SchedUtilization delta) {
 
 void Scheduler::Dump() {
   printf("\ttweight=%s nfair=%d ndeadline=%d vtime=%" PRId64 " period=%" PRId64 " ema=%" PRId64
-         " tutil=%s\n",
+         " mema=%" PRId64 " tutil=%s mutil=%s\n",
          Format(weight_total_).c_str(), runnable_fair_task_count_, runnable_deadline_task_count_,
          virtual_time_.raw_value(), scheduling_period_grans_.raw_value(),
-         total_expected_runtime_ns_.raw_value(), Format(total_deadline_utilization_).c_str());
+         total_expected_runtime_ns_.raw_value(), mean_expected_runtime_ns_.load().raw_value(),
+         Format(total_deadline_utilization_).c_str(),
+         Format(mean_deadline_utilization_.load()).c_str());
 
   if (active_thread_ != nullptr) {
     const SchedulerState& state = active_thread_->scheduler_state();
@@ -244,7 +258,8 @@ size_t Scheduler::GetRunnableTasks() const {
 }
 
 // Performs an augmented binary search for the task with the earliest finish
-// time that is also equal to or later than the given eligible time.
+// time that also has a start time equal to or later than the given eligible
+// time.
 //
 // The tree is ordered by start time and is augmented by maintaining an
 // additional invariant: each task node in the tree stores the minimum finish
@@ -590,6 +605,12 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
   const cpu_num_t last_cpu = thread->scheduler_state().last_cpu_;
   const cpu_mask_t last_cpu_mask = cpu_num_to_mask(last_cpu);
 
+  // Read the global mean values that represent the equilibrium state.
+  const SchedDuration mean_runtime_ns = mean_expected_runtime_ns_.load();
+  const SchedUtilization mean_utilization = mean_deadline_utilization_.load();
+
+  const SchedDuration runtime_threshold_ns = mean_runtime_ns + kLoadHeadroom;
+
   const bool is_fair = IsFairThread(thread);
   const auto compare = [is_fair](Scheduler* const queue_a,
                                  Scheduler* const queue_b) TA_REQ(thread_lock) {
@@ -603,11 +624,23 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
       return a < b;
     }
   };
-  const auto is_idle = [is_fair](Scheduler* const queue) TA_REQ(thread_lock) {
+  const auto is_sufficient = [is_fair, runtime_threshold_ns, mean_utilization,
+                              thread](Scheduler* const queue) {
+    const SchedDuration expected_runtime_ns = thread->scheduler_state().expected_runtime_ns_;
+    const SchedDuration predicted_queue_time_ns = queue->predicted_queue_time_ns();
+
+    const bool sufficient_runtime =
+        queue->predicted_queue_time_ns() + expected_runtime_ns <= runtime_threshold_ns;
     if (is_fair) {
-      return queue->predicted_queue_time_ns() == 0;
+      return sufficient_runtime;
+    } else {
+      const SchedPerformanceScale reciprocal = queue->performance_scale_reciprocal();
+      const SchedUtilization predicted_utilization = queue->predicted_deadline_utilization();
+      const SchedUtilization utilization = thread->scheduler_state().deadline_.utilization;
+      const SchedUtilization scaled_utilization = utilization * reciprocal;
+      return sufficient_runtime &&
+             queue->predicted_deadline_utilization() + utilization <= mean_utilization;
     }
-    return queue->predicted_deadline_utilization() == 0 && queue->predicted_queue_time_ns() == 0;
   };
 
   // Find the best target CPU starting at the last CPU the task ran on, if any.
@@ -627,9 +660,8 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
       target_cpu = candidate_cpu;
       target_queue = candidate_queue;
 
-      // Stop searching at the first idle CPU.
-      // TODO(eieio): Use the load threshold instead.
-      if (is_idle(target_queue)) {
+      // Stop searching at the first sufficiently unloaded CPU.
+      if (is_sufficient(target_queue)) {
         break;
       }
     }
@@ -759,20 +791,14 @@ void Scheduler::RescheduleCommon(SchedTime now, EndTraceCallback end_outer_trace
       (timeslice_expired || current_thread != next_thread)) {
     LocalTraceDuration<KTRACE_DETAILED> update_ema_trace{"update_expected_runtime"_stringref};
 
-    // The expected runtime is an exponential moving average updated as follows:
-    //
-    // Sn = Sn-1 + a * (Yn - Sn-1)
-    //
-    const SchedDuration delta_ns = total_runtime_ns - current_state->expected_runtime_ns_;
-    const SchedDuration scaled_ns = delta_ns * kExpectedRuntimeAlpha;
-    const SchedDuration clamped_ns =
-        ktl::max<SchedDuration>(scaled_ns, -current_state->expected_runtime_ns_);
-    current_state->expected_runtime_ns_ += clamped_ns;
+    const SchedDuration delta_ns =
+        PeakEMADelta(current_state->expected_runtime_ns_, total_runtime_ns, kExpectedRuntimeAlpha);
+    current_state->expected_runtime_ns_ += delta_ns;
 
     // Adjust the aggregate value by the same amount. The adjustment is only
     // necessary when the thread is still active on this CPU.
     if (current_state->active()) {
-      UpdateTotalExpectedRuntime(clamped_ns);
+      UpdateTotalExpectedRuntime(delta_ns);
     }
   }
 
@@ -887,20 +913,17 @@ void Scheduler::UpdatePeriod() {
 
   DEBUG_ASSERT(runnable_fair_task_count_ >= 0);
   DEBUG_ASSERT(minimum_granularity_ns_ > 0);
-  DEBUG_ASSERT(peak_latency_grans_ > 0);
   DEBUG_ASSERT(target_latency_grans_ > 0);
 
   const int64_t num_tasks = runnable_fair_task_count_;
-  const int64_t peak_tasks = Round<int64_t>(peak_latency_grans_);
   const int64_t normal_tasks = Round<int64_t>(target_latency_grans_);
 
   // The scheduling period stretches when there are too many tasks to fit
   // within the target latency.
   scheduling_period_grans_ = SchedDuration{num_tasks > normal_tasks ? num_tasks : normal_tasks};
 
-  SCHED_LTRACEF("num_tasks=%" PRId64 " peak_tasks=%" PRId64 " normal_tasks=%" PRId64
-                " period_grans=%" PRId64 "\n",
-                num_tasks, peak_tasks, normal_tasks, scheduling_period_grans_.raw_value());
+  SCHED_LTRACEF("num_tasks=%" PRId64 " normal_tasks=%" PRId64 " period_grans=%" PRId64 "\n",
+                num_tasks, normal_tasks, scheduling_period_grans_.raw_value());
 
   trace.End(Round<uint64_t>(scheduling_period_grans_), num_tasks);
 }
@@ -1734,3 +1757,65 @@ void Scheduler::ChangeDeadline(Thread* thread, const zx_sched_deadline_params_t&
     mp_reschedule(cpus_to_reschedule_mask, 0);
   }
 }
+
+void Scheduler::LoadSampleTimer(Timer* timer, zx_time_t now, void* /*arg*/) {
+  LocalTraceDuration<KTRACE_COMMON> trace{"sched_load"_stringref};
+
+  struct Sample {
+    SchedDuration runtime_ns{0};
+    SchedUtilization utilization{0};
+  };
+  static ktl::array<Sample, SMP_MAX_CPUS> cpu_samples{};
+  static SchedDuration mean_expected_runtime_ema{0};
+
+  size_t active_count = 0;
+  SchedDuration total_runtime_ns{0};
+  SchedUtilization total_utilization{0};
+  const cpu_mask_t active_mask = mp_get_active_mask();
+  for (cpu_num_t i = 0; i < percpu::processor_count(); i++) {
+    if (cpu_num_to_mask(i) & active_mask) {
+      const percpu& cpu = percpu::Get(i);
+      Sample& sample = cpu_samples[active_count++];
+
+      sample.runtime_ns = cpu.scheduler.predicted_queue_time_ns();
+      sample.utilization = cpu.scheduler.predicted_deadline_utilization();
+
+      total_runtime_ns += sample.runtime_ns;
+      total_utilization += sample.utilization;
+    }
+  }
+
+  const auto denominator = ktl::max<size_t>(active_count, 1u);
+  const SchedDuration mean_expected_runtime_ns = total_runtime_ns / denominator;
+  const SchedUtilization mean_deadline_utilization = total_utilization / denominator;
+
+  constexpr ffl::Fixed<int, 2> alpha = FromRatio(3, 4);
+  mean_expected_runtime_ema +=
+      PeakEMADelta(mean_expected_runtime_ema, mean_expected_runtime_ns, alpha);
+
+  const auto abs = [](SchedDuration value) { return SchedDuration{value < 0 ? -value : value}; };
+
+  SchedDuration total_abs_difference{0};
+  for (cpu_num_t i = 0; i < active_count; i++) {
+    total_abs_difference += abs(mean_expected_runtime_ema - cpu_samples[i].runtime_ns);
+  }
+  const SchedDuration dispersion = total_abs_difference / denominator;
+
+  // Publish the computed global mean values.
+  mean_expected_runtime_ns_ = mean_expected_runtime_ema;
+  mean_deadline_utilization_ = mean_deadline_utilization;
+
+  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Mean Est Load", mean_expected_runtime_ema.raw_value());
+  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Mean Est Util",
+                       Round<int64_t>(mean_deadline_utilization * 10000));
+  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Disp Est Load", dispersion.raw_value());
+
+  const SchedTime next = now + kLoadSampleInterval;
+  timer->SetOneshot(next.raw_value(), Scheduler::LoadSampleTimer, nullptr);
+}
+
+void SchedulerInitHook(uint32_t /*init_level*/) {
+  static Timer load_sample_timer;
+  load_sample_timer.SetOneshot(current_time(), Scheduler::LoadSampleTimer, nullptr);
+}
+LK_INIT_HOOK(sched_load_init, SchedulerInitHook, LK_INIT_LEVEL_LAST)

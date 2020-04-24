@@ -18,6 +18,7 @@
 #include <ffl/fixed.h>
 #include <kernel/scheduler_state.h>
 #include <kernel/thread.h>
+#include <kernel/timer.h>
 #include <kernel/wait.h>
 
 // Forward declaration.
@@ -28,20 +29,29 @@ struct percpu;
 #define SCHEDULER_TRACING_LEVEL 0
 #endif
 
+// Performance scale of a CPU relative to the highest performance CPU in the
+// system. The precision accommodates the 8bit performance values available for
+// ARM and x86.
+using SchedPerformanceScale = ffl::Fixed<int32_t, 8>;
+
 // Implements fair and deadline scheduling algorithms and manages the associated
 // per-CPU state.
 class Scheduler {
  public:
   // Default minimum granularity of time slices.
-  static constexpr SchedDuration kDefaultMinimumGranularity = SchedUs(750);
+  static constexpr SchedDuration kDefaultMinimumGranularity = SchedMs(1);
 
   // Default target latency for a scheduling period.
-  static constexpr SchedDuration kDefaultTargetLatency = SchedMs(16);
+  static constexpr SchedDuration kDefaultTargetLatency = SchedMs(8);
 
-  // Default peak latency for a scheduling period.
-  static constexpr SchedDuration kDefaultPeakLatency = SchedMs(24);
+  // The amount of headroom to apply when comparing the estimated queuing time
+  // of a CPU to the sampled mean. This value defines the amount of imbalance to
+  // permit when finding a CPU to place a task on.
+  static constexpr SchedDuration kLoadHeadroom = SchedMs(2);
 
-  static_assert(kDefaultPeakLatency >= kDefaultTargetLatency);
+  // The interval to sample the estimated queuing time of each CPU and compute
+  // the mean.
+  static constexpr SchedDuration kLoadSampleInterval = kDefaultTargetLatency / 2;
 
   // The adjustment rate of the exponential moving average tracking the expected
   // runtime of each thread.
@@ -63,11 +73,28 @@ class Scheduler {
   // Returns the number of the CPU this scheduler instance is associated with.
   cpu_num_t this_cpu() const { return this_cpu_; }
 
-  zx_duration_t predicted_queue_time_ns() const {
-    return exported_total_expected_runtime_ns_.load().raw_value();
+  // Returns the lock-free value of the predicted queue time for the CPU this
+  // scheduler instance is associated with.
+  SchedDuration predicted_queue_time_ns() const {
+    return exported_total_expected_runtime_ns_.load();
   }
+
+  // Returns the lock-free value of the predicted deadline utilization for the
+  // CPU this scheduler instance is associated with.
   SchedUtilization predicted_deadline_utilization() const {
     return exported_total_deadline_utilization_.load();
+  }
+
+  // Returns the performance scale of the CPU this scheduler instance is
+  // associated with.
+  SchedPerformanceScale performance_scale() const {
+    return performance_scale_;
+  }
+
+  // Returns the reciprocal performance scale of the CPU this scheduler instance
+  // is associated with.
+  SchedPerformanceScale performance_scale_reciprocal() const {
+    return performance_scale_reciprocal_;
   }
 
   // Public entry points.
@@ -115,8 +142,14 @@ class Scheduler {
       TA_REQ(thread_lock);
 
  private:
-  // Allow percpu to init our cpu number.
+  // Allow percpu to init our cpu number and performance scale.
   friend struct percpu;
+  // Init hook to setup the load sampling timer.
+  friend void SchedulerInitHook(uint32_t init_level);
+
+  // Periodically samples the load/utilization of each CPU to establish the
+  // equilibrium state for load balancing.
+  static void LoadSampleTimer(Timer* timer, zx_time_t now, void* arg);
 
   // Allow tests to modify our state.
   friend class LoadBalancerTest;
@@ -368,7 +401,7 @@ class Scheduler {
   // value is an estimate of the average queuimg time for this CPU, given the
   // current set of active threads.
   TA_GUARDED(thread_lock)
-  SchedDuration total_expected_runtime_ns_{SchedNs(0)};
+  SchedDuration total_expected_runtime_ns_{0};
 
   // The sum of the worst case utilization of all active deadline threads on
   // this CPU.
@@ -391,10 +424,19 @@ class Scheduler {
   TA_GUARDED(thread_lock)
   SchedDuration target_latency_grans_{kDefaultTargetLatency / kDefaultMinimumGranularity};
 
-  // The scheduling period threshold over which the CPU is considered
-  // oversubscribed.
-  TA_GUARDED(thread_lock)
-  SchedDuration peak_latency_grans_{kDefaultPeakLatency / kDefaultMinimumGranularity};
+  // Performance scale of this CPU relative to the highest performance CPU. This
+  // value is determined from the system topology, when available.
+  SchedPerformanceScale performance_scale_{1};
+  SchedPerformanceScale performance_scale_reciprocal_{1};
+
+  // The CPU this scheduler instance is associated with.
+  // NOTE: This member is not initialized to prevent clobbering the value set
+  // by sched_early_init(), which is called before the global ctors that
+  // initialize the rest of the members of this class.
+  // TODO(eieio): Figure out a better long-term solution to determine which
+  // CPU is associated with each instance of this class. This is needed by
+  // non-static methods that are called from arbitrary CPUs, namely Insert().
+  cpu_num_t this_cpu_;
 
   // Values exported for lock-free access across CPUs. These are mirrors of the
   // members of the same name without the exported_ prefix. This avoids
@@ -406,14 +448,10 @@ class Scheduler {
   RelaxedAtomic<SchedDuration> exported_total_expected_runtime_ns_{SchedNs(0)};
   RelaxedAtomic<SchedUtilization> exported_total_deadline_utilization_{SchedUtilization{0}};
 
-  // The CPU this scheduler instance is associated with.
-  // NOTE: This member is not initialized to prevent clobbering the value set
-  // by sched_early_init(), which is called before the global ctors that
-  // initialize the rest of the members of this class.
-  // TODO(eieio): Figure out a better long-term solution to determine which
-  // CPU is associated with each instance of this class. This is needed by
-  // non-static methods that are called from arbitrary CPUs, namely Insert().
-  cpu_num_t this_cpu_;
+
+  // Mean values sampled periodically across all active CPUs.
+  inline static RelaxedAtomic<SchedDuration> mean_expected_runtime_ns_{SchedNs(0)};
+  inline static RelaxedAtomic<SchedUtilization> mean_deadline_utilization_{SchedUtilization{0}};
 };
 
 #endif  // ZIRCON_KERNEL_INCLUDE_KERNEL_SCHEDULER_H_
