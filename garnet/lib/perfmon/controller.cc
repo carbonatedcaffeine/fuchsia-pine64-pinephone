@@ -8,6 +8,7 @@
 #include <lib/fdio/directory.h>
 #include <lib/syslog/cpp/macros.h>
 #include <sys/stat.h>
+#include <zircon/status.h>
 
 #include <fbl/algorithm.h>
 
@@ -79,13 +80,13 @@ static bool Initialize(::fuchsia::perfmon::cpu::ControllerSyncPtr* controller_pt
   FidlPerfmonAllocation allocation;
   allocation.num_buffers = num_traces;
   allocation.buffer_size_in_pages = buffer_size_in_pages;
-  FX_VLOGS(2) << fxl::StringPrintf("num_buffers=%u, buffer_size_in_pages=0x%x", num_traces,
-                                   buffer_size_in_pages);
+  FX_LOGS(INFO) << fxl::StringPrintf("num_buffers=%u, buffer_size_in_pages=0x%x", num_traces,
+                                     buffer_size_in_pages);
 
   ::fuchsia::perfmon::cpu::Controller_Initialize_Result result;
   zx_status_t status = (*controller_ptr)->Initialize(allocation, &result);
   if (status != ZX_OK) {
-    FX_LOGS(ERROR) << "Initialize failed: status=" << status;
+    FX_LOGS(ERROR) << "Initialize failed: status=" << zx_status_get_string(status);
     return false;
   }
   if (result.is_err() && result.err() != ZX_ERR_BAD_STATE) {
