@@ -11,21 +11,22 @@
 #include <zircon/syscalls.h>
 
 #include <atomic>
+#include <cstring>
+
+#include <fbl/string_printf.h>
 
 #include "garnet/bin/cpuperf_provider/categories.h"
 #include "garnet/lib/perfmon/reader.h"
 #include "garnet/lib/perfmon/writer.h"
+#include "lib/trace-engine/types.h"
 #include "src/lib/fxl/strings/string_printf.h"
 
 namespace cpuperf_provider {
 
-// Mock process for cpus. The infrastructure only supports processes and
-// threads.
-constexpr zx_koid_t kCpuProcess = 1u;
+#define MAKE_STRING(literal) trace_context_make_registered_string_literal(context_, literal)
 
 Importer::Importer(trace_context_t* context, const TraceConfig* trace_config,
                    trace_ticks_t start_time, trace_ticks_t stop_time)
-#define MAKE_STRING(literal) trace_context_make_registered_string_literal(context, literal)
     : context_(context),
       trace_config_(trace_config),
       start_time_(start_time),
@@ -36,31 +37,30 @@ Importer::Importer(trace_context_t* context, const TraceConfig* trace_config,
       value_name_ref_(MAKE_STRING("value")),
       rate_name_ref_(MAKE_STRING("rate")),
       aspace_name_ref_(MAKE_STRING("aspace")),
-      pc_name_ref_(MAKE_STRING("pc")) {
+      pc_name_ref_(MAKE_STRING("pc")),
+      interval_name_ref_(MAKE_STRING("interval")),
+      event_id_name_ref_(MAKE_STRING("event_id")) {
+  // Create a pseudo thread for each CPU.
   for (unsigned cpu = 0; cpu < countof(cpu_thread_refs_); ++cpu) {
-    // +1 because index thread refs start at 1
-    trace_thread_index_t index = cpu + 1;
-    cpu_thread_refs_[cpu] = trace_make_indexed_thread_ref(index);
-    // Note: Thread ids of zero are invalid. We use "thread 0" (aka cpu 0)
-    // for system-wide events.
-    trace_context_write_thread_record(context, index, kCpuProcess, cpu);
-    if (cpu == 0) {
-      cpu_name_refs_[0] = trace_context_make_registered_string_literal(context, "system");
-    } else {
-      std::string name = fxl::StringPrintf("cpu%u", cpu - 1);
-      cpu_name_refs_[cpu] =
-          trace_context_make_registered_string_copy(context, name.c_str(), name.size());
-    }
-    // TODO(dje): In time emit "cpuN" for thread names, but it won't do any
-    // good at the moment as we use "Count" records which ignore the thread.
+    auto [thread_ref, name_ref] = GetCpuPseudoThreadRef(cpu);
+    cpu_thread_refs_[cpu] = thread_ref;
+    cpu_name_refs_[cpu] = name_ref;
   }
-#undef MAKE_STRING
+
+  // Create a pseudo thread for the system.
+  const char* label = "system";
+  const zx_koid_t thread = kKernelPseudoCpuBase + countof(cpu_thread_refs_);
+  trace_string_ref name_ref = trace_make_inline_string_ref(label, std::strlen(label));
+  trace_context_write_thread_info_record(context_, kNoProcess, thread, &name_ref);
+  system_thread_ref_ = trace_context_make_registered_thread(context_, kNoProcess, thread);
 }
+
+#undef MAKE_STRING
 
 Importer::~Importer() = default;
 
 bool Importer::Import(perfmon::Reader& reader, const perfmon::Config& perfmon_config) {
-  trace_context_write_process_info_record(context_, kCpuProcess, &cpu_string_ref_);
+  trace_context_write_process_info_record(context_, kNoProcess, &cpu_string_ref_);
 
   auto start = zx::clock::get_monotonic();
 
@@ -227,7 +227,7 @@ void Importer::EmitSampleRecord(trace_cpu_number_t cpu, const perfmon::EventDeta
   uint64_t id = record.event();
 #else
   // Add one as zero doesn't get printed.
-  uint64_t id = cpu + 1;
+  uint64_t id = cpu;
 #endif
 
   // While the count of events is cumulative, it's more useful to report some
@@ -336,14 +336,15 @@ void Importer::EmitTallyCounts(perfmon::Reader& reader, const perfmon::Config& p
   for (unsigned cpu = 0; cpu < num_cpus; ++cpu) {
     perfmon_config.IterateOverEvents(
         [this, &event_data, &cpu](const perfmon::Config::EventConfig& event) {
-          perfmon::EventId event_id = event.event;
+          const perfmon::EventId event_id = event.event;
+          const trace_ticks_t interval = stop_time_ - start_time_;
+
           if (event_data.HaveValue(cpu, event_id)) {
             uint64_t value = event_data.GetCountOrValue(cpu, event_id);
             if (event_data.IsValue(cpu, event_id)) {
-              EmitTallyRecord(cpu, event_id, stop_time_, true, value);
+              EmitTallyRecord(cpu, event_id, start_time_, interval, true, value);
             } else {
-              EmitTallyRecord(cpu, event_id, start_time_, false, 0);
-              EmitTallyRecord(cpu, event_id, stop_time_, false, value);
+              EmitTallyRecord(cpu, event_id, start_time_, interval, false, value);
             }
           }
         });
@@ -351,18 +352,21 @@ void Importer::EmitTallyCounts(perfmon::Reader& reader, const perfmon::Config& p
 }
 
 void Importer::EmitTallyRecord(trace_cpu_number_t cpu, perfmon::EventId event_id,
-                               trace_ticks_t time, bool is_value, uint64_t value) {
+                               trace_ticks_t time, trace_ticks_t interval, bool is_value,
+                               uint64_t value) {
   trace_thread_ref_t thread_ref{GetCpuThreadRef(cpu, event_id)};
-  trace_arg_t args[1] = {
+  trace_arg_t args[3] = {
       {trace_make_arg(is_value ? value_name_ref_ : count_name_ref_,
                       trace_make_uint64_arg_value(value))},
+      {trace_make_arg(interval_name_ref_, trace_make_uint64_arg_value(interval))},
+      {trace_make_arg(event_id_name_ref_, trace_make_uint64_arg_value(event_id))},
   };
   const perfmon::EventDetails* details;
   if (trace_config_->model_event_manager()->EventIdToEventDetails(event_id, &details)) {
     trace_string_ref_t name_ref{
         trace_context_make_registered_string_literal(context_, details->name)};
     trace_context_write_counter_event_record(context_, time, &thread_ref, &cpuperf_category_ref_,
-                                             &name_ref, event_id, &args[0], countof(args));
+                                             &name_ref, cpu, args, countof(args));
   } else {
     FX_LOGS(WARNING) << "Invalid event id: " << event_id;
   }
@@ -370,18 +374,27 @@ void Importer::EmitTallyRecord(trace_cpu_number_t cpu, perfmon::EventId event_id
 
 trace_string_ref_t Importer::GetCpuNameRef(trace_cpu_number_t cpu) {
   FX_DCHECK(cpu < countof(cpu_name_refs_));
-  return cpu_name_refs_[cpu + 1];
+  return cpu_name_refs_[cpu];
 }
 
 trace_thread_ref_t Importer::GetCpuThreadRef(trace_cpu_number_t cpu, perfmon::EventId id) {
   FX_DCHECK(cpu < countof(cpu_thread_refs_));
-  // TODO(dje): Misc events are currently all system-wide, not attached
-  // to any specific cpu. That won't always be the case.
-  if (perfmon::GetEventIdGroup(id) == perfmon::kGroupMisc)
-    cpu = 0;
-  else
-    ++cpu;
+  if (perfmon::GetEventIdGroup(id) == perfmon::kGroupMisc) {
+    return system_thread_ref_;
+  }
   return cpu_thread_refs_[cpu];
+}
+
+std::pair<trace_thread_ref_t, trace_string_ref> Importer::GetCpuPseudoThreadRef(
+    trace_cpu_number_t cpu) {
+  const zx_koid_t thread = kKernelPseudoCpuBase + cpu;
+  fbl::String label = fbl::StringPrintf("cpu-%d", cpu);
+
+  trace_string_ref name_ref = trace_make_inline_string_ref(label.data(), label.length());
+  trace_context_write_thread_info_record(context_, kNoProcess, thread, &name_ref);
+  trace_thread_ref_t thread_ref =
+      trace_context_make_registered_thread(context_, kNoProcess, thread);
+  return {thread_ref, name_ref};
 }
 
 }  // namespace cpuperf_provider

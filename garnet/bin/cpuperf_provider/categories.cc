@@ -37,8 +37,9 @@ bool TraceConfig::ProcessCategories(const CategorySpec categories[], size_t num_
                                     CategoryData* data) {
   for (size_t i = 0; i < num_categories; ++i) {
     const CategorySpec& cat = categories[i];
+    FX_LOGS(INFO) << "Category " << cat.name << " received";
     if (is_category_enabled_(cat.name)) {
-      FX_VLOGS(1) << "Category " << cat.name << " enabled";
+      FX_LOGS(INFO) << "Category " << cat.name << " enabled";
       switch (cat.group) {
         case CategoryGroup::kOption:
           switch (static_cast<TraceOption>(cat.value)) {

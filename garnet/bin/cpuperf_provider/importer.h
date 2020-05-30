@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include <unordered_map>
+#include <utility>
 
 #include "garnet/bin/cpuperf_provider/categories.h"
 #include "garnet/lib/perfmon/events.h"
@@ -22,6 +23,14 @@ namespace cpuperf_provider {
 
 class Importer {
  public:
+  // TODO(eieio): These need to be kept in sync with the same values in
+  // ktrace_provider::Importer. Put these in a common location.
+  static constexpr zx_koid_t kNoProcess = 0u;
+  static constexpr zx_koid_t kKernelThreadFlag = 0x100000000;
+
+  static constexpr zx_koid_t kKernelPseudoKoidBase = 0x00000000'70000000u;
+  static constexpr zx_koid_t kKernelPseudoCpuBase = kKernelPseudoKoidBase + 0x00000000'01000000u;
+
   Importer(trace_context* context, const TraceConfig* trace_config, trace_ticks_t start_time,
            trace_ticks_t stop_time);
   ~Importer();
@@ -123,11 +132,13 @@ class Importer {
                        const EventTracker& event_data);
 
   void EmitTallyRecord(trace_cpu_number_t cpu, perfmon::EventId event_id, trace_ticks_t time,
-                       bool is_value, uint64_t value);
+                       trace_ticks_t interval, bool is_value, uint64_t value);
 
   trace_string_ref_t GetCpuNameRef(trace_cpu_number_t cpu);
 
   trace_thread_ref_t GetCpuThreadRef(trace_cpu_number_t cpu, perfmon::EventId id);
+
+  std::pair<trace_thread_ref_t, trace_string_ref> GetCpuPseudoThreadRef(trace_cpu_number_t cpu);
 
   trace_context* const context_;
   const TraceConfig* trace_config_;
@@ -148,12 +159,12 @@ class Importer {
   trace_string_ref_t const rate_name_ref_;
   trace_string_ref_t const aspace_name_ref_;
   trace_string_ref_t const pc_name_ref_;
+  trace_string_ref_t const interval_name_ref_;
+  trace_string_ref_t const event_id_name_ref_;
 
-  // Add one for events that are system-wide (e.g., memory controller events).
-  trace_thread_ref_t cpu_thread_refs_[kMaxNumCpus + 1];
-
-  // Add one for events that are system-wide (e.g., memory controller events).
-  trace_string_ref_t cpu_name_refs_[kMaxNumCpus + 1];
+  trace_thread_ref_t cpu_thread_refs_[kMaxNumCpus];
+  trace_string_ref_t cpu_name_refs_[kMaxNumCpus];
+  trace_thread_ref_t system_thread_ref_;
 
   Importer(const Importer&) = delete;
   Importer(Importer&&) = delete;

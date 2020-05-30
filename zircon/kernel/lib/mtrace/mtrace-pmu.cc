@@ -16,7 +16,7 @@
 #include "lib/mtrace.h"
 #include "trace.h"
 
-#define LOCAL_TRACE 0
+#define LOCAL_TRACE 1
 
 zx_status_t mtrace_perfmon_control(uint32_t action, uint32_t options, user_inout_ptr<void> arg,
                                    size_t size) {

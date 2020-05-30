@@ -26,6 +26,8 @@ class Reader;
 
 class Importer {
  public:
+  // TODO(eieio): These need to be kept in sync with the same values in
+  // cpuperf_provider::Importer. Put these in a common location.
   static constexpr zx_koid_t kNoProcess = 0u;
   static constexpr zx_koid_t kKernelThreadFlag = 0x100000000;
 

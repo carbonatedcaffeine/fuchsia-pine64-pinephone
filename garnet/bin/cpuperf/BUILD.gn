@@ -101,8 +101,16 @@ package("cpuperf") {
         dest = "cycle-counter.cpspec"
       },
       {
+        path = rebase_path("cpspec/arm64/instructions.cpspec")
+        dest = "instructions.cpspec"
+      },
+      {
         path = rebase_path("cpspec/arm64/l1.cpspec")
         dest = "l1.cpspec"
+      },
+      {
+        path = rebase_path("cpspec/arm64/l2.cpspec")
+        dest = "l2.cpspec"
       },
     ]
   }

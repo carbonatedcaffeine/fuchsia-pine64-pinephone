@@ -140,7 +140,7 @@ void PerfmonDevice::FreeBuffersForTrace(PmuPerTraceState* per_trace, uint32_t nu
 }
 
 void PerfmonDevice::PmuGetProperties(FidlPerfmonProperties* props) {
-  zxlogf(DEBUG, "%s called", __func__);
+  zxlogf(INFO, "%s called", __func__);
 
   props->api_version = fidl_perfmon::API_VERSION;
   props->pm_version = pmu_hw_properties_.common.pm_version;
@@ -167,7 +167,7 @@ void PerfmonDevice::PmuGetProperties(FidlPerfmonProperties* props) {
 }
 
 zx_status_t PerfmonDevice::PmuInitialize(const FidlPerfmonAllocation* allocation) {
-  zxlogf(DEBUG, "%s called", __func__);
+  zxlogf(INFO, "%s called", __func__);
 
   if (per_trace_state_) {
     return ZX_ERR_BAD_STATE;
@@ -213,7 +213,7 @@ zx_status_t PerfmonDevice::PmuInitialize(const FidlPerfmonAllocation* allocation
 }
 
 void PerfmonDevice::PmuTerminate() {
-  zxlogf(DEBUG, "%s called", __func__);
+  zxlogf(INFO, "%s called", __func__);
 
   if (active_) {
     PmuStop();
@@ -227,7 +227,7 @@ void PerfmonDevice::PmuTerminate() {
 }
 
 zx_status_t PerfmonDevice::PmuGetAllocation(FidlPerfmonAllocation* allocation) {
-  zxlogf(DEBUG, "%s called", __func__);
+  zxlogf(INFO, "%s called", __func__);
 
   const PmuPerTraceState* per_trace = per_trace_state_.get();
   if (!per_trace) {
@@ -240,7 +240,7 @@ zx_status_t PerfmonDevice::PmuGetAllocation(FidlPerfmonAllocation* allocation) {
 }
 
 zx_status_t PerfmonDevice::PmuGetBufferHandle(uint32_t descriptor, zx_handle_t* out_handle) {
-  zxlogf(DEBUG, "%s called", __func__);
+  zxlogf(INFO, "%s called", __func__);
 
   const PmuPerTraceState* per_trace = per_trace_state_.get();
   if (!per_trace) {
@@ -325,7 +325,7 @@ static zx_status_t VerifyAndCheckTimebase(const FidlPerfmonConfig* icfg, PmuConf
 }
 
 zx_status_t PerfmonDevice::PmuStageConfig(const FidlPerfmonConfig* fidl_config) {
-  zxlogf(DEBUG, "%s called", __func__);
+  zxlogf(INFO, "%s called", __func__);
 
   if (active_) {
     return ZX_ERR_BAD_STATE;
@@ -399,7 +399,7 @@ zx_status_t PerfmonDevice::PmuStageConfig(const FidlPerfmonConfig* fidl_config) 
 }
 
 zx_status_t PerfmonDevice::PmuGetConfig(FidlPerfmonConfig* config) {
-  zxlogf(DEBUG, "%s called", __func__);
+  zxlogf(INFO, "%s called", __func__);
 
   const PmuPerTraceState* per_trace = per_trace_state_.get();
   if (!per_trace) {
@@ -415,7 +415,7 @@ zx_status_t PerfmonDevice::PmuGetConfig(FidlPerfmonConfig* config) {
 }
 
 zx_status_t PerfmonDevice::PmuStart() {
-  zxlogf(DEBUG, "%s called", __func__);
+  zxlogf(INFO, "%s called", __func__);
 
   if (active_) {
     return ZX_ERR_BAD_STATE;
@@ -484,7 +484,7 @@ fail : {
 }
 
 void PerfmonDevice::PmuStop() {
-  zxlogf(DEBUG, "%s called", __func__);
+  zxlogf(INFO, "%s called", __func__);
 
   PmuPerTraceState* per_trace = per_trace_state_.get();
   if (!per_trace) {
@@ -568,20 +568,17 @@ void PerfmonDevice::Stop(StopCompleter::Sync completer) {
 // Devhost interface.
 
 zx_status_t PerfmonDevice::DdkOpen(zx_device_t** dev_out, uint32_t flags) {
-  if (opened_) {
-    return ZX_ERR_ALREADY_BOUND;
-  }
-
-  opened_ = true;
+  zxlogf(INFO, "%s: entry", __func__);
   return ZX_OK;
 }
 
 zx_status_t PerfmonDevice::DdkClose(uint32_t flags) {
-  opened_ = false;
+  zxlogf(INFO, "%s: entry", __func__);
   return ZX_OK;
 }
 
 zx_status_t PerfmonDevice::DdkMessage(fidl_msg_t* msg, fidl_txn_t* txn) {
+  zxlogf(INFO, "%s: entry", __func__);
   DdkTransaction transaction(txn);
   mtx_lock(&lock_);
   fidl_perfmon::Controller::Dispatch(this, msg, &transaction);
@@ -600,6 +597,7 @@ void PerfmonDevice::DdkRelease() {
 }  // namespace perfmon
 
 zx_status_t perfmon_bind(void* ctx, zx_device_t* parent) {
+  zxlogf(INFO, "%s: entry", __func__);
   zx_status_t status = perfmon::PerfmonDevice::InitOnce();
   if (status != ZX_OK) {
     return status;
