@@ -11,6 +11,29 @@
 
 #include "zircon/kernel/phys/stack.h"
 
+
+// TODO(mcgrathr): Use this data later.
+#define CPUID_LEAVES 8
+#define CPUID_LEAF(leaf, reg) (cpuid_leaves + (leaf * 4 * 4) + (reg * 4))(%rip)
+.macro cpuid_leaf n
+.if \n >= CPUID_LEAVES
+  .error "CPUID_LEAVES too small"
+.elseif \n
+  mov $\n, %eax
+.else
+  xor %eax, %eax
+.endif
+  cpuid
+  mov %eax, CPUID_LEAF(\n, 0)
+  mov %ebx, CPUID_LEAF(\n, 1)
+  mov %ecx, CPUID_LEAF(\n, 2)
+  mov %edx, CPUID_LEAF(\n, 3)
+.endm
+
+.object cpuid_leaves, bss, local, align=4
+  .skip 4 * 4 * CPUID_LEAVES
+.end_object
+
 // This is the entry point from the boot loader or thereabouts.
 // It receives one argument, in %rsi, usually a pointer (physical address).
 //
@@ -42,15 +65,41 @@
   // The time stamp will be the second argument to PhysMain.
   mov %rbx, %rsi
 
+  // Some CPUID bits are immediately useful.  Save the whole leaves for later.
+  cpuid_leaf 0
+  cmpl $1, CPUID_LEAF(0, 0)
+  jl 0f
+  cpuid_leaf 1
+  cmpl $7, CPUID_LEAF(0, 0)
+  jl 0f
+  cpuid_leaf 7
+0:
+
   // Set up the stacks and the thread pointer area.
   lea boot_thread_pointer(%rip), %rax
 
-  // TODO: check cpuid and use wrgsbase
+  testl $(1 << 0), CPUID_LEAF(7, 1)
+  jz .Lno_fsgsbase
+  wrgsbase %rax
+  jmp .Lstack_guard
+.Lno_fsgsbase:
   // Use the MSR if wrgsbase is not available.
   wrmsr64 MSR_IA32_GS_BASE
 
 .Lstack_guard:
-  // TODO: check cpuid and use rdseed or rdrand
+  // Stack guard canary value.  See what kind of randomness is available.
+  testl $(1 << 18), CPUID_LEAF(1, 1)
+  jz .Lno_rdseed
+  rdseed %rax
+  jmp .Lstack_guard_write
+
+.Lno_rdseed:
+  testl $(1 << 30), CPUID_LEAF(1, 2)
+  jz .Lno_rdrand
+  rdrand %rax
+  jmp .Lstack_guard_write
+
+.Lno_rdrand:
   // The only "randomness" readily available is our own load address, so
   // swizzle that in with some arbitrary bits.
   lea _start(%rip), %rcx
