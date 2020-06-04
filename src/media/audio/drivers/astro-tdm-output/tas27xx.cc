@@ -115,9 +115,7 @@ zx_status_t Tas27xx::Mute(bool mute) {
 
 // Shuts down I and V sense feature.
 // Puts device in a shutdown state (safe to deactivate clocks after call).
-zx_status_t Tas27xx::Stop() {
-  return WriteReg(PWR_CTL, (1 << 3) | (1 << 2) | (0x02 << 0));
-}
+zx_status_t Tas27xx::Stop() { return WriteReg(PWR_CTL, (1 << 3) | (1 << 2) | (0x02 << 0)); }
 
 // Restores I and V sense feature if previosly set.
 // Puts device in a normal state (started).

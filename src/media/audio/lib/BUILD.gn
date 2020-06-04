@@ -9,6 +9,7 @@ group("lib") {
     "clock",
     "format",
     "logging",
+    "simple-codec",
     "test",
     "wav",
   ]
@@ -21,6 +22,7 @@ group("tests") {
     "clock:tests",
     "effects_loader:tests",
     "format:tests",
+    "simple-codec:tests",
     "wav:tests",
   ]
 }
