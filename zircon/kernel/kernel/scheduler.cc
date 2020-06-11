@@ -185,18 +185,26 @@ constexpr Value PeakEMADelta(Value value, Value sample, Alpha alpha) {
 
 }  // anonymous namespace
 
-inline void Scheduler::UpdateTotalExpectedRuntime(SchedDuration delta) {
-  total_expected_runtime_ns_ += delta;
+// Updates the total expected runtime estimator with the given delta. The
+// exported value is scaled by the relative performance factor of the CPU to
+// account for performance differences in the estimate.
+inline void Scheduler::UpdateTotalExpectedRuntime(SchedDuration delta_ns) {
+  total_expected_runtime_ns_ += delta_ns;
   DEBUG_ASSERT(total_expected_runtime_ns_ >= 0);
-  const SchedDuration scaled_ns = total_expected_runtime_ns_ * performance_scale_reciprocal_;
+  const SchedDuration scaled_ns = total_expected_runtime_ns_ * performance_scale_reciprocal();
   exported_total_expected_runtime_ns_ = scaled_ns;
   LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Est Load", scaled_ns.raw_value(), this_cpu());
 }
 
+// Updates the total deadline utilization estimator with the given delta. The
+// exported value is scaled by the relative performance factor of the CPU to
+// account for performance differences in the estimate.
 inline void Scheduler::UpdateTotalDeadlineUtilization(SchedUtilization delta) {
   total_deadline_utilization_ += delta;
-  exported_total_deadline_utilization_ = total_deadline_utilization_;
   DEBUG_ASSERT(total_deadline_utilization_ >= 0);
+  const SchedUtilization scaled = total_deadline_utilization_ * performance_scale_reciprocal();
+  exported_total_deadline_utilization_ = scaled;
+  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Est Util", Round<uint64_t>(scaled * 10000), this_cpu());
 }
 
 void Scheduler::Dump() {
@@ -336,7 +344,6 @@ void Scheduler::InitializeThread(Thread* thread, int priority) {
   thread->scheduler_state().base_priority_ = priority;
   thread->scheduler_state().effective_priority_ = priority;
   thread->scheduler_state().inherited_priority_ = -1;
-  thread->scheduler_state().expected_runtime_ns_ = kDefaultTargetLatency;
 }
 
 void Scheduler::InitializeThread(Thread* thread, const zx_sched_deadline_params_t& params) {
@@ -350,7 +357,6 @@ void Scheduler::InitializeThread(Thread* thread, const zx_sched_deadline_params_
   thread->scheduler_state().base_priority_ = HIGHEST_PRIORITY;
   thread->scheduler_state().effective_priority_ = HIGHEST_PRIORITY;
   thread->scheduler_state().inherited_priority_ = -1;
-  thread->scheduler_state().expected_runtime_ns_ = SchedDuration{params.capacity};
 }
 
 // Removes the thread at the head of the first eligible run queue. If there is
@@ -610,6 +616,7 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
   const SchedUtilization mean_utilization = mean_deadline_utilization_.load();
 
   const SchedDuration runtime_threshold_ns = mean_runtime_ns + kLoadHeadroom;
+  const SchedDuration utillization_threshold = mean_utilization + kUtilizationHeadroom;
 
   const bool is_fair = IsFairThread(thread);
   const auto compare = [is_fair](Scheduler* const queue_a,
@@ -624,7 +631,7 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
       return a < b;
     }
   };
-  const auto is_sufficient = [is_fair, runtime_threshold_ns, mean_utilization,
+  const auto is_sufficient = [is_fair, runtime_threshold_ns, utillization_threshold,
                               thread](Scheduler* const queue) {
     const SchedDuration expected_runtime_ns = thread->scheduler_state().expected_runtime_ns_;
     const SchedDuration predicted_queue_time_ns = queue->predicted_queue_time_ns();
@@ -639,7 +646,7 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
       const SchedUtilization utilization = thread->scheduler_state().deadline_.utilization;
       const SchedUtilization scaled_utilization = utilization * reciprocal;
       return sufficient_runtime &&
-             queue->predicted_deadline_utilization() + utilization <= mean_utilization;
+             predicted_utilization + scaled_utilization <= utillization_threshold;
     }
   };
 
@@ -791,8 +798,13 @@ void Scheduler::RescheduleCommon(SchedTime now, EndTraceCallback end_outer_trace
       (timeslice_expired || current_thread != next_thread)) {
     LocalTraceDuration<KTRACE_DETAILED> update_ema_trace{"update_expected_runtime"_stringref};
 
-    const SchedDuration delta_ns =
-        PeakEMADelta(current_state->expected_runtime_ns_, total_runtime_ns, kExpectedRuntimeAlpha);
+    // Adjust the runtime for the relative performance of the CPU to account for
+    // different performance levels in the estimate. The relative performance
+    // scale is in the range (0.0, 1.0], such that the adjusted runtime is
+    // always less than or equal to the monotonic runtime.
+    const SchedDuration adjusted_total_runtime_ns = total_runtime_ns * performance_scale();
+    const SchedDuration delta_ns = PeakEMADelta(current_state->expected_runtime_ns_,
+                                                adjusted_total_runtime_ns, kExpectedRuntimeAlpha);
     current_state->expected_runtime_ns_ += delta_ns;
 
     // Adjust the aggregate value by the same amount. The adjustment is only
@@ -1587,7 +1599,8 @@ void Scheduler::UpdateDeadlineCommon(Thread* thread, int original_priority_,
       } else {
         // Remove old utilization from the run queue. Wait to update the
         // exported value until the new value is added below.
-        current->total_deadline_utilization_ -= state->deadline_.utilization;
+        current->total_deadline_utilization_ -=
+            state->deadline_.utilization * current->performance_scale_reciprocal();
       }
 
       // Update the deadline params and the run queue.

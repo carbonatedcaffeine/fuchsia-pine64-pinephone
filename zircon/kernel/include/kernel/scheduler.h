@@ -49,6 +49,10 @@ class Scheduler {
   // permit when finding a CPU to place a task on.
   static constexpr SchedDuration kLoadHeadroom = SchedMs(2);
 
+  // The amount of headroom to apply when comparing the estimated deadline
+  // utilization of a CPU to the sampled mean.
+  static constexpr SchedUtilization kUtilizationHeadroom = ffl::FromRatio(1, 5);
+
   // The interval to sample the estimated queuing time of each CPU and compute
   // the mean.
   static constexpr SchedDuration kLoadSampleInterval = kDefaultTargetLatency / 2;
@@ -87,9 +91,7 @@ class Scheduler {
 
   // Returns the performance scale of the CPU this scheduler instance is
   // associated with.
-  SchedPerformanceScale performance_scale() const {
-    return performance_scale_;
-  }
+  SchedPerformanceScale performance_scale() const { return performance_scale_; }
 
   // Returns the reciprocal performance scale of the CPU this scheduler instance
   // is associated with.
@@ -285,11 +287,11 @@ class Scheduler {
 
   // Updates the total expected runtime estimator and exports the atomic shadow
   // variable for cross-CPU readers.
-  inline void UpdateTotalExpectedRuntime(SchedDuration delta) TA_REQ(thread_lock);
+  inline void UpdateTotalExpectedRuntime(SchedDuration delta_ns) TA_REQ(thread_lock);
 
   // Updates to total deadline utilization estimator and exports the atomic
   // shadow variable for cross-CPU readers.
-  inline void UpdateTotalDeadlineUtilization(SchedUtilization delta) TA_REQ(thread_lock);
+  inline void UpdateTotalDeadlineUtilization(SchedUtilization delta_ns) TA_REQ(thread_lock);
 
   // Traits type to adapt the WAVLTree to Thread with node state in the
   // scheduler_state member.
@@ -447,7 +449,6 @@ class Scheduler {
   // cache performance.
   RelaxedAtomic<SchedDuration> exported_total_expected_runtime_ns_{SchedNs(0)};
   RelaxedAtomic<SchedUtilization> exported_total_deadline_utilization_{SchedUtilization{0}};
-
 
   // Mean values sampled periodically across all active CPUs.
   inline static RelaxedAtomic<SchedDuration> mean_expected_runtime_ns_{SchedNs(0)};
