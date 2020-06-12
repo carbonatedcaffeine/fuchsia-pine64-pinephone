@@ -77,6 +77,8 @@ class Scheduler {
   // Returns the number of the CPU this scheduler instance is associated with.
   cpu_num_t this_cpu() const { return this_cpu_; }
 
+  size_t cluster() const { return cluster_; }
+
   // Returns the lock-free value of the predicted queue time for the CPU this
   // scheduler instance is associated with.
   SchedDuration predicted_queue_time_ns() const {
@@ -439,6 +441,8 @@ class Scheduler {
   // CPU is associated with each instance of this class. This is needed by
   // non-static methods that are called from arbitrary CPUs, namely Insert().
   cpu_num_t this_cpu_;
+
+  size_t cluster_{0};
 
   // Values exported for lock-free access across CPUs. These are mirrors of the
   // members of the same name without the exported_ prefix. This avoids

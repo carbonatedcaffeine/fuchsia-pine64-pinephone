@@ -30,6 +30,7 @@ class CpuSearchSet {
   // Entry type for the list of CPUs.
   struct Entry {
     cpu_num_t cpu;
+    size_t cluster;
   };
 
   // Returns an iterator over the CPU search list. Forward iteration produces
@@ -44,6 +45,8 @@ class CpuSearchSet {
   static void DumpClusters();
 
   size_t cpu_count() const { return cpu_count_; }
+
+  size_t cluster() const { return ordered_cpus_[0].cluster; }
 
  private:
   friend struct percpu;
@@ -80,7 +83,7 @@ class CpuSearchSet {
   // always logical CPU id 0. This assumption exists in other places and may
   // need to be addressed in the future.
   size_t cpu_count_{1};
-  ktl::array<Entry, SMP_MAX_CPUS> ordered_cpus_{{Entry{0}}};
+  ktl::array<Entry, SMP_MAX_CPUS> ordered_cpus_{{Entry{0, 0}}};
 
   // Type representing a logical CPU cluster and its members.
   struct Cluster {

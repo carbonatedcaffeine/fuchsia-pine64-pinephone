@@ -195,7 +195,8 @@ void CpuSearchSet::DoInitialize(cpu_num_t this_cpu, size_t cpu_count, const Clus
   // Initialize the search set in increasing ordinal order.
   cpu_count_ = cpu_count;
   for (cpu_num_t i = 0; i < cpu_count; i++) {
-    ordered_cpus_[i] = {i};
+    const size_t cluster = cluster_set.cpu_to_cluster_map[i].cluster->id;
+    ordered_cpus_[i] = {i, cluster};
   }
 
   // Sort the search set by these criteria in priority order:
