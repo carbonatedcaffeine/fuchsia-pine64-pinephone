@@ -616,7 +616,14 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
   const SchedUtilization mean_utilization = mean_deadline_utilization_.load();
 
   const SchedDuration runtime_threshold_ns = mean_runtime_ns + kLoadHeadroom;
-  const SchedDuration utillization_threshold = mean_utilization + kUtilizationHeadroom;
+  const SchedDuration utilization_threshold = mean_utilization + kUtilizationHeadroom;
+
+  // Find the best target CPU starting at the last CPU the task ran on, if any.
+  const cpu_num_t starting_cpu = last_cpu != INVALID_CPU ? last_cpu : current_cpu;
+  const CpuSearchSet& search_set = percpu::Get(starting_cpu).search_set;
+  Scheduler* const starting_queue = Scheduler::Get(starting_cpu);
+  const size_t starting_cluster = starting_queue->cluster();
+  const SchedDuration starting_predicted_queue_time_ns = starting_queue->predicted_queue_time_ns();
 
   const bool is_fair = IsFairThread(thread);
   const auto compare = [is_fair](Scheduler* const queue_a,
@@ -631,13 +638,17 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
       return a < b;
     }
   };
-  const auto is_sufficient = [is_fair, runtime_threshold_ns, utillization_threshold,
+  const auto is_sufficient = [starting_cluster, starting_predicted_queue_time_ns, is_fair,
+                              runtime_threshold_ns, utilization_threshold,
                               thread](Scheduler* const queue) {
     const SchedDuration expected_runtime_ns = thread->scheduler_state().expected_runtime_ns_;
     const SchedDuration predicted_queue_time_ns = queue->predicted_queue_time_ns();
 
     const bool sufficient_runtime =
-        queue->predicted_queue_time_ns() + expected_runtime_ns <= runtime_threshold_ns;
+        (queue->cluster() == starting_cluster &&
+         predicted_queue_time_ns + expected_runtime_ns <= starting_predicted_queue_time_ns) ||
+        (predicted_queue_time_ns + expected_runtime_ns <= runtime_threshold_ns);
+
     if (is_fair) {
       return sufficient_runtime;
     } else {
@@ -646,13 +657,9 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
       const SchedUtilization utilization = thread->scheduler_state().deadline_.utilization;
       const SchedUtilization scaled_utilization = utilization * reciprocal;
       return sufficient_runtime &&
-             predicted_utilization + scaled_utilization <= utillization_threshold;
+             predicted_utilization + scaled_utilization <= utilization_threshold;
     }
   };
-
-  // Find the best target CPU starting at the last CPU the task ran on, if any.
-  const cpu_num_t starting_cpu = last_cpu != INVALID_CPU ? last_cpu : current_cpu;
-  const CpuSearchSet& search_set = percpu::Get(starting_cpu).search_set;
 
   cpu_num_t target_cpu = INVALID_CPU;
   Scheduler* target_queue = nullptr;
