@@ -150,6 +150,8 @@ class Scheduler {
   friend struct percpu;
   // Init hook to setup the load sampling timer.
   friend void SchedulerInitHook(uint32_t init_level);
+  // Load balancer test.
+  friend struct LoadBalancerTestAccess;
 
   // Periodically samples the load/utilization of each CPU to establish the
   // equilibrium state for load balancing.
