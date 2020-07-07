@@ -144,6 +144,7 @@ __BEGIN_CDECLS
 #define PDEV_DID_AMLOGIC_VIDEO_ENC   35
 #define PDEV_DID_AMLOGIC_RAM_CTL     36
 #define PDEV_DID_AMLOGIC_HEVC_ENC    37
+#define PDEV_DID_AMLOGIC_POWER       38
 
 // Broadcom
 #define PDEV_VID_BROADCOM           6
