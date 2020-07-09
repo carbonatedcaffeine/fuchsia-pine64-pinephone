@@ -4,6 +4,7 @@
 
 #include "aml-sdmmc.h"
 
+#include <lib/device-protocol/i2c-channel.h>
 #include <lib/device-protocol/pdev.h>
 #include <lib/device-protocol/platform-device.h>
 #include <lib/sync/completion.h>
@@ -1053,7 +1054,22 @@ zx_status_t AmlSdmmc::Create(void* ctx, zx_device_t* parent) {
   }
 
   ddk::GpioProtocolClient reset_gpio;
-  if (fragment_count > FRAGMENT_GPIO_RESET) {
+  if (fragment_count > FRAGMENT_GPIO_RESET && config.prefs == 0x1000'0000) {
+    // SD slot, get the GPIO expander to set SD_MODE.
+    ddk::I2cChannel i2c(fragments[FRAGMENT_GPIO_RESET]);
+    if (!i2c.is_valid()) {
+      AML_SDMMC_ERROR("AmlSdmmc::Create: Failed to get I2C");
+    } else {
+      uint8_t buf[2] = {1, 0x80};
+      i2c.WriteSync(buf, 2);
+      buf[0] = 2;
+      buf[1] = 0x00;
+      i2c.WriteSync(buf, 2);
+      buf[0] = 3;
+      buf[1] = 0x00;
+      i2c.WriteSync(buf, 2);
+    }
+  } else if (fragment_count > FRAGMENT_GPIO_RESET) {
     reset_gpio = fragments[FRAGMENT_GPIO_RESET];
     if (!reset_gpio.is_valid()) {
       AML_SDMMC_ERROR("AmlSdmmc::Create: Failed to get GPIO");
