@@ -1,0 +1,25 @@
+# Copyright 2019 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+target_cpu = "arm64"
+
+board_name = "rpi4"
+
+_common_bootfs_deps = [ "//src/devices/board/drivers/rpi4" ]
+
+board_bootfs_labels = _common_bootfs_deps
+
+board_zedboot_bootfs_labels = _common_bootfs_deps
+
+board_recovery_bootfs_labels = _common_bootfs_deps
+
+custom_signing_script =
+    "//zircon/kernel/target/arm64/board/rpi4/package-image.sh"
+
+# partitions for fx flash to flash
+zircon_a_partition = "boot"
+
+# The rpi4 image is not actually signed, but defining custom_signing_script
+# means we use zedboot.zbi.signed.
+#signed_image = true

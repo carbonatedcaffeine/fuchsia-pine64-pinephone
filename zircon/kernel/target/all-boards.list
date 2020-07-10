@@ -2,5 +2,6 @@
 qemu
 vim2
 imx8mevk
+rpi4
 [x64]
 pc

@@ -13,7 +13,7 @@
 #include <dev/psci.h>
 #include <pdev/driver.h>
 
-#define LOCAL_TRACE 0
+#define LOCAL_TRACE 1
 
 static uint64_t shutdown_args[3] = {0, 0, 0};
 static uint64_t reboot_args[3] = {0, 0, 0};

@@ -129,6 +129,7 @@ shims = [
   "msm8998",
   "mt8167s_ref",
   "visalia",
+  "rpi4",
 ]
 
 foreach(shim, shims) {
