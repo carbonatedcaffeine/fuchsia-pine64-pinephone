@@ -788,7 +788,7 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
 
   LOCAL_KTRACE(KTRACE_DETAILED, "target_mask: online,active", mp_get_online_mask(), active_mask);
 
-#if !DISABLE_PERIODIC_LOAD_BALANCER
+#if 0 && !DISABLE_PERIODIC_LOAD_BALANCER
   // TODO(edcoyne): When we drop the define refactor this unify these functions.
   if (IsFairThread(thread)) {
     const cpu_num_t target_cpu = load_balancer::FindTargetCpu(thread);
