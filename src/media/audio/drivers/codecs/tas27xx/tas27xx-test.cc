@@ -59,8 +59,7 @@ class Tas27xxTest : public zxtest::Test {
 struct Tas27xxCodec : public Tas27xx {
   explicit Tas27xxCodec(ddk::I2cChannel i2c, ddk::GpioProtocolClient ena,
                         ddk::GpioProtocolClient fault)
-      : Tas27xx(fake_ddk::kFakeParent, std::move(i2c), std::move(fault), true,
-                true) {}
+      : Tas27xx(fake_ddk::kFakeParent, std::move(i2c), std::move(fault), true, true) {}
   codec_protocol_t GetProto() { return {&this->codec_protocol_ops_, this}; }
 };
 

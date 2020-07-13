@@ -74,9 +74,10 @@ struct AmlTdmOutDeviceTest : public AmlTdmOutDevice {
       : AmlTdmOutDevice(std::move(mmio), clk_src, tdm, ddr, mclk, fifo_depth, version) {}
 };
 
-struct AstroI2sOutTest : public AstroTdmStream {
-  AstroI2sOutTest(codec_protocol_t* codec_protocol, ddk_mock::MockMmioRegRegion& region)
-    : AstroTdmStream(fake_ddk::kFakeParent, false, fake_ddk::kFakeParent, fake_ddk::kFakeParent) {
+struct AmlG12I2sOutTest : public AmlG12TdmStream {
+  AmlG12I2sOutTest(codec_protocol_t* codec_protocol, ddk_mock::MockMmioRegRegion& region)
+      : AmlG12TdmStream(fake_ddk::kFakeParent, false, fake_ddk::kFakeParent,
+                        fake_ddk::kFakeParent) {
     codecs_.push_back(SimpleCodecClient());
     codecs_[0].SetProtocol(codec_protocol);
     metadata_.is_input = false;
@@ -118,7 +119,7 @@ struct AstroI2sOutTest : public AstroTdmStream {
   }
 };
 
-TEST(AstroTdm, InitializeI2sOut) {
+TEST(AmlG12Tdm, InitializeI2sOut) {
   fake_ddk::Bind tester;
 
   auto codec = SimpleCodecServer::Create<CodecTest>(fake_ddk::kFakeParent);
@@ -136,7 +137,7 @@ TEST(AstroTdm, InitializeI2sOut) {
   // TDM OUT CTRL1 FRDDR C with 16 bits per sample.
   mock[0x584].ExpectWrite(0x02000F20);
 
-  auto controller = audio::SimpleAudioStream::Create<AstroI2sOutTest>(&codec_proto, mock);
+  auto controller = audio::SimpleAudioStream::Create<AmlG12I2sOutTest>(&codec_proto, mock);
   ASSERT_NOT_NULL(controller);
   auto raw_controller = fbl::ExportToRawPtr(&controller);  // controller is managed by the DDK.
 
@@ -146,9 +147,9 @@ TEST(AstroTdm, InitializeI2sOut) {
   raw_controller->DdkRelease();
 }
 
-struct AstroPcmOutTest : public AstroI2sOutTest {
-  AstroPcmOutTest(codec_protocol_t* codec_protocol, ddk_mock::MockMmioRegRegion& region)
-      : AstroI2sOutTest(codec_protocol, region) {
+struct AmlG12PcmOutTest : public AmlG12I2sOutTest {
+  AmlG12PcmOutTest(codec_protocol_t* codec_protocol, ddk_mock::MockMmioRegRegion& region)
+      : AmlG12I2sOutTest(codec_protocol, region) {
     metadata_.number_of_channels = 1;
     metadata_.lanes_enable_mask[0] = 1;
     metadata_.tdm.type = metadata::TdmType::Pcm;
@@ -156,7 +157,7 @@ struct AstroPcmOutTest : public AstroI2sOutTest {
   }
 };
 
-TEST(AstroTdm, InitializePcmOut) {
+TEST(AmlG12Tdm, InitializePcmOut) {
   fake_ddk::Bind tester;
 
   auto codec = SimpleCodecServer::Create<CodecTest>(fake_ddk::kFakeParent);
@@ -174,7 +175,7 @@ TEST(AstroTdm, InitializePcmOut) {
   // TDM OUT CTRL1 FRDDR C with 16 bits per sample.
   mock[0x584].ExpectWrite(0x02000F20);
 
-  auto controller = audio::SimpleAudioStream::Create<AstroPcmOutTest>(&codec_proto, mock);
+  auto controller = audio::SimpleAudioStream::Create<AmlG12PcmOutTest>(&codec_proto, mock);
   ASSERT_NOT_NULL(controller);
   auto raw_controller = fbl::ExportToRawPtr(&controller);  // controller is managed by the DDK.
 
@@ -184,7 +185,7 @@ TEST(AstroTdm, InitializePcmOut) {
   raw_controller->DdkRelease();
 }
 
-TEST(AstroTdm, I2sOutChangeRate96K) {
+TEST(AmlG12Tdm, I2sOutChangeRate96K) {
   fake_ddk::Bind tester;
 
   auto codec = SimpleCodecServer::Create<CodecTest>(fake_ddk::kFakeParent);
@@ -210,7 +211,7 @@ TEST(AstroTdm, I2sOutChangeRate96K) {
   mock[0x00c].ExpectRead(0xffffffff).ExpectWrite(0x7fff0000);  // Disable, clear div.
   mock[0x00c].ExpectRead(0x00000000).ExpectWrite(0x84000004);  // Enabled, HIFI PLL, set div to 4.
 
-  auto controller = audio::SimpleAudioStream::Create<AstroI2sOutTest>(&codec_proto, mock);
+  auto controller = audio::SimpleAudioStream::Create<AmlG12I2sOutTest>(&codec_proto, mock);
   ASSERT_NOT_NULL(controller);
   auto raw_controller = fbl::ExportToRawPtr(&controller);  // controller is managed by the DDK.
 
@@ -264,7 +265,7 @@ TEST(AstroTdm, I2sOutChangeRate96K) {
   raw_controller->DdkRelease();
 }
 
-TEST(AstroTdm, EnableAndMuteChannels) {
+TEST(AmlG12Tdm, EnableAndMuteChannels) {
   fake_ddk::Bind tester;
 
   struct AmlTdmOutDeviceMuteTest : public AmlTdmOutDevice {
@@ -282,9 +283,10 @@ TEST(AstroTdm, EnableAndMuteChannels) {
     uint32_t last_enable_mask_[kMaxLanes] = {};
     uint32_t last_mute_mask_[kMaxLanes] = {};
   };
-  struct AstroTdmStreamOutMuteTest : public AstroI2sOutTest {
-    AstroTdmStreamOutMuteTest(codec_protocol_t* codec_protocol, ddk_mock::MockMmioRegRegion& region)
-        : AstroI2sOutTest(codec_protocol, region) {
+  struct AmlG12TdmStreamOutMuteTest : public AmlG12I2sOutTest {
+    AmlG12TdmStreamOutMuteTest(codec_protocol_t* codec_protocol,
+                               ddk_mock::MockMmioRegRegion& region)
+        : AmlG12I2sOutTest(codec_protocol, region) {
       metadata_.number_of_channels = 2;
       metadata_.lanes_enable_mask[0] = 3;  // L + R tweeters.
       metadata_.lanes_enable_mask[1] = 3;  // Woofer in lane 1.
@@ -302,7 +304,7 @@ TEST(AstroTdm, EnableAndMuteChannels) {
   ddk_mock::MockMmioRegRegion unused_mock(regs.data(), sizeof(uint32_t), kRegSize);
 
   auto server =
-      audio::SimpleAudioStream::Create<AstroTdmStreamOutMuteTest>(&codec_proto, unused_mock);
+      audio::SimpleAudioStream::Create<AmlG12TdmStreamOutMuteTest>(&codec_proto, unused_mock);
   ASSERT_NOT_NULL(server);
 
   audio_fidl::Device::SyncClient client_wrap(std::move(tester.FidlClient()));
@@ -400,9 +402,9 @@ struct AmlTdmInDeviceTest : public AmlTdmInDevice {
       : AmlTdmInDevice(std::move(mmio), clk_src, tdm, ddr, mclk, fifo_depth, version) {}
 };
 
-struct AstroI2sInTest : public AstroTdmStream {
-  AstroI2sInTest(ddk_mock::MockMmioRegRegion& region)
-    : AstroTdmStream(fake_ddk::kFakeParent, true, fake_ddk::kFakeParent, fake_ddk::kFakeParent) {
+struct AmlG12I2sInTest : public AmlG12TdmStream {
+  AmlG12I2sInTest(ddk_mock::MockMmioRegRegion& region)
+      : AmlG12TdmStream(fake_ddk::kFakeParent, true, fake_ddk::kFakeParent, fake_ddk::kFakeParent) {
     metadata_.is_input = true;
     metadata_.mClockDivFactor = 10;
     metadata_.sClockDivFactor = 25;
@@ -443,15 +445,15 @@ struct AstroI2sInTest : public AstroTdmStream {
   }
 };
 
-struct AstroPcmInTest : public AstroI2sInTest {
-  AstroPcmInTest(ddk_mock::MockMmioRegRegion& region) : AstroI2sInTest(region) {
+struct AmlG12PcmInTest : public AmlG12I2sInTest {
+  AmlG12PcmInTest(ddk_mock::MockMmioRegRegion& region) : AmlG12I2sInTest(region) {
     metadata_.number_of_channels = 1;
     metadata_.lanes_enable_mask[0] = 1;
     metadata_.tdm.type = metadata::TdmType::Pcm;
   }
 };
 
-TEST(AstroTdm, InitializeI2sIn) {
+TEST(AmlG12Tdm, InitializeI2sIn) {
   fake_ddk::Bind tester;
 
   constexpr size_t kRegSize = S905D2_EE_AUDIO_LENGTH / sizeof(uint32_t);  // in 32 bits chunks.
@@ -464,7 +466,7 @@ TEST(AstroTdm, InitializeI2sIn) {
   // TDM IN CTRL config, I2S, source TDM IN C, bitoffset 4, 2 slots, 16 bits per slot.
   mock[0x380].ExpectWrite(0x0024001f);
 
-  auto controller = audio::SimpleAudioStream::Create<AstroI2sInTest>(mock);
+  auto controller = audio::SimpleAudioStream::Create<AmlG12I2sInTest>(mock);
   ASSERT_NOT_NULL(controller);
   auto raw_controller = fbl::ExportToRawPtr(&controller);  // controller is managed by the DDK.
 
@@ -474,7 +476,7 @@ TEST(AstroTdm, InitializeI2sIn) {
   raw_controller->DdkRelease();
 }
 
-TEST(AstroTdm, InitializePcmIn) {
+TEST(AmlG12Tdm, InitializePcmIn) {
   fake_ddk::Bind tester;
 
   constexpr size_t kRegSize = S905D2_EE_AUDIO_LENGTH / sizeof(uint32_t);  // in 32 bits chunks.
@@ -487,7 +489,7 @@ TEST(AstroTdm, InitializePcmIn) {
   // TDM IN CTRL config, TDM, source TDM IN C, bitoffset 4, 1 slot, 32 bits per slot.
   mock[0x380].ExpectWrite(0x0024001f);
 
-  auto controller = audio::SimpleAudioStream::Create<AstroPcmInTest>(mock);
+  auto controller = audio::SimpleAudioStream::Create<AmlG12PcmInTest>(mock);
   ASSERT_NOT_NULL(controller);
   auto raw_controller = fbl::ExportToRawPtr(&controller);  // controller is managed by the DDK.
 
