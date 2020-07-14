@@ -40,6 +40,9 @@ struct DeviceInfo {
   // The parent device's block count
   uint64_t block_count;
 
+  // The parent device's required block_op_t size.
+  uint64_t upstream_op_size;
+
   // This device's required block_op_t size.
   uint64_t op_size;
 

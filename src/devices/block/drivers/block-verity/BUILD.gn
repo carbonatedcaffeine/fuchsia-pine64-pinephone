@@ -33,6 +33,8 @@ driver_module("block-verity") {
     "device-manager.cc",
     "device.cc",
     "extra.cc",
+    "hash-block-accumulator.cc",
+    "sealer.cc",
   ]
 
   configs += [ "//build/config/fuchsia:integer-paranoia" ]
@@ -44,6 +46,9 @@ driver_module("block-verity") {
     "//src/devices/lib/driver",
     "//src/lib/ddk",
     "//src/lib/ddktl",
+    "//zircon/public/lib/zx",
+    "//zircon/public/lib/zxc",
+    "//zircon/system/ulib/digest",
   ]
 }
 
@@ -54,6 +59,7 @@ test("block-verity-test") {
     "//sdk/fidl/fuchsia.device:fuchsia.device_llcpp",
     "//sdk/fidl/fuchsia.hardware.block.verified:fuchsia.hardware.block.verified_llcpp",
     "//sdk/fidl/fuchsia.io:fuchsia.io_llcpp",
+    "//zircon/public/lib/pretty", # TODO: remove
     "//zircon/public/lib/zxtest",
     "//zircon/system/ulib/devmgr-integration-test",
     "//zircon/system/ulib/devmgr-launcher",
