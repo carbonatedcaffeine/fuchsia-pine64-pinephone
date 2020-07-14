@@ -136,7 +136,8 @@ HashLocation Geometry::NextIntegrityBlockUp(uint32_t distance_from_leaf,
   uint64_t next_tier_stride = current_tier_stride * hashes_per_block_ + 1;
 
   // TODO: clean up these printfs once verified read is implemented/tested
-  // printf("                                       current tier stride %lu, next tier stride %lu\n",
+  // printf("                                       current tier stride %lu, next tier stride
+  // %lu\n",
   //       current_tier_stride, next_tier_stride);
 
   // Compute which hash in the containing integrity block (which sits up one
