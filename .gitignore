@@ -2,6 +2,7 @@
 *~
 .*.sw?
 .build_lock
+.cache
 .cargo
 .clangd
 **/.cache/clangd
