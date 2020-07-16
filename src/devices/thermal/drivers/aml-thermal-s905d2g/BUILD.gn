@@ -13,11 +13,8 @@ driver_module("aml-thermal-s905d2g") {
   configs += [ "//build/config/fuchsia:static_cpp_standard_library" ]
   configs += [ "//build/unification/config:zircon-migrated" ]
   sources = [
-    "aml-cpufreq.cc",
-    "aml-fclk-rates.c",
     "aml-thermal.cc",
     "aml-tsensor.cc",
-    "aml-voltage.cc",
   ]
   deps = [
     "//sdk/banjo/ddk.protocol.clock",
@@ -50,12 +47,9 @@ test("aml-thermal-s905d2g-test") {
   configs += [ "//build/unification/config:zircon-migrated" ]
   output_name = "aml-thermal-s905d2g-test"
   sources = [
-    "aml-cpufreq.cc",
-    "aml-fclk-rates.c",
     "aml-thermal-test.cc",
     "aml-thermal.cc",
     "aml-tsensor.cc",
-    "aml-voltage.cc",
   ]
   deps = [
     "//sdk/banjo/ddk.protocol.clock",
