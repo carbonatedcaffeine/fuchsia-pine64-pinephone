@@ -17,6 +17,8 @@
 #include <sys/types.h>
 #include <zircon/types.h>
 
+#include <functional>
+#include <iomanip>
 #include <iostream>
 #include <optional>
 #include <ostream>
@@ -30,11 +32,16 @@
 #include "performance-domain.h"
 
 using llcpp::fuchsia::device::MAX_DEVICE_PERFORMANCE_STATES;
-using ListCb = void (*)(const char* path);
+using ListCb = std::function<void(const char*)>;
 
 constexpr char kCpuDevicePath[] = "/dev/class/cpu-ctrl";
 constexpr char kCpuDeviceFormat[] = "/dev/class/cpu-ctrl/%s";
 constexpr size_t kMaxPathLen = 24;  // strlen("/dev/class/cpu-ctrl/000\0")
+
+// TODO(gkalsi): Maybe parameterize these?
+constexpr uint64_t kStressTestCycles = 1000;
+constexpr uint64_t kStressTestTimeoutMs =
+    100;  // Milliseconds to wait before issuing another dvfs opp.
 
 void print_frequency(const cpuctrl::CpuPerformanceStateInfo& info) {
   if (info.frequency_hz == cpuctrl::FREQUENCY_UNKNOWN) {
@@ -74,6 +81,11 @@ void usage(const char* cmd) {
   fprintf(stderr, "\t%s pstate <domain> [state]  Set the CPU's performance state to `state`. \n",
           cmd);
   fprintf(stderr, "\t%s                          Returns the current state if `state` is omitted.\n",
+          spaces);
+
+  fprintf(stderr, "\t%s stress [domains...]      Stress test by rapidly and randomly assigning pstates.\n",
+          cmd);
+  fprintf(stderr, "\t%s                          If `domains` is omitted, all domains are tested.\n",
           spaces);
   // clang-format on
 }
@@ -226,6 +238,59 @@ zx_status_t describe_all() {
   return ZX_OK;
 }
 
+void stress(char* domain_names[], const size_t n) {
+  std::vector<std::string> names;
+
+  if (domain_names == nullptr || n == 0) {
+    list([&names](const char* path) { names.push_back(path); });
+  } else {
+    for (size_t i = 0; i < n; i++) {
+      names.push_back(domain_names[i]);
+    }
+  }
+
+  std::vector<CpuPerformanceDomain> domains;
+  for (const auto& name : names) {
+    std::string device_path = std::string(kCpuDevicePath) + std::string("/") + name;
+
+    auto domain = CpuPerformanceDomain::CreateFromPath(device_path.c_str());
+
+    zx_status_t* st = std::get_if<zx_status_t>(&domain);
+    if (st) {
+      std::cerr << "Failed to connect to performance domain device '" << name << "'"
+                << " st = " << *st << std::endl;
+      continue;
+    }
+
+    domains.push_back(std::move(std::get<CpuPerformanceDomain>(domain)));
+  }
+
+  std::cout << "Stress testing " << domains.size() << " domain[s]." << std::endl;
+
+  for (size_t i = 0; i < kStressTestCycles; i++) {
+    // Pick a random domain.
+    const size_t selected_domain_idx = rand() % domains.size();
+
+    // Pick a random operating point for this domain.
+    auto& selected_domain = domains[selected_domain_idx];
+    const auto& ops = selected_domain.GetPerformanceStates();
+    const uint32_t selected_op_pt = rand() % ops.size();
+    zx_status_t status = selected_domain.SetPerformanceState(selected_op_pt);
+    if (status != ZX_OK) {
+      std::cout << "Stress test failed to drive domain " << selected_domain_idx << " into pstate "
+                << selected_op_pt << std::endl;
+      return;
+    }
+
+    if ((i % 10) == 0) {
+      std::cout << "[" << std::setw(4) << i << "/" << std::setw(4) << kStressTestCycles << "] "
+                << "Stress tests completed." << std::endl;
+    }
+
+    zx_nanosleep(zx_deadline_after(ZX_MSEC(kStressTestTimeoutMs)));
+  }
+}
+
 int main(int argc, char* argv[]) {
   const char* cmd = argv[0];
   if (argc == 1) {
@@ -258,6 +323,11 @@ int main(int argc, char* argv[]) {
       return -1;
     }
   } else if (!strncmp(subcmd, "stress", 6)) {
+    if (argc == 2) {
+      stress(nullptr, 0);
+    } else {
+      stress(argv + 2, argc - 2);
+    }
   }
 
   return 0;
