@@ -267,9 +267,13 @@ void DeviceManager::OnSealCompleted(zx_status_t status, const uint8_t* seal_buf,
     ::llcpp::fuchsia::hardware::block::verified::Sha256Seal sha256;
     memcpy(sha256.superblock_hash.begin(), seal_buf, seal_len);
 
-    fidl::aligned<::llcpp::fuchsia::hardware::block::verified::Sha256Seal> aligned = std::move(sha256);
-    seal_completer_->ReplySuccess(
-        ::llcpp::fuchsia::hardware::block::verified::Seal::WithSha256(fidl::unowned_ptr(&aligned)));
+    fidl::aligned<::llcpp::fuchsia::hardware::block::verified::Sha256Seal> aligned =
+        std::move(sha256);
+
+    llcpp::fuchsia::hardware::block::verified::Seal seal =
+        ::llcpp::fuchsia::hardware::block::verified::Seal::WithSha256(fidl::unowned_ptr(&aligned));
+    seal_completer_->ReplySuccess(std::move(seal));
+
   } else {
     zxlogf(WARNING, "Sealer returned failure: %d", status);
     seal_completer_->ReplyError(status);

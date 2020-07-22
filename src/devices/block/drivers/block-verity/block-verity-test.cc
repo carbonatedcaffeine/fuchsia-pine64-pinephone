@@ -18,10 +18,9 @@
 #include <utility>
 
 #include <fvm/test/device-ref.h>
+#include <pretty/hexdump.h>  // TODO: remove this once done hexdumping
 #include <ramdevice-client/ramdisk.h>
 #include <zxtest/zxtest.h>
-
-#include <pretty/hexdump.h> // TODO: remove this once done hexdumping
 namespace {
 
 constexpr uint64_t kBlockSize = 4096;
@@ -104,13 +103,20 @@ class BlockVerityTest : public zxtest::Test {
         devmgr.devfs_root(), mutable_block_path.c_str(), &mutable_block_fd));
   }
 
-  void CloseAndGenerateSeal(zx::channel& verity_chan,
-                            ::llcpp::fuchsia::hardware::block::verified::DeviceManager_CloseAndGenerateSeal_Result* out) {
+  void CloseAndGenerateSeal(
+      zx::channel& verity_chan,
+      // TODO: change all fidl::internal::AlignedBuffer<ZX...> to
+      // fidl::Buffer<::llcpp::fuchsia::hardware::block::verified::DeviceManager_CloseAndGenerateSeal_Response>>
+      // when we debug why the latter isn't working.
+      std::unique_ptr<fidl::internal::AlignedBuffer<ZX_CHANNEL_MAX_MSG_BYTES>>* out_buffer,
+      ::llcpp::fuchsia::hardware::block::verified::DeviceManager_CloseAndGenerateSeal_Result* out) {
+    auto buffer = std::make_unique<fidl::internal::AlignedBuffer<ZX_CHANNEL_MAX_MSG_BYTES>>();
     auto seal_resp =
         ::llcpp::fuchsia::hardware::block::verified::DeviceManager::Call::CloseAndGenerateSeal(
-            zx::unowned_channel(verity_chan));
+            zx::unowned_channel(verity_chan), buffer->view());
     ASSERT_OK(seal_resp.status());
     ASSERT_FALSE(seal_resp->result.is_err());
+    *out_buffer = std::move(buffer);
     *out = std::move(seal_resp->result);
   }
 
@@ -218,7 +224,10 @@ TEST_F(BlockVerityMutableTest, BasicSeal) {
 
   // Close and generate a seal over the all-zeroes data section.
   ::llcpp::fuchsia::hardware::block::verified::DeviceManager_CloseAndGenerateSeal_Result result;
-  CloseAndGenerateSeal(verity_chan_, &result);
+  std::unique_ptr<fidl::internal::AlignedBuffer<ZX_CHANNEL_MAX_MSG_BYTES>> out_buffer =
+      std::make_unique<fidl::internal::AlignedBuffer<ZX_CHANNEL_MAX_MSG_BYTES>>();
+
+  CloseAndGenerateSeal(verity_chan_, &out_buffer, &result);
   ASSERT_TRUE(result.is_response());
 
   // Verify contents of the integrity section.  For our 8126 data blocks of all-zeros,
@@ -240,52 +249,52 @@ TEST_F(BlockVerityMutableTest, BasicSeal) {
   //
   fbl::Array<uint8_t> zero_block(new uint8_t[kBlockSize], kBlockSize);
   memset(zero_block.get(), 0, kBlockSize);
-  uint8_t zero_block_hash[32] = {
-    0xad, 0x7f, 0xac, 0xb2, 0x58, 0x6f, 0xc6, 0xe9, 0x66, 0xc0, 0x04, 0xd7, 0xd1, 0xd1, 0x6b, 0x02,
-    0x4f, 0x58, 0x05, 0xff, 0x7c, 0xb4, 0x7c, 0x7a, 0x85, 0xda, 0xbd, 0x8b, 0x48, 0x89, 0x2c, 0xa7
-  };
+  uint8_t zero_block_hash[32] = {0xad, 0x7f, 0xac, 0xb2, 0x58, 0x6f, 0xc6, 0xe9, 0x66, 0xc0, 0x04,
+                                 0xd7, 0xd1, 0xd1, 0x6b, 0x02, 0x4f, 0x58, 0x05, 0xff, 0x7c, 0xb4,
+                                 0x7c, 0x7a, 0x85, 0xda, 0xbd, 0x8b, 0x48, 0x89, 0x2c, 0xa7};
 
   fbl::Array<uint8_t> expected_early_tier_0_integrity_block(new uint8_t[kBlockSize], kBlockSize);
   for (size_t i = 0; i < 128; i++) {
-    memcpy(expected_early_tier_0_integrity_block.get() + (32*i), zero_block_hash, 32);
+    memcpy(expected_early_tier_0_integrity_block.get() + (32 * i), zero_block_hash, 32);
   }
 
   fbl::Array<uint8_t> expected_final_tier_0_integrity_block(new uint8_t[kBlockSize], kBlockSize);
   for (size_t i = 0; i < 62; i++) {
-    memcpy(expected_final_tier_0_integrity_block.get() + (32*i), zero_block_hash, 32);
+    memcpy(expected_final_tier_0_integrity_block.get() + (32 * i), zero_block_hash, 32);
   }
   memset(expected_final_tier_0_integrity_block.get() + (62 * 32), 0, kBlockSize - (62 * 32));
 
   uint8_t early_tier_0_integrity_block_hash[32] = {
-    // Computed as follows:
-    // python2
-    // >>> import hashlib
-    // >>> h = hashlib.sha256()
-    // >>> hzero = "ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7".decode("hex")
-    // >>> h.update(hzero * 128)
-    // >>> h.hexdigest()
-    // "b24a5dfc7087b09c7378bb9100b5ea913f283da2c8ca05297f39457cbdd651d4"
-    0xb2, 0x4a, 0x5d, 0xfc, 0x70, 0x87, 0xb0, 0x9c, 0x73, 0x78, 0xbb, 0x91, 0x00, 0xb5, 0xea, 0x91,
-    0x3f, 0x28, 0x3d, 0xa2, 0xc8, 0xca, 0x05, 0x29, 0x7f, 0x39, 0x45, 0x7c, 0xbd, 0xd6, 0x51, 0xd4
-  };
+      // Computed as follows:
+      // python2
+      // >>> import hashlib
+      // >>> h = hashlib.sha256()
+      // >>> hzero =
+      // "ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7".decode("hex")
+      // >>> h.update(hzero * 128)
+      // >>> h.hexdigest()
+      // "b24a5dfc7087b09c7378bb9100b5ea913f283da2c8ca05297f39457cbdd651d4"
+      0xb2, 0x4a, 0x5d, 0xfc, 0x70, 0x87, 0xb0, 0x9c, 0x73, 0x78, 0xbb,
+      0x91, 0x00, 0xb5, 0xea, 0x91, 0x3f, 0x28, 0x3d, 0xa2, 0xc8, 0xca,
+      0x05, 0x29, 0x7f, 0x39, 0x45, 0x7c, 0xbd, 0xd6, 0x51, 0xd4};
   uint8_t final_tier_0_integrity_block_hash[32] = {
-    // >>> import hashlib
-    // >>> h = hashlib.sha256()
-    // >>> hzero = "ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7".decode("hex")
-    // >>> h.update((hzero * 62) + ('\0' * 2112))
-    // >>> h.hexdigest()
-    // "b3f0b10c454da8c746faf2a6f1dc89f29385ac56aed6e4b6ffb8fa3e9cee79ec"
-    0xb3, 0xf0, 0xb1, 0x0c, 0x45, 0x4d, 0xa8, 0xc7, 0x46, 0xfa, 0xf2, 0xa6, 0xf1, 0xdc, 0x89, 0xf2,
-    0x93, 0x85, 0xac, 0x56, 0xae, 0xd6, 0xe4, 0xb6, 0xff, 0xb8, 0xfa, 0x3e, 0x9c, 0xee, 0x79, 0xec
-  };
+      // >>> import hashlib
+      // >>> h = hashlib.sha256()
+      // >>> hzero =
+      // "ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7".decode("hex")
+      // >>> h.update((hzero * 62) + ('\0' * 2112))
+      // >>> h.hexdigest()
+      // "b3f0b10c454da8c746faf2a6f1dc89f29385ac56aed6e4b6ffb8fa3e9cee79ec"
+      0xb3, 0xf0, 0xb1, 0x0c, 0x45, 0x4d, 0xa8, 0xc7, 0x46, 0xfa, 0xf2,
+      0xa6, 0xf1, 0xdc, 0x89, 0xf2, 0x93, 0x85, 0xac, 0x56, 0xae, 0xd6,
+      0xe4, 0xb6, 0xff, 0xb8, 0xfa, 0x3e, 0x9c, 0xee, 0x79, 0xec};
 
   fbl::Array<uint8_t> expected_root_integrity_block(new uint8_t[kBlockSize], kBlockSize);
   for (size_t i = 0; i < 63; i++) {
-    memcpy(expected_root_integrity_block.get() + (32*i), early_tier_0_integrity_block_hash, 32);
+    memcpy(expected_root_integrity_block.get() + (32 * i), early_tier_0_integrity_block_hash, 32);
   }
   memcpy(expected_root_integrity_block.get() + (32 * 63), final_tier_0_integrity_block_hash, 32);
-  memset(expected_root_integrity_block.get() + (32 * 64), 0, kBlockSize - (32*64));
-
+  memset(expected_root_integrity_block.get() + (32 * 64), 0, kBlockSize - (32 * 64));
 
   fbl::Array<uint8_t> read_buf(new uint8_t[kBlockSize], kBlockSize);
   for (size_t integrity_block_index = 0; integrity_block_index < 65; integrity_block_index++) {
@@ -300,11 +309,11 @@ TEST_F(BlockVerityMutableTest, BasicSeal) {
       expected_block = expected_final_tier_0_integrity_block.get();
     } else {
       expected_block = expected_root_integrity_block.get();
-      //TODO: remove
-      //printf("Expected:\n");
-      //hexdump_very_ex(expected_block, kBlockSize, 0, hexdump_stdio_printf, stdout);
-      //printf("Observed::\n");
-      //hexdump_very_ex(read_buf.get(), kBlockSize, 0, hexdump_stdio_printf, stdout);
+      // TODO: remove
+      // printf("Expected:\n");
+      // hexdump_very_ex(expected_block, kBlockSize, 0, hexdump_stdio_printf, stdout);
+      // printf("Observed::\n");
+      // hexdump_very_ex(read_buf.get(), kBlockSize, 0, hexdump_stdio_printf, stdout);
     }
     EXPECT_EQ(memcmp(expected_block, read_buf.get(), kBlockSize), 0,
               "integrity block %lu did not contain expected contents", integrity_block_index);
@@ -314,33 +323,36 @@ TEST_F(BlockVerityMutableTest, BasicSeal) {
   // Root integrity block hash is:
   // python2
   // >>> import hashlib
-  // >>> early_t0_hash = "b24a5dfc7087b09c7378bb9100b5ea913f283da2c8ca05297f39457cbdd651d4".decode('hex')
-  // >>> late_t0_hash = "b3f0b10c454da8c746faf2a6f1dc89f29385ac56aed6e4b6ffb8fa3e9cee79ec".decode('hex')
+  // >>> early_t0_hash =
+  // "b24a5dfc7087b09c7378bb9100b5ea913f283da2c8ca05297f39457cbdd651d4".decode('hex')
+  // >>> late_t0_hash =
+  // "b3f0b10c454da8c746faf2a6f1dc89f29385ac56aed6e4b6ffb8fa3e9cee79ec".decode('hex')
   // >>> root_integrity_block = early_t0_hash * 63 + late_t0_hash + ('\0' * 2048)
   // >>> h = hashlib.sha256()
   // >>> h.update(root_integrity_block)
   // >>> h.hexdigest()
   // "5b7ecbf17daa9832c2484342f924e5480157c3582fcfaedc63c83e20875800f2"
   uint8_t expected_superblock[kBlockSize] = {
-    // Recall: the superblock format is:
+      // Recall: the superblock format is:
 
-    // * 16 bytes magic
-    0x62, 0x6c, 0x6f, 0x63, 0x6b, 0x2d, 0x76, 0x65,
-    0x72, 0x69, 0x74, 0x79, 0x2d, 0x76, 0x31, 0x00,
+      // * 16 bytes magic
+      0x62, 0x6c, 0x6f, 0x63, 0x6b, 0x2d, 0x76, 0x65, 0x72, 0x69, 0x74, 0x79, 0x2d, 0x76, 0x31,
+      0x00,
 
-    // * 8 bytes block count (little-endian)
-    0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      // * 8 bytes block count (little-endian)
+      0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 
-    // * 4 bytes block size (little-endian)
-    0x00, 0x10, 0x00, 0x00,
+      // * 4 bytes block size (little-endian)
+      0x00, 0x10, 0x00, 0x00,
 
-    // * 4 bytes hash function tag (little-endian)
-    0x01, 0x00, 0x00, 0x00,
+      // * 4 bytes hash function tag (little-endian)
+      0x01, 0x00, 0x00, 0x00,
 
-    // * 32 bytes integrity root hash (see computation above)
-    0x5b, 0x7e, 0xcb, 0xf1, 0x7d, 0xaa, 0x98, 0x32, 0xc2, 0x48, 0x43, 0x42, 0xf9, 0x24, 0xe5, 0x48,
-    0x01, 0x57, 0xc3, 0x58, 0x2f, 0xcf, 0xae, 0xdc, 0x63, 0xc8, 0x3e, 0x20, 0x87, 0x58, 0x00, 0xf2,
-    // * 4032 zero bytes padding the rest of the block, autofilled by compiler.
+      // * 32 bytes integrity root hash (see computation above)
+      0x5b, 0x7e, 0xcb, 0xf1, 0x7d, 0xaa, 0x98, 0x32, 0xc2, 0x48, 0x43, 0x42, 0xf9, 0x24, 0xe5,
+      0x48, 0x01, 0x57, 0xc3, 0x58, 0x2f, 0xcf, 0xae, 0xdc, 0x63, 0xc8, 0x3e, 0x20, 0x87, 0x58,
+      0x00, 0xf2,
+      // * 4032 zero bytes padding the rest of the block, autofilled by compiler.
   };
 
   ASSERT_EQ(lseek(ramdisk_->fd(), 0, SEEK_SET), 0);
@@ -349,11 +361,11 @@ TEST_F(BlockVerityMutableTest, BasicSeal) {
             "superblock did not contain expected contents");
 
   // TODO: verify that the root hash in Seal is the hash of the superblock.
-  uint8_t expected_seal[32] = {
-    0x79, 0x66, 0xa2, 0x81, 0x27, 0x55, 0xbc, 0x70, 0xba, 0x70, 0x58, 0xbe, 0x1f, 0xbb, 0xf1, 0xc4,
-    0xd8, 0x06, 0xf1, 0xd4, 0x0b, 0x16, 0x00, 0xaa, 0xc2, 0x96, 0x33, 0x32, 0xbf, 0x78, 0x1e, 0x28
-  };
+  uint8_t expected_seal[32] = {0x79, 0x66, 0xa2, 0x81, 0x27, 0x55, 0xbc, 0x70, 0xba, 0x70, 0x58,
+                               0xbe, 0x1f, 0xbb, 0xf1, 0xc4, 0xd8, 0x06, 0xf1, 0xd4, 0x0b, 0x16,
+                               0x00, 0xaa, 0xc2, 0x96, 0x33, 0x32, 0xbf, 0x78, 0x1e, 0x28};
   auto& actual_seal = result.response().seal;
+
   ASSERT_FALSE(actual_seal.has_invalid_tag());
   ASSERT_TRUE(actual_seal.is_sha256());
   auto actual_seal_data = actual_seal.sha256().superblock_hash.data();
