@@ -105,12 +105,12 @@ class BlockVerityTest : public zxtest::Test {
 
   void CloseAndGenerateSeal(
       zx::channel& verity_chan,
-      // TODO: change all fidl::internal::AlignedBuffer<ZX...> to
-      // fidl::Buffer<::llcpp::fuchsia::hardware::block::verified::DeviceManager_CloseAndGenerateSeal_Response>>
-      // when we debug why the latter isn't working.
-      std::unique_ptr<fidl::internal::AlignedBuffer<ZX_CHANNEL_MAX_MSG_BYTES>>* out_buffer,
+      std::unique_ptr<fidl::Buffer<
+          llcpp::fuchsia::hardware::block::verified::DeviceManager::CloseAndGenerateSealResponse>>*
+          out_buffer,
       ::llcpp::fuchsia::hardware::block::verified::DeviceManager_CloseAndGenerateSeal_Result* out) {
-    auto buffer = std::make_unique<fidl::internal::AlignedBuffer<ZX_CHANNEL_MAX_MSG_BYTES>>();
+    auto buffer = std::make_unique<fidl::Buffer<
+        llcpp::fuchsia::hardware::block::verified::DeviceManager::CloseAndGenerateSealResponse>>();
     auto seal_resp =
         ::llcpp::fuchsia::hardware::block::verified::DeviceManager::Call::CloseAndGenerateSeal(
             zx::unowned_channel(verity_chan), buffer->view());
@@ -224,8 +224,8 @@ TEST_F(BlockVerityMutableTest, BasicSeal) {
 
   // Close and generate a seal over the all-zeroes data section.
   ::llcpp::fuchsia::hardware::block::verified::DeviceManager_CloseAndGenerateSeal_Result result;
-  std::unique_ptr<fidl::internal::AlignedBuffer<ZX_CHANNEL_MAX_MSG_BYTES>> out_buffer =
-      std::make_unique<fidl::internal::AlignedBuffer<ZX_CHANNEL_MAX_MSG_BYTES>>();
+  auto out_buffer = std::make_unique<fidl::Buffer<
+      llcpp::fuchsia::hardware::block::verified::DeviceManager::CloseAndGenerateSealResponse>>();
 
   CloseAndGenerateSeal(verity_chan_, &out_buffer, &result);
   ASSERT_TRUE(result.is_response());
