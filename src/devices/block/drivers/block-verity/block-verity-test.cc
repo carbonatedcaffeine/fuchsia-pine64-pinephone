@@ -18,10 +18,9 @@
 #include <utility>
 
 #include <fvm/test/device-ref.h>
+#include <pretty/hexdump.h>  // TODO: remove this once done hexdumping
 #include <ramdevice-client/ramdisk.h>
 #include <zxtest/zxtest.h>
-
-#include <pretty/hexdump.h> // TODO: remove this once done hexdumping
 namespace {
 
 constexpr uint64_t kBlockSize = 4096;
@@ -104,13 +103,20 @@ class BlockVerityTest : public zxtest::Test {
         devmgr.devfs_root(), mutable_block_path.c_str(), &mutable_block_fd));
   }
 
-  void CloseAndGenerateSeal(zx::channel& verity_chan,
-                            ::llcpp::fuchsia::hardware::block::verified::DeviceManager_CloseAndGenerateSeal_Result* out) {
+  void CloseAndGenerateSeal(
+      zx::channel& verity_chan,
+      std::unique_ptr<fidl::Buffer<
+          llcpp::fuchsia::hardware::block::verified::DeviceManager::CloseAndGenerateSealResponse>>*
+          out_buffer,
+      ::llcpp::fuchsia::hardware::block::verified::DeviceManager_CloseAndGenerateSeal_Result* out) {
+    auto buffer = std::make_unique<fidl::Buffer<
+        llcpp::fuchsia::hardware::block::verified::DeviceManager::CloseAndGenerateSealResponse>>();
     auto seal_resp =
         ::llcpp::fuchsia::hardware::block::verified::DeviceManager::Call::CloseAndGenerateSeal(
-            zx::unowned_channel(verity_chan));
+            zx::unowned_channel(verity_chan), buffer->view());
     ASSERT_OK(seal_resp.status());
     ASSERT_FALSE(seal_resp->result.is_err());
+    *out_buffer = std::move(buffer);
     *out = std::move(seal_resp->result);
   }
 
@@ -218,7 +224,10 @@ TEST_F(BlockVerityMutableTest, BasicSeal) {
 
   // Close and generate a seal over the all-zeroes data section.
   ::llcpp::fuchsia::hardware::block::verified::DeviceManager_CloseAndGenerateSeal_Result result;
-  CloseAndGenerateSeal(verity_chan_, &result);
+  std::unique_ptr<fidl::Buffer<
+      llcpp::fuchsia::hardware::block::verified::DeviceManager::CloseAndGenerateSealResponse>>
+      buffer;
+  CloseAndGenerateSeal(verity_chan_, &buffer, &result);
   ASSERT_TRUE(result.is_response());
 
   // Verify contents of the integrity section.  For our 8126 data blocks of all-zeros,
@@ -285,7 +294,6 @@ TEST_F(BlockVerityMutableTest, BasicSeal) {
   }
   memcpy(expected_root_integrity_block.get() + (32 * 63), final_tier_0_integrity_block_hash, 32);
   memset(expected_root_integrity_block.get() + (32 * 64), 0, kBlockSize - (32*64));
-
 
   fbl::Array<uint8_t> read_buf(new uint8_t[kBlockSize], kBlockSize);
   for (size_t integrity_block_index = 0; integrity_block_index < 65; integrity_block_index++) {
