@@ -122,6 +122,8 @@ fbl::String GetTestFilter() {
     return "*Nelson*";
   } else if (!strcmp(board_name, "vs680-evk")) {
     return "*Vs680Evk*";
+  } else if (!strcmp(board_name, "luis")) {
+    return "*Luis*";
   }
 
   return "Unknown";
@@ -663,6 +665,15 @@ TEST_F(DeviceEnumerationTest, C18Test) {
       "emmc/mtk-sdmmc/sdmmc/sdmmc-mmc/user/block/part-010/block",
       "emmc/mtk-sdmmc/sdmmc/sdmmc-mmc/user/block/part-011/block",
       "sys/platform/0d:00:e/mtk-spi-2/spi/spi-2-0",
+  };
+
+  ASSERT_NO_FATAL_FAILURES(TestRunner(kDevicePaths, std::size(kDevicePaths)));
+}
+
+TEST_F(DeviceEnumerationTest, LuisTest) {
+  static const char* kDevicePaths[] = {
+      "sys/platform/05:04:16/sherlock-audio-in",
+      "luis-i2s-audio-out",
   };
 
   ASSERT_NO_FATAL_FAILURES(TestRunner(kDevicePaths, std::size(kDevicePaths)));
