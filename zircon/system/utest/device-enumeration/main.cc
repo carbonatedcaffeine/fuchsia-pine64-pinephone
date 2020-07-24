@@ -408,7 +408,7 @@ TEST_F(DeviceEnumerationTest, SherlockTest) {
       "sys/platform/05:00:14/clocks",
       "sys/platform/05:00:2/aml-i2c",
       "sys/platform/05:00:10/aml-canvas",
-      "aml-thermal/thermal",
+      // "aml-thermal/thermal",
       "sys/platform/00:00:1e/dw-dsi",
       "display/amlogic-display/display-controller",
       "sys/platform/05:00:18/aml-usb-phy-v2",
@@ -460,6 +460,11 @@ TEST_F(DeviceEnumerationTest, SherlockTest) {
       "aml-secure-mem/aml-securemem",
       "pwm-init",
       "sys/platform/05:04:24/ram",
+
+      // Power domains.
+      "aml-power-impl-composite/power-impl",
+      "composite-pd-big-core/power-0",
+      "composite-pd-little-core/power-1",
   };
 
   ASSERT_NO_FATAL_FAILURES(TestRunner(kDevicePaths, std::size(kDevicePaths)));

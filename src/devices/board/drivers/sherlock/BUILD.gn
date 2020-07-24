@@ -41,6 +41,7 @@ template("sherlock_driver") {
       "sherlock-mali.cc",
       "sherlock-nna.cc",
       "sherlock-ot-radio.cc",
+      "sherlock-power.cc",
       "sherlock-pwm.cc",
       "sherlock-ram.cc",
       "sherlock-sdio.cc",

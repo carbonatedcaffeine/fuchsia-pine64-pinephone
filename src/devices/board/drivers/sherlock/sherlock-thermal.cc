@@ -24,9 +24,9 @@ namespace sherlock {
 
 namespace {
 
-constexpr uint32_t kPwmDFn = 3;
+__UNUSED constexpr uint32_t kPwmDFn = 3;
 
-const pbus_mmio_t thermal_mmios[] = {
+__UNUSED const pbus_mmio_t thermal_mmios[] = {
     {
         .base = T931_TEMP_SENSOR_BASE,
         .length = T931_TEMP_SENSOR_LENGTH,
@@ -41,14 +41,14 @@ const pbus_mmio_t thermal_mmios[] = {
     },
 };
 
-const pbus_irq_t thermal_irqs[] = {
+__UNUSED const pbus_irq_t thermal_irqs[] = {
     {
         .irq = T931_TS_PLL_IRQ,
         .mode = ZX_INTERRUPT_MODE_EDGE_HIGH,
     },
 };
 
-constexpr fuchsia_hardware_thermal_ThermalTemperatureInfo TripPoint(float temp_c,
+__UNUSED constexpr fuchsia_hardware_thermal_ThermalTemperatureInfo TripPoint(float temp_c,
                                                                     uint16_t cpu_opp_big,
                                                                     uint16_t cpu_opp_little,
                                                                     uint16_t gpu_opp) {
@@ -102,7 +102,7 @@ constexpr fuchsia_hardware_thermal_ThermalTemperatureInfo TripPoint(float temp_c
 
 // NOTE: This is a very trivial policy, no data backing it up
 // As we do more testing this policy can evolve.
-fuchsia_hardware_thermal_ThermalDeviceInfo aml_sherlock_config =
+__UNUSED fuchsia_hardware_thermal_ThermalDeviceInfo aml_sherlock_config =
     {
         .active_cooling = false,
         .passive_cooling = true,
@@ -160,7 +160,7 @@ fuchsia_hardware_thermal_ThermalDeviceInfo aml_sherlock_config =
 };
 
 // clang-format on
-aml_thermal_info_t aml_thermal_info = {
+__UNUSED aml_thermal_info_t aml_thermal_info = {
     .voltage_table =
         {
             {1'022'000, 0}, {1'011'000, 3}, {1'001'000, 6}, {991'000, 10}, {981'000, 13},
@@ -181,7 +181,7 @@ aml_thermal_info_t aml_thermal_info = {
     .cluster_id_map = {},
 };
 
-const pbus_metadata_t thermal_metadata[] = {
+__UNUSED const pbus_metadata_t thermal_metadata[] = {
     {
         .type = DEVICE_METADATA_THERMAL_CONFIG,
         .data_buffer = &aml_sherlock_config,
@@ -194,7 +194,7 @@ const pbus_metadata_t thermal_metadata[] = {
     },
 };
 
-constexpr pbus_dev_t thermal_dev = []() {
+__UNUSED constexpr pbus_dev_t thermal_dev = []() {
   pbus_dev_t dev = {};
   dev.name = "aml-thermal";
   dev.vid = PDEV_VID_AMLOGIC;
@@ -208,59 +208,59 @@ constexpr pbus_dev_t thermal_dev = []() {
   dev.metadata_count = countof(thermal_metadata);
   return dev;
 }();
-
+__UNUSED 
 const zx_bind_inst_t root_match[] = {
     BI_MATCH(),
 };
-const zx_bind_inst_t pwm_ao_d_match[] = {
+__UNUSED const zx_bind_inst_t pwm_ao_d_match[] = {
     BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_PWM),
     BI_MATCH_IF(EQ, BIND_PWM_ID, T931_PWM_AO_D),
 };
-const zx_bind_inst_t pwm_a_match[] = {
+__UNUSED const zx_bind_inst_t pwm_a_match[] = {
     BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_PWM),
     BI_MATCH_IF(EQ, BIND_PWM_ID, T931_PWM_A),
 };
-const zx_bind_inst_t clk1_match[] = {
+__UNUSED const zx_bind_inst_t clk1_match[] = {
     BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_CLOCK),
     BI_MATCH_IF(EQ, BIND_CLOCK_ID, g12b_clk::G12B_CLK_SYS_PLL_DIV16),
 };
-const zx_bind_inst_t clk2_match[] = {
+__UNUSED const zx_bind_inst_t clk2_match[] = {
     BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_CLOCK),
     BI_MATCH_IF(EQ, BIND_CLOCK_ID, g12b_clk::G12B_CLK_SYS_CPU_CLK_DIV16),
 };
-const zx_bind_inst_t clk3_match[] = {
+__UNUSED const zx_bind_inst_t clk3_match[] = {
     BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_CLOCK),
     BI_MATCH_IF(EQ, BIND_CLOCK_ID, g12b_clk::G12B_CLK_SYS_PLLB_DIV16),
 };
-const zx_bind_inst_t clk4_match[] = {
+__UNUSED const zx_bind_inst_t clk4_match[] = {
     BI_ABORT_IF(NE, BIND_PROTOCOL, ZX_PROTOCOL_CLOCK),
     BI_MATCH_IF(EQ, BIND_CLOCK_ID, g12b_clk::G12B_CLK_SYS_CPUB_CLK_DIV16),
 };
-const device_fragment_part_t pwm_ao_d_fragment[] = {
+__UNUSED const device_fragment_part_t pwm_ao_d_fragment[] = {
     {countof(root_match), root_match},
     {countof(pwm_ao_d_match), pwm_ao_d_match},
 };
-const device_fragment_part_t pwm_a_fragment[] = {
+__UNUSED const device_fragment_part_t pwm_a_fragment[] = {
     {countof(root_match), root_match},
     {countof(pwm_a_match), pwm_a_match},
 };
-const device_fragment_part_t clk1_fragment[] = {
+__UNUSED const device_fragment_part_t clk1_fragment[] = {
     {countof(root_match), root_match},
     {countof(clk1_match), clk1_match},
 };
-const device_fragment_part_t clk2_fragment[] = {
+__UNUSED const device_fragment_part_t clk2_fragment[] = {
     {countof(root_match), root_match},
     {countof(clk2_match), clk2_match},
 };
-const device_fragment_part_t clk3_fragment[] = {
+__UNUSED const device_fragment_part_t clk3_fragment[] = {
     {countof(root_match), root_match},
     {countof(clk3_match), clk3_match},
 };
-const device_fragment_part_t clk4_fragment[] = {
+__UNUSED const device_fragment_part_t clk4_fragment[] = {
     {countof(root_match), root_match},
     {countof(clk4_match), clk4_match},
 };
-const device_fragment_t fragments[] = {
+__UNUSED const device_fragment_t fragments[] = {
     // First fragment must be big cluster PWM, second must be little cluster PWM.
     {countof(pwm_a_fragment), pwm_a_fragment}, {countof(pwm_ao_d_fragment), pwm_ao_d_fragment},
     {countof(clk1_fragment), clk1_fragment},   {countof(clk2_fragment), clk2_fragment},
@@ -270,6 +270,8 @@ const device_fragment_t fragments[] = {
 }  // namespace
 
 zx_status_t Sherlock::ThermalInit() {
+    return ZX_OK;
+    /*
   // Configure the GPIO to be Output & set it to alternate
   // function 3 which puts in PWM_D mode. A53 cluster (Small)
   gpio_impl_.SetAltFunction(T931_GPIOE(1), kPwmDFn);
@@ -290,12 +292,13 @@ zx_status_t Sherlock::ThermalInit() {
     return status;
   }
 
-  status = pbus_.CompositeDeviceAdd(&thermal_dev, fragments, countof(fragments), UINT32_MAX);
-  if (status != ZX_OK) {
-    zxlogf(ERROR, "%s: DeviceAdd failed %d", __func__, status);
-    return status;
-  }
-  return status;
+//   status = pbus_.CompositeDeviceAdd(&thermal_dev, fragments, countof(fragments), UINT32_MAX);
+//   if (status != ZX_OK) {
+//     zxlogf(ERROR, "%s: DeviceAdd failed %d", __func__, status);
+//     return status;
+//   }
+//   return status;
+    */
 }
 
 }  // namespace sherlock

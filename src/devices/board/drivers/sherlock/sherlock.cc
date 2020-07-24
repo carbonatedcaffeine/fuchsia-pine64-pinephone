@@ -87,6 +87,11 @@ int Sherlock::Thread() {
     return -1;
   }
 
+  if (PowerInit() != ZX_OK) {
+    zxlogf(ERROR, "PowerInit() failed");
+    return -1;
+  }
+
   if (I2cInit() != ZX_OK) {
     zxlogf(ERROR, "I2cInit() failed");
   }

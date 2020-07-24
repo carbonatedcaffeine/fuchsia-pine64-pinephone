@@ -22,6 +22,8 @@
 
 namespace aml_pwm {
 
+constexpr uint32_t kPwmDFn = 3;
+
 // Offsets
 static_assert((T931_PWM_PWM_A == kAOffset) && (T931_PWM_PWM_C == kAOffset) &&
                   (T931_PWM_PWM_E == kAOffset) && (T931_AO_PWM_PWM_A == kAOffset) &&
