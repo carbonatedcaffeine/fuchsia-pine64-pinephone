@@ -20,6 +20,7 @@
 #include <fbl/array.h>
 #include <fbl/mutex.h>
 #include <hwreg/mmio.h>
+#include <soc/aml-meson/aml-clk-common.h>
 #include <soc/aml-s905d2/s905d2-hiu.h>
 
 #include "aml-clk-blocks.h"
@@ -53,11 +54,14 @@ class AmlClock : public DeviceType, public ddk::ClockImplProtocol<AmlClock, ddk:
   zx_status_t ClockImplSetInput(uint32_t id, uint32_t idx);
   zx_status_t ClockImplGetNumInputs(uint32_t id, uint32_t* out_num_inputs);
   zx_status_t ClockImplGetInput(uint32_t id, uint32_t* out_input);
+  zx_status_t ClockImplGetDomain(uint32_t* out_domain) {
+    *out_domain = 33;
+    return ZX_OK;
+  }
 
   // CLK IOCTL implementation.
   zx_status_t ClkMeasure(uint32_t clk, fuchsia_hardware_clock_FrequencyInfo* info);
   uint32_t GetClkCount();
-
   zx_status_t DdkMessage(fidl_msg_t* msg, fidl_txn_t* txn);
 
   // Device protocol implementation.
@@ -67,6 +71,13 @@ class AmlClock : public DeviceType, public ddk::ClockImplProtocol<AmlClock, ddk:
   void ShutDown();
 
   void Register(const ddk::PBusProtocolClient& pbus);
+
+  // Get rate of MpllDds
+  zx_status_t GetMpllDdsRate(uint16_t index, uint64_t* freq_hz);
+  // Set rate of MpllDds
+  zx_status_t SetMpllDdsRate(uint16_t index, uint64_t freq_hz);
+  // Return id of clock that is source of specified domain
+  zx_status_t GetDomainRootId(aml_clk_common::aml_clk_domain domain, uint32_t* clkid);
 
  private:
   // Toggle clocks enable bit.

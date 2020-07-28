@@ -17,36 +17,15 @@
 int usage(const char* cmd) {
   fprintf(stderr,
           "\nInteract with clocks on the SOC:\n"
-          "   %s measure                    Measures all clock values\n"
-          "   %s measure -idx <idx>         Measure CLK idx\n"
-          "   %s help                       Print this message\n",
-          cmd, cmd, cmd);
+          "   %s measure [idx]              Measures all clock values\n"
+          "                                     or clock at idx if given\n"
+          "   %s setrate <domain> <hz>      Set rate of clock source for domain to hz\n"
+          "   %s getrate <domain>           Get current rate of clock source for domain\n"
+          "   %s help                       Print this message\n"
+          "\nNote: measure uses on chip measurement capabilities whereas getrate\n"
+          "  calculates the rate based on hardware configuration.\n",
+          cmd, cmd, cmd, cmd);
   return -1;
-}
-
-// Returns "true" if the argument matches the prefix.
-// In this case, moves the argument past the prefix.
-bool prefix_match(const char** arg, const char* prefix) {
-  if (!strncmp(*arg, prefix, strlen(prefix))) {
-    *arg += strlen(prefix);
-    return true;
-  }
-  return false;
-}
-
-// Gets the value of a particular field passed through
-// command line.
-const char* getValue(int argc, char** argv, const char* field) {
-  int i = 1;
-  while (i < argc - 1 && strcmp(argv[i], field) != 0) {
-    ++i;
-  }
-  if (i >= argc - 1) {
-    printf("NULL\n");
-    return NULL;
-  } else {
-    return argv[i + 1];
-  }
 }
 
 char* guess_dev(void) {
@@ -86,25 +65,9 @@ int measure_clk_util(zx_handle_t ch, uint32_t idx) {
   return 0;
 }
 
-int measure_clk(const char* path, uint32_t idx, bool clk) {
-  int fd = open(path, O_RDWR);
-
-  if (fd < 0) {
-    fprintf(stderr, "ERROR: Failed to open clock device: %d\n", fd);
-    return -1;
-  }
-
-  zx_handle_t ch;
-  zx_status_t status = fdio_get_service_handle(fd, &ch);
-
-  if (status != ZX_OK) {
-    fprintf(stderr, "Failed to get service handle: %d!\n", status);
-    return status;
-  }
-
+int measure_clk(zx_handle_t ch, uint32_t idx, bool clk) {
   uint32_t num_clocks = 0;
   ssize_t rc = fuchsia_hardware_clock_DeviceGetCount(ch, &num_clocks);
-
   if (rc < 0) {
     fprintf(stderr, "ERROR: Failed to get num_clocks: %zd\n", rc);
     return rc;
@@ -124,45 +87,19 @@ int measure_clk(const char* path, uint32_t idx, bool clk) {
       }
     }
   }
-
   return 0;
 }
 
 int main(int argc, char** argv) {
-  int err = 0;
   const char* cmd = basename(argv[0]);
   char* path = NULL;
-  const char* index = NULL;
-  bool measure = false;
   bool clk = false;
-  uint32_t idx = 0;
+  uint32_t idx = 50000000;
 
   // If no arguments passed, bail out after dumping
   // usage information.
-  if (argc == 1) {
+  if (argc < 2) {
     return usage(cmd);
-  }
-
-  // Parse all args.
-  while (argc > 1) {
-    const char* arg = argv[1];
-    if (prefix_match(&arg, "measure")) {
-      measure = true;
-    }
-    if (prefix_match(&arg, "-idx")) {
-      index = getValue(argc, argv, "-idx");
-      clk = true;
-      if (index) {
-        idx = atoi(index);
-      } else {
-        fprintf(stderr, "Enter Valid CLK IDX.\n");
-      }
-    }
-    if (prefix_match(&arg, "help")) {
-      return usage(cmd);
-    }
-    argc--;
-    argv++;
   }
 
   // Get the device path.
@@ -172,12 +109,58 @@ int main(int argc, char** argv) {
     return usage(cmd);
   }
 
-  // Measure the clocks.
-  if (measure) {
-    err = measure_clk(path, idx, clk);
-    if (err) {
-      printf("Measure CLK failed.\n");
-    }
+  int fd = open(path, O_RDWR);
+  if (fd < 0) {
+    fprintf(stderr, "ERROR: Failed to open clock device: %d\n", fd);
+    return -1;
   }
-  return 0;
+
+  zx_handle_t ch;
+  zx_status_t status = fdio_get_service_handle(fd, &ch);
+  if (status != ZX_OK) {
+    fprintf(stderr, "Could not get service handle: %d\n", status);
+    return status;
+  }
+
+  if (!strcmp(argv[1], "setrate")) {
+    if (argc < 4) {
+      return usage(cmd);
+    }
+    uint32_t domain = atoi(argv[2]);
+    uint32_t clkfreq = atoi(argv[3]);
+    uint64_t actual;
+    ssize_t rc = fuchsia_hardware_clock_DeviceSetRate(ch, domain, clkfreq, &status, &actual);
+    if (rc || status) {
+      fprintf(stderr, "SetRate failed: rc = %zd, status = %d\n", rc, status);
+      return rc;
+    } else {
+      printf("Clock set for domain %u successful.  Actual rate = %lu\n", domain, actual);
+    }
+    return 0;
+  }
+
+  if (!strcmp(argv[1], "getrate")) {
+    if (argc < 3) {
+      return usage(cmd);
+    }
+    uint32_t domain = atoi(argv[2]);
+    uint64_t freq;
+    ssize_t rc = fuchsia_hardware_clock_DeviceGetRate(ch, domain, &status, &freq);
+    if (rc || status) {
+      fprintf(stderr, "SetRate failed: rc = %zd, status = %d\n", rc, status);
+      return rc;
+    } else {
+      printf("Clock frequency for domain[%u] = %lu\n", domain, freq);
+    }
+    return 0;
+  }
+
+  if (!strcmp(argv[1], "measure")) {
+    if (argc == 3) {
+      idx = atoi(argv[2]);
+      clk = true;
+    }
+    return measure_clk(ch, idx, clk);
+  }
+  return usage(cmd);
 }

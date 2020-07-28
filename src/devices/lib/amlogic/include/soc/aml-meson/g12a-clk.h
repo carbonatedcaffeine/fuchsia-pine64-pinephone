@@ -11,6 +11,7 @@
 namespace g12a_clk {
 
 using clk_type = ::aml_clk_common::aml_clk_type;
+using clk_domain = ::aml_clk_common::aml_clk_domain;
 
 // kMesonGate Clocks
 constexpr uint32_t CLK_SYS_PLL_DIV16 = AmlClkId(0, clk_type::kMesonGate);
@@ -88,6 +89,16 @@ constexpr uint32_t CLK_PCIE_PLL = AmlClkId(PCIE_PLL, clk_type::kMesonPll);
 constexpr uint32_t CLK_HIFI_PLL = AmlClkId(HIFI_PLL, clk_type::kMesonPll);
 constexpr uint32_t CLK_SYS_PLL = AmlClkId(SYS_PLL, clk_type::kMesonPll);
 constexpr uint32_t CLK_SYS1_PLL = AmlClkId(SYS1_PLL, clk_type::kMesonPll);
+
+// kMesonDdsClocks
+constexpr clock_id_t CLK_MP0_DDS =
+    AmlClkId(MP0_DDS, clk_type::kMesonDds, clk_domain::kMpll0ClockDomain);
+constexpr clock_id_t CLK_MP1_DDS =
+    AmlClkId(MP1_DDS, clk_type::kMesonDds, clk_domain::kMpll1ClockDomain);
+constexpr clock_id_t CLK_MP2_DDS =
+    AmlClkId(MP2_DDS, clk_type::kMesonDds, clk_domain::kMpll2ClockDomain);
+constexpr clock_id_t CLK_MP3_DDS =
+    AmlClkId(MP3_DDS, clk_type::kMesonDds, clk_domain::kMpll3ClockDomain);
 
 }  // namespace g12a_clk
 

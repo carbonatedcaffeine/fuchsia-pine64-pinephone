@@ -16,8 +16,8 @@ using ClockDeviceType = ddk::Device<ClockDevice, ddk::UnbindableNew>;
 class ClockDevice : public ClockDeviceType,
                     public ddk::ClockProtocol<ClockDevice, ddk::base_protocol> {
  public:
-  ClockDevice(zx_device_t* parent, clock_impl_protocol_t* clock, uint32_t id)
-      : ClockDeviceType(parent), clock_(clock), id_(id) {}
+  ClockDevice(zx_device_t* parent, clock_impl_protocol_t* clock, uint32_t id, uint32_t domain = 0)
+      : ClockDeviceType(parent), clock_(clock), id_(id), domain_(domain) {}
 
   static zx_status_t Create(void* ctx, zx_device_t* parent);
 
@@ -35,10 +35,15 @@ class ClockDevice : public ClockDeviceType,
   zx_status_t ClockSetInput(uint32_t idx);
   zx_status_t ClockGetNumInputs(uint32_t* out);
   zx_status_t ClockGetInput(uint32_t* out);
+  zx_status_t ClockGetDomain(uint32_t* out) {
+    *out = domain_;
+    return ZX_OK;
+  }
 
  private:
   const ddk::ClockImplProtocolClient clock_;
   const uint32_t id_;
+  const uint32_t domain_;
 };
 
 #endif  // SRC_DEVICES_CLOCK_DRIVERS_CLOCK_CLOCK_H_

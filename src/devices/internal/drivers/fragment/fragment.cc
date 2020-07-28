@@ -158,6 +158,8 @@ zx_status_t Fragment::RpcClock(const uint8_t* req_buf, uint32_t req_size, uint8_
       return clock_client_.proto_client().GetNumInputs(&resp->num_inputs);
     case ClockOp::GET_INPUT:
       return clock_client_.proto_client().GetInput(&resp->current_input);
+    case ClockOp::GET_DOMAIN:
+      return clock_client_.proto_client().GetDomain(&resp->domain);
     default:
       zxlogf(ERROR, "%s: unknown clk op %u", __func__, static_cast<uint32_t>(req->op));
       return ZX_ERR_INTERNAL;

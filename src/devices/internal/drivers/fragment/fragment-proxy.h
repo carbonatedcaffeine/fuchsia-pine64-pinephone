@@ -83,6 +83,7 @@ class FragmentProxy : public FragmentProxyBase,
   zx_status_t ClockSetInput(uint32_t idx);
   zx_status_t ClockGetNumInputs(uint32_t* out_num_inputs);
   zx_status_t ClockGetInput(uint32_t* out_current_input);
+  zx_status_t ClockGetDomain(uint32_t* out_domain);
   zx_status_t EthBoardResetPhy();
   zx_status_t GpioConfigIn(uint32_t flags);
   zx_status_t GpioConfigOut(uint8_t initial_value);

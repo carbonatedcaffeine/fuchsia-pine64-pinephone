@@ -81,8 +81,9 @@ zx_status_t ClockDevice::Create(void* ctx, zx_device_t* parent) {
 
   for (uint32_t i = 0; i < clock_count; i++) {
     auto clock_id = clock_ids[i].clock_id;
+    auto domain = clock_ids[i].domain;
     fbl::AllocChecker ac;
-    std::unique_ptr<ClockDevice> dev(new (&ac) ClockDevice(parent, &clock_proto, clock_id));
+    std::unique_ptr<ClockDevice> dev(new (&ac) ClockDevice(parent, &clock_proto, clock_id, domain));
     if (!ac.check()) {
       return ZX_ERR_NO_MEMORY;
     }

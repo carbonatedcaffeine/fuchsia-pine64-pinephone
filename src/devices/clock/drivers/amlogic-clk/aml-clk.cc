@@ -6,6 +6,7 @@
 
 #include <fuchsia/hardware/clock/c/fidl.h>
 #include <lib/device-protocol/pdev.h>
+#include <math.h>
 #include <string.h>
 
 #include <ddk/binding.h>
@@ -16,7 +17,6 @@
 #include <ddktl/protocol/platform/bus.h>
 #include <fbl/auto_call.h>
 #include <fbl/auto_lock.h>
-#include <soc/aml-meson/aml-clk-common.h>
 
 #include "aml-axg-blocks.h"
 #include "aml-g12a-blocks.h"
@@ -30,6 +30,16 @@ namespace amlogic_clock {
 static constexpr uint32_t kHiuMmio = 0;
 static constexpr uint32_t kDosbusMmio = 1;
 static constexpr uint32_t kMsrMmio = 2;
+
+// Rate of the fixed MPLL synthesizer
+static constexpr double kMpllRate = 2e9;
+// Max fractionality of MPLL DDS fractional divider's Sigma Delta Modulator
+static constexpr uint32_t kMpllDdsSdmMAX = 16384;
+// Number of MPLL DDS fractional dividers
+static constexpr uint32_t kMpllDdsCount = 4;
+// Rate limits of MPLL DDS fractional dividers
+static constexpr uint64_t kMpllDdsMaxRate = 500000000;
+static constexpr uint32_t kMpllDdsMinRate = 3920000;
 
 #define MSR_WAIT_BUSY_RETRIES 5
 #define MSR_WAIT_BUSY_TIMEOUT_US 10000
@@ -251,18 +261,19 @@ zx_status_t AmlClock::ClockImplSetRate(uint32_t clk, uint64_t hz) {
   aml_clk_common::aml_clk_type type = aml_clk_common::AmlClkType(clk);
   const uint16_t clkid = aml_clk_common::AmlClkIndex(clk);
 
-  if (clkid >= HIU_PLL_COUNT) {
-    return ZX_ERR_INVALID_ARGS;
+  if (type == aml_clk_common::aml_clk_type::kMesonPll) {
+    if (clkid >= HIU_PLL_COUNT) {
+      return ZX_ERR_INVALID_ARGS;
+    }
+    aml_pll_dev_t* target = &plldev_[clkid];
+    return s905d2_pll_set_rate(target, hz);
   }
 
-  if (type != aml_clk_common::aml_clk_type::kMesonPll) {
-    // For now, only Meson PLLs support rate operation.
-    return ZX_ERR_NOT_SUPPORTED;
+  if (type == aml_clk_common::aml_clk_type::kMesonDds) {
+    return SetMpllDdsRate(clkid, hz);
   }
 
-  aml_pll_dev_t* target = &plldev_[clkid];
-
-  return s905d2_pll_set_rate(target, hz);
+  return ZX_ERR_NOT_SUPPORTED;
 }
 
 zx_status_t AmlClock::ClockImplQuerySupportedRate(uint32_t clk, uint64_t max_rate,
@@ -308,7 +319,62 @@ zx_status_t AmlClock::ClockImplQuerySupportedRate(uint32_t clk, uint64_t max_rat
 }
 
 zx_status_t AmlClock::ClockImplGetRate(uint32_t id, uint64_t* out_current_rate) {
+  if (out_current_rate == nullptr) {
+    return ZX_ERR_INVALID_ARGS;
+  }
+
+  const uint16_t index = aml_clk_common::AmlClkIndex(id);
+  const aml_clk_common::aml_clk_type type = (aml_clk_common::AmlClkType(id));
+
+  if (type == aml_clk_common::aml_clk_type::kMesonDds) {
+    zx_status_t status = GetMpllDdsRate(index, out_current_rate);
+    return status;
+  }
+
   return ZX_ERR_NOT_SUPPORTED;
+}
+
+zx_status_t AmlClock::GetMpllDdsRate(uint16_t index, uint64_t* freq_hz) {
+  if (index >= kMpllDdsCount) {
+    return ZX_ERR_INVALID_ARGS;
+  }
+  uint32_t reg = hiu_mmio_.Read32(kHhiMpllCntl1 + 8 * index);
+  // check if dds is enabled
+  if ((reg & 0xc0000000) != 0xc0000000) {
+    *freq_hz = 0;
+    return ZX_OK;
+  }
+  double sdm = static_cast<double>(reg & ((1 << 14) - 1)) / static_cast<double>(kMpllDdsSdmMAX);
+  uint32_t n = (reg >> 20) & ((1 << 9) - 1);
+  *freq_hz = static_cast<uint64_t>(round(kMpllRate / (n + sdm)));
+  return ZX_OK;
+}
+
+zx_status_t AmlClock::SetMpllDdsRate(uint16_t index, uint64_t freq_hz) {
+  if (index >= kMpllDdsCount) {
+    return ZX_ERR_INVALID_ARGS;
+  }
+  if ((freq_hz > kMpllDdsMaxRate) || (freq_hz < kMpllDdsMinRate)) {
+    return ZX_ERR_INVALID_ARGS;
+  }
+
+  double ratio = kMpllRate / static_cast<double>(freq_hz);
+  uint32_t n = static_cast<uint32_t>(trunc(ratio));
+  uint32_t sdm = static_cast<uint32_t>(round((ratio - n) * kMpllDdsSdmMAX));
+
+  // Initialize the MPLL DDS control bocck
+  hiu_mmio_.Write32(0x00000543, kHhiMpllCntl0);
+  // Initialize specific DDS block, set load bit (hw double buffered)
+  hiu_mmio_.Write32(0x40000033, kHhiMpllCntl2 + 8 * index);
+
+  // Since load bit is set, cntl1 must be only written to once with all changes
+  uint32_t reg = hiu_mmio_.Read32(kHhiMpllCntl1 + 8 * index);
+  reg |= 0xc0000000;  // Enable the dds and sdm
+  reg = (reg & ~((1 << 14) - 1)) | sdm;
+  reg = (reg & ~(((1 << 9) - 1) << 20)) | (n << 20);
+  hiu_mmio_.Write32(reg, kHhiMpllCntl1 + 8 * index);
+
+  return ZX_OK;
 }
 
 zx_status_t AmlClock::IsSupportedMux(const uint32_t id, const uint16_t kSupportedMask) {
@@ -348,8 +414,8 @@ zx_status_t AmlClock::ClockImplSetInput(uint32_t id, uint32_t idx) {
   const meson_clk_mux_t& mux = muxes_[index];
 
   if (idx >= mux.n_inputs) {
-    zxlogf(ERROR, "%s: mux input index out of bounds, max = %u, idx = %u.", __func__,
-           mux.n_inputs, idx);
+    zxlogf(ERROR, "%s: mux input index out of bounds, max = %u, idx = %u.", __func__, mux.n_inputs,
+           idx);
     return ZX_ERR_OUT_OF_RANGE;
   }
 
@@ -496,6 +562,26 @@ void AmlClock::Register(const ddk::PBusProtocolClient& pbus) {
   pbus.RegisterProtocol(ZX_PROTOCOL_CLOCK_IMPL, &clk_proto, sizeof(clk_proto));
 }
 
+zx_status_t AmlClock::GetDomainRootId(aml_clk_common::aml_clk_domain domain, uint32_t* clkid) {
+  switch (domain) {
+    case aml_clk_common::aml_clk_domain::kRootClockDomain:
+      return ZX_ERR_NOT_SUPPORTED;
+    case aml_clk_common::aml_clk_domain::kMpll0ClockDomain:
+      *clkid = aml_clk_common::AmlClkId(MP0_DDS, aml_clk_common::aml_clk_type::kMesonDds);
+      return ZX_OK;
+    case aml_clk_common::aml_clk_domain::kMpll1ClockDomain:
+      *clkid = aml_clk_common::AmlClkId(MP1_DDS, aml_clk_common::aml_clk_type::kMesonDds);
+      return ZX_OK;
+    case aml_clk_common::aml_clk_domain::kMpll2ClockDomain:
+      *clkid = aml_clk_common::AmlClkId(MP2_DDS, aml_clk_common::aml_clk_type::kMesonDds);
+      return ZX_OK;
+    case aml_clk_common::aml_clk_domain::kMpll3ClockDomain:
+      *clkid = aml_clk_common::AmlClkId(MP3_DDS, aml_clk_common::aml_clk_type::kMesonDds);
+      return ZX_OK;
+  }
+  return ZX_ERR_NOT_SUPPORTED;
+}
+
 zx_status_t fidl_clk_measure(void* ctx, uint32_t clk, fidl_txn_t* txn) {
   auto dev = static_cast<AmlClock*>(ctx);
   fuchsia_hardware_clock_FrequencyInfo info;
@@ -511,9 +597,38 @@ zx_status_t fidl_clk_get_count(void* ctx, fidl_txn_t* txn) {
   return fuchsia_hardware_clock_DeviceGetCount_reply(txn, dev->GetClkCount());
 }
 
+zx_status_t fidl_clk_set_rate(void* ctx, uint32_t domain, uint64_t hz, fidl_txn_t* txn) {
+  auto dev = static_cast<AmlClock*>(ctx);
+  zx_status_t status;
+  uint32_t id;
+  uint64_t actual = 0;
+  status = dev->GetDomainRootId(static_cast<aml_clk_common::aml_clk_domain>(domain), &id);
+  if (status == ZX_OK) {
+    status = dev->ClockImplSetRate(id, hz);
+  }
+  if (status == ZX_OK) {
+    status = dev->ClockImplGetRate(id, &actual);
+  }
+  return fuchsia_hardware_clock_DeviceSetRate_reply(txn, status, actual);
+}
+
+zx_status_t fidl_clk_get_rate(void* ctx, uint32_t domain, fidl_txn_t* txn) {
+  auto dev = static_cast<AmlClock*>(ctx);
+  uint32_t id;
+  uint64_t actual = 0;
+  zx_status_t status =
+      dev->GetDomainRootId(static_cast<aml_clk_common::aml_clk_domain>(domain), &id);
+  if (status == ZX_OK) {
+    status = dev->ClockImplGetRate(id, &actual);
+  }
+  return fuchsia_hardware_clock_DeviceGetRate_reply(txn, status, actual);
+}
+
 static const fuchsia_hardware_clock_Device_ops_t fidl_ops_ = {
     .Measure = fidl_clk_measure,
     .GetCount = fidl_clk_get_count,
+    .SetRate = fidl_clk_set_rate,
+    .GetRate = fidl_clk_get_rate,
 };
 
 zx_status_t AmlClock::DdkMessage(fidl_msg_t* msg, fidl_txn_t* txn) {

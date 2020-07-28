@@ -286,6 +286,21 @@ zx_status_t FragmentProxy::ClockGetInput(uint32_t* out_current_input) {
   return status;
 }
 
+zx_status_t FragmentProxy::ClockGetDomain(uint32_t* out_domain) {
+  ClockProxyRequest req = {};
+  ClockProxyResponse resp = {};
+  req.header.proto_id = ZX_PROTOCOL_CLOCK;
+  req.op = ClockOp::GET_DOMAIN;
+
+  auto status = Rpc(&req.header, sizeof(req), &resp.header, sizeof(resp));
+
+  if (status == ZX_OK) {
+    *out_domain = resp.domain;
+  }
+
+  return status;
+}
+
 zx_status_t FragmentProxy::EthBoardResetPhy() {
   EthBoardProxyRequest req = {};
   ProxyResponse resp = {};

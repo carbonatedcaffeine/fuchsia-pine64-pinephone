@@ -196,6 +196,7 @@ enum class ClockOp {
   SET_INPUT,
   GET_NUM_INPUTS,
   GET_INPUT,
+  GET_DOMAIN,
 };
 
 struct ClockProxyRequest {
@@ -211,6 +212,7 @@ struct ClockProxyResponse {
   uint64_t rate;
   uint32_t num_inputs;
   uint32_t current_input;
+  uint32_t domain;
 };
 
 // ZX_PROTOCOL_POWER proxy support.

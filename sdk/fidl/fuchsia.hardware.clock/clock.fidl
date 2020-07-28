@@ -4,6 +4,8 @@
 
 library fuchsia.hardware.clock;
 
+using zx;
+
 const uint32 NAME_LEN = 30;
 
 struct FrequencyInfo {
@@ -13,6 +15,15 @@ struct FrequencyInfo {
 
 [ForDeprecatedCBindings]
 protocol Device {
+    /// Measure the clock with id = clock
     Measure(uint32 clock) -> (FrequencyInfo info);
+
+    /// Return the number of clocks supported by Measure function
     GetCount() -> (uint32 count);
+
+    /// Set the rate of the clock source of specified domain
+    SetRate(uint32 domain, uint64 rate) -> (zx.status status, uint64 actual);
+
+    /// Get the rate of the clock soruce of specified domain
+    GetRate(uint32 domain) -> (zx.status status, uint64 rate);
 };

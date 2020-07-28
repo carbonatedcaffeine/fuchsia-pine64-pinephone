@@ -44,4 +44,7 @@ protocol Clock {
 
     /// Returns the index of the current input of this clock.
     GetInput() -> (zx.status s, uint32 index);
+
+    /// Returns the clock domain of this clock.
+    GetDomain() -> (zx.status s, uint32 domain);
 };

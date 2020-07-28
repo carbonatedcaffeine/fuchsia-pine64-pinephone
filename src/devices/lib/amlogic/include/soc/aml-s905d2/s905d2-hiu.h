@@ -21,6 +21,14 @@ typedef enum {
   HIU_PLL_COUNT,
 } hhi_plls_t;
 
+typedef enum {
+  MP0_DDS = 0,
+  MP1_DDS,
+  MP2_DDS,
+  MP3_DDS,
+  HIU_DDS_COUNT,
+} hhi_dds_t;
+
 typedef struct {
   uint64_t rate;
   uint32_t n;

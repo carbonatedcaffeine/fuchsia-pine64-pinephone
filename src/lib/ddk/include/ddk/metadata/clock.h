@@ -7,6 +7,7 @@
 
 typedef struct {
   uint32_t clock_id;
+  uint32_t domain = 0;
 } clock_id_t;
 
 #endif  // SRC_LIB_DDK_INCLUDE_DDK_METADATA_CLOCK_H_
