@@ -156,6 +156,7 @@ zedboot_deps = [
   "//src/media/audio/drivers/astro-tdm-output",
   "//src/media/audio/drivers/codecs/tas27xx",
   "//src/media/audio/drivers/usb-audio",
+  "//src/media/audio/drivers/vim3-tdm",
   "//src/power/shutdown-shim",
   "//src/security/bin/syscall-check",
   "//src/storage/bin/blobfs",

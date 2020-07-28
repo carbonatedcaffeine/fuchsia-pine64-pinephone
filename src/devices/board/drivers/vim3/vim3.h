@@ -28,7 +28,16 @@ enum {
   BTI_SDIO,
   BTI_SYSMEM,
   BTI_NNA,
+  BTI_AUDIO_OUT,
 };
+enum {
+  VIM3_I2C_AO_BUS,
+  VIM3_I2C_M3_BUS,
+};
+
+constexpr uint8_t VIM3_I2C_CODEC_ADDR = (0x48);
+constexpr uint8_t VIM3_I2C_RTC_ADDR = (0x51);
+constexpr uint8_t VIM3_I2C_MCU_ADDR = (0x18);
 
 class Vim3;
 using Vim3Type = ddk::Device<Vim3, ddk::Initializable>;
@@ -48,6 +57,7 @@ class Vim3 : public Vim3Type {
  private:
   DISALLOW_COPY_ASSIGN_AND_MOVE(Vim3);
 
+  zx_status_t AudioInit();
   zx_status_t ClkInit();
   zx_status_t EmmcInit();
   zx_status_t EthInit();

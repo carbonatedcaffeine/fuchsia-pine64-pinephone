@@ -101,9 +101,13 @@ int Vim3::Thread() {
   }
   if ((status = NnaInit()) != ZX_OK) {
     zxlogf(ERROR, "NnaInit() failed: %d", status);
+  }
+  if ((status = AudioInit()) != ZX_OK) {
+    zxlogf(ERROR, "AudioInit() failed: %d\n", status);
     init_txn_->Reply(ZX_ERR_INTERNAL);
     return status;
   }
+
   init_txn_->Reply(status);
   return ZX_OK;
 }

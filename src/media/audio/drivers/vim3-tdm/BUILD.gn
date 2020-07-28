@@ -1,0 +1,34 @@
+# Copyright 2020 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/fuchsia/rules.gni")
+
+driver_module("vim3-tdm") {
+  defines = [ "_ALL_SOURCE" ]
+  configs += [ "//build/config/fuchsia:enable_zircon_asserts" ]
+  configs -= [ "//build/config/fuchsia:no_cpp_standard_library" ]
+  configs += [ "//build/config/fuchsia:static_cpp_standard_library" ]
+  configs += [ "//build/unification/config:zircon-migrated" ]
+  sources = [ "audio-stream-out.cc" ]
+
+  deps = [
+    "//sdk/banjo/ddk.protocol.composite",
+    "//sdk/banjo/ddk.protocol.gpio",
+    "//sdk/banjo/ddk.protocol.platform.device",
+    "//src/devices/bus/lib/device-protocol-pdev",
+    "//src/devices/lib/amlogic",
+    "//src/devices/lib/driver",
+    "//src/devices/lib/mmio",
+    "//src/lib/ddk",
+    "//src/lib/ddktl",
+    "//src/media/audio/lib/simple-audio-stream",
+    "//src/media/audio/lib/simple-codec",
+    "//zircon/public/lib/fbl",
+    "//zircon/public/lib/sync",
+    "//zircon/public/lib/zx",
+    "//zircon/system/ulib/audio-driver-proto",
+    "//zircon/system/ulib/audio-proto-utils",
+    "//zircon/system/ulib/fzl",
+  ]
+}
