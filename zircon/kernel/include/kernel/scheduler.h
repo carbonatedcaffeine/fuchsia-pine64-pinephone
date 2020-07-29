@@ -38,19 +38,34 @@ using SchedPerformanceScale = ffl::Fixed<int32_t, 8>;
 class Scheduler {
  public:
   // Default minimum granularity of time slices.
-  static constexpr SchedDuration kDefaultMinimumGranularity = SchedUs(750);
+  static constexpr SchedDuration kDefaultMinimumGranularity = SchedMs(1);
 
   // Default target latency for a scheduling period.
-  static constexpr SchedDuration kDefaultTargetLatency = SchedMs(16);
+  static constexpr SchedDuration kDefaultTargetLatency = SchedMs(8);
 
-  // Default peak latency for a scheduling period.
-  static constexpr SchedDuration kDefaultPeakLatency = SchedMs(24);
+  // The amount of headroom to apply when comparing the estimated queuing time
+  // of a CPU to the sampled mean. This value defines the amount of imbalance to
+  // permit when finding a CPU to place a task on.
+  static constexpr SchedDuration kLoadHeadroom = SchedUs(500);
 
-  static_assert(kDefaultPeakLatency >= kDefaultTargetLatency);
+  // The per-CPU deadline utilization limit to attempt to honor when selecting a
+  // CPU to place a task. It is up to userspace to ensure that the total set of
+  // deadline tasks can honor this limit. Even if userspace ensures the total
+  // set of deadline utilizations is within the total available processor
+  // resources, when total utilization is high enough it may not be possible to
+  // honor this limit due to the bin packing problem.
+  static constexpr SchedUtilization kCpuUtilizationLimit{1};
+
+  // The maximum deadline utilization permitted for a single thread. This limit
+  // is applied when scaling the utilization of a deadline task to the relative
+  // performance of a candidate target processor -- placing a task on a
+  // processor that would cause the scaled thread utilization to exceed this
+  // value is avoided if possible.
+  static constexpr SchedUtilization kThreadUtilizationMax{1};
 
   // The adjustment rate of the exponential moving average tracking the expected
   // runtime of each thread.
-  static constexpr ffl::Fixed<int32_t, 2> kExpectedRuntimeAlpha = ffl::FromRatio(3, 4);
+  static constexpr ffl::Fixed<int32_t, 2> kExpectedRuntimeAlpha = ffl::FromRatio(1, 4);
 
   Scheduler() = default;
   ~Scheduler() = default;
@@ -203,12 +218,12 @@ class Scheduler {
   // Evaluates the schedule and returns the thread that should execute,
   // updating the run queue as necessary.
   Thread* EvaluateNextThread(SchedTime now, Thread* current_thread, bool timeslice_expired,
-                             SchedDuration total_runtime_ns) TA_REQ(thread_lock);
+                             SchedDuration scaled_total_runtime_ns) TA_REQ(thread_lock);
 
   // Adds a thread to the run queue tree. The thread must be active on this
   // CPU.
   void QueueThread(Thread* thread, Placement placement, SchedTime now = SchedTime{0},
-                   SchedDuration total_runtime_ns = SchedDuration{0}) TA_REQ(thread_lock);
+                   SchedDuration scaled_total_runtime_ns = SchedDuration{0}) TA_REQ(thread_lock);
 
   // Removes the thread at the head of the first eligible run queue.
   Thread* DequeueThread(SchedTime now) TA_REQ(thread_lock);
@@ -277,11 +292,17 @@ class Scheduler {
 
   // Updates the total expected runtime estimator and exports the atomic shadow
   // variable for cross-CPU readers.
-  inline void UpdateTotalExpectedRuntime(SchedDuration delta) TA_REQ(thread_lock);
+  inline void UpdateTotalExpectedRuntime(SchedDuration delta_ns) TA_REQ(thread_lock);
 
   // Updates to total deadline utilization estimator and exports the atomic
   // shadow variable for cross-CPU readers.
-  inline void UpdateTotalDeadlineUtilization(SchedUtilization delta) TA_REQ(thread_lock);
+  inline void UpdateTotalDeadlineUtilization(SchedUtilization delta_ns) TA_REQ(thread_lock);
+
+  // Utilities to scale up or down the given value by the performace scale of the CPU.
+  template <typename Value>
+  inline Value ScaleUp(Value value) const;
+  template <typename Value>
+  inline Value ScaleDown(Value value) const;
 
   // Update trace counters which track the total number of runnable threads for a CPU
   inline void TraceTotalRunnableThreads() const TA_REQ(thread_lock);
@@ -396,7 +417,7 @@ class Scheduler {
   // value is an estimate of the average queuimg time for this CPU, given the
   // current set of active threads.
   TA_GUARDED(thread_lock)
-  SchedDuration total_expected_runtime_ns_{SchedNs(0)};
+  SchedDuration total_expected_runtime_ns_{0};
 
   // The sum of the worst case utilization of all active deadline threads on
   // this CPU.
@@ -448,6 +469,11 @@ class Scheduler {
   // cache performance.
   RelaxedAtomic<SchedDuration> exported_total_expected_runtime_ns_{SchedNs(0)};
   RelaxedAtomic<SchedUtilization> exported_total_deadline_utilization_{SchedUtilization{0}};
+
+  // Sum of the total expected runtimes of all CPUs in the system. This value
+  // may be divided by the number of active CPUs to derive the mean expected
+  // runtime or equilibrium point for load balancing.
+  inline static RelaxedAtomic<zx_duration_t> global_expected_runtime_ns_{0};
 };
 
 #endif  // ZIRCON_KERNEL_INCLUDE_KERNEL_SCHEDULER_H_
