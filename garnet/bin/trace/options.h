@@ -12,7 +12,7 @@
 namespace tracing {
 
 constexpr uint32_t kMinBufferSizeMegabytes = 1;
-constexpr uint32_t kMaxBufferSizeMegabytes = 64;
+constexpr uint32_t kMaxBufferSizeMegabytes = 128;
 
 // Individual providers can be tuned with these parameters.
 struct ProviderSpec {
