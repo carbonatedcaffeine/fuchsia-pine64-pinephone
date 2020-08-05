@@ -12,6 +12,7 @@
 #include <zircon/syscalls/object.h>
 #include <zircon/types.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <mutex>
@@ -221,6 +222,43 @@ zx::unowned_profile GetProfile(zx::duration capacity, zx::duration deadline, zx:
   zx::profile profile;
   const auto status = provider.GetDeadlineProfile(capacity.get(), deadline.get(), period.get(),
                                                   "garnet/bin/loadbench", &fidl_status, &profile);
+  FX_CHECK(status == ZX_OK);
+  FX_CHECK(fidl_status == ZX_OK);
+
+  // Add the new profile to the map for later retrieval.
+  auto [iter, okay] = profiles.emplace(key, std::move(profile));
+  FX_CHECK(okay);
+
+  return zx::unowned_profile{iter->second.get()};
+}
+
+// Returns an unowned handle to a profile for the specified CPU affinity.
+// Maintains an internal map of already requested profiles and returns the same
+// handle for multiple requests for the same set of CPUs.
+zx::unowned_profile GetProfile(zx_cpu_set_t affinity) {
+  using Key = zx_cpu_set_t;
+  const Key key{affinity};
+
+  // Maintains a map of profiles for each previously requested priority/affinity.
+  static std::map<Key, zx::profile> profiles;
+  static std::mutex mutex;
+
+  std::lock_guard<std::mutex> guard{mutex};
+
+  // Return the existing handle if it's already in the map.
+  auto search = profiles.find(key);
+  if (search != profiles.end()) {
+    return zx::unowned_profile{search->second.get()};
+  }
+
+  auto& provider = GetProfileProvider();
+
+  fuchsia::scheduler::CpuSet cpu_set{};
+  std::copy(std::begin(affinity.mask), std::end(affinity.mask), std::begin(cpu_set.mask));
+
+  zx_status_t fidl_status;
+  zx::profile profile;
+  const auto status = provider.GetCpuAffinityProfile(cpu_set, &fidl_status, &profile);
   FX_CHECK(status == ZX_OK);
   FX_CHECK(fidl_status == ZX_OK);
 

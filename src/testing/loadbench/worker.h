@@ -11,6 +11,7 @@
 #include <lib/zx/thread.h>
 #include <lib/zx/time.h>
 #include <lib/zx/timer.h>
+#include <zircon/status.h>
 #include <zircon/time.h>
 
 #include <atomic>
@@ -38,8 +39,8 @@ class Worker {
   Worker& operator=(const Worker&) = delete;
 
   static std::pair<std::thread, std::unique_ptr<Worker>> Create(WorkerConfig config) {
-    std::unique_ptr<Worker> worker{
-        new Worker{std::move(config.actions), config.name, config.group, config.priority}};
+    std::unique_ptr<Worker> worker{new Worker{std::move(config.actions), config.name, config.group,
+                                              config.priority, config.cpu_affinity}};
     return {std::thread{&Worker::Run, worker.get()}, std::move(worker)};
   }
 
@@ -86,7 +87,10 @@ class Worker {
     FX_CHECK(ready_count() == count) << "ready_count=" << ready_count() << " count=" << count;
   }
 
-  static void StartAll() { sync_completion_signal(&start_completion_); }
+  static void StartAll(std::chrono::steady_clock::time_point terminate_at) {
+    terminate_at_ = terminate_at;
+    sync_completion_signal(&start_completion_);
+  }
 
   static void TerminateAll() {
     sync_completion_signal(&terminate_completion_);
@@ -106,12 +110,14 @@ class Worker {
 
  private:
   Worker(std::vector<std::unique_ptr<Action>> actions, const std::string& name,
-         const std::string& group, WorkerConfig::PriorityType priority)
+         const std::string& group, WorkerConfig::PriorityType priority,
+         std::optional<zx_cpu_set_t> cpu_affinity)
       : id_{thread_counter_++},
         actions_{std::move(actions)},
         name_{name},
         group_{group},
-        priority_{priority} {}
+        priority_{priority},
+        cpu_affinity_{cpu_affinity} {}
 
   void Run() {
     if (std::holds_alternative<int>(priority_)) {
@@ -127,6 +133,12 @@ class Worker {
                                 << " to {capacity=" << params.capacity.get()
                                 << ", deadline=" << params.deadline.get()
                                 << ", period=" << params.period.get() << "}!";
+    }
+    if (cpu_affinity_.has_value()) {
+      auto profile = GetProfile(cpu_affinity_.value());
+      const auto status = zx::thread::self()->set_profile(*profile, 0);
+      FX_CHECK(status == ZX_OK) << "Failed to set worker " << id_
+                                << " CPU affinity: status=" << zx_status_get_string(status) << "!";
     }
 
     // Setup the actions on this worker.
@@ -172,6 +184,7 @@ class Worker {
   std::string name_;
   std::string group_;
   WorkerConfig::PriorityType priority_;
+  std::optional<zx_cpu_set_t> cpu_affinity_;
 
   bool early_exit_{false};
   std::atomic<uint64_t> spin_iterations_{0};
@@ -179,11 +192,15 @@ class Worker {
   std::chrono::nanoseconds total_runtime_begin_;
   std::chrono::nanoseconds total_runtime_end_;
 
-  static bool should_terminate() { return sync_completion_signaled(&terminate_completion_); }
+  static bool should_terminate() {
+    return sync_completion_signaled(&terminate_completion_) ||
+           std::chrono::steady_clock::now() >= terminate_at_;
+  }
   static size_t ready_count() { return ready_count_.load(); }
 
   inline static std::atomic<int> thread_counter_{0};
 
+  inline static std::chrono::steady_clock::time_point terminate_at_;
   inline static sync_completion terminate_completion_;
   inline static sync_completion start_completion_;
 

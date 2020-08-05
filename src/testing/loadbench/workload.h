@@ -7,7 +7,9 @@
 
 #include <lib/syslog/cpp/macros.h>
 #include <lib/zx/time.h>
+#include <zircon/types.h>
 
+#include <cstdint>
 #include <optional>
 #include <unordered_map>
 #include <variant>
@@ -28,6 +30,7 @@ struct WorkerConfig {
       name = other.name;
       group = other.group;
       priority = other.priority;
+      cpu_affinity = other.cpu_affinity;
       for (auto& action : other.actions) {
         actions.emplace_back(action->Copy());
       }
@@ -46,6 +49,7 @@ struct WorkerConfig {
   std::string name;
   std::string group;
   PriorityType priority;
+  std::optional<zx_cpu_set_t> cpu_affinity;
   std::vector<std::unique_ptr<Action>> actions;
 };
 

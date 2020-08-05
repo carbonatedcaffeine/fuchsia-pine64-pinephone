@@ -11,6 +11,7 @@
 #include <lib/zx/time.h>
 #include <lib/zx/timer.h>
 #include <zircon/syscalls/port.h>
+#include <zircon/types.h>
 
 #include <chrono>
 #include <memory>
@@ -579,6 +580,43 @@ void Workload::ParseWorker(const rapidjson::Value& worker) {
       const zx::duration period{ParseDuration(priority_member["period"]).value.count()};
 
       config.priority = WorkerConfig::DeadlineParams{capacity, deadline, period};
+    }
+  }
+
+  if (worker.HasMember("affinity")) {
+    const auto& affinity_member = worker["affinity"];
+    const bool is_int = affinity_member.IsInt();
+    const bool is_array = affinity_member.IsArray();
+    FX_CHECK(is_int || is_array)
+        << "Worker member \"affinity\" must either be an integer or an array!";
+
+    const auto add_bit = [](zx_cpu_set_t* cpu_set, size_t cpu_number) {
+      cpu_set->mask[cpu_number / ZX_CPU_SET_BITS_PER_WORD] |=
+          uint64_t{1} << (cpu_number % ZX_CPU_SET_BITS_PER_WORD);
+    };
+
+    if (is_int) {
+      const size_t cpu_number = affinity_member.GetUint();
+      FX_CHECK(cpu_number < ZX_CPU_SET_MAX_CPUS)
+          << "Worker member \"affinity\" must be an integer in the range [0, "
+          << ZX_CPU_SET_MAX_CPUS << ")!";
+      zx_cpu_set_t cpu_set{};
+      add_bit(&cpu_set, cpu_number);
+      config.cpu_affinity = cpu_set;
+    } else if (is_array) {
+      zx_cpu_set_t cpu_set{};
+      size_t element_count = 0;
+      for (const auto& value : IterateValues(affinity_member)) {
+        element_count++;
+        const size_t cpu_number = value.GetInt();
+        FX_CHECK(cpu_number < ZX_CPU_SET_MAX_CPUS)
+            << "Worker member \"affinity\" must be an integer in the range [0, "
+            << ZX_CPU_SET_MAX_CPUS << ")!";
+        add_bit(&cpu_set, cpu_number);
+      }
+      if (element_count > 0) {
+        config.cpu_affinity = cpu_set;
+      }
     }
   }
 

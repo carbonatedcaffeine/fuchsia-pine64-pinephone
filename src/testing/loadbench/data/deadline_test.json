@@ -10,16 +10,10 @@
       "group": "Deadline Threads",
       "instances": 8,
       "priority": { "capacity": "5ms", "deadline": "20ms", "period": "20ms" },
+      "affinity": [0, 1, 2],
       "actions": [
-        { "action": "spin", "duration": "500us" },
-        { "action": "sleep", "duration": "4ms" },
-      ]
-    },
-    {
-      "group": "Fair Threads",
-      "instances": 0,
-      "actions": [
-        { "action": "spin", "duration": "5m" }
+        { "action": "spin", "duration": "10ms" },
+        { "action": "sleep", "duration": "10ms" },
       ]
     },
   ]

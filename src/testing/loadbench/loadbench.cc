@@ -140,15 +140,16 @@ int main(int argc, char** argv) {
     std::cout << "Tracing started." << std::endl;
   }
 
-  std::cout << "Kicking off workload..." << std::endl;
-  Worker::StartAll();
-
-  ReadCpuStats(cpu_stats_start.data(), cpu_stats_start.size());
-
   const std::chrono::nanoseconds interval_ns =
       default_interval.has_value() ? default_interval.value()
                                    : workload.interval().has_value() ? workload.interval().value()
                                                                      : kDefaultWorkloadInterval;
+
+  ReadCpuStats(cpu_stats_start.data(), cpu_stats_start.size());
+
+  std::cout << "Kicking off workload..." << std::endl;
+  Worker::StartAll(std::chrono::steady_clock::now() + interval_ns);
+
   const auto interval_s = double_seconds{interval_ns}.count();
   std::cout << "Waiting for " << interval_s << " s..." << std::endl;
   std::this_thread::sleep_for(interval_ns);
