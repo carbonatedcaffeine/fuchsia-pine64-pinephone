@@ -6,7 +6,10 @@ target_cpu = "arm64"
 
 board_name = "rpi4"
 
-_common_bootfs_deps = [ "//src/devices/board/drivers/rpi4" ]
+_common_bootfs_deps = [
+  "//src/devices/board/drivers/rpi4",
+  "//src/devices/gpio/drivers/bcm2711-gpio",
+]
 
 board_bootfs_labels = _common_bootfs_deps
 
@@ -19,7 +22,6 @@ custom_signing_script =
 
 # partitions for fx flash to flash
 zircon_a_partition = "boot"
-
 # The rpi4 image is not actually signed, but defining custom_signing_script
 # means we use zedboot.zbi.signed.
 #signed_image = true
