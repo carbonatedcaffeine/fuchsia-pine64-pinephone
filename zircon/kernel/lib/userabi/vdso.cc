@@ -143,6 +143,8 @@ class VDsoCodeWindow {
     for (size_t i = 0; i < size / 4; ++i)
       code[i] = 0xd4200020;  // 'brk #1' (what __builtin_trap() emits)
 
+#elif ARCH_RISCV64
+
 #else
 #error what architecture?
 #endif
