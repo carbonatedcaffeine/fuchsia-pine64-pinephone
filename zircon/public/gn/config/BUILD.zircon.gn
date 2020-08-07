@@ -151,6 +151,11 @@ config("compiler") {
         # regardless of this switch.
         cflags += [ "-mno-outline-atomics" ]
       }
+    } else if (current_cpu == "riscv64") {
+      compiler_flags += [
+        "-march=rv64gc",
+        "-mno-relax",
+      ]
     } else if (current_cpu == "x64") {
       # Let the compiler generate the cmpxchg16b instruction.
       compiler_flags += [
@@ -530,6 +535,8 @@ config("default_warnings") {
 
     # TODO(37765): Temporarily disable this warning to unblock the GCC roll.
     "-Wno-address-of-packed-member",
+
+    "-Wno-atomic-alignment",
   ]
   cflags_c = [
     "-Wstrict-prototypes",
