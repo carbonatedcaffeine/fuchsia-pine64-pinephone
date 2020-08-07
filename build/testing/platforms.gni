@@ -40,6 +40,10 @@ test_platforms = [
     cpu = "arm64"
   },
   {
+    device_type = "QEMU"
+    cpu = "riscv64"
+  },
+  {
     device_type = "Intel NUC Kit NUC7i5DNHE"
     cpu = "x64"
   },

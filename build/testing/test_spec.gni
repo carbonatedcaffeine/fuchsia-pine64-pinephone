@@ -152,7 +152,6 @@ template("test_spec") {
         },
       ]
     }
-
     # Empty scopes may have been introduced to platform_dims, corresponding to
     # non-existent keys;
     # Add and then subtract an empty scope to remove them.
