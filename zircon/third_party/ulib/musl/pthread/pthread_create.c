@@ -175,6 +175,7 @@ static NO_ASAN _Noreturn void finish_exit(pthread_t self) {
       :
       : [base] "r"(self->tcb_region.iov_base), [len] "r"(self->tcb_region.iov_len - PAGE_SIZE),
         [self] "r"(self));
+#elif defined(__riscv)
 #else
 #error what architecture?
 #endif

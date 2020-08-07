@@ -194,6 +194,7 @@ NO_ASAN __NO_SAFESTACK _Noreturn void __libc_start_main(zx_handle_t bootstrap,
           [ shadow_call_stack ] "r"(p.td->shadow_call_stack.iov_base),
           "m"(p),  // Tell the compiler p's fields are all still alive.
           [ arg ] "r"(&p));
+#elif defined(__riscv)
 #else
 #error what architecture?
 #endif
