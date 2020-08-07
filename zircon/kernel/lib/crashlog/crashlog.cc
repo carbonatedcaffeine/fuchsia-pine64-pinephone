@@ -68,6 +68,8 @@ size_t crashlog_to_string(char* out, const size_t out_len, zircon_crash_reason_t
   const char* arch = "x86_64";
 #elif defined(__aarch64__)
   const char* arch = "aarch64";
+#elif defined(__riscv)
+  const char* arch = "riscv64";
 #endif
   fprintf(&outfile.stream_,
           "VERSION\narch: %s\nbuild_id: %s\ndso: id=%s base=%#lx "
