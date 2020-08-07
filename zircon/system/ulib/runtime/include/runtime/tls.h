@@ -64,6 +64,15 @@ __NO_SAFESTACK static inline void zxr_tp_set(zx_handle_t self, void* tp) {
     __builtin_trap();
 }
 
+#elif defined(__riscv)
+
+__NO_SAFESTACK static inline void* zxr_tp_get(void) {
+  return NULL;
+}
+
+__NO_SAFESTACK static inline void zxr_tp_set(zx_handle_t self, void* tp) {
+}
+
 #else
 
 #error Unsupported architecture
