@@ -1,0 +1,14 @@
+# Copyright 2020 The Fuchsia Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+target_cpu = "riscv64"
+
+board_name = "riscv64"
+
+board_package_labels = [ ]
+
+board_bootfs_labels = [ ]
+
+max_fuchsia_zbi_size = "16777216"  # 16 MiB
+max_zedboot_zbi_size = "16777216"  # 16 MiB
