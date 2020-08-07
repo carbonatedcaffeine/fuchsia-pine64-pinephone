@@ -104,6 +104,8 @@ sdk_atom("vulkan_layers") {
         binaries.arm64 = sdk_binaries
       } else if (target_cpu == "x64") {
         binaries.x64 = sdk_binaries
+      } else if (target_cpu == "riscv64") {
+        # TODO: binaries.riscv64 = sdk_binaries
       } else {
         assert(false, "Unknown CPU type: %target_cpu")
       }
