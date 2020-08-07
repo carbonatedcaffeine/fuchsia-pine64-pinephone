@@ -620,11 +620,18 @@ environment_redirect("boot-shim-arm64") {
   deps = [ "//kernel/target/arm64/boot-shim" ]
 }
 
+environment_redirect("boot-shim-riscv64") {
+  cpu = "riscv64"
+  environment_label = "$zx/public/gn/toolchain:user"
+  deps = [ "//kernel/target/riscv64/boot-shim" ]
+}
+
 build_api_module("legacy_images") {
   testonly = true
   data_keys = [ "images" ]
   deps = [
     ":boot-shim-arm64",
+    ":boot-shim-riscv64",
     ":zbi_tests",
     "tools",
   ]
@@ -646,6 +653,9 @@ foreach(cpu, standard_fuchsia_cpus) {
 
     if (cpu == "arm64") {
       deps += [ ":boot-shim-arm64" ]
+    }
+    if (cpu == "riscv64") {
+      deps += [ ":boot-shim-riscv64" ]
     }
 
     # Add the dependencies of legacy-aux directly, as that target sets a barrier
