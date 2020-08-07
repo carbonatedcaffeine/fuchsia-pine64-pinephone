@@ -475,19 +475,28 @@ romfs_image("extras") {
 
   deps = [
     ":icd_manifest",
-    "//src/graphics/lib/magma/tests/integration:virtmagma_abi_conformance_tests(${linux_exe_toolchain})",
-    "//src/graphics/lib/magma/tests_linux/unit_tests:virtmagma_unit_tests_linux(${linux_exe_toolchain})",
-    "//src/graphics/lib/magma/tests_linux/unit_tests:virtmagma_vulkan_unit_tests(${linux_exe_toolchain})",
-    "//src/lib/vulkan(${linux_lib_toolchain})",
   ]
 
   inputs = [
     "${icd_manifest}",
-    "${linux_lib_path}/libvulkan.so",  # Vulkan Loader
-    "${linux_exe_path}/virtmagma_unit_tests_linux",
-    "${linux_exe_path}/virtmagma_vulkan_unit_tests",
-    "${linux_exe_path}/virtmagma_abi_conformance_tests",
   ]
+
+  if (current_cpu == "x64" || current_cpu == "arm64") {
+    deps += [
+      "//src/graphics/lib/magma/tests/integration:virtmagma_abi_conformance_tests(${linux_exe_toolchain})",
+      "//src/graphics/lib/magma/tests_linux/unit_tests:virtmagma_unit_tests_linux(${linux_exe_toolchain})",
+      "//src/graphics/lib/magma/tests_linux/unit_tests:virtmagma_vulkan_unit_tests(${linux_exe_toolchain})",
+      "//src/lib/vulkan(${linux_lib_toolchain})",
+    ]
+
+    inputs += [
+      "${linux_lib_path}/libvulkan.so",  # Vulkan Loader
+      "${linux_exe_path}/virtmagma_unit_tests_linux",
+      "${linux_exe_path}/virtmagma_vulkan_unit_tests",
+      "${linux_exe_path}/virtmagma_abi_conformance_tests",
+    ]
+
+  }
 
   if (current_cpu == "x64") {
     deps += [ "//third_party/mesa/src/intel/vulkan:vulkan_intel(${linux_lib_toolchain})" ]
