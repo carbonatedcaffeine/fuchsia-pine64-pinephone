@@ -1,0 +1,19 @@
+# Copyright 2020 The Fuchsia Authors
+#
+# Use of this source code is governed by a MIT-style
+# license that can be found in the LICENSE file or at
+# https://opensource.org/licenses/MIT
+
+zx_library("riscv64") {
+  kernel = true
+  host = true
+  static = true
+  sources = []
+
+  sdk = "source"
+  sdk_headers = [
+    "lib/arch/asm.h",
+    "lib/arch/intrin.h",
+    "lib/arch/ticks.h",
+  ]
+}
