@@ -8,6 +8,7 @@ import("$zx/public/gn/prebuilt.gni")
 standard_fuchsia_cpus = [
   "arm64",
   "x64",
+  "riscv64",
 ]
 
 # All the {cpu, os} combinations supported as build or SDK hosts.  The
