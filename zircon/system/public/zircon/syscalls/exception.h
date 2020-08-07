@@ -80,6 +80,10 @@ typedef struct zx_arm64_exc_data {
     uint64_t far;
 } zx_arm64_exc_data_t;
 
+typedef struct zx_riscv64_exc_data {
+    uint8_t padding1[4];
+} zx_riscv64_exc_data_t;
+
 // data associated with an exception (siginfo in linux parlance)
 // Things available from regsets (e.g., pc) are not included here.
 // For an example list of things one might add, see linux siginfo.
@@ -90,6 +94,10 @@ typedef struct zx_exception_context {
             struct {
                 zx_arm64_exc_data_t  arm_64;
                 uint8_t padding1[8];
+            };
+            struct {
+                zx_riscv64_exc_data_t  riscv_64;
+                uint8_t padding2[20];
             };
         } u;
     } arch;
