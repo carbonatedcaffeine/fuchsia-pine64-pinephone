@@ -65,6 +65,12 @@ bool hasHardwareCRC32() {
   return !!(getauxval(AT_HWCAP) & HWCAP_CRC32);
 #endif // SCUDO_FUCHSIA
 }
+#elif defined(__riscv)
+
+bool hasHardwareCRC32() {
+ return false;
+}
+
 #endif // defined(__x86_64__) || defined(__i386__)
 
 } // namespace scudo
