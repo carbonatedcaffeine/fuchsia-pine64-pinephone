@@ -97,6 +97,8 @@ if (is_linux) {
     library_sources += [ "$vboot_dir/host/arch/x86_64/lib/crossystem_arch.c" ]
   } else if (target_cpu == "arm64") {
     library_sources += [ "$vboot_dir/host/arch/arm/lib/crossystem_arch.c" ]
+  } else if (target_cpu == "riscv64") {
+    library_sources += [ "$vboot_dir/host/arch/riscv64/lib/crossystem_arch.c" ]
   } else {
     assert(false, "Unsupported CPU")
   }
