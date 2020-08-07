@@ -297,6 +297,8 @@ if (current_toolchain == default_toolchain) {
     ]
     if (current_cpu == "arm64") {
       deps += [ "platform/generic-arm" ]
+    } else if (current_cpu == "riscv64") {
+      deps += [ "platform/generic-riscv64" ]
     } else if (current_cpu == "x64") {
       deps += [ "target/pc" ]
     }
