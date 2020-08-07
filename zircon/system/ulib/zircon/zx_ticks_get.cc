@@ -16,6 +16,8 @@ __EXPORT zx_ticks_t _zx_ticks_get(void) {
   return ticks;
 #elif __x86_64__
   return __rdtsc();
+#elif __riscv
+  return 0;
 #else
 #error Unsupported architecture
 #endif
