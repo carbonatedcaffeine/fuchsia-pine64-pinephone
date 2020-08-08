@@ -16,6 +16,7 @@ SECTIONS
     .text : {
         *(.text*)
         *(.gnu.linkonce.t.*)
+        *(.note.gnu.build-id)
     }
 
     .rodata : {
