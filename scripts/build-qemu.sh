@@ -41,7 +41,6 @@ build() {
     ${QEMU_HOST_FLAGS} \
     --prefix= \
     --target-list=aarch64-softmmu,x86_64-softmmu \
-    --without-system-pixman \
     --without-system-fdt \
     --disable-vnc-jpeg \
     --disable-vnc-png \
@@ -52,7 +51,6 @@ build() {
     --disable-debug-info \
     --disable-qom-cast-debug \
     --disable-guest-agent \
-    --disable-bluez \
     --disable-brlapi \
     --disable-gnutls \
     --disable-gcrypt \
