@@ -90,9 +90,19 @@ static void platform_init_postvm(uint level) { }
 LK_INIT_HOOK(platform_postvm, platform_init_postvm, LK_INIT_LEVEL_VM)
 
 void platform_dputs_thread(const char* str, size_t len) {
+  char ch;
+  while ((ch = *str++) && len) {
+    *ns16550a_thr = ch;
+    len--;
+  }
 }
 
 void platform_dputs_irq(const char* str, size_t len) {
+  char ch;
+  while ((ch = *str++) && len) {
+    *ns16550a_thr = ch;
+    len--;
+  }
 }
 
 int platform_dgetc(char* c, bool wait) {
