@@ -295,150 +295,150 @@ standard_sanitizer_variants = [
     }
   },
 ]
-standard_variants += standard_sanitizer_variants
+#standard_variants += standard_sanitizer_variants
 
 # These are additional standard variants that are not likely to
 # be interesting for special-purpose environments like fuzzers.
-standard_variants += [
-  {
+#standard_variants += [
+#  {
     # TODO(30033): This is identical to "asan" except for having "kernel"
     # and not "useronly" in tags.  When kernel ASan is ready for prime
     # time, this will be removed and the "useronly" tag dropped from "asan"
     # so that a simple "asan" selector will enable it for kernel too.  For
     # now, it's easier to let a simple "kasan" selector enable kernel ASan
     # and not user ASan, and "asan" vice versa.
-    variant = {
-      name = "kasan"
-      configs = [
+#    variant = {
+#      name = "kasan"
+#      configs = [
         # ASan wants frame pointers because it captures stack traces
         # on allocations and such, not just on errors.
-        {
+#        {
           # First add and then remove both in case either is already there.
-          add = [
-            "$zx/public/gn/config:frame_pointers",
-            "$zx/public/gn/config:default_frame_pointers",
-          ]
-          remove = add
-        },
+#          add = [
+#            "$zx/public/gn/config:frame_pointers",
+#            "$zx/public/gn/config:default_frame_pointers",
+#          ]
+#          remove = add
+#        },
 
         # Now add frame_pointers back, only one and no default_frame_pointers.
-        "$zx/public/gn/config:frame_pointers",
+#        "$zx/public/gn/config:frame_pointers",
 
         # kasan disables safestack for all files built with instrumentation, so
         # we need to ensure that files built without instrumentation have a
         # consistent no_safestack setting.
-        "$zx/public/gn/config:no_safestack",
+#        "$zx/public/gn/config:no_safestack",
 
-        "$zx/public/gn/config/instrumentation:asan",
-      ]
-      implicit_deps = [
-        {
-          types = [
-            "executable",
-            "host_tool",
-            "test",
-          ]
-          add = [ "$zx/public/gn/config/instrumentation:asan_default_options" ]
-        },
-      ]
-      toolchain_vars = {
+#        "$zx/public/gn/config/instrumentation:asan",
+#      ]
+#      implicit_deps = [
+#        {
+#          types = [
+#            "executable",
+#            "host_tool",
+#            "test",
+#          ]
+#          add = [ "$zx/public/gn/config/instrumentation:asan_default_options" ]
+#        },
+#      ]
+#      toolchain_vars = {
         # This is the key for toolchain_runtime_deps() to find the right
         # shared library dependencies for the instrumentation.  Note that
         # the asan runtime includes ubsan but not vice versa, so this set
         # must be used in preference to ubsan when both are enabled.
-        runtime_deps_cflags = [ "-fsanitize=address" ]
-      }
-      tags = [
-        "instrumentation-runtime",
-        "instrumented",
-        "kernel",
-      ]
-    }
-  },
+#        runtime_deps_cflags = [ "-fsanitize=address" ]
+#      }
+#      tags = [
+#        "instrumentation-runtime",
+#        "instrumented",
+#        "kernel",
+#      ]
+#    }
+#  },
 
   # TODO(30033): see above
-  {
-    variant = {
-      name = "kasan-sancov"
-      bases = [
-        "kasan",
-        "sancov",
-      ]
-    }
-  },
-  {
-    variant = {
-      name = "lto"
-      configs = [ "$zx/public/gn/config/lto" ]
-      tags = [ "lto" ]
-    }
-  },
-  {
-    variant = {
-      name = "thinlto"
-      configs = [ "$zx/public/gn/config/lto:thinlto" ]
-      tags = [ "lto" ]
-    }
-  },
-  {
-    variant = {
-      name = "profile"
-      configs = [ "$zx/public/gn/config/instrumentation:profile" ]
-      implicit_deps = [ "$zx/public/gn/config/instrumentation:profile_deps" ]
-      tags = [
-        "instrumented",
+#  {
+#    variant = {
+#      name = "kasan-sancov"
+#      bases = [
+#        "kasan",
+#        "sancov",
+#      ]
+#    }
+#  },
+#  {
+#    variant = {
+#      name = "lto"
+#      configs = [ "$zx/public/gn/config/lto" ]
+#      tags = [ "lto" ]
+#    }
+#  },
+#  {
+#    variant = {
+#      name = "thinlto"
+#      configs = [ "$zx/public/gn/config/lto:thinlto" ]
+#      tags = [ "lto" ]
+#    }
+#  },
+#  {
+#    variant = {
+#      name = "profile"
+#      configs = [ "$zx/public/gn/config/instrumentation:profile" ]
+#      implicit_deps = [ "$zx/public/gn/config/instrumentation:profile_deps" ]
+#      tags = [
+#        "instrumented",
 
         # TODO(TC-598): The instrumentation metadata sections are not put
         # into section groups properly under -ffunction-sections.  This
         # means that links (like the x86 kernel's) that rely for their
         # correctness on --gc-sections pruning dead code with dangling
         # references won't work.
-        "breaks-gc-sections",
-      ]
-    }
-  },
-  {
-    variant = {
-      name = "sancov"
-      configs = [ "$zx/public/gn/config/instrumentation:sancov" ]
+#        "breaks-gc-sections",
+#      ]
+#    }
+#  },
+#  {
+#    variant = {
+#      name = "sancov"
+#      configs = [ "$zx/public/gn/config/instrumentation:sancov" ]
 
       # The "sancov" tag is important: see $zx/system/ulib/c/sanitizers.
-      tags = [
-        "instrumentation-runtime",
-        "instrumented",
-        "sancov",
-      ]
+#      tags = [
+#        "instrumentation-runtime",
+#        "instrumented",
+#        "sancov",
+#      ]
 
       # When no other sanitizer is enabled, clang links in the ubsan
       # runtime to provide the sancov runtime.
-      toolchain_vars = {
-        runtime_deps_cflags = [ "-fsanitize=undefined" ]
-      }
-    }
-  },
-  {
-    variant = {
-      name = "ubsan-sancov"
-      bases = [
-        "ubsan",
-        "sancov",
-      ]
-    }
-  },
-  {
-    variant = {
-      name = "ubsan-sancov-full"
-      bases = [
-        "ubsan",
-        "sancov",
-      ]
-      configs = [ "$zx/public/gn/config/instrumentation:sancov-full" ]
+#      toolchain_vars = {
+#        runtime_deps_cflags = [ "-fsanitize=undefined" ]
+#      }
+#    }
+#  },
+#  {
+#    variant = {
+#      name = "ubsan-sancov"
+#      bases = [
+#        "ubsan",
+#        "sancov",
+#      ]
+#    }
+#  },
+#  {
+#    variant = {
+#      name = "ubsan-sancov-full"
+#      bases = [
+#        "ubsan",
+#        "sancov",
+#      ]
+#      configs = [ "$zx/public/gn/config/instrumentation:sancov-full" ]
 
       # The kernel provides runtime for sancov but not for sancov-full.
-      tags = [ "useronly" ]
-    }
-  },
-]
+#      tags = [ "useronly" ]
+#    }
+#  },
+#]
 
 # This list is appended to the $variants list for the build.  It provides
 # default selectors that match if nothing else does.  The first catch-all

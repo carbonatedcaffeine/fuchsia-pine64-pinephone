@@ -56,13 +56,13 @@ aggregate_manifest("legacy-aux") {
     ":lib.c",
     ":test.sys.libc-test",
     ":test.sys.noop-test",
-    ":test.sys.noop-test.asan",
-    ":test.sys.noop-test.asan-ubsan",
-    ":test.sys.noop-test.profile",
-    ":test.sys.noop-test.sancov",
-    ":test.sys.noop-test.ubsan",
-    ":test.sys.noop-test.ubsan-sancov",
-    ":test.sys.noop-test.ubsan-sancov-full",
+#    ":test.sys.noop-test.asan",
+#    ":test.sys.noop-test.asan-ubsan",
+#    ":test.sys.noop-test.profile",
+#    ":test.sys.noop-test.sancov",
+#    ":test.sys.noop-test.ubsan",
+#    ":test.sys.noop-test.ubsan-sancov",
+#    ":test.sys.noop-test.ubsan-sancov-full",
   ]
 
   reference = "legacy-aux-$target_cpu"
@@ -74,13 +74,13 @@ aggregate_manifest("legacy-tests") {
   deps = [
     ":test.sys.libc-test",
     ":test.sys.noop-test",
-    ":test.sys.noop-test.asan",
-    ":test.sys.noop-test.asan-ubsan",
-    ":test.sys.noop-test.profile",
-    ":test.sys.noop-test.sancov",
-    ":test.sys.noop-test.ubsan",
-    ":test.sys.noop-test.ubsan-sancov",
-    ":test.sys.noop-test.ubsan-sancov-full",
+#    ":test.sys.noop-test.asan",
+#    ":test.sys.noop-test.asan-ubsan",
+#    ":test.sys.noop-test.profile",
+#    ":test.sys.noop-test.sancov",
+#    ":test.sys.noop-test.ubsan",
+#    ":test.sys.noop-test.ubsan-sancov",
+#    ":test.sys.noop-test.ubsan-sancov-full",
   ]
 
   reference = "legacy-tests-$target_cpu"
