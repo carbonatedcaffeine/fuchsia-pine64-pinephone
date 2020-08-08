@@ -41,7 +41,7 @@ SECTIONS {
          * This is the end of the kernel load image proper, where the bss
          * starts at runtime and the fixup code starts in the image.
          */
-        ASSERT(ABSOLUTE(IMAGE_LOAD_KERNEL_END) < ABSOLUTE(IMAGE_LOAD_END),
+        ASSERT(ABSOLUTE(IMAGE_LOAD_KERNEL_END) <= ABSOLUTE(IMAGE_LOAD_END),
                "image symbols bad");
     } :load_image
 
