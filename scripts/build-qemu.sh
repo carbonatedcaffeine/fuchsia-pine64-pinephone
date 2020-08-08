@@ -40,7 +40,7 @@ build() {
   ${srcdir}/configure \
     ${QEMU_HOST_FLAGS} \
     --prefix= \
-    --target-list=aarch64-softmmu,x86_64-softmmu \
+    --target-list=aarch64-softmmu,x86_64-softmmu,riscv64-softmmu \
     --without-system-fdt \
     --disable-vnc-jpeg \
     --disable-vnc-png \
