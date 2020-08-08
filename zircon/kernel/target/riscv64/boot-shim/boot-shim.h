@@ -18,6 +18,6 @@ typedef struct {
   uint64_t entry;     // Returned in x1.
 } boot_shim_return_t;
 
-boot_shim_return_t boot_shim(void* device_tree);
+boot_shim_return_t boot_shim(uint64_t hart_id, void* device_tree);
 
 #endif  // ZIRCON_KERNEL_TARGET_ARM64_BOOT_SHIM_BOOT_SHIM_H_
