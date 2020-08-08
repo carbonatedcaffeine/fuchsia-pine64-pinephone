@@ -26,6 +26,10 @@
 #include <lib/zircon-internal/device/cpu-trace/arm64-pm.h>
 
 #include "arm64-pm-impl.h"
+#elif defined(__riscv)
+#include <lib/zircon-internal/device/cpu-trace/riscv64-pm.h>
+
+#include "riscv64-pm-impl.h"
 #else
 #error "unsupported architecture"
 #endif

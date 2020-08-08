@@ -80,6 +80,7 @@ static void advance_over_breakpoint(zx_handle_t thread) {
             ZX_OK);
 #elif defined(__x86_64__)
 // x86 sets the instruction pointer to the following instruction so needs no update.
+#elif defined(__riscv)
 #else
 #error Not supported on this platform.
 #endif
@@ -1047,6 +1048,8 @@ TEST(Threads, ReadingFpRegisterState) {
   ASSERT_NO_FATAL_FAILURES(fp_regs_expect_eq(regs, fp_regs_expected));
 #elif defined(__aarch64__)
   ASSERT_EQ(status, ZX_ERR_NOT_SUPPORTED);
+#elif defined(__riscv)
+  ASSERT_EQ(status, ZX_ERR_NOT_SUPPORTED);
 #else
 #error unsupported platform
 #endif
@@ -1221,6 +1224,8 @@ TEST(Threads, WritingFpRegisterState) {
   setup.DoSave(&save_fp_regs_and_exit_thread, &regs);
   ASSERT_NO_FATAL_FAILURES(fp_regs_expect_eq(regs_to_set, regs));
 #elif defined(__aarch64__)
+  ASSERT_EQ(status, ZX_ERR_NOT_SUPPORTED);
+#elif defined(__riscv)
   ASSERT_EQ(status, ZX_ERR_NOT_SUPPORTED);
 #else
 #error unsupported platform

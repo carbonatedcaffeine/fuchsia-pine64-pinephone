@@ -80,6 +80,7 @@ __asm__(
     "  testl %eax, %eax\n"        // If returned ZX_OK...
     "  jz 0b\n"                   // ...loop.
     "  ud2\n"                     // Else crash.
+#elif defined(__riscv)
 #else
 #error "what machine?"
 #endif

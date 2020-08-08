@@ -74,6 +74,7 @@ void fp_regs_fill_test_values(zx_thread_state_fp_regs* regs) {
   WriteNaNDouble(&regs->st[7].low);
 #elif defined(__aarch64__)
 // No FP struct on ARM (vector only).
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -100,6 +101,7 @@ void vector_regs_fill_test_values(zx_thread_state_vector_regs* regs) {
 
   // Write NaN to the last value.
   WriteNaNDouble(&regs->v[31].low);
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -155,6 +157,8 @@ void debug_regs_fill_test_values(zx_thread_state_debug_regs_t* to_write,
   ARM64_DBGWCR_PAC_SET(&expected->hw_wps[1].dbgwcr, 0b10);
   ARM64_DBGWCR_LSC_SET(&expected->hw_wps[1].dbgwcr, 0);
   ARM64_DBGWCR_SSC_SET(&expected->hw_wps[1].dbgwcr, 1);
+#elif defined(__riscv)
+  to_write->reserved = (uint8_t)base; // (we just need to use base)
 #else
 #error Unsupported architecture
 #endif
@@ -192,6 +196,7 @@ void general_regs_expect_eq(const zx_thread_state_general_regs_t& regs1,
   CHECK_REG(sp);
   CHECK_REG(pc);
   CHECK_REG(cpsr);
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -214,6 +219,7 @@ void fp_regs_expect_eq(const zx_thread_state_fp_regs_t& regs1,
   // No FP regs on ARM (uses vector regs for FP).
   (void)regs1;
   (void)regs2;
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -236,6 +242,7 @@ void vector_regs_expect_unsupported_are_zero(const zx_thread_state_vector_regs_t
   }
 #elif defined(__aarch64__)
   // All features/fields are supported on arm64.
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -255,6 +262,7 @@ void vector_regs_expect_eq(const zx_thread_state_vector_regs_t& regs1,
     EXPECT_EQ(regs1.v[i].high, regs2.v[i].high);
     EXPECT_EQ(regs1.v[i].low, regs2.v[i].low);
   }
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -282,6 +290,7 @@ void debug_regs_expect_eq(const char* file, int line, const zx_thread_state_debu
 
   EXPECT_EQ(regs1.esr, regs2.esr);
   EXPECT_EQ(regs1.far, regs2.far);
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -393,6 +402,7 @@ __asm__(
     ".global spin_address\n"
     "b spin_address\n"
     ".popsection\n");
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -442,6 +452,7 @@ __asm__(
     ".global spin_address\n"
     "b spin_address\n"
     ".popsection\n");
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -513,6 +524,7 @@ __asm__(
     ".global spin_address\n"
     "b spin_address\n"
     ".popsection\n");
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -549,6 +561,7 @@ __asm__(
     ".global spin_address\n"
     "b spin_address\n"
     ".popsection\n");
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -620,6 +633,7 @@ __asm__(
     "bl zx_thread_exit\n"
     "brk 0\n"
     ".popsection\n");
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -658,6 +672,7 @@ __asm__(
     "bl zx_thread_exit\n"
     "brk 0\n"
     ".popsection\n");
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -729,6 +744,7 @@ __asm__(
     "bl zx_thread_exit\n"
     "brk 0\n"
     ".popsection\n");
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
@@ -772,6 +788,7 @@ __asm__(
     "bl zx_thread_exit\n"
     "brk 0\n"
     ".popsection\n");
+#elif defined(__riscv)
 #else
 #error Unsupported architecture
 #endif
