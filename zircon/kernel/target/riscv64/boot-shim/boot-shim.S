@@ -10,6 +10,22 @@
 
 .section .text.boot0,"ax"
 FUNCTION(_start)
+    # wfi loop on CPU != 0
+    beqz    a0, hart_0
+
+waiting_hart:
+    wfi
+    j	waiting_hart
+
+hart_0:
+    # Setup stack
+    la sp,  stack_end
+
+    # Retrieve kernel entry point
+    jal     boot_shim
+
+    # Jump into the kernel
+    jalr    a1
 END_FUNCTION(_start)
 
 .bss
