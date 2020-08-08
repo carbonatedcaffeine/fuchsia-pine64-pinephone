@@ -269,22 +269,6 @@ boot_shim_return_t boot_shim(uint64_t hart_id, void* device_tree) {
     }
   }
 
-  // If there is a complete ZBI from device tree, ignore whatever might
-  // have been appended to the shim image.  If not, the kernel is appended.
-  if (kernel == NULL) {
-    zbi_header_t* bad_hdr;
-    zbi_result_t check = zbi_check(&embedded_zbi, &bad_hdr);
-    if (check != ZBI_RESULT_OK) {
-      fail("no ZBI from device tree and no valid ZBI embedded\n");
-    }
-    if (embedded_zbi.hdr_file.length > sizeof(zbi_header_t) &&
-        embedded_zbi.hdr_kernel.type == ZBI_TYPE_KERNEL_RISCV64) {
-      kernel = &embedded_zbi;
-    } else {
-      fail("no RISCV64 kernel in ZBI from device tree or embedded ZBI\n");
-    }
-  }
-
   // If there was no ZBI at all from device tree then use the embedded ZBI
   // along with the embedded kernel.  Otherwise always use the ZBI from
   // device tree, whether the kernel is in that ZBI or was embedded.

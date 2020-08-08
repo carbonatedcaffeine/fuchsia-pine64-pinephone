@@ -29,12 +29,6 @@ SECTIONS
     .bss : {
         *(.bss*) *(.sbss*) *(COMMON)
     }
-
-    /*
-     * Pad the shim image out to the alignment the kernel requires.
-     * A complete riscv64 ZBI can be appended directly to the shim.
-     */
-    PROVIDE_HIDDEN(embedded_zbi = KERNEL_ALIGN);
 }
 
 PHDRS
