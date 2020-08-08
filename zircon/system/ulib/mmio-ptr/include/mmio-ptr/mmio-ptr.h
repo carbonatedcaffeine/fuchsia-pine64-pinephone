@@ -37,7 +37,7 @@
 //   // Correct way
 //   value = MmioRead8(mmio_pointer);
 
-#ifdef __clang__
+#if defined(__clang__) && !defined(__riscv)
 // The address space number needs to be unique, but the value is not necessarily
 // meaningful except for a few reserved values for LLVM on specific machines.
 // Address spaces 256, 257, and 258 are examples of reserved address spaces in
