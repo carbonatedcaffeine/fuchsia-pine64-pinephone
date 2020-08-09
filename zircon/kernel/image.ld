@@ -31,6 +31,7 @@ SECTIONS {
 
     .load_image : {
         KEEP(*(.text))
+        *(.note.gnu.build-id)
 
         /*
          * This includes the fixup code, which overlaps the bss.
