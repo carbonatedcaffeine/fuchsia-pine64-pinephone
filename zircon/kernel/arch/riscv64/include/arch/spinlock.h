@@ -35,7 +35,7 @@ static inline uint arch_spin_lock_holder_cpu(const arch_spin_lock_t* lock) {
 }
 
 static inline bool arch_spin_lock_held(arch_spin_lock_t* lock) {
-  return *lock != 0;
+  return lock->value != 0;
 }
 
 enum {
@@ -45,7 +45,7 @@ enum {
    * SPIN_LOCK_FLAG_SET_PMR          = 0x20000000,
    */
 
-  /* ARM specific flags */
+  /* ARM specific flags (TODO: get rid of those) */
   SPIN_LOCK_FLAG_IRQ = 0x40000000,
   SPIN_LOCK_FLAG_FIQ = 0x80000000, /* Do not use unless IRQs are already disabled */
   SPIN_LOCK_FLAG_IRQ_FIQ = SPIN_LOCK_FLAG_IRQ | SPIN_LOCK_FLAG_FIQ,
