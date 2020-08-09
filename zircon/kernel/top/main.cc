@@ -61,7 +61,7 @@ void lk_main() {
 
   // we can safely printf now since we have both the debuglog and the current thread
   // set which holds a per-line buffer
-  dprintf(SPEW, "printing enabled\n");
+  //dprintf(SPEW, "printing enabled\n");
 
   // deal with any static constructors
   call_constructors();
