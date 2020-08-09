@@ -37,13 +37,34 @@ extern "C" void riscv64_configure_percpu_early(uint hart_id) {
   percpu[hart_id].hart_id = hart_id;
 }
 
+// first C level code to initialize each cpu
+void riscv64_early_init_percpu(void) {
+  // set the top level exception handler
+  riscv_csr_write(RISCV_CSR_XTVEC, (uintptr_t)&riscv64_exception_entry);
+
+  // mask all exceptions, just in case
+  riscv_csr_clear(RISCV_CSR_XSTATUS, RISCV_CSR_XSTATUS_IE);
+  riscv_csr_clear(RISCV_CSR_XIE, RISCV_CSR_XIE_SIE | RISCV_CSR_XIE_TIE | RISCV_CSR_XIE_EIE);
+}
+
 void arch_early_init() {
+  riscv64_early_init_percpu();
 }
 
 void arch_prevm_init() {
 }
 
+// later init per cpu
+void riscv64_init_percpu(void) {
+  // enable software interrupts, used for inter-processor-interrupts
+  riscv_csr_set(RISCV_CSR_XIE, RISCV_CSR_XIE_SIE);
+
+  // enable external interrupts
+  riscv_csr_set(RISCV_CSR_XIE, RISCV_CSR_XIE_EIE);
+}
+
 void arch_init() TA_NO_THREAD_SAFETY_ANALYSIS {
+  riscv64_init_percpu();
 }
 
 void arch_late_init_percpu(void) {
