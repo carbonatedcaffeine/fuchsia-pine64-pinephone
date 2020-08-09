@@ -65,6 +65,11 @@ void riscv64_init_percpu(void) {
 
 void arch_init() TA_NO_THREAD_SAFETY_ANALYSIS {
   riscv64_init_percpu();
+
+  // print some arch info
+  dprintf(INFO, "RISCV: Supervisor mode\n");
+  dprintf(INFO, "RISCV: MMU enabled sv49\n");
+  dprintf(INFO, "RISCV: SBI impl id %#lx version %#lx\n", sbi_call(SBI_GET_SBI_IMPL_ID).value, sbi_call(SBI_GET_SBI_IMPL_VERSION).value);
 }
 
 void arch_late_init_percpu(void) {
