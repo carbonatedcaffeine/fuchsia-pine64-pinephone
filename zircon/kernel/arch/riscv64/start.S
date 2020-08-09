@@ -111,6 +111,17 @@ FUNCTION(_start)
     add     sp, sp, t0
     add     ra, ra, t0
 
+    // call into early C code to set up the percpu structure
+    mv      s0, a0
+    mv      s1, a1
+    mv      s2, a2
+    mv      s3, a3
+    jal     riscv64_configure_percpu_early
+    mv      a0, s0
+    mv      a1, s1
+    mv      a2, s2
+    mv      a3, s3
+
     // call main
     jal     lk_main
 

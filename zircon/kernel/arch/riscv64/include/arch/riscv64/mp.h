@@ -15,7 +15,17 @@
 
 __BEGIN_CDECLS
 
+struct riscv64_percpu {
+    uint cpu_num;
+    uint hart_id;
+} __ALIGNED(MAX_CACHE_LINE);
+
+static inline struct riscv64_percpu *riscv64_get_percpu(void) {
+  return (struct riscv64_percpu *)riscv_csr_read(RISCV_CSR_XSCRATCH);
+}
+
 static inline cpu_num_t arch_curr_cpu_num(void) {
+//  return riscv64_get_percpu()->cpu_num;
   return 0;
 }
 

@@ -24,6 +24,19 @@
 #include <lk/init.h>
 #include <lk/main.h>
 
+// per cpu structure, pointed to by xscratch
+struct riscv64_percpu percpu[SMP_MAX_CPUS];
+
+// called extremely early from start.S prior to getting into any other C code on
+// both the boot cpu and the secondaries
+extern "C" void riscv64_configure_percpu_early(uint hart_id) {
+  // point xscratch at the current cpu
+  // on the first cpu cpu_num should be set to 0 so we'll leave it alone
+  // on secondary cpus the secondary boot code will fill in the cpu number
+  riscv_csr_write(RISCV_CSR_XSCRATCH, &percpu[hart_id]);
+  percpu[hart_id].hart_id = hart_id;
+}
+
 void arch_early_init() {
 }
 
