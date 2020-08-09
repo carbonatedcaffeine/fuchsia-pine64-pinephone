@@ -19,6 +19,7 @@
 
 #include <arch/mp.h>
 #include <arch/ops.h>
+#include <arch/riscv64/sbi.h>
 #include <kernel/atomic.h>
 #include <kernel/thread.h>
 #include <lk/init.h>
@@ -68,8 +69,17 @@ void arch_init() TA_NO_THREAD_SAFETY_ANALYSIS {
 
   // print some arch info
   dprintf(INFO, "RISCV: Supervisor mode\n");
+  dprintf(INFO, "RISCV: mvendorid %#lx marchid %#lx mimpid %#lx\n",
+          sbi_call(SBI_GET_MVENDORID).value, sbi_call(SBI_GET_MARCHID).value,
+          sbi_call(SBI_GET_MIMPID).value);
   dprintf(INFO, "RISCV: MMU enabled sv49\n");
   dprintf(INFO, "RISCV: SBI impl id %#lx version %#lx\n", sbi_call(SBI_GET_SBI_IMPL_ID).value, sbi_call(SBI_GET_SBI_IMPL_VERSION).value);
+
+  // probe some SBI extensions
+  dprintf(INFO, "RISCV: SBI extension TIMER %ld\n", sbi_call(SBI_PROBE_EXTENSION, SBI_EXT_TIMER).value);
+  dprintf(INFO, "RISCV: SBI extension IPI %ld\n", sbi_call(SBI_PROBE_EXTENSION, SBI_EXT_IPI).value);
+  dprintf(INFO, "RISCV: SBI extension RFENCE %ld\n", sbi_call(SBI_PROBE_EXTENSION, SBI_EXT_RFENCE).value);
+  dprintf(INFO, "RISCV: SBI extension HSM %ld\n", sbi_call(SBI_PROBE_EXTENSION, SBI_EXT_HSM).value);
 }
 
 void arch_late_init_percpu(void) {
