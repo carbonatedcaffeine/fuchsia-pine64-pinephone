@@ -9,6 +9,41 @@
 
 #define REGOFF(x) ((x) * 8)
 
+// void riscv64_context_switch(vaddr_t* old_sp, vaddr_t new_sp);
+FUNCTION(riscv64_context_switch)
+    sd    ra, REGOFF(0)(a0)
+    sd    sp, REGOFF(1)(a0)
+    sd    s0, REGOFF(2)(a0)
+    sd    s1, REGOFF(3)(a0)
+    sd    s2, REGOFF(4)(a0)
+    sd    s3, REGOFF(5)(a0)
+    sd    s4, REGOFF(6)(a0)
+    sd    s5, REGOFF(7)(a0)
+    sd    s6, REGOFF(8)(a0)
+    sd    s7, REGOFF(9)(a0)
+    sd    s8, REGOFF(10)(a0)
+    sd    s9, REGOFF(11)(a0)
+    sd    s10, REGOFF(12)(a0)
+    sd    s11, REGOFF(13)(a0)
+
+    ld    s11, REGOFF(13)(a1)
+    ld    s10, REGOFF(12)(a1)
+    ld    s9, REGOFF(11)(a1)
+    ld    s8, REGOFF(10)(a1)
+    ld    s7, REGOFF(9)(a1)
+    ld    s6, REGOFF(8)(a1)
+    ld    s5, REGOFF(7)(a1)
+    ld    s4, REGOFF(6)(a1)
+    ld    s3, REGOFF(5)(a1)
+    ld    s2, REGOFF(4)(a1)
+    ld    s1, REGOFF(3)(a1)
+    ld    s0, REGOFF(2)(a1)
+    ld    sp, REGOFF(1)(a1)
+    ld    ra, REGOFF(0)(a1)
+
+    ret
+END_FUNCTION(riscv_context_switch)
+
 /* top level exception handler for riscv64 in non vectored mode */
 .balign 4
 FUNCTION(riscv64_exception_entry)
