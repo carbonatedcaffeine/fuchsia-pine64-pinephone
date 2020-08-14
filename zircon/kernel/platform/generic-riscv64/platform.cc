@@ -57,7 +57,19 @@
 extern paddr_t kernel_entry_paddr;
 extern paddr_t zbi_paddr;
 
+static void* ramdisk_base;
+static size_t ramdisk_size;
+
 static zbi_header_t* zbi_root = nullptr;
+
+static bool uart_disabled = false;
+
+// all of the configured memory arenas from the zbi
+static constexpr size_t kNumArenas = 16;
+static pmm_arena_info_t mem_arena[kNumArenas];
+static size_t arena_count = 0;
+
+static constexpr bool kProcessZbiEarly = true;
 
 const zbi_header_t* platform_get_zbi(void) { return zbi_root; }
 
@@ -65,20 +77,326 @@ void platform_panic_start(void) {
 }
 
 void* platform_get_ramdisk(size_t* size) {
-    return NULL;
+  if (ramdisk_base) {
+    *size = ramdisk_size;
+    return ramdisk_base;
+  } else {
+    *size = 0;
+    return nullptr;
+  }
 }
 
 void platform_halt_cpu(void) {
 }
 
+static inline bool is_zbi_container(void* addr) {
+  DEBUG_ASSERT(addr);
+
+  zbi_header_t* item = (zbi_header_t*)addr;
+  return item->type == ZBI_TYPE_CONTAINER;
+}
+
+static void process_mem_range(const zbi_mem_range_t* mem_range) {
+  switch (mem_range->type) {
+    case ZBI_MEM_RANGE_RAM:
+      dprintf(INFO, "ZBI: mem arena base %#" PRIx64 " size %#" PRIx64 "\n", mem_range->paddr,
+              mem_range->length);
+      if (arena_count >= kNumArenas) {
+        printf("ZBI: Warning, too many memory arenas, dropping additional\n");
+        break;
+      }
+      mem_arena[arena_count] = pmm_arena_info_t{"ram", 0, mem_range->paddr, mem_range->length};
+      arena_count++;
+      break;
+    case ZBI_MEM_RANGE_PERIPHERAL: {
+      dprintf(INFO, "ZBI: peripheral range base %#" PRIx64 " size %#" PRIx64 "\n", mem_range->paddr,
+              mem_range->length);
+//      auto status = add_periph_range(mem_range->paddr, mem_range->length);
+//      ASSERT(status == ZX_OK);
+      break;
+    }
+    case ZBI_MEM_RANGE_RESERVED:
+      dprintf(INFO, "ZBI: reserve mem range base %#" PRIx64 " size %#" PRIx64 "\n",
+              mem_range->paddr, mem_range->length);
+      boot_reserve_add_range(mem_range->paddr, mem_range->length);
+      break;
+    default:
+      panic("bad mem_range->type in process_mem_range\n");
+      break;
+  }
+}
+
+// Called during platform_init_early, the heap is not yet present.
+static zbi_result_t process_zbi_item_early(zbi_header_t* item, void* payload, void*) {
+  if (ZBI_TYPE_DRV_METADATA(item->type)) {
+    return ZBI_RESULT_OK;
+  }
+
+  switch (item->type) {
+    case ZBI_TYPE_KERNEL_DRIVER:
+    case ZBI_TYPE_PLATFORM_ID:
+      break;
+    case ZBI_TYPE_CMDLINE: {
+      if (item->length < 1) {
+        break;
+      }
+      char* contents = reinterpret_cast<char*>(payload);
+      contents[item->length - 1] = '\0';
+      gCmdline.Append(contents);
+
+      // The CMDLINE might include entropy for the zircon cprng.
+      // We don't want that information to be accesible after it has
+      // been added to the kernel cmdline.
+      mandatory_memset(payload, 0, item->length);
+      item->type = ZBI_TYPE_DISCARD;
+      item->crc32 = ZBI_ITEM_NO_CRC32;
+      item->flags &= ~ZBI_FLAG_CRC32;
+      break;
+    }
+    case ZBI_TYPE_MEM_CONFIG: {
+      zbi_mem_range_t* mem_range = reinterpret_cast<zbi_mem_range_t*>(payload);
+      uint32_t count = item->length / (uint32_t)sizeof(zbi_mem_range_t);
+      for (uint32_t i = 0; i < count; i++) {
+        process_mem_range(mem_range++);
+      }
+      break;
+    }
+
+    case ZBI_TYPE_NVRAM: {
+      zbi_nvram_t info;
+      memcpy(&info, payload, sizeof(info));
+
+      dprintf(INFO, "boot reserve nvram range: phys base %#" PRIx64 " length %#" PRIx64 "\n",
+              info.base, info.length);
+
+      platform_set_ram_crashlog_location(info.base, info.length);
+      boot_reserve_add_range(info.base, info.length);
+      break;
+    }
+
+    case ZBI_TYPE_HW_REBOOT_REASON: {
+      zbi_hw_reboot_reason_t reason;
+      memcpy(&reason, payload, sizeof(reason));
+      platform_set_hw_reboot_reason(reason);
+      break;
+    }
+  }
+
+  return ZBI_RESULT_OK;
+}
+
+static constexpr zbi_topology_node_t fallback_topology = {
+    .entity_type = ZBI_TOPOLOGY_ENTITY_PROCESSOR,
+    .parent_index = ZBI_TOPOLOGY_NO_PARENT,
+    .entity = {.processor = {.logical_ids = {0},
+                             .logical_id_count = 1,
+                             .flags = 0,
+                             .architecture = ZBI_TOPOLOGY_ARCH_ARM,
+                             .architecture_info = {.arm = {
+                                                       .cluster_1_id = 0,
+                                                       .cluster_2_id = 0,
+                                                       .cluster_3_id = 0,
+                                                       .cpu_id = 0,
+                                                       .gic_id = 0,
+                                                   }}}}};
+
+static void init_topology(zbi_topology_node_t* nodes, size_t node_count) {
+  auto result = system_topology::Graph::InitializeSystemTopology(nodes, node_count);
+  if (result != ZX_OK) {
+    printf("Failed to initialize system topology! error: %d\n", result);
+
+    // Try to fallback to a topology of just this processor.
+    result = system_topology::Graph::InitializeSystemTopology(&fallback_topology, 1);
+    ASSERT(result == ZX_OK);
+  }
+
+  arch_set_num_cpus(static_cast<uint>(system_topology::GetSystemTopology().processor_count()));
+
+  // TODO(ZX-3068) Print the whole topology of the system.
+  if (DPRINTF_ENABLED_FOR_LEVEL(INFO)) {
+    for (auto* proc : system_topology::GetSystemTopology().processors()) {
+      auto& info = proc->entity.processor.architecture_info.arm;
+      dprintf(INFO, "System topology: CPU %u:%u:%u:%u\n", info.cluster_3_id, info.cluster_2_id,
+              info.cluster_1_id, info.cpu_id);
+    }
+  }
+}
+
+// Called after heap is up, but before multithreading.
+static zbi_result_t process_zbi_item_late(zbi_header_t* item, void* payload, void*) {
+  switch (item->type) {
+    case ZBI_TYPE_CPU_CONFIG: {
+      zbi_cpu_config_t* cpu_config = reinterpret_cast<zbi_cpu_config_t*>(payload);
+
+      // Convert old zbi_cpu_config into zbi_topology structure.
+
+      // Allocate some memory to work in.
+      size_t node_count = 0;
+      for (size_t cluster = 0; cluster < cpu_config->cluster_count; cluster++) {
+        // Each cluster will get a node.
+        node_count++;
+        node_count += cpu_config->clusters[cluster].cpu_count;
+      }
+
+      fbl::AllocChecker checker;
+      auto flat_topology =
+          ktl::unique_ptr<zbi_topology_node_t[]>{new (&checker) zbi_topology_node_t[node_count]};
+      if (!checker.check()) {
+        return ZBI_RESULT_ERROR;
+      }
+
+      // Initialize to 0.
+      memset(flat_topology.get(), 0, sizeof(zbi_topology_node_t) * node_count);
+
+      // Create topology structure.
+      size_t flat_index = 0;
+      uint16_t logical_id = 0;
+      for (size_t cluster = 0; cluster < cpu_config->cluster_count; cluster++) {
+        const auto cluster_index = flat_index;
+        auto& node = flat_topology.get()[flat_index++];
+        node.entity_type = ZBI_TOPOLOGY_ENTITY_CLUSTER;
+        node.parent_index = ZBI_TOPOLOGY_NO_PARENT;
+
+        // We don't have this data so it is a guess that little cores are
+        // first.
+        node.entity.cluster.performance_class = static_cast<uint8_t>(cluster);
+
+        for (size_t i = 0; i < cpu_config->clusters[cluster].cpu_count; i++) {
+          auto& node = flat_topology.get()[flat_index++];
+          node.entity_type = ZBI_TOPOLOGY_ENTITY_PROCESSOR;
+          node.parent_index = static_cast<uint16_t>(cluster_index);
+          node.entity.processor.logical_id_count = 1;
+          node.entity.processor.logical_ids[0] = logical_id;
+          node.entity.processor.architecture = ZBI_TOPOLOGY_ARCH_ARM;
+          node.entity.processor.architecture_info.arm.cluster_1_id = static_cast<uint8_t>(cluster);
+          node.entity.processor.architecture_info.arm.cpu_id = static_cast<uint8_t>(i);
+          node.entity.processor.architecture_info.arm.gic_id = static_cast<uint8_t>(logical_id++);
+        }
+      }
+      DEBUG_ASSERT(flat_index == node_count);
+
+      // Initialize topology subsystem.
+      init_topology(flat_topology.get(), node_count);
+      break;
+    }
+    case ZBI_TYPE_CPU_TOPOLOGY: {
+      const int node_count = item->length / item->extra;
+
+      zbi_topology_node_t* nodes = reinterpret_cast<zbi_topology_node_t*>(payload);
+
+      init_topology(nodes, node_count);
+      break;
+    }
+  }
+  return ZBI_RESULT_OK;
+}
+
+static void process_zbi(zbi_header_t* root, bool early) {
+  DEBUG_ASSERT(root);
+  zbi_result_t result;
+
+  uint8_t* zbi_base = reinterpret_cast<uint8_t*>(root);
+  zbi::Zbi image(zbi_base);
+
+  // Make sure the image looks valid.
+  result = image.Check(nullptr);
+  if (result != ZBI_RESULT_OK) {
+    // TODO(gkalsi): Print something informative here?
+    return;
+  }
+
+  image.ForEach(early ? process_zbi_item_early : process_zbi_item_late, nullptr);
+}
+
 void platform_early_init(void) {
+  // if the zbi_paddr variable is -1, it was not set
+  // in start.S, so we are in a bad place.
+  if (zbi_paddr == -1UL) {
+    panic("no zbi_paddr!\n");
+  }
+
+  void* zbi_vaddr = paddr_to_physmap(zbi_paddr);
+
+  // initialize the boot memory reservation system
+  boot_reserve_init();
+
+  if (zbi_vaddr && is_zbi_container(zbi_vaddr)) {
+    zbi_header_t* header = (zbi_header_t*)zbi_vaddr;
+
+
+    ramdisk_base = header;
+    ramdisk_size = ROUNDUP(header->length + sizeof(*header), PAGE_SIZE);
+  } else {
+    panic("no bootdata!\n");
+  }
+
+  if (!ramdisk_base || !ramdisk_size) {
+    panic("no ramdisk!\n");
+  }
+
+  zbi_root = reinterpret_cast<zbi_header_t*>(ramdisk_base);
+  // walk the zbi structure and process all the items
+  process_zbi(zbi_root, kProcessZbiEarly);
+
+  // is the cmdline option to bypass dlog set ?
+  dlog_bypass_init();
+
+  // bring up kernel drivers after we have mapped our peripheral ranges
+  pdev_init(zbi_root);
+
+  // Serial port should be active now
+
+  // Check if serial should be enabled
+  const char* serial_mode = gCmdline.GetString("kernel.serial");
+  uart_disabled = (serial_mode != NULL && !strcmp(serial_mode, "none"));
+
+  // Initialize the PmmChecker now that the cmdline has been parsed.
+  pmm_checker_init_from_cmdline();
+
+  // add the ramdisk to the boot reserve memory list
+  paddr_t ramdisk_start_phys = physmap_to_paddr(ramdisk_base);
+  paddr_t ramdisk_end_phys = ramdisk_start_phys + ramdisk_size;
+  dprintf(INFO, "reserving ramdisk phys range [%#" PRIx64 ", %#" PRIx64 "]\n", ramdisk_start_phys,
+          ramdisk_end_phys - 1);
+  boot_reserve_add_range(ramdisk_start_phys, ramdisk_size);
+
+  // check if a memory limit was passed in via kernel.memory-limit-mb and
+  // find memory ranges to use if one is found.
+  zx_status_t status = memory_limit_init();
+  bool have_limit = (status == ZX_OK);
+  for (size_t i = 0; i < arena_count; i++) {
+    if (have_limit) {
+      // Figure out and add arenas based on the memory limit and our range of DRAM
+      status = memory_limit_add_range(mem_arena[i].base, mem_arena[i].size, mem_arena[i]);
+    }
+
+    // If no memory limit was found, or adding arenas from the range failed, then add
+    // the existing global arena.
+    if (!have_limit || status != ZX_OK) {
+      // Init returns not supported if no limit exists
+      if (status != ZX_ERR_NOT_SUPPORTED) {
+        dprintf(INFO, "memory limit lib returned an error (%d), falling back to defaults\n",
+                status);
+      }
+      pmm_add_arena(&mem_arena[i]);
+    }
+  }
+
+  // add any pending memory arenas the memory limit library has pending
+  if (have_limit) {
+    status = memory_limit_add_arenas(mem_arena[0]);
+    DEBUG_ASSERT(status == ZX_OK);
+  }
+
+  // tell the boot allocator to mark ranges we've reserved as off limits
+  boot_reserve_wire();
 }
 
 void platform_prevm_init() {
 }
 
 // Called after the heap is up but before the system is multithreaded.
-void platform_init_pre_thread(uint) { }
+void platform_init_pre_thread(uint) { process_zbi(zbi_root, !kProcessZbiEarly); }
 
 LK_INIT_HOOK(platform_init_pre_thread, platform_init_pre_thread, LK_INIT_LEVEL_VM)
 
