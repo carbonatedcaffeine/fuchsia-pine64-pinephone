@@ -742,11 +742,11 @@ class __POINTER(KeyType_) WAVLTree {
     }
 
     typename IterTraits::RefType operator*() const {
-      ZX_DEBUG_ASSERT(node_);
+      ZX_DEBUG_ASSERT(internal::valid_sentinel_ptr(node_));
       return *node_;
     }
     typename IterTraits::RawPtrType operator->() const {
-      ZX_DEBUG_ASSERT(node_);
+      ZX_DEBUG_ASSERT(internal::valid_sentinel_ptr(node_));
       return node_;
     }
 
