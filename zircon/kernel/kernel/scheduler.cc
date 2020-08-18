@@ -43,8 +43,11 @@ using ffl::FromRatio;
 using ffl::Round;
 
 // Determines which subset of tracers are enabled when detailed tracing is
-// enabled.
-#define LOCAL_KTRACE_LEVEL SCHEDULER_TRACING_LEVEL
+// enabled. When queue tracing is enabled the minimum trace level is
+// KTRACE_COMMON.
+#define LOCAL_KTRACE_LEVEL                                                         \
+  (SCHEDULER_TRACING_LEVEL == 0 && SCHEDULER_QUEUE_TRACING_ENABLED ? KTRACE_COMMON \
+                                                                   : SCHEDULER_TRACING_LEVEL)
 
 // The tracing levels used in this compilation unit.
 #define KTRACE_COMMON 1
@@ -200,6 +203,33 @@ inline uint64_t Scheduler::NextFlowId() {
 #else
   return 0;
 #endif
+}
+
+// Records details about the threads entering/exiting the run queues for various
+// CPUs, as well as which task on each CPU is currently active. These events are
+// used for trace analysis to compute statistics about overall utilization,
+// taking CPU affinity into account.
+inline void Scheduler::TraceThreadQueueEvent(StringRef* name, Thread* thread) {
+  // Traces marking the end of a queue/dequeue operation have arguments encoded
+  // as follows:
+  //
+  // arg0[56..63] : Number of runnable tasks on this CPU after the queue event.
+  // arg0[48..55] : CPU_ID of the affected queue.
+  // arg0[ 0..47] : Lowest 48 bits of thread TID/ptr.
+  // arg1[ 0..63] : CPU availability mask.
+  if constexpr (SCHEDULER_QUEUE_TRACING_ENABLED) {
+    const uint64_t tid =
+        thread->IsIdle()
+            ? 0
+            : (thread->user_thread() ? thread->user_tid() : reinterpret_cast<uint64_t>(thread));
+    const size_t cnt = fair_run_queue_.size() + deadline_run_queue_.size() +
+                       ((active_thread_ && !active_thread_->IsIdle()) ? 1 : 0);
+    const uint64_t arg0 = (tid & 0xFFFFFFFFFFFF) |
+                          (ktl::clamp<uint64_t>(this_cpu_, 0, 0xFF) << 48) |
+                          (ktl::clamp<uint64_t>(cnt, 0, 0xFF) << 56);
+    const uint64_t arg1 = thread->scheduler_state().GetEffectiveCpuMask(mp_get_active_mask());
+    ktrace_probe(TraceAlways, TraceContext::Cpu, name, arg0, arg1);
+  }
 }
 
 // Updates the total expected runtime estimator with the given delta. The
@@ -483,6 +513,7 @@ Thread* Scheduler::StealWork(SchedTime now) {
         DEBUG_ASSERT(check_affinity(*thread));
         queue->deadline_run_queue_.erase(*thread);
         queue->Remove(thread);
+        queue->TraceThreadQueueEvent("tqe_deque_steal_work"_stringref, thread);
 
         // Associate the thread with this Scheduler, but don't enqueue it. It
         // will run immediately on this CPU as if dequeued from a local queue.
@@ -496,7 +527,7 @@ Thread* Scheduler::StealWork(SchedTime now) {
         return check_affinity(*iter) && !iter->has_migrate_fn();
       };
 
-      // TODO(eieio): Revisit the eligiblity time parameter if/when moving to WF2Q.
+      // TODO(eieio): Revisit the eligibility time parameter if/when moving to WF2Q.
       queue->UpdateTimeline(now);
       SchedTime eligible_time = queue->virtual_time_;
       if (!queue->fair_run_queue_.is_empty()) {
@@ -510,6 +541,7 @@ Thread* Scheduler::StealWork(SchedTime now) {
         DEBUG_ASSERT(check_affinity(*thread));
         queue->fair_run_queue_.erase(*thread);
         queue->Remove(thread);
+        queue->TraceThreadQueueEvent("tqe_deque_steal_work"_stringref, thread);
 
         // Associate the thread with this Scheduler, but don't enqueue it. It
         // will run immediately on this CPU as if dequeued from a local queue.
@@ -550,7 +582,9 @@ Thread* Scheduler::DequeueFairThread() {
                    earliest_thread.scheduler_state().min_finish_time_.raw_value());
 
   virtual_time_ = eligible_time;
-  return fair_run_queue_.erase(*eligible_thread);
+  fair_run_queue_.erase(*eligible_thread);
+  TraceThreadQueueEvent("tqe_deque_fair"_stringref, eligible_thread);
+  return eligible_thread;
 }
 
 // Dequeues the eligible thread with the earliest deadline. The caller must
@@ -568,6 +602,7 @@ Thread* Scheduler::DequeueDeadlineThread(SchedTime eligible_time) {
                    eligible_thread->scheduler_state().min_finish_time_.raw_value());
 
   deadline_run_queue_.erase(*eligible_thread);
+  TraceThreadQueueEvent("tqe_deque_deadline"_stringref, eligible_thread);
 
   const SchedulerState& state = eligible_thread->scheduler_state();
   trace.End(Round<uint64_t>(state.start_time_), Round<uint64_t>(state.finish_time_));
@@ -597,7 +632,13 @@ SchedTime Scheduler::GetNextEligibleTime() {
 Thread* Scheduler::DequeueEarlierDeadlineThread(SchedTime eligible_time, SchedTime finish_time) {
   LocalTraceDuration<KTRACE_DETAILED> trace{"dequeue_earlier_deadline_thread"_stringref};
   Thread* const eligible_thread = FindEarlierDeadlineThread(eligible_time, finish_time);
-  return eligible_thread ? deadline_run_queue_.erase(*eligible_thread) : nullptr;
+
+  if (eligible_thread != nullptr) {
+    deadline_run_queue_.erase(*eligible_thread);
+    TraceThreadQueueEvent("tqe_deque_earlier_deadline"_stringref, eligible_thread);
+  }
+
+  return eligible_thread;
 }
 
 // Updates the system load metrics. Updates happen only when the active thread
@@ -609,7 +650,7 @@ void Scheduler::UpdateCounters(SchedDuration queue_time_ns) {
   samples_counter.Add(1);
 }
 
-// Selects a thread to run. Performs any necessary maintenanace if the current
+// Selects a thread to run. Performs any necessary maintenance if the current
 // thread is changing, depending on the reason for the change.
 Thread* Scheduler::EvaluateNextThread(SchedTime now, Thread* current_thread, bool timeslice_expired,
                                       SchedDuration scaled_total_runtime_ns) {
@@ -685,7 +726,7 @@ Thread* Scheduler::EvaluateNextThread(SchedTime now, Thread* current_thread, boo
   //
   cpu_mask_t cpus_to_reschedule_mask = 0;
   for (; needs_migration(next_thread); next_thread = DequeueThread(now)) {
-    // If the thread is not scheduled to migrate to a specifc CPU, find a
+    // If the thread is not scheduled to migrate to a specific CPU, find a
     // suitable target CPU. If the thread has a migration function, the search
     // will schedule the thread to migrate to a specific CPU and return the
     // current CPU.
@@ -980,13 +1021,17 @@ void Scheduler::RescheduleCommon(SchedTime now, EndTraceCallback end_outer_trace
   const cpu_num_t last_cpu = next_state->last_cpu_;
   next_state->last_cpu_ = current_cpu;
   next_state->curr_cpu_ = current_cpu;
+  active_thread_ = next_thread;
+
+  // Trace the activation of the next thread before context switching.
+  if (current_thread != next_thread) {
+    TraceThreadQueueEvent("tqe_activate"_stringref, next_thread);
+  }
 
   // Call the migrate function if the thread has moved between CPUs.
   if (last_cpu != INVALID_CPU && last_cpu != current_cpu) {
     next_thread->CallMigrateFnLocked(Thread::MigrateStage::After);
   }
-
-  active_thread_ = next_thread;
 
   // Update the expected runtime of the current thread and the per-CPU total.
   // Only update the thread and aggregate values if the current thread is still
@@ -1343,7 +1388,7 @@ void Scheduler::QueueThread(Thread* thread, Placement placement, SchedTime now,
   }
 
   // Only update the generation, enqueue time, and emit a flow event if this
-  // is an insertion, preemption, or migration. In constrast, an adjustment only
+  // is an insertion, preemption, or migration. In contrast, an adjustment only
   // changes the queue position in the same queue due to a parameter change and
   // should not perform these actions.
   if (placement != Placement::Adjustment) {
@@ -1371,6 +1416,7 @@ void Scheduler::QueueThread(Thread* thread, Placement placement, SchedTime now,
   } else {
     deadline_run_queue_.insert(thread);
   }
+  TraceThreadQueueEvent("tqe_enque"_stringref, thread);
   trace.End(Round<uint64_t>(state->start_time_), Round<uint64_t>(state->finish_time_));
 }
 
@@ -1614,8 +1660,8 @@ void Scheduler::Reschedule() {
 }
 
 void Scheduler::RescheduleInternal() {
-  LocalTraceDuration<KTRACE_COMMON> trace{"sched_reschedule_internal"_stringref};
-  Get()->RescheduleCommon(CurrentTime());
+  LocalTraceDuration<KTRACE_COMMON> trace{"sched_resched_internal"_stringref};
+  Get()->RescheduleCommon(CurrentTime(), trace.Completer());
 }
 
 void Scheduler::Migrate(Thread* thread) {
@@ -1685,6 +1731,7 @@ void Scheduler::MigrateUnpinnedThreads() {
       pinned_threads.insert(thread);
     } else {
       // Move unpinned threads to another available CPU.
+      current->TraceThreadQueueEvent("tqe_deque_migrate_unpinned_fair"_stringref, thread);
       current->Remove(thread);
       thread->CallMigrateFnLocked(Thread::MigrateStage::Before);
 
@@ -1708,6 +1755,7 @@ void Scheduler::MigrateUnpinnedThreads() {
       pinned_threads.insert(thread);
     } else {
       // Move unpinned threads to another available CPU.
+      current->TraceThreadQueueEvent("tqe_deque_migrate_unpinned_deadline"_stringref, thread);
       current->Remove(thread);
       thread->CallMigrateFnLocked(Thread::MigrateStage::Before);
 
@@ -1752,11 +1800,12 @@ void Scheduler::UpdateWeightCommon(Thread* thread, int original_priority, SchedW
 
       // If the thread is in a run queue, remove it before making subsequent
       // changes to the properties of the thread. Erasing and enqueuing depend
-      // on having the currect discipline set before hand.
+      // on having the current discipline set before hand.
       if (thread->state() == THREAD_READY) {
         DEBUG_ASSERT(state->InQueue());
         DEBUG_ASSERT(state->active());
         current->GetRunQueue(thread).erase(*thread);
+        current->TraceThreadQueueEvent("tqe_deque_update_weight"_stringref, thread);
       }
 
       if (IsDeadlineThread(thread)) {
@@ -1842,7 +1891,7 @@ void Scheduler::UpdateDeadlineCommon(Thread* thread, int original_priority,
 
       // If the thread is in a run queue, remove it before making subsequent
       // changes to the properties of the thread. Erasing and enqueuing depend
-      // on having the currect discipline set before hand.
+      // on having the correct discipline set before hand.
       if (thread->state() == THREAD_READY) {
         DEBUG_ASSERT(state->InQueue());
         DEBUG_ASSERT(state->active());
