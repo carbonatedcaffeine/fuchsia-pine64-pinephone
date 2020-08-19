@@ -211,8 +211,10 @@ inline void Scheduler::UpdateTotalExpectedRuntime(SchedDuration delta_ns) {
   exported_total_expected_runtime_ns_ = scaled_ns;
   LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Est Load", scaled_ns.raw_value(), this_cpu());
 
-  const auto original_value = global_expected_runtime_ns_ += delta_ns.raw_value();
-  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Global Est Load", original_value + delta_ns.raw_value());
+  const SchedDuration scaled_delta_ns = ScaleUp(delta_ns);
+  const auto original_value = global_expected_runtime_ns_ += scaled_delta_ns.raw_value();
+  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Global Est Load",
+                       original_value + scaled_delta_ns.raw_value());
 }
 
 // Updates the total deadline utilization estimator with the given delta. The
@@ -877,14 +879,20 @@ void Scheduler::RescheduleCommon(SchedTime now, EndTraceCallback end_outer_trace
     // scale is in the range (0.0, 1.0], such that the adjusted runtime is
     // always less than or equal to the monotonic runtime.
     const SchedDuration adjusted_total_runtime_ns = ScaleDown(total_runtime_ns);
-    const SchedDuration delta_ns = PeakEMADelta(current_state->expected_runtime_ns_,
-                                                adjusted_total_runtime_ns, kExpectedRuntimeAlpha);
-    current_state->expected_runtime_ns_ += delta_ns;
+    current_state->banked_runtime_ns_ += adjusted_total_runtime_ns;
 
-    // Adjust the aggregate value by the same amount. The adjustment is only
-    // necessary when the thread is still active on this CPU.
-    if (current_state->active()) {
-      UpdateTotalExpectedRuntime(delta_ns);
+    if (timeslice_expired || !current_state->active()) {
+      const SchedDuration delta_ns =
+          PeakEMADelta(current_state->expected_runtime_ns_, current_state->banked_runtime_ns_,
+                       kExpectedRuntimeAlpha);
+      current_state->expected_runtime_ns_ += delta_ns;
+      current_state->banked_runtime_ns_ = SchedDuration{0};
+
+      // Adjust the aggregate value by the same amount. The adjustment is only
+      // necessary when the thread is still active on this CPU.
+      if (current_state->active()) {
+        UpdateTotalExpectedRuntime(delta_ns);
+      }
     }
   }
 
