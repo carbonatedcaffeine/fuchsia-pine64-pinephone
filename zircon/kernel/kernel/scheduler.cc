@@ -49,7 +49,8 @@ using ffl::Round;
 // The tracing levels used in this compilation unit.
 #define KTRACE_COMMON 1
 #define KTRACE_FLOW 2
-#define KTRACE_DETAILED 3
+#define KTRACE_COUNTER 3
+#define KTRACE_DETAILED 4
 
 // Evaluates to true if tracing is enabled for the given level.
 #define LOCAL_KTRACE_LEVEL_ENABLED(level) ((LOCAL_KTRACE_LEVEL) >= (level))
@@ -213,11 +214,11 @@ inline void Scheduler::UpdateTotalExpectedRuntime(SchedDuration delta_ns) {
   DEBUG_ASSERT(total_expected_runtime_ns_ >= 0);
   const SchedDuration scaled_ns = ScaleUp(total_expected_runtime_ns_);
   exported_total_expected_runtime_ns_ = scaled_ns;
-  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Est Load", scaled_ns.raw_value(), this_cpu());
+  LOCAL_KTRACE_COUNTER(KTRACE_COUNTER, "Est Load", scaled_ns.raw_value(), this_cpu());
 
   const SchedDuration scaled_delta_ns = ScaleUp(delta_ns);
   const auto original_value = global_expected_runtime_ns_ += scaled_delta_ns.raw_value();
-  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Global Est Load",
+  LOCAL_KTRACE_COUNTER(KTRACE_COUNTER, "Global Est Load",
                        original_value + scaled_delta_ns.raw_value());
 }
 
@@ -229,7 +230,7 @@ inline void Scheduler::UpdateTotalDeadlineUtilization(SchedUtilization delta) {
   DEBUG_ASSERT(total_deadline_utilization_ >= 0);
   const SchedUtilization scaled = ScaleUp(total_deadline_utilization_);
   exported_total_deadline_utilization_ = scaled;
-  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Est Util", Round<uint64_t>(scaled * 10000), this_cpu());
+  LOCAL_KTRACE_COUNTER(KTRACE_COUNTER, "Est Util", Round<uint64_t>(scaled * 10000), this_cpu());
 }
 
 // Updates the total weight and exports the atomic shadow variable for
@@ -239,15 +240,15 @@ inline void Scheduler::UpdateTotalWeight(SchedWeight delta) {
   DEBUG_ASSERT(weight_total_ >= 0);
   const SchedWeight scaled = ScaleUp(weight_total_);
   exported_weight_total_ = scaled;
-  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Weight", scaled.raw_value(), this_cpu());
+  LOCAL_KTRACE_COUNTER(KTRACE_COUNTER, "Weight", scaled.raw_value(), this_cpu());
 
   const SchedWeight scaled_delta = ScaleUp(delta);
   const auto original_value = global_total_weight_ += scaled_delta.raw_value();
-  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Global Weight", original_value + scaled_delta.raw_value());
+  LOCAL_KTRACE_COUNTER(KTRACE_COUNTER, "Global Weight", original_value + scaled_delta.raw_value());
 }
 
 inline void Scheduler::TraceTotalRunnableThreads() const {
-  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Run-Q Len",
+  LOCAL_KTRACE_COUNTER(KTRACE_COUNTER, "Run-Q Len",
                        runnable_fair_task_count_ + runnable_deadline_task_count_, this_cpu());
 }
 
@@ -439,7 +440,7 @@ Thread* Scheduler::DequeueThread(SchedTime now) {
 // queues. Returns a pointer to the stolen thread that is now associated with
 // the local Scheduler instance, or nullptr is no work was stolen.
 Thread* Scheduler::StealWork(SchedTime now) {
-  LocalTraceDuration<KTRACE_COMMON> trace{"steal_work"_stringref};
+  LocalTraceDuration<KTRACE_DETAILED> trace{"steal_work"_stringref};
 
   const cpu_num_t current_cpu = this_cpu();
   const cpu_mask_t current_cpu_mask = cpu_num_to_mask(current_cpu);
@@ -778,9 +779,9 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
                            const Scheduler* queue_a, const Scheduler* queue_b) TA_REQ(thread_lock) {
     const SchedDuration a_predicted_queue_time_ns = queue_a->predicted_queue_time_ns();
     const SchedDuration b_predicted_queue_time_ns = queue_b->predicted_queue_time_ns();
-    LocalTraceDuration<KTRACE_COMMON> trace_compare{"compare: qtime,qtime"_stringref,
-                                                    Round<uint64_t>(a_predicted_queue_time_ns),
-                                                    Round<uint64_t>(b_predicted_queue_time_ns)};
+    LocalTraceDuration<KTRACE_DETAILED> trace_compare{"compare: qtime,qtime"_stringref,
+                                                      Round<uint64_t>(a_predicted_queue_time_ns),
+                                                      Round<uint64_t>(b_predicted_queue_time_ns)};
     if (IsFairThread(thread)) {
       // CPUs in the same logical cluster are considered equivalent in terms of
       // cache affinity. Choose the least loaded among the members of a cluster.
@@ -820,9 +821,9 @@ cpu_num_t Scheduler::FindTargetCpu(Thread* thread) {
     const SchedDuration candidate_queue_time_ns =
         queue->predicted_queue_time_ns() + expected_runtime_ns;
 
-    LocalTraceDuration<KTRACE_COMMON> sufficient_trace{"is_sufficient: thresh,ema+qtime"_stringref,
-                                                       Round<uint64_t>(runtime_threshold_ns),
-                                                       Round<uint64_t>(candidate_queue_time_ns)};
+    LocalTraceDuration<KTRACE_DETAILED> sufficient_trace{
+        "is_sufficient: thresh,ema+qtime"_stringref, Round<uint64_t>(runtime_threshold_ns),
+        Round<uint64_t>(candidate_queue_time_ns)};
 
     const bool sufficient_runtime = candidate_queue_time_ns <= runtime_threshold_ns;
     if (IsFairThread(thread)) {
@@ -1612,7 +1613,10 @@ void Scheduler::Reschedule() {
   Get()->RescheduleCommon(now, trace.Completer());
 }
 
-void Scheduler::RescheduleInternal() { Get()->RescheduleCommon(CurrentTime()); }
+void Scheduler::RescheduleInternal() {
+  LocalTraceDuration<KTRACE_COMMON> trace{"sched_reschedule_internal"_stringref};
+  Get()->RescheduleCommon(CurrentTime());
+}
 
 void Scheduler::Migrate(Thread* thread) {
   LocalTraceDuration<KTRACE_COMMON> trace{"sched_migrate"_stringref};
