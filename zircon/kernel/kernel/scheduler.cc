@@ -32,6 +32,7 @@
 #include <kernel/thread.h>
 #include <kernel/thread_lock.h>
 #include <ktl/algorithm.h>
+#include <ktl/forward.h>
 #include <ktl/move.h>
 #include <ktl/pair.h>
 #include <ktl/popcount.h>
@@ -64,6 +65,10 @@ using ffl::Round;
 #define LOCAL_KTRACE_FLOW_END(level, string, flow_id, args...)                      \
   ktrace_flow_end(LocalTrace<LOCAL_KTRACE_LEVEL_ENABLED(level)>, TraceContext::Cpu, \
                   KTRACE_GRP_SCHEDULER, KTRACE_STRING_REF(string), flow_id, ##args)
+
+#define LOCAL_KTRACE_FLOW_STEP(level, string, flow_id, args...)                      \
+  ktrace_flow_step(LocalTrace<LOCAL_KTRACE_LEVEL_ENABLED(level)>, TraceContext::Cpu, \
+                   KTRACE_GRP_SCHEDULER, KTRACE_STRING_REF(string), flow_id, ##args)
 
 #define LOCAL_KTRACE_COUNTER(level, string, value, args...)                           \
   ktrace_counter(LocalTrace<LOCAL_KTRACE_LEVEL_ENABLED(level)>, KTRACE_GRP_SCHEDULER, \
@@ -144,16 +149,6 @@ inline void TraceContextSwitch(const Thread* current_thread, const Thread* next_
   ktrace(TAG_CONTEXT_SWITCH, user_tid, context, current, next);
 }
 
-// Returns a sufficiently unique flow id for a thread based on the thread id and
-// queue generation count. This flow id cannot be used across enqueues because
-// the generation count changes during enqueue.
-inline uint64_t FlowIdFromThreadGeneration(const Thread* thread) {
-  const int kRotationBits = 32;
-  const uint64_t rotated_tid =
-      (thread->user_tid() << kRotationBits) | (thread->user_tid() >> kRotationBits);
-  return rotated_tid ^ thread->scheduler_state().generation();
-}
-
 // Returns true if the given thread is fair scheduled.
 inline bool IsFairThread(const Thread* thread) {
   return thread->scheduler_state().discipline() == SchedDiscipline::Fair;
@@ -195,6 +190,15 @@ inline Value Scheduler::ScaleUp(Value value) const {
 template <typename Value>
 inline Value Scheduler::ScaleDown(Value value) const {
   return value * performance_scale();
+}
+
+// Returns a new flow id when flow tracing is enabled, zero otherwise.
+inline uint64_t Scheduler::NextFlowId() {
+#if LOCAL_KTRACE_LEVEL >= KTRACE_FLOW
+  return next_flow_id_ += 1;
+#else
+  return 0;
+#endif
 }
 
 // Updates the total expected runtime estimator with the given delta. The
@@ -306,7 +310,8 @@ size_t Scheduler::GetRunnableTasks() const {
 
 // Performs an augmented binary search for the task with the earliest finish
 // time that also has a start time equal to or later than the given eligible
-// time.
+// time. An optional predicate may be supplied to filter candidates based on
+// additional conditions.
 //
 // The tree is ordered by start time and is augmented by maintaining an
 // additional invariant: each task node in the tree stores the minimum finish
@@ -318,10 +323,19 @@ size_t Scheduler::GetRunnableTasks() const {
 // See kernel/scheduler_internal.h for an explanation of how the augmented
 // invariant is maintained.
 Thread* Scheduler::FindEarliestEligibleThread(RunQueue* run_queue, SchedTime eligible_time) {
+  return FindEarliestEligibleThread(run_queue, eligible_time, [](const auto iter) { return true; });
+}
+template <typename Predicate>
+Thread* Scheduler::FindEarliestEligibleThread(RunQueue* run_queue, SchedTime eligible_time,
+                                              Predicate&& predicate) {
   // Early out if there is no eligible thread.
   if (run_queue->is_empty() || run_queue->front().scheduler_state().start_time_ > eligible_time) {
     return nullptr;
   }
+
+  // Deduces either Predicate& or const Predicate&, preserving the const
+  // qualification of the predicate.
+  decltype(auto) accept = ktl::forward<Predicate>(predicate);
 
   auto node = run_queue->root();
   auto subtree = run_queue->end();
@@ -350,16 +364,20 @@ Thread* Scheduler::FindEarliestEligibleThread(RunQueue* run_queue, SchedTime eli
     }
   }
 
-  if (!subtree ||
-      subtree->scheduler_state().min_finish_time_ >= path->scheduler_state().finish_time_) {
+  if (!subtree) {
+    return path && accept(path) ? path.CopyPointer() : nullptr;
+  }
+  if (subtree->scheduler_state().min_finish_time_ >= path->scheduler_state().finish_time_ &&
+      accept(path)) {
     return path.CopyPointer();
   }
 
   // Find the node with the earliest finish time among the decendents of the
   // subtree with the smallest minimum finish time.
   node = subtree;
-  do {
-    if (subtree->scheduler_state().min_finish_time_ == node->scheduler_state().finish_time_) {
+  while (node) {
+    if (subtree->scheduler_state().min_finish_time_ == node->scheduler_state().finish_time_ &&
+        accept(node)) {
       return node.CopyPointer();
     }
 
@@ -369,7 +387,7 @@ Thread* Scheduler::FindEarliestEligibleThread(RunQueue* run_queue, SchedTime eli
     } else {
       node = node.right();
     }
-  } while (node);
+  }
 
   return nullptr;
 }
@@ -402,15 +420,105 @@ void Scheduler::InitializeThread(Thread* thread, const zx_sched_deadline_params_
 
 // Removes the thread at the head of the first eligible run queue. If there is
 // an eligible deadline thread, it takes precedence over available fair
-// threads.
+// threads. If there is no eligible work, attempt to steal work from other busy
+// CPUs.
 Thread* Scheduler::DequeueThread(SchedTime now) {
   if (IsDeadlineThreadEligible(now)) {
     return DequeueDeadlineThread(now);
-  } else if (likely(!fair_run_queue_.is_empty())) {
-    return DequeueFairThread();
-  } else {
-    return &percpu::Get(this_cpu()).idle_thread;
   }
+  if (likely(!fair_run_queue_.is_empty())) {
+    return DequeueFairThread();
+  }
+  if (Thread* const thread = StealWork(now); thread != nullptr) {
+    return thread;
+  }
+  return &percpu::Get(this_cpu()).idle_thread;
+}
+
+// Attempts to steal work from other busy CPUs and move it to the local run
+// queues. Returns a pointer to the stolen thread that is now associated with
+// the local Scheduler instance, or nullptr is no work was stolen.
+Thread* Scheduler::StealWork(SchedTime now) {
+  LocalTraceDuration<KTRACE_COMMON> trace{"steal_work"_stringref};
+
+  const cpu_num_t current_cpu = this_cpu();
+  const cpu_mask_t current_cpu_mask = cpu_num_to_mask(current_cpu);
+  const cpu_mask_t active_cpu_mask = mp_get_active_mask();
+
+  // Compute the global mean runtime that represents the equilibrium state.
+  const int denominator = ktl::max(ktl::popcount(active_cpu_mask), 1);
+  const SchedDuration mean_runtime_ns{global_expected_runtime_ns_.load() / denominator};
+  const SchedDuration runtime_threshold_ns = mean_runtime_ns + kLoadHeadroom;
+
+  // Returns true if the give thread can run on this CPU.
+  const auto check_affinity = [current_cpu_mask, active_cpu_mask](const Thread& thread) -> bool {
+    return current_cpu_mask & thread.scheduler_state().GetEffectiveCpuMask(active_cpu_mask);
+  };
+
+  const CpuSearchSet& search_set = percpu::Get(current_cpu).search_set;
+  for (const auto& entry : search_set.const_iterator()) {
+    if (entry.cpu != current_cpu && active_cpu_mask & cpu_num_to_mask(entry.cpu)) {
+      Scheduler* const queue = Get(entry.cpu);
+
+      // Only steal across clusters if the target is above the load threshold.
+      if (cluster() != entry.cluster && queue->predicted_queue_time_ns() <= runtime_threshold_ns) {
+        continue;
+      }
+
+      // Returns true if the given thread in the run queue meets the criteria to
+      // run on this CPU.
+      const auto deadline_predicate = [this, check_affinity](const auto iter) {
+        const SchedulerState& state = iter->scheduler_state();
+        const SchedUtilization scaled_utilization = ScaleUp(state.deadline_.utilization);
+        const bool is_scheduleable = scaled_utilization <= kThreadUtilizationMax;
+        return check_affinity(*iter) && is_scheduleable && !iter->has_migrate_fn();
+      };
+
+      // Attempt to find a deadline thread that can run on this CPU.
+      Thread* thread =
+          FindEarliestEligibleThread(&queue->deadline_run_queue_, now, deadline_predicate);
+      if (thread != nullptr) {
+        DEBUG_ASSERT(!thread->has_migrate_fn());
+        DEBUG_ASSERT(check_affinity(*thread));
+        queue->deadline_run_queue_.erase(*thread);
+        queue->Remove(thread);
+
+        // Associate the thread with this Scheduler, but don't enqueue it. It
+        // will run immediately on this CPU as if dequeued from a local queue.
+        Insert(now, thread, Placement::Association);
+        return thread;
+      }
+
+      // Returns true if the given thread in the run queue meets the criteria to
+      // run on this CPU.
+      const auto fair_predicate = [check_affinity](const auto iter) {
+        return check_affinity(*iter) && !iter->has_migrate_fn();
+      };
+
+      // TODO(eieio): Revisit the eligiblity time parameter if/when moving to WF2Q.
+      queue->UpdateTimeline(now);
+      SchedTime eligible_time = queue->virtual_time_;
+      if (!queue->fair_run_queue_.is_empty()) {
+        const auto& earliest_thread = queue->fair_run_queue_.front();
+        const auto earliest_start = earliest_thread.scheduler_state().start_time_;
+        eligible_time = ktl::max(eligible_time, earliest_start);
+      }
+      thread = FindEarliestEligibleThread(&queue->fair_run_queue_, eligible_time, fair_predicate);
+      if (thread != nullptr) {
+        DEBUG_ASSERT(!thread->has_migrate_fn());
+        DEBUG_ASSERT(check_affinity(*thread));
+        queue->fair_run_queue_.erase(*thread);
+        queue->Remove(thread);
+
+        // Associate the thread with this Scheduler, but don't enqueue it. It
+        // will run immediately on this CPU as if dequeued from a local queue.
+        Insert(now, thread, Placement::Association);
+        return thread;
+      }
+    }
+  }
+
+  return nullptr;
 }
 
 // Dequeues the eligible thread with the earliest virtual finish time. The
@@ -971,7 +1079,7 @@ void Scheduler::RescheduleCommon(SchedTime now, EndTraceCallback end_outer_trace
     // Emit a flow end event to match the flow begin event emitted when the
     // thread was enqueued. Emitting in this scope ensures that thread just
     // came from the run queue (and is not the idle thread).
-    LOCAL_KTRACE_FLOW_END(KTRACE_FLOW, "sched_latency", FlowIdFromThreadGeneration(next_thread),
+    LOCAL_KTRACE_FLOW_END(KTRACE_FLOW, "sched_latency", next_state->flow_id(),
                           next_thread->user_tid());
   } else if (const SchedTime eligible_time_ns = GetNextEligibleTime();
              eligible_time_ns < absolute_deadline_ns_) {
@@ -1161,6 +1269,7 @@ void Scheduler::QueueThread(Thread* thread, Placement placement, SchedTime now,
 
   DEBUG_ASSERT(thread->state() == THREAD_READY);
   DEBUG_ASSERT(!thread->IsIdle());
+  DEBUG_ASSERT(placement != Placement::Association);
   SCHED_LTRACEF("QueueThread: thread=%s\n", thread->name());
 
   SchedulerState* const state = &thread->scheduler_state();
@@ -1233,17 +1342,25 @@ void Scheduler::QueueThread(Thread* thread, Placement placement, SchedTime now,
   }
 
   // Only update the generation, enqueue time, and emit a flow event if this
-  // is an insertion or preemption. In constrast, an adjustment only changes the
-  // queue position due to a parameter change and should not perform these
-  // actions.
+  // is an insertion, preemption, or migration. In constrast, an adjustment only
+  // changes the queue position in the same queue due to a parameter change and
+  // should not perform these actions.
   if (placement != Placement::Adjustment) {
-    // Reuse this member to track the time the thread enters the run queue.
-    // It is not read outside of the scheduler unless the thread state is
-    // THREAD_RUNNING.
-    state->last_started_running_ = now;
+    if (placement == Placement::Migration) {
+      // Connect the flow into the previous queue to the new queue.
+      LOCAL_KTRACE_FLOW_STEP(KTRACE_FLOW, "sched_latency", state->flow_id(), thread->user_tid());
+    } else {
+      // Reuse this member to track the time the thread enters the run queue. It
+      // is not read outside of the scheduler unless the thread state is
+      // THREAD_RUNNING.
+      state->last_started_running_ = now;
+      state->flow_id_ = NextFlowId();
+      LOCAL_KTRACE_FLOW_BEGIN(KTRACE_FLOW, "sched_latency", state->flow_id(), thread->user_tid());
+    }
+
+    // The generation count must always be updated when changing between CPUs,
+    // as each CPU has its own generation count.
     state->generation_ = ++generation_count_;
-    LOCAL_KTRACE_FLOW_BEGIN(KTRACE_FLOW, "sched_latency", FlowIdFromThreadGeneration(thread),
-                            thread->user_tid());
   }
 
   // Insert the thread into the appropriate run queue after the generation count
@@ -1253,12 +1370,10 @@ void Scheduler::QueueThread(Thread* thread, Placement placement, SchedTime now,
   } else {
     deadline_run_queue_.insert(thread);
   }
-  LOCAL_KTRACE(KTRACE_DETAILED, "queue_thread");
-
   trace.End(Round<uint64_t>(state->start_time_), Round<uint64_t>(state->finish_time_));
 }
 
-void Scheduler::Insert(SchedTime now, Thread* thread) {
+void Scheduler::Insert(SchedTime now, Thread* thread, Placement placement) {
   LocalTraceDuration<KTRACE_DETAILED> trace{"insert"_stringref};
 
   DEBUG_ASSERT(thread->state() == THREAD_READY);
@@ -1287,9 +1402,14 @@ void Scheduler::Insert(SchedTime now, Thread* thread) {
       runnable_deadline_task_count_++;
       DEBUG_ASSERT(runnable_deadline_task_count_ != 0);
     }
-
     TraceTotalRunnableThreads();
-    QueueThread(thread, Placement::Insertion, now);
+
+    if (placement != Placement::Association) {
+      QueueThread(thread, placement, now);
+    } else {
+      // Connect the flow into the previous queue to the new queue.
+      LOCAL_KTRACE_FLOW_STEP(KTRACE_FLOW, "sched_latency", state->flow_id(), thread->user_tid());
+    }
   }
 }
 
