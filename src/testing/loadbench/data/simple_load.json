@@ -6,10 +6,10 @@
   },
   "workers": [
     {
-      "instances": 4,
+      "instances": 8,
       "actions": [
-        { "action": "spin", "duration": "250us" },
-        { "action": "sleep", "duration": "1ms" },
+        { "action": "spin", "uniform" : { "min": "1ms", "max": "16ms" } },
+        { "action": "sleep", "uniform" : { "min": "1ms", "max": "16ms" } },
       ]
     }
   ]
