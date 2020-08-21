@@ -298,6 +298,10 @@ class Scheduler {
   // shadow variable for cross-CPU readers.
   inline void UpdateTotalDeadlineUtilization(SchedUtilization delta_ns) TA_REQ(thread_lock);
 
+  // Updates the total weight and exports the atomic shadow variable for
+  // cross-CPU readers.
+  inline void UpdateTotalWeight(SchedWeight delta) TA_REQ(thread_lock);
+
   // Utilities to scale up or down the given value by the performace scale of the CPU.
   template <typename Value>
   inline Value ScaleUp(Value value) const;
@@ -469,11 +473,16 @@ class Scheduler {
   // cache performance.
   RelaxedAtomic<SchedDuration> exported_total_expected_runtime_ns_{SchedNs(0)};
   RelaxedAtomic<SchedUtilization> exported_total_deadline_utilization_{SchedUtilization{0}};
+  RelaxedAtomic<SchedWeight> exported_weight_total_{SchedWeight{0}};
 
   // Sum of the total expected runtimes of all CPUs in the system. This value
   // may be divided by the number of active CPUs to derive the mean expected
   // runtime or equilibrium point for load balancing.
   inline static RelaxedAtomic<zx_duration_t> global_expected_runtime_ns_{0};
+
+  // Sum of the total weights of all CPUs in the system. This value may be
+  // divided by the number of active CPUs to derive the mean weight.
+  inline static RelaxedAtomic<int64_t> global_total_weight_{0};
 };
 
 #endif  // ZIRCON_KERNEL_INCLUDE_KERNEL_SCHEDULER_H_

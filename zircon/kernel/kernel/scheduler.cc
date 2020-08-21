@@ -228,6 +228,20 @@ inline void Scheduler::UpdateTotalDeadlineUtilization(SchedUtilization delta) {
   LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Est Util", Round<uint64_t>(scaled * 10000), this_cpu());
 }
 
+// Updates the total weight and exports the atomic shadow variable for
+// cross-CPU readers.
+inline void Scheduler::UpdateTotalWeight(SchedWeight delta) {
+  weight_total_ += delta;
+  DEBUG_ASSERT(weight_total_ >= 0);
+  const SchedWeight scaled = ScaleUp(weight_total_);
+  exported_weight_total_ = scaled;
+  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Weight", scaled.raw_value(), this_cpu());
+
+  const SchedWeight scaled_delta = ScaleUp(delta);
+  const auto original_value = global_total_weight_ += scaled_delta.raw_value();
+  LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Global Weight", original_value + scaled_delta.raw_value());
+}
+
 inline void Scheduler::TraceTotalRunnableThreads() const {
   LOCAL_KTRACE_COUNTER(KTRACE_COMMON, "Run-Q Len",
                        runnable_fair_task_count_ + runnable_deadline_task_count_, this_cpu());
@@ -1267,8 +1281,7 @@ void Scheduler::Insert(SchedTime now, Thread* thread) {
       UpdateTimeline(now);
       UpdatePeriod();
 
-      weight_total_ += state->fair_.weight;
-      DEBUG_ASSERT(weight_total_ > 0);
+      UpdateTotalWeight(state->fair_.weight);
     } else {
       UpdateTotalDeadlineUtilization(state->deadline_.utilization);
       runnable_deadline_task_count_++;
@@ -1303,8 +1316,7 @@ void Scheduler::Remove(Thread* thread) {
       state->start_time_ = SchedNs(0);
       state->finish_time_ = SchedNs(0);
 
-      weight_total_ -= state->fair_.weight;
-      DEBUG_ASSERT(weight_total_ >= 0);
+      UpdateTotalWeight(-state->fair_.weight);
 
       SCHED_LTRACEF("name=%s weight_total=%s weight=%s\n", thread->name(),
                     Format(weight_total_).c_str(), Format(state->fair_.weight).c_str());
@@ -1637,14 +1649,14 @@ void Scheduler::UpdateWeightCommon(Thread* thread, int original_priority, SchedW
         current->runnable_fair_task_count_++;
       } else {
         // Remove the old weight from the run queue.
-        current->weight_total_ -= state->fair_.weight;
+        current->UpdateTotalWeight(-state->fair_.weight);
       }
 
       // Update the weight of the thread and the run queue. The time slice
       // of a running thread will be adjusted during reschedule due to the
       // change in demand on the run queue.
-      current->weight_total_ += weight;
       state->fair_.weight = weight;
+      current->UpdateTotalWeight(weight);
 
       // Adjust the position of the thread in the run queue based on the new
       // weight.
@@ -1716,7 +1728,7 @@ void Scheduler::UpdateDeadlineCommon(Thread* thread, int original_priority,
       if (IsFairThread(thread)) {
         // Changed to the deadline discipline and update the task counts and
         // queue weight.
-        current->weight_total_ -= state->fair_.weight;
+        current->UpdateTotalWeight(-state->fair_.weight);
         state->discipline_ = SchedDiscipline::Deadline;
         current->runnable_fair_task_count_--;
         current->runnable_deadline_task_count_++;
