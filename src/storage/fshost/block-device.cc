@@ -91,6 +91,17 @@ int UnsealZxcryptThread(void* arg) {
   return 0;
 }
 
+// return value is ignored
+int OpenBlockVerityVerifiedReadThread(void* arg) {
+  std::unique_ptr<int> fd_ptr(static_cast<int*>(arg));
+  fbl::unique_fd fd(*fd_ptr);
+  fbl::unique_fd devfs_root(open("/dev", O_RDONLY));
+  // EncryptedVolume volume(std::move(fd), std::move(devfs_root));
+  // volume.EnsureUnsealedAndFormatIfNeeded();
+  // TODO: not the above -- need verity volume situation.
+  return 0;
+}
+
 }  // namespace
 
 BlockDevice::BlockDevice(FilesystemMounter* mounter, fbl::unique_fd fd)
@@ -222,6 +233,34 @@ zx_status_t BlockDevice::FormatZxcrypt() {
   }
   EncryptedVolume volume(fd_.duplicate(), std::move(devfs_root_fd));
   return volume.Format();
+}
+
+zx::status<std::string> BlockDevice::VeritySeal() {
+  return mounter_->boot_args()->block_verity_seal();
+}
+
+zx_status_t BlockDevice::OpenBlockVerityVerifiedRead() {
+  printf("fshost: opening block-verity for verified read\n");
+  // Call OpenForRead from a separate thread, since we
+  // have to wait for a number of devices to do I/O and settle,
+  // and we don't want to block block-watcher for any nontrivial
+  // length of time.
+
+  // We transfer fd to the spawned thread.  Since it's UB to cast
+  // ints to pointers and back, we allocate the fd on the heap.
+  int loose_fd = fd_.release();
+  int* raw_fd_ptr = new int(loose_fd);
+  thrd_t th;
+  int err = thrd_create_with_name(&th, &OpenBlockVerityVerifiedReadThread, raw_fd_ptr,
+                                  "verity-open-read");
+  if (err != thrd_success) {
+    printf("fshost: failed to open block-verity for verified read");
+    close(loose_fd);
+    delete raw_fd_ptr;
+  } else {
+    thrd_detach(th);
+  }
+  return ZX_OK;
 }
 
 bool BlockDevice::ShouldCheckFilesystems() { return mounter_->ShouldCheckFilesystems(); }
@@ -430,6 +469,11 @@ zx_status_t BlockDeviceInterface::Add() {
       // TODO(fxbug.dev/55936): this should launch a thread to call OpenForVerifiedRead when the
       // verity device is available. It should only launch that thread if we are not in FCT mode.
       return AttachDriver(kBlockVerityDriverPath);
+      // check if in FCT mode via /boot/config
+      // get the root hash from VeritySeal
+      // launch a thread
+      // -- wait for ramdevice
+      // -- call OpenForVerifiedRead
     }
     case DISK_FORMAT_ZXCRYPT: {
       if (!Netbooting()) {

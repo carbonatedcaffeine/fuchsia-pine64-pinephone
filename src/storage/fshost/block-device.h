@@ -5,6 +5,7 @@
 #ifndef SRC_STORAGE_FSHOST_BLOCK_DEVICE_H_
 #define SRC_STORAGE_FSHOST_BLOCK_DEVICE_H_
 
+#include <lib/zx/status.h>
 #include <zircon/types.h>
 
 #include <memory>
@@ -42,6 +43,8 @@ class BlockDevice final : public BlockDeviceInterface {
   zx_status_t CheckFilesystem() final;
   zx_status_t FormatFilesystem() final;
   zx_status_t MountFilesystem() final;
+  zx::status<std::string> VeritySeal() final;
+  zx_status_t OpenBlockVerityVerifiedRead() final;
 
  private:
   FilesystemMounter* mounter_ = nullptr;

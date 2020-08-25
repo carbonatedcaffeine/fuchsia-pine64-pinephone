@@ -104,3 +104,11 @@ TEST_F(FshostBootArgsTest, GetBlobfsCompressionAlgorithm_Unspecified) {
 
   EXPECT_EQ(std::nullopt, boot_args().blobfs_write_compression_algorithm());
 }
+
+TEST_F(FshostBootArgsTest, GetBlockVeritySeal) {
+  // TODO(ampearce): make match Dmitry's arg.
+  std::map<std::string, std::string> config = {{"factory.verity.seal", "0xcc"}};
+  ASSERT_NO_FATAL_FAILURES(CreateFshostBootArgs(config));
+
+  EXPECT_EQ("0xcc", boot_args().block_verity_seal());
+}
