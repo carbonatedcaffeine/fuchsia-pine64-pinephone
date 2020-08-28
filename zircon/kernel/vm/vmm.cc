@@ -55,7 +55,7 @@ zx_status_t vmm_page_fault_handler(vaddr_t addr, uint flags) {
 
 #if TRACE_PAGE_FAULT || LOCAL_TRACE
   Thread* current_thread = Thread::Current::Get();
-  TRACEF("thread %s va %#" PRIxPTR ", flags 0x%x\n", current_thread->name, addr, flags);
+  TRACEF("thread %s va %#" PRIxPTR ", flags 0x%x\n", current_thread->name(), addr, flags);
 #endif
 
   ktrace(TAG_PAGE_FAULT, (uint32_t)(addr >> 32), (uint32_t)addr, flags, arch_curr_cpu_num());
