@@ -44,6 +44,16 @@ FUNCTION(riscv64_context_switch)
     ret
 END_FUNCTION(riscv_context_switch)
 
+FUNCTION(riscv64_get_current_thread)
+    mv a0, tp
+    ret
+END_FUNCTION(riscv64_get_current_thread)
+
+FUNCTION(riscv64_set_current_thread)
+    mv tp, a0
+    ret
+END_FUNCTION(riscv64_set_current_thread)
+
 /* top level exception handler for riscv64 in non vectored mode */
 .balign 4
 FUNCTION(riscv64_exception_entry)
@@ -111,3 +121,4 @@ continue:
 
     RISCV_XRET
 END_FUNCTION(riscv64_exception_entry)
+
