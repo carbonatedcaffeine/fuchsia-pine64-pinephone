@@ -126,18 +126,17 @@ $3 == "R_X86_64_PC32" || $3 == "R_X86_64_PLT32" || \
 $3 == "R_AARCH64_PREL32" || $3 == "R_AARCH64_PREL64" || \
 $3 == "R_AARCH64_CALL26" || $3 == "R_AARCH64_JUMP26" || \
 $3 == "R_AARCH64_CONDBR19" || $3 == "R_AARCH64_TSTBR14" || \
-$3 ~ /^R_AARCH64_ADR_/ || $3 ~ /^R_AARCH64_.*ABS_L/ {
+$3 ~ /^R_AARCH64_ADR_/ || $3 ~ /^R_AARCH64_.*ABS_L/ || \
+$3 == "R_RISCV_JAL" || $3 == "R_RISCV_CALL" || \
+$3 == "R_RISCV_CALL_PLT"  || $3 == "R_RISCV_GOT_HI20" || \
+$3 ~ /^R_RISCV_PCREL_/ {
     # PC-relative relocs need no fixup.
-    next
-}
-$3 ~ /^R_RISCV.*/ {
-    # We ignore RISCV-64 fixups for now.
     next
 }
 {
     # awk handles large integers poorly, so factor out the high 40 bits.
     this_prefix = substr($1, 1, 10)
-    raw_offset = substr($1, 10)
+    raw_offset = substr($1, 11)
     if (address_prefix == "") {
         address_prefix = this_prefix;
     } else if (this_prefix != address_prefix) {
@@ -155,7 +154,7 @@ $3 ~ /^R_RISCV.*/ {
         bad = "";
     } else if (r_offset % 8 != 0) {
         bad = "misaligned r_offset";
-    } else if (secname !~ /^\.(ro)?data|^\.kcounter.desc|\.init_array|\.fini_array|code_patch_table|__llvm_prf_data|asan_globals/) {
+    } else if (secname !~ /^\.(ro|s)?data|^\.kcounter.desc|\.init_array|\.fini_array|code_patch_table|__llvm_prf_data|asan_globals/) {
         bad = "fixup in unexpected section"
     } else {
         bad = "";
@@ -186,8 +185,7 @@ END {
         }
     } else if (nrelocs == 0) {
         print "Kernel should have some fixups!" > "/dev/stderr";
-        print "Oh unless if you are building for RISC-V, have fun" > "/dev/stderr";
-#        exit(1);
+        exit(1);
     }
 
     # 256 bytes is the max reach of a load/store post indexed instruction on arm64

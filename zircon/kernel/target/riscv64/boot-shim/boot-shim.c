@@ -385,7 +385,7 @@ boot_shim_return_t boot_shim(uint64_t hart_id, void* device_tree) {
 
   boot_shim_return_t result = {
       .zbi = zbi,
-      .entry = (uintptr_t)kernel + kernel->data_kernel.entry - 0xffff800088340000,
+      .entry = (uintptr_t)kernel + kernel->data_kernel.entry - 0xffff800000000000,
   };
   uart_puts("Entering kernel at ");
   uart_print_hex(result.entry);

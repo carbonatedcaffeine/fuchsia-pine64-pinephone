@@ -82,6 +82,7 @@ if (current_toolchain == default_toolchain) {
     sources = [
       "arch.cc",
       "asm.S",
+      "boot-mmu.cc",
       "debugger.cc",
       "exceptions_c.cc",
       "mmu.cc",
