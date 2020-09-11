@@ -36,6 +36,7 @@ void arch_thread_initialize(Thread* t, vaddr_t entry_point) {
 
   // fill in the entry point
   frame->ra = entry_point;
+  frame->sp = stack_top;
 
   // set the stack pointer
   t->arch().sp = (vaddr_t)frame;
@@ -44,6 +45,10 @@ void arch_thread_initialize(Thread* t, vaddr_t entry_point) {
 __NO_SAFESTACK void arch_thread_construct_first(Thread* t) {
   // make sure the thread saves a copy of the current cpu pointer
   t->arch().current_percpu_ptr = riscv64_get_percpu();
+  __asm__ volatile(
+      "mv   %0, sp"
+      : "=r" (t->arch().sp)
+      :: "memory");
 }
 
 __NO_SAFESTACK void arch_context_switch(Thread* oldthread, Thread* newthread) {
@@ -51,7 +56,7 @@ __NO_SAFESTACK void arch_context_switch(Thread* oldthread, Thread* newthread) {
 
   LTRACEF("old %p (%s), new %p (%s)\n", oldthread, oldthread->name(), newthread, newthread->name());
 
-  riscv64_context_switch(&oldthread->arch().sp, newthread->arch().sp);
+  riscv64_context_switch(oldthread->arch().sp, newthread->arch().sp);
 }
 
 void arch_dump_thread(Thread* t) {

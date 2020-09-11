@@ -40,8 +40,6 @@ if (current_toolchain == default_toolchain) {
   }
 
   config("abi") {
-    # We should reserve a register for per-CPU structure.
-    cflags = [ "-ffixed-x4" ]
   }
 
   # This is used pervasively throughout the kernel on riscv64.
