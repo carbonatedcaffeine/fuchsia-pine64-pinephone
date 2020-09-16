@@ -22,6 +22,7 @@
 #include <arch/thread.h>
 #include <arch/user_copy.h>
 #include <kernel/interrupt.h>
+#include <kernel/percpu_trace.h>
 #include <kernel/thread.h>
 #include <pretty/hexdump.h>
 #include <vm/fault.h>
@@ -379,6 +380,8 @@ static inline void fix_exception_percpu_pointer(uint32_t exception_flags, uint64
 
 /* called from assembly */
 extern "C" void arm64_sync_exception(arm64_iframe_t* iframe, uint exception_flags, uint32_t esr) {
+  PTRACE("sync_exception start");
+
   uint32_t ec = BITS_SHIFT(esr, 31, 26);
 
   switch (ec) {
@@ -447,10 +450,13 @@ extern "C" void arm64_sync_exception(arm64_iframe_t* iframe, uint exception_flag
   }
 
   fix_exception_percpu_pointer(exception_flags, iframe->r);
+  PTRACE("sync_exception end");
 }
 
 /* called from assembly */
 extern "C" void arm64_irq(iframe_t* iframe, uint exception_flags) {
+  PTRACE("irq start");
+
   LTRACEF("iframe %p, flags %#x\n", iframe, exception_flags);
   bool is_user = exception_flags & ARM64_EXCEPTION_FLAG_LOWER_EL;
 
@@ -483,16 +489,27 @@ extern "C" void arm64_irq(iframe_t* iframe, uint exception_flags) {
   }
 
   fix_exception_percpu_pointer(exception_flags, iframe->r);
+
+  PTRACE("irq end");
 }
 
 /* called from assembly */
 extern "C" void arm64_invalid_exception(arm64_iframe_t* iframe, unsigned int which) {
+  PTRACE("invalid exception");
+
   platform_panic_start();
 
   printf("invalid exception, which %#x\n", which);
   dump_iframe(iframe);
 
   platform_halt(HALT_ACTION_HALT, ZirconCrashReason::Panic);
+}
+
+/* called from assembly */
+extern "C" void arch_iframe_process_pending_signals_post_syscall(iframe_t* iframe) {
+  PTRACE("Signals start");
+  arch_iframe_process_pending_signals(iframe);
+  PTRACE("Signals end");
 }
 
 /* called from assembly */

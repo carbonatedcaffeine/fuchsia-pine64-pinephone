@@ -9,6 +9,7 @@
 #include <zircon/types.h>
 
 #include <kernel/auto_lock.h>
+#include <kernel/percpu_trace.h>
 #include <kernel/spinlock.h>
 #include <lk/init.h>
 #include <pdev/interrupt.h>
@@ -155,7 +156,11 @@ void interrupt_init_percpu() { intr_ops->init_percpu(); }
 
 void platform_irq(iframe_t* frame) { intr_ops->handle_irq(frame); }
 
-void platform_fiq(iframe_t* frame) { intr_ops->handle_fiq(frame); }
+void platform_fiq(iframe_t* frame) {
+  PTRACE("fiq start");
+  intr_ops->handle_fiq(frame);
+  PTRACE("fiq end");
+}
 
 void pdev_register_interrupts(const struct pdev_interrupt_ops* ops) {
   intr_ops = ops;

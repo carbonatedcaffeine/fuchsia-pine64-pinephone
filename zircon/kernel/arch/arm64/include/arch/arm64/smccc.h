@@ -10,6 +10,7 @@
 #include <zircon/types.h>
 
 #include <kernel/auto_preempt_disabler.h>
+#include <kernel/percpu_trace.h>
 
 __BEGIN_CDECLS
 
@@ -35,8 +36,11 @@ inline arm_smccc_result_t arm_smccc_smc(uint32_t w0,               // Function I
                                                    uint64_t x3, uint64_t x4, uint64_t x5,
                                                    uint64_t x6, uint32_t w7);
   AutoPreemptDisabler<APDInitialState::PREEMPT_DISABLED> disabler;
-  return arm_smccc_smc_internal(w0, x1, x2, x3, x4, x5, x6, w7);
-}
+  PTRACE("smc start");
+  auto result = arm_smccc_smc_internal(w0, x1, x2, x3, x4, x5, x6, w7);
+  PTRACE("smc end");
+  return result;
+  }
 
 // Calls the low-level HVC function with preemption disabled.
 inline arm_smccc_result_t arm_smccc_hvc(uint32_t w0,               // Function Identifier
@@ -48,7 +52,10 @@ inline arm_smccc_result_t arm_smccc_hvc(uint32_t w0,               // Function I
                                                    uint64_t x3, uint64_t x4, uint64_t x5,
                                                    uint64_t x6, uint32_t w7);
   AutoPreemptDisabler<APDInitialState::PREEMPT_DISABLED> disabler;
-  return arm_smccc_hvc_internal(w0, x1, x2, x3, x4, x5, x6, w7);
+  PTRACE("hvc start");
+  auto result = arm_smccc_hvc_internal(w0, x1, x2, x3, x4, x5, x6, w7);
+  PTRACE("hvc end");
+  return result;
 }
 
 __END_CDECLS

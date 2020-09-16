@@ -461,7 +461,7 @@ LOCAL_FUNCTION_LABEL(arm64_syscall_dispatcher)
     // Check for pending signals. If none, just return.
     cbz  x1, arm64_exc_shared_restore_lower_el
     mov  x0, sp
-    bl   arch_iframe_process_pending_signals
+    bl   arch_iframe_process_pending_signals_post_syscall
     b    arm64_exc_shared_restore_lower_el
 
 // Emit a small trampoline to branch to the wrapper routine for the syscall.
