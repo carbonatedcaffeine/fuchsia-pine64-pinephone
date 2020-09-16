@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <trace.h>
 
+#include <kernel/percpu_trace.h>
 #include <kernel/stats.h>
 #include <kernel/thread.h>
 #include <object/process_dispatcher.h>
@@ -88,6 +89,8 @@ __NO_INLINE syscall_result do_syscall_post(uint64_t ret, uint64_t syscall_num) {
 template <typename T>
 inline syscall_result do_syscall(uint64_t syscall_num, uint64_t pc, bool (*valid_pc)(uintptr_t),
                                  T make_call) {
+  PTRACE("Syscall Enter", static_cast<uint32_t>(syscall_num), 0, 0, 0, reinterpret_cast<void*>(pc),
+         reinterpret_cast<void*>(valid_pc));
   // Call the shared preamble code
   auto pre_ret = do_syscall_pre(syscall_num, pc);
   const uintptr_t vdso_code_address = pre_ret.vdso_code_address;
@@ -104,7 +107,15 @@ inline syscall_result do_syscall(uint64_t syscall_num, uint64_t pc, bool (*valid
   }
 
   // Call through to the shared postamble code
+#if 0
   return do_syscall_post(ret, syscall_num);
+#else
+  syscall_result result = do_syscall_post(ret, syscall_num);
+  PTRACE("Syscall Exit", static_cast<uint32_t>(syscall_num),
+         static_cast<uint32_t>(result.status >> 32), static_cast<uint32_t>(result.status),
+         result.is_signaled ? 1 : 0);
+  return result;
+#endif
 }
 
 // Called when an out of bounds syscall number is passed from user space

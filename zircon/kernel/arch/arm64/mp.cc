@@ -70,7 +70,7 @@ cpu_num_t arm64_mpidr_to_cpu_num(uint64_t mpidr) {
 }
 
 // do the 'slow' lookup by mpidr to cpu number
-static cpu_num_t arch_curr_cpu_num_slow() {
+cpu_num_t arch_curr_cpu_num_slow() {
   uint64_t mpidr = __arm_rsr64("mpidr_el1");
   return arm64_mpidr_to_cpu_num(mpidr);
 }
