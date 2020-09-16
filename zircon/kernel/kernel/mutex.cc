@@ -26,9 +26,11 @@
 #include <lib/ktrace.h>
 #include <platform.h>
 #include <trace.h>
+#include <zircon/compiler.h>
 #include <zircon/time.h>
 #include <zircon/types.h>
 
+#include <kernel/percpu_trace.h>
 #include <kernel/scheduler.h>
 #include <kernel/thread.h>
 #include <kernel/thread_lock.h>
@@ -120,6 +122,8 @@ Mutex::~Mutex() {
 }
 
 void Mutex::Acquire(zx_duration_t spin_max_duration) {
+  PTRACE("Mutex", spin_max_duration >> 32, static_cast<uint32_t>(spin_max_duration), 0, 0, this,
+         __GET_CALLER(0));
   magic_.Assert();
   DEBUG_ASSERT(!arch_blocking_disallowed());
   DEBUG_ASSERT(arch_num_spinlocks_held() == 0);
@@ -345,6 +349,7 @@ __NO_INLINE void Mutex::ReleaseContendedMutex(const bool allow_reschedule,
 }
 
 void Mutex::Release() {
+  PTRACE("Mutex", 0, 0, 0, 0, this, __GET_CALLER(0));
   magic_.Assert();
   DEBUG_ASSERT(!arch_blocking_disallowed());
 
@@ -353,6 +358,7 @@ void Mutex::Release() {
 }
 
 void Mutex::ReleaseThreadLocked(const bool allow_reschedule) {
+  PTRACE("Mutex", allow_reschedule, 0, 0, 0, this, __GET_CALLER(0));
   magic_.Assert();
   DEBUG_ASSERT(!arch_blocking_disallowed());
   DEBUG_ASSERT(arch_ints_disabled());
