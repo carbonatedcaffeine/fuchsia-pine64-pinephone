@@ -1,0 +1,15 @@
+{
+  "name": "Nanosleep stress tester.",
+  "config": {
+    "priority": 25
+  },
+  "workers": [
+    {
+      "instances": 8,
+      "actions": [
+        { "action": "sleep", "uniform" : { "min": "20us", "max": "100us" } },
+        { "action": "nanosleep", "uniform" : { "min": "20us", "max": "100us" } },
+      ]
+    }
+  ]
+}

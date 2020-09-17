@@ -7,6 +7,7 @@
 
 #include <lib/sync/completion.h>
 #include <lib/syslog/cpp/macros.h>
+#include <lib/zx/clock.h>
 #include <lib/zx/profile.h>
 #include <lib/zx/thread.h>
 #include <lib/zx/time.h>
@@ -47,6 +48,11 @@ class Worker {
   // flag is set.
   void Sleep(std::chrono::nanoseconds duration_ns) {
     sync_completion_wait(&terminate_completion_, duration_ns.count());
+  }
+
+  void NanoSleep(std::chrono::nanoseconds duration_ns) {
+    const zx::time deadline = zx::clock::get_monotonic() + zx::duration{duration_ns.count()};
+    zx::nanosleep(deadline);
   }
 
   // Spins the worker for the given duration. Returns early if the termination

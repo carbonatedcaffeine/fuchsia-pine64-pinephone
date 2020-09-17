@@ -72,6 +72,29 @@ struct SleepUniformAction : ActionBase<SleepUniformAction> {
   Random random;
 };
 
+struct NanoSleepDurationAction : ActionBase<NanoSleepDurationAction> {
+  explicit NanoSleepDurationAction(std::chrono::nanoseconds duration_ns)
+      : duration_ns{duration_ns} {}
+
+  void Perform(Worker* worker) override { worker->NanoSleep(duration_ns); }
+
+  const std::chrono::nanoseconds duration_ns;
+};
+
+struct NanoSleepUniformAction : ActionBase<NanoSleepUniformAction> {
+  NanoSleepUniformAction(std::chrono::nanoseconds min_ns, std::chrono::nanoseconds max_ns)
+      : min_ns{min_ns}, max_ns{max_ns} {}
+
+  void Perform(Worker* worker) override {
+    const std::chrono::nanoseconds duration_ns{random.GetUniform(min_ns.count(), max_ns.count())};
+    worker->NanoSleep(duration_ns);
+  }
+
+  const std::chrono::nanoseconds min_ns;
+  const std::chrono::nanoseconds max_ns;
+  Random random;
+};
+
 struct SpinDurationAction : ActionBase<SpinDurationAction> {
   explicit SpinDurationAction(std::chrono::nanoseconds duration_ns) : duration_ns{duration_ns} {}
 
@@ -451,6 +474,15 @@ std::unique_ptr<Action> Workload::ParseAction(const rapidjson::Value& action) {
     } else /*if (std::holds_alternative<Uniform>(result))*/ {
       const auto [min_ns, max_ns] = std::get<Uniform>(result);
       return SleepUniformAction::Create(min_ns, max_ns);
+    }
+  } else if (action_string == "nanosleep") {
+    const auto result = ParseInterval(action, AcceptNamedInterval);
+    if (std::holds_alternative<Duration>(result)) {
+      const auto [duration_ns] = std::get<Duration>(result);
+      return NanoSleepDurationAction::Create(duration_ns);
+    } else /*if (std::holds_alternative<Uniform>(result))*/ {
+      const auto [min_ns, max_ns] = std::get<Uniform>(result);
+      return NanoSleepUniformAction::Create(min_ns, max_ns);
     }
   } else if (action_string == "yield") {
     return YieldAction::Create();

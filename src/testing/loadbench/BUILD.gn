@@ -70,6 +70,7 @@ package("loadbench") {
     "deadline_test.json",
     "default.json",
     "example.json",
+    "nanosleep.json",
     "port_test.json",
     "simple_load.json",
     "relative_bandwidth.json",
