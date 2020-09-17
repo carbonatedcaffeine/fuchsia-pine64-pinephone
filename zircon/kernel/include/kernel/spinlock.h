@@ -14,6 +14,7 @@
 #include <arch/arch_ops.h>
 #include <arch/interrupt.h>
 #include <arch/spinlock.h>
+#include <kernel/percpu_trace.h>
 #include <lockdep/lock_policy.h>
 #include <lockdep/lock_traits.h>
 
@@ -23,16 +24,30 @@ class TA_CAP("mutex") SpinLock {
 
   // Interrupts must already be disabled.
   void Acquire() TA_ACQ() {
+    PTRACE_LOW_LEVEL("Spinlock (acq before)", 0, 0, 0, 0, this, __GET_CALLER(0));
     DEBUG_ASSERT(arch_ints_disabled());
     DEBUG_ASSERT(!arch_spin_lock_held(&spinlock_));
     arch_spin_lock(&spinlock_);
+    PTRACE_LOW_LEVEL("Spinlock (acq after)", 0, 0, 0, 0, this, __GET_CALLER(0));
   }
 
   // Returns false when the lock is acquired, and true when the lock is not acquired.
-  bool TryAcquire() TA_TRY_ACQ(false) { return arch_spin_trylock(&spinlock_); }
+  bool TryAcquire() TA_TRY_ACQ(false) {
+    PTRACE_LOW_LEVEL("Spinlock (try before)", 0, 0, 0, 0, this, __GET_CALLER(0));
+#if 0
+    return arch_spin_trylock(&spinlock_);
+#else
+    bool ret = arch_spin_trylock(&spinlock_);
+    PTRACE_LOW_LEVEL("Spinlock (try after)", ret, 0, 0, 0, this, __GET_CALLER(0));
+    return ret;
+#endif
+  }
 
   // Interrupts must already be disabled.
-  void Release() TA_REL() { arch_spin_unlock(&spinlock_); }
+  void Release() TA_REL() {
+    PTRACE_LOW_LEVEL("Spinlock (release)", 0, 0, 0, 0, this, __GET_CALLER(0));
+    arch_spin_unlock(&spinlock_);
+  }
 
   // Returns true if held by the calling CPU.
   //
@@ -43,12 +58,16 @@ class TA_CAP("mutex") SpinLock {
   // Acquire spin lock, but save disable and save interrupt state first.
   void AcquireIrqSave(interrupt_saved_state_t& state) TA_ACQ() {
     state = arch_interrupt_save();
-    Acquire();
+    PTRACE_LOW_LEVEL("Spinlock (acq before)", 0, 0, 0, 0, this, __GET_CALLER(0));
+    DEBUG_ASSERT(!arch_spin_lock_held(&spinlock_));
+    arch_spin_lock(&spinlock_);
+    PTRACE_LOW_LEVEL("Spinlock (acq after)", 0, 0, 0, 0, this, __GET_CALLER(0));
   }
 
   // Restore interrupt state before unlocking.
   void ReleaseIrqRestore(interrupt_saved_state_t state) TA_REL() {
-    Release();
+    PTRACE_LOW_LEVEL("Spinlock", 0, 0, 0, 0, this, __GET_CALLER(0));
+    arch_spin_unlock(&spinlock_);
     arch_interrupt_restore(state);
   }
 
