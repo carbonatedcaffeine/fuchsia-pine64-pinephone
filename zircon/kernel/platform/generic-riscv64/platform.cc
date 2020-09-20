@@ -8,6 +8,7 @@
 #include <arch.h>
 #include <debug.h>
 #include <err.h>
+#include <lib/affine/ratio.h>
 #include <lib/arch/intrin.h>
 #include <lib/cmdline.h>
 #include <lib/console.h>
@@ -21,6 +22,7 @@
 
 #include <arch/arch_ops.h>
 #include <arch/riscv64.h>
+#include <arch/riscv64/sbi.h>
 #include <arch/mp.h>
 #include <dev/display.h>
 #include <dev/hw_rng.h>
@@ -36,6 +38,7 @@
 #include <lk/init.h>
 #include <object/resource_dispatcher.h>
 #include <platform/crashlog.h>
+#include <platform/timer.h>
 #include <vm/bootreserve.h>
 #include <vm/kstack.h>
 #include <vm/physmap.h>
@@ -52,6 +55,8 @@
 
 #include <lib/zbi/zbi-cpp.h>
 #include <pdev/pdev.h>
+
+#define LOCAL_TRACE 0
 
 // Defined in start.S.
 extern paddr_t kernel_entry_paddr;
@@ -476,18 +481,39 @@ LK_INIT_HOOK(riscv64_resource_init, riscv64_resource_dispatcher_init_hook, LK_IN
 void topology_init() {
 }
 
-__BEGIN_CDECLS
 void platform_stop_timer(void) {
+  riscv_csr_clear(RISCV_CSR_XIE, RISCV_CSR_XIE_TIE);
 }
 
+void platform_shutdown_timer(void) {
+  riscv_csr_clear(RISCV_CSR_XIE, RISCV_CSR_XIE_TIE);
+}
+
+zx_status_t platform_mp_prep_cpu_unplug(cpu_num_t cpu_id) {
+  return arch_mp_prep_cpu_unplug(cpu_id);
+}
+
+zx_status_t platform_mp_cpu_unplug(cpu_num_t cpu_id) { return arch_mp_cpu_unplug(cpu_id); }
+
 zx_ticks_t platform_current_ticks() {
-  return 0;
+  return riscv_get_time();
 }
 
 zx_status_t platform_set_oneshot_timer(zx_time_t deadline) {
-    return ZX_OK;
+  // enable the timer
+  riscv_csr_set(RISCV_CSR_XIE, RISCV_CSR_XIE_TIE);
+
+  // convert interval to ticks
+  uint64_t ticks = riscv_get_time() + deadline / 10;
+  sbi_set_timer(ticks);
+
+  return ZX_OK;
 }
-__END_CDECLS
+
+void riscv64_timer_exception(void) {
+  riscv_csr_clear(RISCV_CSR_XIE, RISCV_CSR_XIE_TIE);
+  timer_tick(current_time());
+}
 
 zx_status_t register_int_handler(unsigned int vector, int_handler handler, void* arg) {
     return ZX_OK;
@@ -539,4 +565,11 @@ bool msi_is_supported(void) {
 void msi_register_handler(const msi_block_t* block, uint msi_id, int_handler handler, void* ctx) {
   PANIC_UNIMPLEMENTED;
 }
+
+static void platform_init_timer(uint level) {
+  uint32_t cntpct = 10000000; // Dummy value
+  affine::Ratio cntpct_to_nsec = {ZX_SEC(1), cntpct};
+  platform_set_ticks_to_time_ratio(cntpct_to_nsec);
+}
+LK_INIT_HOOK(timer, &platform_init_timer, LK_INIT_LEVEL_VM + 3)
 
