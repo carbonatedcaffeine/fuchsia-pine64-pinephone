@@ -29,8 +29,6 @@
 
 // offset where sp,elr,spsr,lr,mdscr goes in the iframe
 #define regsave_special_reg_offset (30 * 8)
-// offset where ELR_EL1 is restored from
-#define regsave_elr_el1_offset (regsave_special_reg_offset + 16)
 
 .macro regsave
 // There are 5 regs @ regsave_special_reg_offset, plus one unused space = 6 to
@@ -449,18 +447,19 @@ LOCAL_FUNCTION_LABEL(arm64_syscall_dispatcher)
     // Upon return from syscall, x0 = status, x1 = thread signalled
     // Move the status to frame->r[0] for return to userspace.
     str  x0, [sp]
+    // Check for pending signals. If none, just return.
+    cbz  x1, arm64_exc_shared_restore_lower_el
+    mov  x0, sp
+    bl   arch_iframe_process_pending_signals
     // Spectre: ARM64 CPUs may speculatively execute instructions after an SVC instruction.
     // The userspace entry code has a speculation barrier; advance ELR_EL1 past in on the return
     // since it has already done its job.
 .ifne ARM64_SYSCALL_SPECULATION_BARRIER_SIZE - 8
 .error "Syscall speculation barrier must be 8 bytes"
 .endif
-    ldr  x10, [sp, #(regsave_elr_el1_offset)]
+    msr  elr_el1, x10
     add  x10, x10, ARM64_SYSCALL_SPECULATION_BARRIER_SIZE
-    str  x10, [sp, #(regsave_elr_el1_offset)]
-    // Check for pending signals. If none, just return.
-    cbz  x1, arm64_exc_shared_restore_lower_el
-    mov  x0, sp
+    mrs  x10, elr_el1
     bl   arch_iframe_process_pending_signals_post_syscall
     b    arm64_exc_shared_restore_lower_el
 
