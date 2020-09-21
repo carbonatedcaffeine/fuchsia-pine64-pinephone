@@ -18,8 +18,42 @@ extern cpu_num_t arch_curr_cpu_num_slow();
 
 namespace {
 
+enum class UseAtomics { No, Yes };
+
+constexpr UseAtomics kUseAtomics = UseAtomics::Yes;
 constexpr size_t MAX_CPUS = 6;
 static constexpr uint32_t TRACE_ENTRIES = 1024;
+
+template <typename T, UseAtomics choice>
+class MaybeAtomic;
+
+template <typename T>
+class MaybeAtomic<T, UseAtomics::No> {
+ public:
+  explicit MaybeAtomic(T val) : val_(val) {}
+  void store(T val) { val_ = val; }
+  T load() { return val_; }
+  T fetch_add(T val) {
+    T ret = val_;
+    val_ += val;
+    return ret;
+  }
+
+ private:
+  T val_;
+};
+
+template <typename T>
+class MaybeAtomic<T, UseAtomics::Yes> {
+ public:
+  explicit MaybeAtomic(T val) : val_(val) {}
+  void store(T val) { val_.store(val); }
+  T load() { return val_.load(); }
+  T fetch_add(T val) { return val_.fetch_add(val); }
+
+ private:
+  ktl::atomic<T> val_;
+};
 
 class Trace {
  public:
@@ -48,6 +82,9 @@ class Trace {
   void Dump(cpu_num_t cpu_id, bool reset_flag, bool disable_flag) {
     // Disable the log while we dump it
     enabled_.store(false);
+    if constexpr (kUseAtomics == UseAtomics::No) {
+      ktl::atomic_thread_fence(ktl::memory_order_seq_cst);
+    }
     Thread::Current::SleepRelative(ZX_MSEC(10));
 
     size_t wr = wr_.load();
@@ -118,8 +155,8 @@ class Trace {
   }
 
   TraceEntry entries_[TRACE_ENTRIES];
-  ktl::atomic<size_t> wr_{0};
-  ktl::atomic<bool> enabled_{true};
+  MaybeAtomic<size_t, kUseAtomics> wr_{0};
+  MaybeAtomic<bool, kUseAtomics> enabled_{true};
 };
 
 ktl::array<Trace, MAX_CPUS> g_trace;
