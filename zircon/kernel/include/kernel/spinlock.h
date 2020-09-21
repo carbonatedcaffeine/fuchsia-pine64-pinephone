@@ -28,7 +28,7 @@ class TA_CAP("mutex") SpinLock {
     DEBUG_ASSERT(arch_ints_disabled());
     DEBUG_ASSERT(!arch_spin_lock_held(&spinlock_));
     arch_spin_lock(&spinlock_);
-    PTRACE_LOW_LEVEL("Spinlock (acq after)", 0, 0, 0, 0, this, __GET_CALLER(0));
+    //PTRACE_LOW_LEVEL("Spinlock (acq after)", 0, 0, 0, 0, this, __GET_CALLER(0));
   }
 
   // Returns false when the lock is acquired, and true when the lock is not acquired.
@@ -38,7 +38,7 @@ class TA_CAP("mutex") SpinLock {
     return arch_spin_trylock(&spinlock_);
 #else
     bool ret = arch_spin_trylock(&spinlock_);
-    PTRACE_LOW_LEVEL("Spinlock (try after)", ret, 0, 0, 0, this, __GET_CALLER(0));
+    //PTRACE_LOW_LEVEL("Spinlock (try after)", ret, 0, 0, 0, this, __GET_CALLER(0));
     return ret;
 #endif
   }
@@ -61,7 +61,7 @@ class TA_CAP("mutex") SpinLock {
     PTRACE_LOW_LEVEL("Spinlock (acq before)", 0, 0, 0, 0, this, __GET_CALLER(0));
     DEBUG_ASSERT(!arch_spin_lock_held(&spinlock_));
     arch_spin_lock(&spinlock_);
-    PTRACE_LOW_LEVEL("Spinlock (acq after)", 0, 0, 0, 0, this, __GET_CALLER(0));
+    //PTRACE_LOW_LEVEL("Spinlock (acq after)", 0, 0, 0, 0, this, __GET_CALLER(0));
   }
 
   // Restore interrupt state before unlocking.
