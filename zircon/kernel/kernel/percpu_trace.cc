@@ -20,7 +20,7 @@ namespace {
 
 enum class UseAtomics { No, Yes };
 
-constexpr UseAtomics kUseAtomics = UseAtomics::Yes;
+constexpr UseAtomics kUseAtomics = UseAtomics::No;
 constexpr size_t MAX_CPUS = 6;
 static constexpr uint32_t TRACE_ENTRIES = 1024;
 
