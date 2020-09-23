@@ -54,6 +54,37 @@ FUNCTION(riscv64_set_current_thread)
     ret
 END_FUNCTION(riscv64_set_current_thread)
 
+// void riscv64_uspace_entry(iframe_t* iframe, vaddr_t kstack) __NO_RETURN;
+FUNCTION(riscv64_uspace_entry)
+    mv  sp, a1
+    mv  t6, a0
+
+    ld     sp, REGOFF(0)(t6)
+    ld     t0, REGOFF(1)(t6)
+    csrw   RISCV_CSR_XEPC, t0
+    ld     t0, REGOFF(2)(t6)
+    csrw   RISCV_CSR_XSTATUS, t0
+
+    ld     ra, REGOFF(3)(t6)
+    ld     a0, REGOFF(4)(t6)
+    ld     a1, REGOFF(5)(t6)
+    ld     a2, REGOFF(6)(t6)
+    ld     a3, REGOFF(7)(t6)
+    ld     a4, REGOFF(8)(t6)
+    ld     a5, REGOFF(9)(t6)
+    ld     a6, REGOFF(10)(t6)
+    ld     a7, REGOFF(11)(t6)
+    ld     t0, REGOFF(12)(t6)
+    ld     t1, REGOFF(13)(t6)
+    ld     t2, REGOFF(14)(t6)
+    ld     t3, REGOFF(15)(t6)
+    ld     t4, REGOFF(16)(t6)
+    ld     t5, REGOFF(17)(t6)
+    ld     t6, REGOFF(18)(t6)
+
+    RISCV_XRET
+END_FUNCTION(riscv64_uspace_entry)
+
 /* top level exception handler for riscv64 in non vectored mode */
 .balign 4
 FUNCTION(riscv64_exception_entry)
@@ -76,7 +107,7 @@ FUNCTION(riscv64_exception_entry)
     sd     a0, REGOFF(4)(t6)
     sd     ra, REGOFF(3)(t6)
     csrr   t0, RISCV_CSR_XSTATUS
-    sd     t0, REGOFF(1)(sp)
+    sd     t0, REGOFF(2)(t6)
     csrr   a0, RISCV_CSR_XCAUSE
     csrr   a1, RISCV_CSR_XEPC
     sd     a1, REGOFF(1)(t6)
@@ -96,28 +127,29 @@ continue:
     jal    riscv64_exception_handler
 
     /* put everything back */
-    ld     t0, REGOFF(0)(sp)
+    csrr   t6, sscratch
+    ld     sp, REGOFF(0)(t6)
+    ld     t0, REGOFF(1)(t6)
     csrw   RISCV_CSR_XEPC, t0
-    ld     t0, REGOFF(1)(sp)
+    ld     t0, REGOFF(2)(t6)
     csrw   RISCV_CSR_XSTATUS, t0
 
-    ld     ra, REGOFF(2)(sp)
-    ld     a0, REGOFF(3)(sp)
-    ld     a1, REGOFF(4)(sp)
-    ld     a2, REGOFF(5)(sp)
-    ld     a3, REGOFF(6)(sp)
-    ld     a4, REGOFF(7)(sp)
-    ld     a5, REGOFF(8)(sp)
-    ld     a6, REGOFF(9)(sp)
-    ld     a7, REGOFF(10)(sp)
-    ld     t0, REGOFF(11)(sp)
-    ld     t1, REGOFF(12)(sp)
-    ld     t2, REGOFF(13)(sp)
-    ld     t3, REGOFF(14)(sp)
-    ld     t4, REGOFF(15)(sp)
-    ld     t5, REGOFF(16)(sp)
-    ld     t6, REGOFF(17)(sp)
-    addi   sp, sp, REGOFF(20)
+    ld     ra, REGOFF(3)(t6)
+    ld     a0, REGOFF(4)(t6)
+    ld     a1, REGOFF(5)(t6)
+    ld     a2, REGOFF(6)(t6)
+    ld     a3, REGOFF(7)(t6)
+    ld     a4, REGOFF(8)(t6)
+    ld     a5, REGOFF(9)(t6)
+    ld     a6, REGOFF(10)(t6)
+    ld     a7, REGOFF(11)(t6)
+    ld     t0, REGOFF(12)(t6)
+    ld     t1, REGOFF(13)(t6)
+    ld     t2, REGOFF(14)(t6)
+    ld     t3, REGOFF(15)(t6)
+    ld     t4, REGOFF(16)(t6)
+    ld     t5, REGOFF(17)(t6)
+    ld     t6, REGOFF(18)(t6)
 
     RISCV_XRET
 END_FUNCTION(riscv64_exception_entry)

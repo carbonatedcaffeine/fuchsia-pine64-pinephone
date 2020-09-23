@@ -36,7 +36,7 @@ void arch_thread_initialize(Thread* t, vaddr_t entry_point) {
 
   // fill in the entry point
   frame->ra = entry_point;
-  frame->sp = stack_top;
+  frame->sp = (vaddr_t)frame;
 
   // set the stack pointer
   t->arch().sp = (vaddr_t)frame;
@@ -56,6 +56,7 @@ __NO_SAFESTACK void arch_context_switch(Thread* oldthread, Thread* newthread) {
 
   LTRACEF("old %p (%s), new %p (%s)\n", oldthread, oldthread->name(), newthread, newthread->name());
 
+  riscv64_get_percpu()->ksp = 0;
   riscv64_context_switch(oldthread->arch().sp, newthread->arch().sp);
 }
 

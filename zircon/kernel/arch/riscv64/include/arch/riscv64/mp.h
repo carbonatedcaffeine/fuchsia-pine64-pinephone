@@ -16,6 +16,8 @@
 __BEGIN_CDECLS
 
 struct riscv64_percpu {
+  iframe_t iframe;
+  unsigned long ksp;
   cpu_num_t cpu_num;
   uint hart_id;
 

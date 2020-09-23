@@ -17,6 +17,25 @@
 // It can be forward declared thus this is the "real" type and
 // riscv64_iframe_t is the alias.
 struct iframe_t {
+  unsigned long sp;
+  unsigned long epc;
+  unsigned long status;
+  unsigned long ra;
+  unsigned long a0;
+  unsigned long a1;
+  unsigned long a2;
+  unsigned long a3;
+  unsigned long a4;
+  unsigned long a5;
+  unsigned long a6;
+  unsigned long a7;
+  unsigned long t0;
+  unsigned long t1;
+  unsigned long t2;
+  unsigned long t3;
+  unsigned long t4;
+  unsigned long t5;
+  unsigned long t6;
 };
 
 // Lots of the code uses this name.
