@@ -72,6 +72,7 @@ static const gpio_pin_t gpio_pins[] = {
     {VIM3_ETH_MAC_INTR},
     {A311D_GPIOBOOT(12)},
     {A311D_GPIOX(6)},
+    {A311D_GPIOC(6)},
 };
 
 static const pbus_metadata_t gpio_metadata[] = {
