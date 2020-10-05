@@ -241,3 +241,9 @@ FUNCTION(riscv64_syscall_dispatcher)
 
 END_FUNCTION(riscv64_syscall_dispatcher)
 
+FUNCTION(mexec_asm)
+    ret
+END_FUNCTION(mexec_asm)
+
+DATA(mexec_asm_end)
+
