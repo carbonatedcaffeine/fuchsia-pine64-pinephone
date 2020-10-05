@@ -14,6 +14,7 @@
 #include <trace.h>
 #include <zircon/syscalls/exception.h>
 #include <zircon/types.h>
+#include <syscalls/syscalls.h>
 
 #include <arch/arch_ops.h>
 #include <arch/exception.h>
@@ -104,6 +105,8 @@ static void riscv64_page_fault_handler(long cause, ulong epc, struct iframe_t *f
   vmm_page_fault_handler(tval, pf_flags);
 }
 
+extern "C" syscall_result riscv64_syscall_dispatcher(struct iframe_t *frame);
+
 extern "C" void riscv64_exception_handler(long cause, ulong epc, struct iframe_t *frame) {
     LTRACEF("hart %u cause %s epc %#lx status %#lx\n",
             arch_curr_cpu_num(), cause_to_string(cause), epc, frame->status);
@@ -130,6 +133,11 @@ extern "C" void riscv64_exception_handler(long cause, ulong epc, struct iframe_t
             case RISCV_EXCEPTION_LOAD_PAGE_FAULT:
             case RISCV_EXCEPTION_STORE_PAGE_FAULT:
                 riscv64_page_fault_handler(cause, epc, frame);
+		break;
+	    case RISCV_EXCEPTION_ENV_CALL_U_MODE:
+		frame->epc = frame->epc + 0x4; // Skip the ecall instruction
+		frame->a0 = riscv64_syscall_dispatcher(frame).status;
+                // TODO(revest): handle ret.is_signaled
 		break;
             default:
                 fatal_exception(cause, epc, frame);
