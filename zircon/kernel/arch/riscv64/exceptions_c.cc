@@ -102,7 +102,18 @@ static void riscv64_page_fault_handler(long cause, ulong epc, struct iframe_t *f
   pf_flags |= cause == RISCV_EXCEPTION_STORE_PAGE_FAULT ? VMM_PF_FLAG_WRITE : 0;
   pf_flags |= cause == RISCV_EXCEPTION_INS_PAGE_FAULT ? VMM_PF_FLAG_INSTRUCTION : 0;
   pf_flags |= is_user_address(tval) ? VMM_PF_FLAG_USER : 0; // TODO: also check whether the privilege number!
-  vmm_page_fault_handler(tval, pf_flags);
+
+  zx_status_t pf_status = vmm_page_fault_handler(tval, pf_flags);
+
+  if (pf_status != ZX_OK) {
+    uint64_t dfr = Thread::Current::Get()->arch().data_fault_resume;
+    if (unlikely(dfr)) {
+      frame->epc = dfr;
+      frame->a1 = tval;
+      frame->a2 = pf_flags;
+      return;
+    }
+  }
 }
 
 extern "C" syscall_result riscv64_syscall_dispatcher(struct iframe_t *frame);
