@@ -163,8 +163,12 @@ else
     CMDLINE_BOOTIMAGE="${ZIRCON_BOOTIMAGE}"
 fi
 
-# Prepend boot shim
-cat "${BOOT_SHIM}" "${CMDLINE_BOOTIMAGE}" > "${SHIMMED_ZIRCON_BOOTIMAGE}"
+if [[ "${RAMDISK_TYPE}" == "zbi" ]]; then
+    cp "${BOOT_SHIM}" "${SHIMMED_ZIRCON_BOOTIMAGE}"
+else
+    # Prepend boot shim
+    cat "${BOOT_SHIM}" "${CMDLINE_BOOTIMAGE}" > "${SHIMMED_ZIRCON_BOOTIMAGE}"
+fi
 
 # Optionally compress the shimmed image
 if [[ ${USE_GZIP} == true ]]; then

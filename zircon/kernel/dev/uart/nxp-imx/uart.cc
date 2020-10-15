@@ -36,6 +36,7 @@
 /* UCR1 Bit Definition */
 #define UCR1_TRDYEN                 (1 << 13)
 #define UCR1_RRDYEN                 (1 << 9)
+#define UCR1_TXMPTYEN               (1 << 6)
 #define UCR1_UARTEN                 (1 << 0)
 
 /* UCR2 Bit Definition */
@@ -79,6 +80,8 @@ static SpinLock uart_spinlock;
 #define UARTREG(reg) (*(volatile uint32_t*)((uart_base) + (reg)))
 
 static interrupt_eoi uart_irq_handler(void* arg) {
+  uint32_t status2 = UARTREG(MX8_USR1);
+  static_cast<void>(status2);
   /* read interrupt status and mask */
   while ((UARTREG(MX8_USR1) & USR1_RRDY)) {
     if (uart_rx_buf.Full()) {
@@ -89,12 +92,10 @@ static interrupt_eoi uart_irq_handler(void* arg) {
   }
 
   /* Signal if anyone is waiting to TX */
-  if (UARTREG(MX8_UCR1) & UCR1_TRDYEN) {
+  if (!(UARTREG(MX8_UTS) & UTS_TXFULL)) {
+    UARTREG(MX8_UCR1) &= ~UCR1_TXMPTYEN;
     uart_spinlock.Acquire();
-    if (!(UARTREG(MX8_USR2) & UTS_TXFULL)) {
-      // signal
-      uart_dputc_event.Signal();
-    }
+    uart_dputc_event.Signal();
     uart_spinlock.Release();
   }
 
@@ -141,9 +142,10 @@ static void imx_dputs(const char* str, size_t len, bool block, bool map_NL) {
 
   while (len > 0) {
     // is FIFO full?
-    while ((UARTREG(MX8_UTS) & UTS_TXFULL)) {
+    while (UARTREG(MX8_UTS) & UTS_TXFULL) {
       uart_spinlock.ReleaseIrqRestore(state);
       if (block) {
+        UARTREG(MX8_UCR1) |= UCR1_TXMPTYEN;
         uart_dputc_event.Wait();
       } else {
         arch::Yield();
@@ -190,13 +192,7 @@ static void imx_uart_init(const void* driver_data, uint32_t length) {
   UARTREG(MX8_UFCR) = regVal;
 
   // enable rx interrupt
-  regVal = UARTREG(MX8_UCR1);
-  regVal |= UCR1_RRDYEN;
-  if (dlog_bypass() == false) {
-    // enable tx interrupt
-    regVal |= UCR1_TRDYEN;
-  }
-  UARTREG(MX8_UCR1) = regVal;
+  UARTREG(MX8_UCR1) |= UCR1_RRDYEN;
 
   // enable rx and tx transmisster
   regVal = UARTREG(MX8_UCR2);

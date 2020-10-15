@@ -163,6 +163,7 @@ __BEGIN_CDECLS
 // NXP
 #define PDEV_VID_NXP                0x09
 #define PDEV_PID_IMX8MMEVK          0x01
+#define PDEV_PID_IMX8M              0x02
 
 #define PDEV_DID_IMX_GPIO           0x01
 #define PDEV_DID_IMX_DISPLAY        0x02

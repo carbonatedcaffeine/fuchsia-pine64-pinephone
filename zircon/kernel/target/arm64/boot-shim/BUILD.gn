@@ -124,6 +124,7 @@ shims = [
   "as370",
   "c18",
   "cleo",
+  "imx8m",
   "msm8x53-som",
   "msm8998",
   "mt8167s_ref",
