@@ -2,5 +2,6 @@
 qemu
 vim2
 imx8mevk
+pinephone-1.2
 [x64]
 pc
