@@ -1,7 +1,24 @@
-# Copyright 2019 The Fuchsia Authors. All rights reserved.
+# Copyright 2020 The Fuchsia Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//boards/arm64.gni")
 
 board_name = "pinephone-1.2"
+
+_common_bootfs_deps = [ "//src/devices/board/drivers/msm8998" ]
+
+board_bootfs_labels += _common_bootfs_deps
+
+board_zedboot_bootfs_labels += _common_bootfs_deps
+
+board_recovery_bootfs_labels += _common_bootfs_deps
+
+
+
+
+zvb_partition_name = "boot"
+
+# partitions for fx flash to flash
+zircon_a_partition = "boot_a"
+zircon_b_partition = "boot_b"
